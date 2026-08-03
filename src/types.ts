@@ -36,8 +36,27 @@ export interface StdSymbol {
   ownerTypeclass?: string;
   hasDefault?: boolean;
   typeclass?: StdTypeclassInfo;
+  typeInfo?: StdTypeInfo;
   function?: StdFunctionInfo;
 }
+
+export interface StdTypeField {
+  name: string;
+  type: string;
+  defaultValue?: string;
+  modifiers: string[];
+}
+
+export interface StdTypeVariant {
+  name: string;
+  type?: string;
+  value?: string;
+}
+
+export type StdTypeInfo =
+  | { kind: "struct"; fields: StdTypeField[] }
+  | { kind: "union"; variants: StdTypeVariant[] }
+  | { kind: "enum"; flags: boolean; variants: StdTypeVariant[] };
 
 export interface StdParameter {
   name: string;

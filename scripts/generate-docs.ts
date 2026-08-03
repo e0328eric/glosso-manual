@@ -54,6 +54,21 @@ type StdFunctionInfo = {
   returnType: string;
   memoryContracts: StdMemoryContract[];
 };
+type StdTypeField = {
+  name: string;
+  type: string;
+  defaultValue?: string;
+  modifiers: string[];
+};
+type StdTypeVariant = {
+  name: string;
+  type?: string;
+  value?: string;
+};
+type StdTypeInfo =
+  | { kind: "struct"; fields: StdTypeField[] }
+  | { kind: "union"; variants: StdTypeVariant[] }
+  | { kind: "enum"; flags: boolean; variants: StdTypeVariant[] };
 type StdSymbol = {
   id: string;
   name: string;
@@ -67,6 +82,7 @@ type StdSymbol = {
   ownerTypeclass?: string;
   hasDefault?: boolean;
   typeclass?: StdTypeclassInfo;
+  typeInfo?: StdTypeInfo;
   function?: StdFunctionInfo;
 };
 type StdInstance = {
@@ -1036,15 +1052,145 @@ function splitTopLevel(text: string, delimiter = ","): string[] {
 function topLevelIndex(text: string, needle: string): number {
   let round = 0;
   let square = 0;
+  let brace = 0;
+  let quote = "";
   for (let index = 0; index <= text.length - needle.length; index += 1) {
     const char = text[index];
-    if (char === "(") round += 1;
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === "(") round += 1;
     else if (char === ")") round -= 1;
     else if (char === "[") square += 1;
     else if (char === "]") square -= 1;
-    else if (round === 0 && square === 0 && text.startsWith(needle, index)) return index;
+    else if (char === "{") brace += 1;
+    else if (char === "}") brace -= 1;
+    else if (round === 0 && square === 0 && brace === 0 && text.startsWith(needle, index)) return index;
   }
   return -1;
+}
+
+function matchingBrace(text: string, open: number): number {
+  let depth = 0;
+  let quote = "";
+  for (let index = open; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === "{") depth += 1;
+    else if (char === "}" && --depth === 0) return index;
+  }
+  return -1;
+}
+
+function aggregateBodyOpen(text: string, start: number): number {
+  const declaration = text.slice(start).match(/^[^\n]*?::\s*(?:struct|union|enum_flags|enum)\b/);
+  if (!declaration) return -1;
+  let cursor = start + declaration[0].length;
+  while (cursor < text.length) {
+    const bodyOpen = text.indexOf("{", cursor);
+    if (bodyOpen < 0) return -1;
+    const prefix = text.slice(cursor, bodyOpen);
+    if (/#modify\s*$/.test(prefix)) {
+      const modifyClose = matchingBrace(text, bodyOpen);
+      if (modifyClose < 0) return -1;
+      cursor = modifyClose + 1;
+      continue;
+    }
+    return bodyOpen;
+  }
+  return -1;
+}
+
+function documentedStructFields(body: string): StdTypeField[] {
+  const fields: StdTypeField[] = [];
+  for (const declaration of splitTopLevel(body, ";")) {
+    let value = declaration.replace(/\s+/g, " ").trim();
+    if (!value) continue;
+
+    if (/^#empty\s*:/.test(value)) {
+      const marker = value.indexOf(":");
+      for (const type of splitTopLevel(value.slice(marker + 1))) {
+        fields.push({ name: "#empty", type, modifiers: ["empty type witness"] });
+      }
+      continue;
+    }
+
+    const modifiers: string[] = [];
+    let consumedModifier = true;
+    while (consumedModifier) {
+      consumedModifier = false;
+      if (/^using\b/.test(value)) {
+        modifiers.push("using");
+        value = value.replace(/^using\s+/, "");
+        consumedModifier = true;
+      }
+      if (/^#as\b/.test(value)) {
+        modifiers.push("#as");
+        value = value.replace(/^#as\s+/, "");
+        consumedModifier = true;
+      }
+    }
+
+    const colon = topLevelIndex(value, ":");
+    if (colon < 0) continue;
+    const name = value.slice(0, colon).trim();
+    let type = value.slice(colon + 1).trim();
+    const equals = topLevelIndex(type, "=");
+    const defaultValue = equals >= 0 ? type.slice(equals + 1).trim() : undefined;
+    if (equals >= 0) type = type.slice(0, equals).trim();
+    if (name && type) fields.push({ name, type, defaultValue, modifiers });
+  }
+  return fields;
+}
+
+function documentedUnionVariants(body: string): StdTypeVariant[] {
+  const variants: StdTypeVariant[] = [];
+  for (const declaration of splitTopLevel(body, ";")) {
+    const value = declaration.replace(/\s+/g, " ").trim();
+    const colon = topLevelIndex(value, ":");
+    if (colon < 0) continue;
+    const name = value.slice(0, colon).trim();
+    const type = value.slice(colon + 1).trim();
+    if (name && type) variants.push({ name, type });
+  }
+  return variants;
+}
+
+function documentedEnumVariants(body: string): StdTypeVariant[] {
+  const variants: StdTypeVariant[] = [];
+  for (const declaration of splitTopLevel(body, ";")) {
+    const variant = declaration.replace(/\s+/g, " ").trim();
+    if (!variant) continue;
+    const separator = topLevelIndex(variant, "::");
+    const name = (separator >= 0 ? variant.slice(0, separator) : variant).trim();
+    const value = separator >= 0 ? variant.slice(separator + 2).trim() : undefined;
+    if (name) variants.push({ name, value: value || undefined });
+  }
+  return variants;
+}
+
+function documentedType(definition: string, text: string, start: number): StdTypeInfo | undefined {
+  const declaration = definition.match(/^(struct|union|enum_flags|enum)\b/);
+  if (!declaration) return undefined;
+  const bodyOpen = aggregateBodyOpen(text, start);
+  const bodyClose = bodyOpen >= 0 ? matchingBrace(text, bodyOpen) : -1;
+  if (bodyOpen < 0 || bodyClose < 0) return undefined;
+  const body = text.slice(bodyOpen + 1, bodyClose);
+  if (declaration[1] === "struct") return { kind: "struct", fields: documentedStructFields(body) };
+  if (declaration[1] === "union") return { kind: "union", variants: documentedUnionVariants(body) };
+  return {
+    kind: "enum",
+    flags: declaration[1] === "enum_flags",
+    variants: documentedEnumVariants(body),
+  };
 }
 
 function parameterType(parameter: string): string {
@@ -1322,6 +1468,7 @@ function parseStdFile(path: string): StdModule {
       sourcePath,
       sourceLine: line,
       typeclass: minimal ? { minimal: minimal.value, minimalExplicit: minimal.explicit, members: [] } : undefined,
+      typeInfo: kind === "type" ? documentedType(definition, text, match.index ?? 0) : undefined,
     });
   }
 

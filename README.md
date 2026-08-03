@@ -100,8 +100,9 @@ cstring16_from_string :: (
             reads(text), noescape(text));
 ```
 
-The generator reads the preceding comments, parameter names and types, default
-values, return type, and `#memory` contracts. It also groups typeclass methods,
+The generator reads the preceding comments, struct fields, union and enum
+variants, parameter names and types, default values, return type, and `#memory`
+contracts. It also groups typeclass methods,
 associated types, minimal definitions, positive instances, and negative
 instances. A source file's opening comment becomes its module summary.
 

@@ -34,6 +34,26 @@ if (!stdInstances.some((instance) => instance.typeclass === "PartialEq")) {
 }
 console.log(`Typeclass instance index ready: ${stdInstances.length} instances.`);
 
+const fileErrorReason = stdSymbols.find((symbol) => symbol.name === "File_Error_Reason");
+if (fileErrorReason?.typeInfo?.kind !== "struct" || !fileErrorReason.typeInfo.fields.some(
+  (field) => field.name === "code" && field.type === "s64" && field.defaultValue === "0",
+)) {
+  throw new Error("Struct fields and their defaults were not extracted");
+}
+const fileError = stdSymbols.find((symbol) => symbol.name === "File_Error");
+if (fileError?.typeInfo?.kind !== "union" || !fileError.typeInfo.variants.some(
+  (variant) => variant.name === "End_Of_File" && variant.type === "File_Error_Reason",
+)) {
+  throw new Error("Union variants and their payload types were not extracted");
+}
+const allocatorError = stdSymbols.find((symbol) => symbol.name === "Allocator_Error");
+if (allocatorError?.typeInfo?.kind !== "enum" || !allocatorError.typeInfo.variants.some(
+  (variant) => variant.name === "Out_Of_Memory" && variant.value === "1",
+)) {
+  throw new Error("Enum variants and their declared values were not extracted");
+}
+console.log("Struct fields and union/enum variants ready.");
+
 const documentedFunctions = stdSymbols.filter((symbol) => symbol.kind === "function" || symbol.kind === "method");
 const undocumentedFunction = documentedFunctions.find((symbol) => !symbol.function);
 if (undocumentedFunction) {

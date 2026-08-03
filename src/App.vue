@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import CodeBlock from "./components/CodeBlock.vue";
 import FunctionDetails from "./components/FunctionDetails.vue";
 import RichText from "./components/RichText.vue";
+import TypeDetails from "./components/TypeDetails.vue";
 import {
   directives,
   grammarGroups,
@@ -782,6 +783,7 @@ onBeforeUnmount(() => {
                 </div>
                 <p class="symbol-signature">{{ symbol.signature }}</p>
                 <p v-if="symbol.summary" class="mt-3 text-sm leading-6 text-muted">{{ symbol.summary }}</p>
+                <TypeDetails v-if="symbol.kind === 'type' && symbol.typeInfo" :details="symbol.typeInfo" />
                 <FunctionDetails v-if="symbol.kind === 'function' && symbol.function" :details="symbol.function" />
 
                 <template v-if="symbol.kind === 'typeclass' && symbol.typeclass">
