@@ -109,6 +109,36 @@ Declarations after `#enable(private_section)` are omitted until the matching
 `#disable(private_section)`. A leading `__` is only a naming convention; the
 site keeps such functions and constants at the bottom of their sections.
 
+### Updating the site after a standard-library change
+
+First edit the declarations and their documentation comments in
+`../glosso/std/**/*.glo`. Then regenerate and validate the committed website
+snapshot from the standalone manual repository:
+
+```powershell
+cd C:\Users\almag\Github\glosso-manual
+$env:GLOSSO_SOURCE_ROOT = "..\glosso"
+nub run generate
+nub run check
+```
+
+Review the generated diff, then publish it:
+
+```powershell
+git diff -- src/generated/docs.ts
+git add src/generated/docs.ts
+git commit -m "Update standard library documentation"
+git push
+```
+
+Pushing the default branch runs the GitHub Pages workflow and redeploys the
+updated reference. The generator needs the Glosso checkout to contain
+`src/lexer.rs`, `src/parser.rs`, `docs/glosso-manual.typ`, and `std/`. If any of
+these are missing, `nub run generate` keeps the existing snapshot instead of
+partially replacing it. In particular, restore the current
+`docs/glosso-manual.typ` source before regenerating; do not substitute an older
+copy that omits newer manual chapters.
+
 ### Previewing changes
 
 From this directory, generate the documentation and start the development
