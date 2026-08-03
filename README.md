@@ -7,10 +7,10 @@ an indexed standard-library reference, full-text search, and Hoogle-style
 function signature search.
 
 The checked-in `src/generated/docs.ts` snapshot makes this directory portable.
-While it remains inside the Glosso repository, `nub run generate` refreshes the
-snapshot from `../docs/glosso-manual.typ`, `../src/lexer.rs`, `../src/parser.rs`,
-and `../std`. If this directory becomes a separate repository, the generator
-keeps the committed snapshot instead.
+When a Glosso source checkout exists at `../glosso`, `nub run generate`
+refreshes the snapshot from its manual, compiler, and standard-library sources.
+Set `GLOSSO_SOURCE_ROOT` to use a different checkout location. In a standalone
+checkout such as GitHub Actions, the generator keeps the committed snapshot.
 
 ## Local development
 
@@ -26,10 +26,12 @@ search, provided Tree-sitter WASM parser, and production bundle together:
 nub run check
 ```
 
-This command also checks manual coverage against the current lexer and parser:
-all language keywords and directives must be documented, and every parser
-routine must be mapped to a manual chapter or a complete-grammar section. A
-new language construct therefore makes the check fail until it is documented.
+When Glosso compiler sources are available, this command also checks manual
+coverage against the current lexer and parser: all language keywords and
+directives must be documented, and every parser routine must be mapped to a
+manual chapter or complete-grammar section. Without the compiler checkout, it
+validates the committed documentation snapshot and skips only the source-drift
+checks.
 
 ## Editing the documentation
 
@@ -41,18 +43,18 @@ Edit the following source files instead:
 
 | Documentation | Source |
 | --- | --- |
-| Language-manual chapters | `../docs/glosso-manual.typ` |
+| Language-manual chapters | `../glosso/docs/glosso-manual.typ` |
 | Additional web-only explanations | `scripts/manual-enrichment.ts` |
 | Complete EBNF grammar | `scripts/generate-docs.ts`, in `grammarGroups` |
 | Directive descriptions | `scripts/generate-docs.ts`, in `directiveDetails` and `directiveDocs` |
-| Standard-library descriptions | Comments in `../std/**/*.glo` |
+| Standard-library descriptions | Comments in `../glosso/std/**/*.glo` |
 | Chapter sidebar organization | `src/App.vue`, in `manualGroupDefinitions` |
 | Page layout and reusable UI | `src/App.vue` and `src/components/` |
 | Colors and styling | `src/style.css` |
 
 ### Editing or adding a language chapter
 
-Language chapters are read from the part of `../docs/glosso-manual.typ`
+Language chapters are read from the part of `../glosso/docs/glosso-manual.typ`
 between `= Detailed Language Reference` and `= Grammar Appendix`. Use `==` for
 a chapter and `===` or `====` for headings inside it:
 
@@ -85,7 +87,7 @@ the generated chapter ID.
 ### Editing standard-library documentation
 
 The standard-library reference is extracted from the public declarations in
-`../std`. Put explanatory comments immediately before a declaration:
+`../glosso/std`. Put explanatory comments immediately before a declaration:
 
 ```glosso
 // Converts UTF-8 text into an owned UTF-16 string.
@@ -118,9 +120,9 @@ nub run dev
 ```
 
 `nub run dev` generates once before starting Vite. If the server is already
-running and you edit `../docs/glosso-manual.typ`, `../std`, the lexer, or the
-parser, run `nub run generate` again in another terminal. Vite will then reload
-the changed generated snapshot.
+running and you edit the Glosso manual, standard library, lexer, or parser, run
+`nub run generate` again in another terminal. Vite will then reload the changed
+generated snapshot.
 
 Before publishing, run the complete validation pipeline:
 
@@ -128,25 +130,41 @@ Before publishing, run the complete validation pipeline:
 nub run check
 ```
 
-### Moving `manual` into a separate repository
+### Connecting the Glosso source checkout
 
-The generator currently reads `../docs`, `../src`, and `../std`. When those
-Glosso source directories are unavailable, it deliberately keeps and uses the
-committed `src/generated/docs.ts` snapshot instead of regenerating it.
+The default local layout is:
 
-Before turning this directory into an independent repository, move or copy the
-canonical editable inputs into that repository (for example under `content/`)
-and update `scripts/generate-docs.ts` to read them. Alternatively, provide the
-Glosso source repository as a sibling checkout or submodule and update
-`repoRoot`. Without one of those arrangements, the standalone website remains
-buildable, but language and standard-library documentation cannot be
-regenerated there.
+```text
+Github/
+├── glosso/
+└── glosso-manual/
+```
+
+In that layout no configuration is necessary. For a different layout, point
+`GLOSSO_SOURCE_ROOT` at the Glosso repository before generating:
+
+```powershell
+$env:GLOSSO_SOURCE_ROOT = "C:\path\to\glosso"
+nub run generate
+```
+
+```sh
+GLOSSO_SOURCE_ROOT=/path/to/glosso nub run generate
+```
+
+The configured directory must contain `src/lexer.rs`, `src/parser.rs`,
+`docs/glosso-manual.typ`, and `std/`. After regeneration, commit the updated
+`src/generated/docs.ts` so standalone builds and GitHub Pages receive the new
+documentation.
+
+If the Glosso checkout is unavailable, generation deliberately leaves the
+committed snapshot unchanged. `nub run check` still validates that snapshot,
+TypeScript, search, WASM highlighting, and the production bundle; it reports
+that parser-drift checks were skipped.
 
 ## GitHub Pages
 
-The parent Glosso repository uses `/.github/workflows/manual-pages.yml`. The
-copy at `manual/.github/workflows/pages.yml` becomes active automatically if
-`manual` is later promoted to its own repository.
+This repository deploys with `.github/workflows/pages.yml`.
 
 In the repository on GitHub, open **Settings → Pages**, set **Source** to
 **GitHub Actions**, then run **Actions → Deploy Glosso manual → Run workflow**

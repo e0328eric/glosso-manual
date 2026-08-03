@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { directives, grammarGroups, keywords, manualSections } from "../src/generated/docs";
+import { findGlossoSourceRoot } from "./glosso-source";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(scriptDir, "..", "..");
+const manualDir = resolve(scriptDir, "..");
+const repoRoot = findGlossoSourceRoot(manualDir);
 const read = (path: string): string => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 
 const expectedKeywords = [
@@ -118,24 +120,12 @@ for (const directive of directives) {
   }
 }
 
-const parser = read(resolve(repoRoot, "src", "parser.rs"));
-const lexer = read(resolve(repoRoot, "src", "lexer.rs"));
-const parserFunctions = [...parser.matchAll(/\bfn\s+(parse_[a-z_]+)\s*\(/g)].map((match) => match[1]);
-sameMembers(parserFunctions, Object.keys(parserFunctionCoverage), "Parser routine");
-
 const sectionIds = new Set(manualSections.map((section) => section.id));
 const grammarTitles = new Set(grammarGroups.map((group) => group.title));
 for (const [parserFunction, target] of Object.entries(parserFunctionCoverage)) {
   const [kind, name] = target.split(":", 2);
   const exists = kind === "manual" ? sectionIds.has(name) : kind === "grammar" && grammarTitles.has(name);
   if (!exists) throw new Error(`${parserFunction} points to missing coverage target ${target}.`);
-}
-
-for (const directive of expectedDirectives) {
-  const spelling = directive.slice(1);
-  if (!parser.includes(`"${spelling}"`) && !lexer.includes(`"${spelling}"`)) {
-    throw new Error(`${directive} has no parser/lexer source signal.`);
-  }
 }
 
 const grammar = grammarGroups.map((group) => `${group.title}\n${group.grammar}`).join("\n");
@@ -164,4 +154,18 @@ for (const stale of ["Practical guidance", "pattern-tests", "Exponent notation i
   if (manualText.includes(stale)) throw new Error(`Manual still contains stale content: ${stale}.`);
 }
 
-console.log(`Manual coverage verified: ${manualSections.length} chapters, ${parserFunctions.length} parser routines, ${keywords.length} keywords, and ${directives.length} directives.`);
+if (repoRoot) {
+  const parser = read(resolve(repoRoot, "src", "parser.rs"));
+  const lexer = read(resolve(repoRoot, "src", "lexer.rs"));
+  const parserFunctions = [...parser.matchAll(/\bfn\s+(parse_[a-z_]+)\s*\(/g)].map((match) => match[1]);
+  sameMembers(parserFunctions, Object.keys(parserFunctionCoverage), "Parser routine");
+  for (const directive of expectedDirectives) {
+    const spelling = directive.slice(1);
+    if (!parser.includes(`"${spelling}"`) && !lexer.includes(`"${spelling}"`)) {
+      throw new Error(`${directive} has no parser/lexer source signal.`);
+    }
+  }
+  console.log(`Manual coverage verified: ${manualSections.length} chapters, ${parserFunctions.length} parser routines, ${keywords.length} keywords, and ${directives.length} directives.`);
+} else {
+  console.log(`Documentation snapshot verified: ${manualSections.length} chapters, ${keywords.length} keywords, and ${directives.length} directives. Glosso compiler sources are unavailable, so parser-drift checks were skipped.`);
+}

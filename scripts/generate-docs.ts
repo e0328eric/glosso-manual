@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findGlossoSourceRoot } from "./glosso-source";
 import { manualEnrichment } from "./manual-enrichment";
 
 type DocBlock = {
@@ -90,7 +91,7 @@ type StdModule = {
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const manualDir = resolve(scriptDir, "..");
-const repoRoot = resolve(manualDir, "..");
+const repoRoot = findGlossoSourceRoot(manualDir) ?? "";
 const generatedDir = resolve(manualDir, "src", "generated");
 const publicDir = resolve(manualDir, "public");
 
@@ -100,7 +101,7 @@ copyFileSync(resolve(manualDir, "tree-sitter-glosso.wasm"), resolve(publicDir, "
 const runtimeWasm = resolve(manualDir, "node_modules", "web-tree-sitter", "tree-sitter.wasm");
 if (existsSync(runtimeWasm)) copyFileSync(runtimeWasm, resolve(publicDir, "tree-sitter.wasm"));
 
-if (!existsSync(resolve(repoRoot, "src", "lexer.rs"))) {
+if (!repoRoot) {
   const snapshot = resolve(generatedDir, "docs.ts");
   if (!existsSync(snapshot)) {
     throw new Error("The Glosso source tree is unavailable and src/generated/docs.ts has not been committed.");
