@@ -154,6 +154,17 @@ for (const stale of ["Practical guidance", "pattern-tests", "Exponent notation i
   if (manualText.includes(stale)) throw new Error(`Manual still contains stale content: ${stale}.`);
 }
 
+const entrySection = manualSections.find((section) => section.id === "hello-world-and-program-entry");
+const entryText = entrySection?.blocks
+  .flatMap((block) => [block.text ?? "", ...(block.items ?? []), ...(block.rows ?? []).flat()])
+  .join("\n") ?? "";
+for (const required of ["Termination", "main :: () -> int", "Result(void, E)", "termination_status"]) {
+  if (!entryText.includes(required)) throw new Error(`Program-entry documentation is missing ${required}.`);
+}
+for (const stale of ["no declared result type", "value-returning source signature is not"]) {
+  if (entryText.includes(stale)) throw new Error(`Program-entry documentation still claims ${stale}.`);
+}
+
 if (repoRoot) {
   const parser = read(resolve(repoRoot, "src", "parser.rs"));
   const lexer = read(resolve(repoRoot, "src", "lexer.rs"));

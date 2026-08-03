@@ -2,6 +2,10 @@ export type ManualEnrichment = {
   heading: string;
   overview: string;
   rules: string[];
+  replacements?: Array<{
+    from: string;
+    to: string;
+  }>;
   blocks?: Array<{
     kind: "paragraph" | "code" | "list" | "heading" | "note" | "table";
     text?: string;
@@ -84,16 +88,65 @@ export const manualEnrichment: Record<string, ManualEnrichment> = {
     ],
   },
   "hello-world-and-program-entry": {
-    heading: "Entry-point behavior",
+    heading: "Entry-point behavior and termination",
     overview:
-      "A linked executable starts at the top-level procedure `main :: ()`. The current entry contract has no source parameters and no declared return value; command-line arguments and process termination are provided by prelude functions.",
+      "A linked executable starts at the top-level, zero-parameter `main`. Omitting its return type gives the familiar `main :: ()` form and a successful status on normal completion. Alternatively, `main` may return any type that implements the prelude `Termination` typeclass; the runtime passes the returned value to `termination_status` to obtain the process status.",
+    replacements: [
+      {
+        from: "A compiled program starts at `main`. The entry procedure has no parameters and no declared result type. To read command-line arguments, call `get_cmdline_args()`. To return a process status, call `exit(status)`.",
+        to: "A compiled program starts at `main`. The entry procedure has no parameters. It may omit its result type, or return a type that implements `Termination`. To read command-line arguments, call `get_cmdline_args()`.",
+      },
+    ],
     rules: [
-      "Declare the entry point as `main :: () { ... }`; a parameterized or value-returning source signature is not the documented executable entry contract.",
-      "`get_cmdline_args()` returns a borrowed `[]string` view of process arguments, including the executable entry according to the runtime platform's construction.",
-      "`exit(status: int)` terminates the process and is marked `#noreturn`; use it to produce a nonzero status.",
+      "`main` must not take source parameters. Use `get_cmdline_args()` for a borrowed `[]string` view of process arguments, including the executable entry according to the runtime platform's construction.",
+      "A `main :: () { ... }` that reaches the end normally returns process status 0. `exit(status: int)` remains available for immediate termination and is marked `#noreturn`.",
+      "Every integer type implements `Termination`; `termination_status` casts the value to `s32`, after which the host applies its platform exit-code rules.",
+      "`Result(void, E)` implements `Termination` when `E` implements `Error`. Success becomes status 0; an error is reported with `report_error` and becomes status 1, making `?` convenient in fallible entry points.",
+      "Application-specific result types may implement `Termination` by defining `termination_status(value: T) -> s32`. A non-void `main` whose return type has no matching instance is rejected.",
       "The prelude and ordinary implicit context are available in `main` unless the declaration is deliberately changed to a no-context/C-ABI form.",
     ],
     blocks: [
+      {
+        kind: "table",
+        columns: ["Entry signature", "Normal process status"],
+        rows: [
+          ["`main :: ()`", "0 when execution reaches the end"],
+          ["`main :: () -> I` where `Is_Integer(I)`", "The returned integer, cast to `s32`"],
+          ["`main :: () -> Result(void, E)` where `Error(E)`", "0 for `Ok`; report `Err` and return 1"],
+          ["`main :: () -> T` where `Termination(T)`", "The `s32` produced by `termination_status`"],
+        ],
+      },
+      {
+        kind: "heading",
+        text: "Returning an integer status",
+      },
+      {
+        kind: "code",
+        language: "glosso",
+        text: "main :: () -> int {\n    if get_cmdline_args().count < 2 return 2;\n    return 0;\n}",
+      },
+      {
+        kind: "heading",
+        text: "Propagating a typed error",
+      },
+      {
+        kind: "code",
+        language: "glosso",
+        text: "#import \"File\";\n\nmain :: () -> Result(void, File_Error) {\n    file := open_read(\"input.txt\")?;\n    _ := close(file)?;\n}",
+      },
+      {
+        kind: "note",
+        text: "Falling through the end of a `Result(void, E)` entry point is the successful `void` output and becomes `Ok`; a propagated `Err` is reported through the error type's `Error` instance before the process exits with status 1.",
+      },
+      {
+        kind: "heading",
+        text: "Defining an application-specific status",
+      },
+      {
+        kind: "code",
+        language: "glosso",
+        text: "Exit_Status :: struct { code: s32; }\n\nExit_Status :: instance Termination {\n    termination_status :: (value: Exit_Status) -> s32 {\n        return value.code;\n    }\n}\n\nmain :: () -> Exit_Status {\n    return .{ .code = 9 };\n}",
+      },
       {
         kind: "code",
         language: "glosso",

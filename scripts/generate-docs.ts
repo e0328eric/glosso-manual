@@ -346,6 +346,11 @@ function enrichManualSections(sections: ManualSection[]): void {
   for (const section of sections) {
     const enrichment = manualEnrichment[section.id];
     if (!enrichment) continue;
+    for (const replacement of enrichment.replacements ?? []) {
+      for (const block of section.blocks) {
+        if (block.text === replacement.from) block.text = replacement.to;
+      }
+    }
     section.blocks.push(
       { kind: "heading", text: enrichment.heading },
       { kind: "paragraph", text: enrichment.overview },
