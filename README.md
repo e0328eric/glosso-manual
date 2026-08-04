@@ -8,8 +8,10 @@ function signature search.
 
 The checked-in `src/generated/docs.ts` snapshot makes this directory portable.
 When a Glosso source checkout exists at `../glosso`, `nub run generate`
-refreshes the snapshot from its manual, compiler, and standard-library sources.
-Set `GLOSSO_SOURCE_ROOT` to use a different checkout location. In a standalone
+refreshes the snapshot from its compiler and standard-library sources. If that
+checkout also contains `docs/glosso-manual.typ`, the language chapters are
+refreshed from it; otherwise the committed manual chapters are preserved. Set
+`GLOSSO_SOURCE_ROOT` to use a different checkout location. In a standalone
 checkout such as GitHub Actions, the generator keeps the committed snapshot.
 
 ## Local development
@@ -134,11 +136,11 @@ git push
 
 Pushing the default branch runs the GitHub Pages workflow and redeploys the
 updated reference. The generator needs the Glosso checkout to contain
-`src/lexer.rs`, `src/parser.rs`, `docs/glosso-manual.typ`, and `std/`. If any of
-these are missing, `nub run generate` keeps the existing snapshot instead of
-partially replacing it. In particular, restore the current
-`docs/glosso-manual.typ` source before regenerating; do not substitute an older
-copy that omits newer manual chapters.
+`src/lexer.rs`, `src/parser.rs`, and `std/`. If these are missing,
+`nub run generate` keeps the existing snapshot instead of partially replacing
+it. When `docs/glosso-manual.typ` is absent, the generator keeps the committed
+manual chapters while still refreshing the lexer, parser, and standard-library
+references. Do not substitute an older manual copy that omits newer chapters.
 
 ### Previewing changes
 
@@ -183,10 +185,10 @@ nub run generate
 GLOSSO_SOURCE_ROOT=/path/to/glosso nub run generate
 ```
 
-The configured directory must contain `src/lexer.rs`, `src/parser.rs`,
-`docs/glosso-manual.typ`, and `std/`. After regeneration, commit the updated
-`src/generated/docs.ts` so standalone builds and GitHub Pages receive the new
-documentation.
+The configured directory must contain `src/lexer.rs`, `src/parser.rs`, and
+`std/`; `docs/glosso-manual.typ` is optional. After regeneration, commit the
+updated `src/generated/docs.ts` so standalone builds and GitHub Pages receive
+the new documentation.
 
 If the Glosso checkout is unavailable, generation deliberately leaves the
 committed snapshot unchanged. `nub run check` still validates that snapshot,

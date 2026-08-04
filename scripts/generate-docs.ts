@@ -110,6 +110,7 @@ const manualDir = resolve(scriptDir, "..");
 const repoRoot = findGlossoSourceRoot(manualDir) ?? "";
 const generatedDir = resolve(manualDir, "src", "generated");
 const publicDir = resolve(manualDir, "public");
+const snapshotPath = resolve(generatedDir, "docs.ts");
 
 mkdirSync(generatedDir, { recursive: true });
 mkdirSync(publicDir, { recursive: true });
@@ -118,8 +119,7 @@ const runtimeWasm = resolve(manualDir, "node_modules", "web-tree-sitter", "tree-
 if (existsSync(runtimeWasm)) copyFileSync(runtimeWasm, resolve(publicDir, "tree-sitter.wasm"));
 
 if (!repoRoot) {
-  const snapshot = resolve(generatedDir, "docs.ts");
-  if (!existsSync(snapshot)) {
+  if (!existsSync(snapshotPath)) {
     throw new Error("The Glosso source tree is unavailable and src/generated/docs.ts has not been committed.");
   }
   console.log("Glosso source tree not found; using the committed documentation snapshot.");
@@ -134,6 +134,26 @@ const slugify = (value: string): string =>
     .replace(/^-|-$/g, "")
     .toLowerCase();
 
+const sourceManualPath = resolve(repoRoot, "docs", "glosso-manual.typ");
+const hasSourceManual = existsSync(sourceManualPath);
+
+function readSnapshotManual(): ManualSection[] {
+  if (!existsSync(snapshotPath)) {
+    throw new Error(
+      "docs/glosso-manual.typ is unavailable and src/generated/docs.ts has no manual snapshot to preserve.",
+    );
+  }
+  const source = read(snapshotPath);
+  const prefix = "export const manualSections = ";
+  const suffix = " as ManualSection[];";
+  const start = source.indexOf(prefix);
+  const end = start < 0 ? -1 : source.indexOf(suffix, start + prefix.length);
+  if (start < 0 || end < 0) {
+    throw new Error("Could not read manualSections from src/generated/docs.ts.");
+  }
+  return JSON.parse(source.slice(start + prefix.length, end)) as ManualSection[];
+}
+
 function cleanTypstLine(line: string): string {
   return line
     .replace(/^\s*#note\($/, "")
@@ -146,7 +166,8 @@ function cleanTypstLine(line: string): string {
 }
 
 function parseManual(): ManualSection[] {
-  const lines = read(resolve(repoRoot, "docs", "glosso-manual.typ")).split("\n");
+  if (!hasSourceManual) return readSnapshotManual();
+  const lines = read(sourceManualPath).split("\n");
   const start = lines.findIndex((line) => line === "= Detailed Language Reference");
   const end = lines.findIndex((line) => line === "= Grammar Appendix");
   if (start < 0 || end < 0) throw new Error("Could not locate the language reference in docs/glosso-manual.typ");
@@ -1581,7 +1602,7 @@ const symbols = modules.flatMap((module) => module.symbols);
 const instances = modules.flatMap((module) => module.instances);
 const metadata = {
   generatedAt: new Date().toISOString(),
-  sourceManual: "docs/glosso-manual.typ",
+  sourceManual: hasSourceManual ? "docs/glosso-manual.typ" : "src/generated/docs.ts (preserved manual)",
   sourceLexer: "src/lexer.rs",
   sourceParser: "src/parser.rs",
   moduleCount: modules.length,
@@ -1605,6 +1626,7 @@ export const stdInstances = ${JSON.stringify(instances, null, 2)} as StdInstance
 
 writeFileSync(resolve(generatedDir, "docs.ts"), output, "utf8");
 console.log(
-  `Generated ${manualSections.length} manual chapters, ${directiveDocs.length} directives, ` +
+  `${hasSourceManual ? "Generated" : "Preserved"} ${manualSections.length} manual chapters, ` +
+    `generated ${directiveDocs.length} directives, ` +
     `${modules.length} modules, ${symbols.length} public symbols, and ${instances.length} instances.`,
 );

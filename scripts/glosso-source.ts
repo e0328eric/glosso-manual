@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 function isGlossoSourceRoot(path: string): boolean {
   return existsSync(resolve(path, "src", "lexer.rs")) &&
     existsSync(resolve(path, "src", "parser.rs")) &&
-    existsSync(resolve(path, "docs", "glosso-manual.typ")) &&
     existsSync(resolve(path, "std"));
 }
 
