@@ -16,6 +16,15 @@ checkout such as GitHub Actions, the generator keeps the committed snapshot.
 
 ## Local development
 
+Enter the Nix development environment to install the pinned Nub CLI:
+
+```sh
+nix develop .
+```
+
+Alternatively, install Nub separately. Then install the project dependencies
+and start the development server:
+
 ```sh
 nub install
 nub run dev
