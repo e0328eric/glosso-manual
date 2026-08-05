@@ -1238,6 +1238,11 @@ function documentedParameter(parameter: string): StdParameter {
     value = value.slice(modifier.length).trim();
   }
 
+  if (/^#comptime\s+/.test(value)) {
+    modifiers.push("comptime");
+    value = value.replace(/^#comptime\s+/, "");
+  }
+
   const equals = topLevelIndex(value, "=");
   const defaultValue = equals >= 0 ? value.slice(equals + 1).trim() : undefined;
   if (equals >= 0) value = value.slice(0, equals).trim();
@@ -1250,7 +1255,7 @@ function documentedParameter(parameter: string): StdParameter {
   let name = colon >= 0 ? value.slice(0, colon).trim() : value;
   let type = colon >= 0 ? value.slice(colon + 1).trim() : "any";
   const special = name.match(/^#(comptime|empty)$/);
-  if (special) modifiers.push(special[1] === "empty" ? "empty type witness" : "compile-time");
+  if (special) modifiers.push(special[1] === "empty" ? "empty type witness" : "comptime");
   if (type.startsWith("...")) {
     modifiers.push("variadic");
     type = type.slice(3).trim() || "any";
