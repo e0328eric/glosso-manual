@@ -1,0 +1,185 @@
+// Shared Clay declarations and manual content primitives.
+
+#memory Clay_EndLayout { returns_static, };
+#memory Clay_GetElementId { returns_borrow(arg(0)), };
+#memory Clay_GetElementIdWithIndex { returns_borrow(arg(0)), };
+#memory Clay_GetPointerState { returns_static, };
+
+clay_string :: (value: string) -> Clay_String #memory returns_borrow(value) {
+    result: Clay_String;
+    result.isStaticallyAllocated = true;
+    result.length = cast(s32)value.count;
+    result.chars = cast([*]const s8)value.data;
+    return result;
+}
+
+color :: (r: f32, g: f32, b: f32, a: f32 = 255) -> Clay_Color {
+    result: Clay_Color;
+    result.r = r; result.g = g; result.b = b; result.a = a;
+    return result;
+}
+
+axis :: (kind: u8, minimum: f32, maximum: f32) -> Clay_SizingAxis {
+    result: Clay_SizingAxis;
+    result.size_abi_0 = f32_to_bits(minimum);
+    result.size_abi_1 = f32_to_bits(maximum);
+    result.type_ = kind;
+    return result;
+}
+
+fixed_axis :: (size: f32) -> Clay_SizingAxis {
+    return axis(CLAY__SIZING_TYPE_FIXED, size, size);
+}
+
+grow_axis :: (minimum: f32 = 0, maximum: f32 = 1000000) -> Clay_SizingAxis {
+    return axis(CLAY__SIZING_TYPE_GROW, minimum, maximum);
+}
+
+fit_axis :: (minimum: f32 = 0, maximum: f32 = 1000000) -> Clay_SizingAxis {
+    return axis(CLAY__SIZING_TYPE_FIT, minimum, maximum);
+}
+
+padding :: (horizontal: u16, vertical: u16) -> Clay_Padding {
+    result: Clay_Padding;
+    result.left = horizontal; result.right = horizontal;
+    result.top = vertical; result.bottom = vertical;
+    return result;
+}
+
+radius :: (amount: f32) -> Clay_CornerRadius {
+    result: Clay_CornerRadius;
+    result.topLeft = amount; result.topRight = amount;
+    result.bottomLeft = amount; result.bottomRight = amount;
+    return result;
+}
+
+text_style :: (
+    size: u16,
+    ink: Clay_Color,
+    font: u16 = 0,
+    line_height: u16 = 0,
+    wrap: u8 = CLAY_TEXT_WRAP_WORDS,
+) -> Clay_TextElementConfig {
+    config: Clay_TextElementConfig;
+    config.textColor = ink;
+    config.fontId = font;
+    config.fontSize = size;
+    if line_height == 0 {
+        config.lineHeight = cast(u16)(cast(f32)size * 1.55);
+    } else {
+        config.lineHeight = line_height;
+    }
+    config.wrapMode = wrap;
+    return config;
+}
+
+open_id :: (id: Clay_ElementId, declaration: Clay_ElementDeclaration) {
+    Clay__OpenElementWithId(id);
+    Clay__ConfigureOpenElement(declaration);
+}
+
+open_element :: (name: string, declaration: Clay_ElementDeclaration) {
+    open_id(Clay_GetElementId(clay_string(name)), declaration);
+}
+
+open_indexed :: (
+    name: string,
+    index: s32,
+    declaration: Clay_ElementDeclaration,
+) {
+    open_id(
+        Clay_GetElementIdWithIndex(clay_string(name), cast(u32)index),
+        declaration,
+    );
+}
+
+close_element :: () { Clay__CloseElement(); }
+
+emit_text :: (value: string, style: Clay_TextElementConfig) {
+    Clay__OpenTextElement(clay_string(value), style);
+}
+
+column_box :: (gap: u16 = 0) -> Clay_ElementDeclaration {
+    box: Clay_ElementDeclaration;
+    box.layout.sizing.width = grow_axis();
+    box.layout.sizing.height = fit_axis();
+    box.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
+    box.layout.childGap = gap;
+    return box;
+}
+
+paragraph :: (index: s32, value: string) {
+    box := column_box();
+    box.layout.padding = padding(0, 2);
+    open_indexed("paragraph", index, box);
+    emit_text(value, text_style(17, color(64, 67, 78), 0, 28));
+    close_element();
+}
+
+subheading :: (index: s32, value: string) {
+    box := column_box();
+    box.layout.padding = padding(0, 8);
+    open_indexed("subheading", index, box);
+    emit_text(value, text_style(24, color(25, 27, 35), 1, 32));
+    close_element();
+}
+
+code_block :: (index: s32, language: string, value: string) {
+    box := column_box(10);
+    box.layout.padding = padding(20, 18);
+    box.backgroundColor = color(24, 26, 34);
+    box.cornerRadius = radius(12);
+    open_indexed("code", index, box);
+    emit_text(language, text_style(11, color(157, 142, 255), 1, 16));
+    emit_text(
+        value,
+        text_style(14, color(231, 232, 238), 2, 22, CLAY_TEXT_WRAP_NEWLINES),
+    );
+    close_element();
+}
+
+bullet :: (index: s32, value: string) {
+    row: Clay_ElementDeclaration;
+    row.layout.sizing.width = grow_axis();
+    row.layout.sizing.height = fit_axis();
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.layout.childGap = 10;
+    row.layout.padding = padding(4, 2);
+    open_indexed("bullet", index, row);
+    emit_text("•", text_style(18, color(112, 91, 255), 1, 28));
+    emit_text(value, text_style(16, color(64, 67, 78), 0, 27));
+    close_element();
+}
+
+note :: (index: s32, value: string) {
+    box := column_box(8);
+    box.layout.padding = padding(18, 16);
+    box.backgroundColor = color(242, 239, 255);
+    box.cornerRadius = radius(12);
+    box.border.color = color(112, 91, 255);
+    box.border.width.left = 4;
+    open_indexed("note", index, box);
+    emit_text("NOTE", text_style(11, color(89, 67, 224), 1, 16));
+    emit_text(value, text_style(16, color(62, 55, 94), 0, 26));
+    close_element();
+}
+
+table_header :: (index: s32, value: string) {
+    box := column_box();
+    box.layout.padding = padding(14, 12);
+    box.backgroundColor = color(236, 235, 240);
+    box.cornerRadius = radius(8);
+    open_indexed("table-head", index, box);
+    emit_text(value, text_style(13, color(38, 40, 49), 1, 20));
+    close_element();
+}
+
+table_row :: (index: s32, value: string) {
+    box := column_box();
+    box.layout.padding = padding(14, 11);
+    box.backgroundColor = color(249, 249, 251);
+    box.cornerRadius = radius(8);
+    open_indexed("table-row", index, box);
+    emit_text(value, text_style(14, color(62, 65, 77), 0, 23));
+    close_element();
+}

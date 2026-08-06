@@ -1,0 +1,1149 @@
+// Sections 36-53: aggregates, functions, and constraints.
+
+render_section_36 :: () {
+    paragraph(0, #string,oneline
+        \\A struct is a nominal record. Field order is source order. Fields can
+        \\have defaults. Generic parameters are inferred from `$T` in field
+        \\types. Every field declaration ends with `;`; commas do not separate
+        \\aggregate members.
+    );
+    code_block(1, "glosso", #string
+        \\Pair :: struct {
+        \\    first: $T;
+        \\    second: T;
+        \\}
+        \\
+        \\Config :: struct {
+        \\    retries: int = 3;
+        \\    verbose: bool = false;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Struct, union, and enum types may be declared inline as aggregate
+        \\field types. The compiler gives each inline declaration a
+        \\field-qualified nominal name.
+    );
+    code_block(3, "glosso", #string
+        \\Command :: union {
+        \\    Yandere: struct {
+        \\        url: string;
+        \\        filename_prefix: string;
+        \\    };
+        \\}
+    );
+    paragraph(4, "Create values with typed or inferred literals.");
+    code_block(5, "glosso", #string
+        \\p := Pair(int).{ .first = 1, .second = 2 };
+        \\c: Config = .{ .verbose = true };
+    );
+    subheading(6, "Construction and layout");
+    paragraph(7, #string,oneline
+        \\A struct groups named fields into one value and establishes their
+        \\declared types, defaults, and layout-related directives. Construction
+        \\should make invariants visible while leaving truly conventional values
+        \\to field defaults.
+    );
+    bullet(8, #string,oneline
+        \\Use named field initializers so source remains stable when
+        \\declarations are reordered or extended.
+    );
+    bullet(9, #string,oneline
+        \\Keep representation-sensitive structs explicit and review every change
+        \\when they cross a binary or foreign boundary.
+    );
+    bullet(10, #string,oneline
+        \\Put validation in constructors or helper functions when not every
+        \\mechanically constructible field combination is valid.
+    );
+    bullet(11, #string,oneline
+        \\Use `#derive` for supported mechanical behavior and handwritten
+        \\operations for semantics that require domain choices.
+    );
+    table_header(12, "Struct part   —   Compiler behavior");
+    table_row(13, #string,oneline
+        \\`field: Type;`   |   Required stored field with type-default
+        \\initialization when omitted from a literal
+    );
+    table_row(14, #string,oneline
+        \\`field: Type = expression;`   |   Stored field whose omitted
+        \\initializer uses the declared default expression
+    );
+    table_row(15, #string,oneline
+        \\A field type containing `$T`   |   Introduces/infer a generic type
+        \\parameter; later uses may write `T` without `$`
+    );
+    table_row(16, #string,oneline
+        \\`#c_call`   |   Marks the representation for C-ABI validation and
+        \\target aggregate passing rules
+    );
+    table_row(17, #string,oneline
+        \\`#derive(Name, ...)`   |   Requests the named derive expansion for the
+        \\completed type
+    );
+    table_row(18, #string,oneline
+        \\`#modify`   |   Runs the declared modification hook over the
+        \\declaration during compilation
+    );
+    table_row(19, #string,oneline
+        \\`#magic "name"`   |   Associates compiler-provided behavior; reserved
+        \\for known compiler/standard-library integration
+    );
+    paragraph(20, #string,oneline
+        \\Field order is source order and every field ends with `;`. A typed
+        \\literal uses `Type.{ .field = value }`; an inferred `.{ ... }`
+        \\requires an expected struct type. Omitted fields are default
+        \\initialized. Inline struct, union, and enum field types receive
+        \\field-qualified nominal identities rather than becoming anonymous
+        \\structural types.
+    );
+}
+
+render_section_37 :: () {
+    paragraph(0, #string,oneline
+        \\A `using` marker is accepted before a struct field, but the current
+        \\checker stores that field as an ordinary named field. Member promotion
+        \\through the containing value is not implemented: access the nested
+        \\field explicitly.
+    );
+    code_block(1, "glosso", #string
+        \\Position :: struct { x: f32; y: f32; }
+        \\Entity :: struct {
+        \\    using pos: Position;
+        \\    id: u64;
+        \\}
+        \\
+        \\e: Entity;
+        \\e.pos.x = 10; // required by the current checker
+    );
+    paragraph(2, #string,oneline
+        \\Consequently `e.x` is currently rejected with `no field 'x' in
+        \\'Entity'`. The `using value;` statement is a separate, partially
+        \\implemented feature. It allows fields of a struct-typed local to be
+        \\read as unqualified identifiers for the remainder of the current
+        \\checked body. Assignment to such an unqualified field is currently
+        \\rejected as an unbound assignment target; qualify writes.
+    );
+    code_block(3, "glosso", #string
+        \\position := e.pos;
+        \\using position;
+        \\copy := x;       // reads position.x
+        \\position.x = 20; // writes must remain qualified
+    );
+    subheading(4, "Current lookup behavior");
+    paragraph(5, #string,oneline
+        \\The parser accepts `using field: Type;` inside a struct, but the
+        \\current checker records it as an ordinary field. It does not promote
+        \\nested members through the containing value: `entity.x` is rejected
+        \\when only `entity.pos.x` exists.
+    );
+    bullet(6, #string,oneline
+        \\Access a marked field through its declared name, exactly like an
+        \\unmarked field.
+    );
+    bullet(7, #string,oneline
+        \\`using local;` is a different statement feature: a struct local's
+        \\fields can then be read as bare identifiers.
+    );
+    bullet(8, #string,oneline
+        \\The current assignment checker does not accept a bare promoted field
+        \\as a write target; qualify writes as `local.field = value`.
+    );
+    bullet(9, #string,oneline
+        \\The marker changes neither layout, initialization, ownership, nor
+        \\lifetime in the current implementation.
+    );
+    code_block(10, "glosso", #string
+        \\Position :: struct { x: f32; y: f32; }
+        \\Entity :: struct { using pos: Position; id: u64; }
+        \\
+        \\e: Entity;
+        \\e.pos.x = 10; // implemented
+        \\// e.x = 10;  // error: no field 'x' in 'Entity'
+        \\
+        \\position := e.pos;
+        \\using position;
+        \\copy := x;       // read lookup through `position`
+        \\position.x = 20; // qualify a write
+    );
+    note(11, #string,oneline
+        \\This section documents the current compiler, not the intended
+        \\promotion design. If member promotion is implemented later, this page
+        \\and its compiler-backed examples should be updated together.
+    );
+}
+
+render_section_38 :: () {
+    paragraph(0, #string,oneline
+        \\`#empty` stores type information without runtime storage. `#as` marks
+        \\an implicit conversion field.
+    );
+    code_block(1, "glosso", #string
+        \\Handle :: struct {
+        \\    #empty: $Owner;
+        \\    raw: u64;
+        \\}
+        \\
+        \\Buffer :: struct {
+        \\    #as data: []u8;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Use `#empty` to keep type-level distinctions with zero runtime cost.
+    );
+    subheading(3, "Type evidence and conversion lookup");
+    paragraph(4, #string,oneline
+        \\`#empty` records compile-time type relationships without adding
+        \\ordinary runtime payload, while `#as` marks a field as an intentional
+        \\conversion view of its containing value. Both features shape type
+        \\behavior and should communicate a real abstraction relationship.
+    );
+    bullet(5, #string,oneline
+        \\Use `#empty` for type-level evidence or association, not as hidden
+        \\runtime state.
+    );
+    bullet(6, #string,oneline
+        \\Use `#as` only when conversion is unambiguous and preserves the
+        \\invariant expected by callers.
+    );
+    bullet(7, #string,oneline
+        \\Add `using` only when the converted or embedded interface should also
+        \\participate in member lookup.
+    );
+    bullet(8, #string,oneline
+        \\Prefer an explicitly named conversion function when the operation
+        \\allocates, can fail, or loses information.
+    );
+    table_header(9, "Field form   —   Stored?   —   Lookup/conversion effect");
+    table_row(10, #string,oneline
+        \\`#empty: T;`   |   No ordinary runtime field   |   Records `T` as
+        \\type-level evidence and can introduce/retain generic type information
+    );
+    table_row(11, #string,oneline
+        \\`#empty: T, U;`   |   No ordinary runtime fields   |   Adds several
+        \\empty type markers in one declaration
+    );
+    table_row(12, #string,oneline
+        \\`#as field: T;`   |   Yes   |   Makes `field` the struct's implicit
+        \\conversion field when a `T` is expected
+    );
+    table_row(13, #string,oneline
+        \\`#as using field: T;`   |   Yes   |   Parses the same conversion field
+        \\plus the current `using` marker; embedded member promotion remains
+        \\subject to the limitation documented in the preceding chapter
+    );
+    paragraph(14, #string,oneline
+        \\An implicit `#as` conversion is selected only when the containing
+        \\struct is being coerced to the marked field's type. It is not a
+        \\general cast hook and does not run arbitrary code. The compiler stores
+        \\one effective `as_field` name for the struct, so a type should declare
+        \\one unambiguous conversion field.
+    );
+}
+
+render_section_39 :: () {
+    paragraph(0, #string,oneline
+        \\Assigning a variant activates it. Payload-less variants use `void` and
+        \\are activated by naming the variant.
+    );
+    code_block(1, "glosso", #string
+        \\Option :: union { some: $T; none: void; }
+        \\
+        \\x: Option(int);
+        \\x.some = 123;
+        \\
+        \\empty: Option(int);
+        \\empty.none;
+    );
+    paragraph(2, #string,oneline
+        \\Reading a payload is meaningful when that variant is active. Switch
+        \\before accessing uncertain data.
+    );
+    subheading(3, "Active variants and payloads");
+    paragraph(4, #string,oneline
+        \\A tagged union stores one active variant together with the information
+        \\needed to identify it. Constructing a variant selects that active
+        \\case, and payload syntax must agree with whether the declared variant
+        \\carries data.
+    );
+    bullet(5, #string,oneline
+        \\Name the variant at construction so the active state is obvious at the
+        \\point where data enters the union.
+    );
+    bullet(6, #string,oneline
+        \\Payload-free variants express states such as absence or completion
+        \\without inventing sentinel data.
+    );
+    bullet(7, #string,oneline
+        \\Never read a payload until control flow has established the
+        \\corresponding active variant.
+    );
+    bullet(8, #string,oneline
+        \\Use a struct payload when a variant needs several named values; it
+        \\keeps pattern matching and evolution readable.
+    );
+    table_header(9, "Variant declaration   —   Activation");
+    table_row(10, #string,oneline
+        \\`Some: T;`   |   Assign the payload through the variant field, such as
+        \\`value.Some = payload`, or construct contextually as `.Some(payload)`
+        \\where supported
+    );
+    table_row(11, #string,oneline
+        \\`None: void;`   |   Select the payload-free variant by naming it, such
+        \\as `value.None`, or use contextual `.None` construction
+    );
+    table_row(12, #string,oneline
+        \\Inline aggregate payload   |   Construct/match the inline nominal
+        \\payload under that variant
+    );
+    note(13, #string,oneline
+        \\The active tag changes when a variant is activated. A field access
+        \\alone is not proof that a payload-bearing variant is active; switch or
+        \\pattern-match before reading uncertain payload storage.
+    );
+}
+
+render_section_40 :: () {
+    paragraph(0, #string,oneline
+        \\The switch form `if value == { ... }` dispatches over the active tag.
+        \\A dot-prefixed case such as `case .some;` uses the same contextual
+        \\spelling as an enum case. The older bare spelling, `case some;`,
+        \\remains accepted.
+    );
+    code_block(1, "glosso", #string
+        \\show :: (x: Option(int)) {
+        \\    if x == {
+        \\        case .some; print("some %\n", x.some);
+        \\        case .none; print("none\n");
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`#falling` falls through to the next case body when explicitly
+        \\requested.
+    );
+    subheading(3, "Narrowing and exhaustiveness");
+    paragraph(4, #string,oneline
+        \\Switching on a tagged union narrows each case to one active variant
+        \\and makes its payload available under that case's rules. Exhaustive
+        \\handling is the safest default because adding a variant then reveals
+        \\every decision point that needs review.
+    );
+    bullet(5, #string,oneline
+        \\Handle every variant or add an explicit `else` when several states
+        \\intentionally share behavior.
+    );
+    bullet(6, #string,oneline
+        \\Use `#partial` only when ignoring unmatched variants is part of the
+        \\operation's contract, not to silence an incomplete implementation.
+    );
+    bullet(7, #string,oneline
+        \\Keep payload-dependent work inside the matched case so the active-tag
+        \\proof remains local.
+    );
+    bullet(8, #string,oneline
+        \\Prefer pattern switches when nested payload structure needs to be
+        \\destructured at the same time.
+    );
+    paragraph(9, #string,oneline
+        \\`if union_value == { ... }` is the tagged-union switch form. `case
+        \\.Variant;` is the contextual spelling and `case Variant;` remains
+        \\accepted for compatibility. Within a payload case, access through the
+        \\subject (`union_value.Variant`) or use a pattern case to bind the
+        \\payload directly.
+    );
+    code_block(10, "glosso", #string
+        \\show :: (value: Option(string)) {
+        \\    if value == {
+        \\        case .Some; print("%\n", value.Some);
+        \\        case .None; print("none\n");
+        \\    }
+        \\}
+        \\
+        \\// Destructuring alternative
+        \\if #pattern value == {
+        \\case .Some(text); print("%\n", text);
+        \\case .None; print("none\n");
+        \\}
+    );
+}
+
+render_section_41 :: () {
+    paragraph(0, #string,oneline
+        \\A raw union has no tag and overlays storage. Use it for low-level
+        \\representation work and C interop. The compiler cannot know which
+        \\field is active.
+    );
+    code_block(1, "glosso", "Bits :: union #raw { i: u32; f: f32; }");
+    paragraph(2, #string,oneline
+        \\Because no tag exists, raw unions cannot participate in tagged union
+        \\switching.
+    );
+    subheading(3, "Untagged storage");
+    paragraph(4, #string,oneline
+        \\A raw union overlays its fields without recording which one is active.
+        \\This is a representation tool for foreign layouts and tightly
+        \\controlled low-level code, not a substitute for an ordinary sum type.
+    );
+    bullet(5, #string,oneline
+        \\Track the active interpretation in surrounding state and update that
+        \\state together with every union write.
+    );
+    bullet(6, #string,oneline
+        \\Reading a field different from the one established by the
+        \\representation contract can produce invalid values.
+    );
+    bullet(7, #string,oneline
+        \\Prefer tagged unions whenever the program itself owns the data model
+        \\and can afford an explicit tag.
+    );
+    bullet(8, #string,oneline
+        \\Verify size, alignment, and field types against the external ABI when
+        \\a raw union mirrors foreign data.
+    );
+    paragraph(9, #string,oneline
+        \\`Name :: union #raw { ... }` allocates enough aligned storage for its
+        \\largest member and emits no active-variant tag. Consequently the
+        \\tagged switch and coverage rules do not apply. Writing one field and
+        \\reading another is a representation reinterpretation whose validity
+        \\comes from the external format or low-level algorithm, not from the
+        \\type checker.
+    );
+}
+
+render_section_42 :: () {
+    paragraph(0, #string,oneline
+        \\An enum is a nominal set of named integer-like values. Explicit values
+        \\use `::`.
+    );
+    code_block(1, "glosso", #string
+        \\Mode :: enum { Read; Write :: 4; Append; }
+        \\mode := Mode.Read;
+    );
+    paragraph(2, #string,oneline
+        \\Enums support equality and ordering through prelude instances.
+    );
+    subheading(3, "Members and backing values");
+    paragraph(4, #string,oneline
+        \\An enum gives symbolic names to a closed set of values. The enum type
+        \\is a domain boundary: callers should reason in member names, while the
+        \\backing representation matters mainly for layout, serialization, or
+        \\foreign interoperability.
+    );
+    bullet(5, #string,oneline
+        \\Use enum members in APIs instead of unrelated integers so invalid
+        \\states are harder to express.
+    );
+    bullet(6, #string,oneline
+        \\Choose and document an explicit backing type when values cross a
+        \\binary boundary.
+    );
+    bullet(7, #string,oneline
+        \\Handle members exhaustively when each value has distinct behavior;
+        \\newly added members will then expose stale logic.
+    );
+    bullet(8, #string,oneline
+        \\Keep stable explicit numeric values for persistent formats rather than
+        \\depending on declaration order.
+    );
+    table_header(9, "Syntax   —   Assigned value");
+    table_row(10, #string,oneline
+        \\`First;`   |   0 when no earlier member changes the sequence
+    );
+    table_row(11, #string,oneline
+        \\`Named :: 4;`   |   Exactly 4; enum member values use `::`, not `=`
+    );
+    table_row(12, #string,oneline
+        \\The member after `Named :: 4;`   |   5; implicit numbering resumes
+        \\from the explicit value plus one
+    );
+    table_row(13, #string,oneline
+        \\`Name :: enum u8 { ... }`   |   Uses the explicit backing type; omit
+        \\it for the compiler's default enum representation
+    );
+}
+
+render_section_43 :: () {
+    paragraph(0, #string,oneline
+        \\`enum_flags T` defines a bit-mask enum with backing type `T`. Use
+        \\bitwise operators to combine and test flags.
+    );
+    code_block(1, "glosso", #string
+        \\Open_Flags :: enum_flags u32 { Read :: 1; Write :: 2; Create :: 4; }
+        \\flags := Open_Flags.Read | Open_Flags.Create;
+    );
+    subheading(2, "Bit-set representation");
+    paragraph(3, #string,oneline
+        \\A flag enum models a set of independently combinable options in an
+        \\integer backing value. Individual flags should occupy distinct bits;
+        \\combined values then represent membership rather than a single
+        \\alternative.
+    );
+    bullet(4, #string,oneline
+        \\Assign powers of two to independent flags and reserve zero for the
+        \\empty set when that state is useful.
+    );
+    bullet(5, #string,oneline
+        \\Use bitwise set, clear, and test operations rather than equality when
+        \\several flags may be present.
+    );
+    bullet(6, #string,oneline
+        \\Mask unknown bits when decoding untrusted or versioned data according
+        \\to the format's compatibility policy.
+    );
+    bullet(7, #string,oneline
+        \\Use an ordinary enum when exactly one member may be active; flag enums
+        \\intentionally permit combinations.
+    );
+    paragraph(8, #string,oneline
+        \\The syntax is `Name :: enum_flags IntegerType { Member :: value; ...
+        \\}`; unlike an ordinary enum, the backing type is mandatory. The
+        \\compiler does not invent power-of-two values for omitted members—the
+        \\same sequential enum numbering rule applies—so independently
+        \\combinable flags should be assigned explicit bit values.
+    );
+    code_block(9, "glosso", #string
+        \\Permissions :: enum_flags u32 {
+        \\    None    :: 0;
+        \\    Read    :: 1;
+        \\    Write   :: 2;
+        \\    Execute :: 4;
+        \\}
+        \\
+        \\permissions := Permissions.Read | Permissions.Write;
+        \\can_write := (permissions & Permissions.Write) != cast(Permissions)0;
+    );
+}
+
+render_section_44 :: () {
+    paragraph(0, #string,oneline
+        \\A function declaration has a name, parameter list, optional return
+        \\type, directives, constraints, and a body. Omitting `-> T` means the
+        \\function returns `void`.
+    );
+    code_block(1, "glosso", #string
+        \\area :: (w: int, h: int) -> int {
+        \\    return w * h;
+        \\}
+        \\
+        \\log_done :: () {
+        \\    print("done\n");
+        \\}
+    );
+    subheading(2, "Named Results");
+    paragraph(3, #string,oneline
+        \\Naming every component of a tuple return type declares mutable result
+        \\variables in the function body. Each starts with the same type-default
+        \\value as an ordinary declaration without an explicit initializer. A
+        \\naked `return;` returns their current values, and reaching the end of
+        \\the function does the same.
+    );
+    code_block(4, "glosso", #string
+        \\divide :: (
+        \\    numerator: int,
+        \\    denominator: int,
+        \\) -> (err: string, quotient: int) {
+        \\    if denominator == 0 {
+        \\        err = "division by zero";
+        \\        return;
+        \\    }
+        \\    quotient = numerator / denominator;
+        \\}
+    );
+    paragraph(5, #string,oneline
+        \\An explicit multi-value return remains valid and does not have to use
+        \\the named result variables: `return "", numerator / denominator;`.
+    );
+}
+
+render_section_45 :: () {
+    paragraph(0, #string,oneline
+        \\An ordinary parameter is `[using] [noalias] name: Type` with an
+        \\optional `= default`. The accepted parameter families are:
+    );
+    bullet(1, "`name: Type` for a runtime parameter.");
+    bullet(2, "`name: Type = expression` for a typed default.");
+    bullet(3, "`name := expression` for an inferred default parameter.");
+    bullet(4, "`#comptime name: Type` for an erased compile-time parameter.");
+    bullet(5, "`#empty: Type, ...` for unnamed erased type evidence.");
+    bullet(6, #string,oneline
+        \\`name: ...Type`, `name: ...$T`, `name: ...any`, or a constrained
+        \\variadic pack.
+    );
+    bullet(7, #string,oneline
+        \\A final bare `...` for C varargs on `#foreign` or `#c_call`
+        \\declarations.
+    );
+    paragraph(8, #string,oneline
+        \\Two names may share an annotation as `left, right: Type`. A variadic
+        \\parameter has exactly one name. Parameters after a Glosso variadic
+        \\pack must have defaults; a C ellipsis is always last. `using` and
+        \\`noalias` may appear in either order, but neither may qualify
+        \\`#comptime` or `#empty`.
+    );
+    paragraph(9, #string,oneline
+        \\`using parameter: Struct` behaves as if `using parameter;` were
+        \\inserted at the start of the function body. It currently has the same
+        \\limitations as the `using` statement: unqualified reads work, while
+        \\writes should remain qualified.
+    );
+    paragraph(10, #string,oneline
+        \\Call sites can use named arguments to make intent explicit. Named
+        \\arguments are written `.parameter = expression`, including the leading
+        \\dot.
+    );
+    code_block(11, "glosso", #string
+        \\connect_with_timeout :: (
+        \\    host: string,
+        \\    port: string,
+        \\    timeout_ms: int = 1000,
+        \\) {
+        \\    _ := host; _ := port; _ := timeout_ms;
+        \\}
+        \\
+        \\connect_with_timeout(
+        \\    .host = "example.com",
+        \\    .port = "80",
+        \\    .timeout_ms = 2500,
+        \\);
+    );
+    paragraph(12, #string,oneline
+        \\Default expressions are attached to the declaration and used for
+        \\omitted arguments. A named call cannot invent a parameter spelling,
+        \\supply one parameter twice, or leave a required parameter unbound.
+        \\Overload candidate selection includes named/default binding before
+        \\type and `where` checks.
+    );
+    subheading(13, "Argument binding");
+    paragraph(14, #string,oneline
+        \\Default parameters make an argument optional at a call site, while
+        \\named arguments make the selected parameter explicit. Together they
+        \\work best for stable, unsurprising configuration rather than for
+        \\inputs whose omission changes the operation's fundamental meaning.
+    );
+    bullet(15, #string,oneline
+        \\Place required parameters before optional ones and choose defaults
+        \\that are safe for the common case.
+    );
+    bullet(16, #string,oneline
+        \\Use named arguments when skipping earlier defaults or when several
+        \\adjacent values have the same type.
+    );
+    bullet(17, #string,oneline
+        \\Treat parameter names used by external callers as part of the
+        \\source-level API.
+    );
+    bullet(18, #string,oneline
+        \\Prefer an options struct when optional settings become numerous,
+        \\evolve independently, or need reuse across calls.
+    );
+    table_header(19, "Parameter form   —   Call-site behavior");
+    table_row(20, "`name: Type`   |   Required runtime argument");
+    table_row(21, #string,oneline
+        \\`name: Type = expression`   |   Optional argument with an explicit
+        \\parameter type
+    );
+    table_row(22, #string,oneline
+        \\`name := expression`   |   Optional argument whose parameter type is
+        \\inferred from its default
+    );
+    table_row(23, #string,oneline
+        \\`a, b: Type`   |   Several parameters sharing one type annotation
+    );
+    table_row(24, #string,oneline
+        \\`.name = expression` at a call   |   Binds that parameter by name
+        \\instead of by position
+    );
+    paragraph(25, #string,oneline
+        \\Call matching first assigns named arguments to their parameter slots
+        \\and then fills remaining positional slots in order. Supplying the same
+        \\parameter twice, naming an unknown parameter, omitting a required
+        \\argument, or providing too many non-variadic arguments makes that
+        \\declaration inapplicable. Parameter names are therefore part of the
+        \\source-level calling interface.
+    );
+    code_block(26, "glosso", #string
+        \\connect :: (host: string, port: string = "443", retries := 3) {}
+        \\
+        \\connect("example.com");
+        \\connect(.host = "example.com", .retries = 5);
+        \\connect("example.com", .retries = 1);
+    );
+}
+
+render_section_46 :: () {
+    paragraph(0, #string,oneline
+        \\`noalias` is a promise on a pointer parameter, equivalent in purpose
+        \\to C `restrict` and Zig `noalias`. It is accepted on `*T` and `[*]T`,
+        \\including `const`/`volatile` forms and aliases that resolve to those
+        \\pointer types.
+    );
+    code_block(1, "glosso", #string
+        \\copy_nonoverlapping :: (
+        \\    noalias destination: [*]$T,
+        \\    noalias source: [*]const T,
+        \\    count: s64,
+        \\) {
+        \\    for index: 0..count destination[index] = source[index];
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\For one execution of the call, if a location accessed through a
+        \\`noalias` parameter is modified, every access to that location must
+        \\use that parameter or a pointer derived from it; pure read/read
+        \\aliasing is permitted. The compiler does not prove or dynamically
+        \\check this promise. Violating it is undefined behavior in native code,
+        \\and optimized builds may exploit it; the VM treats `noalias` as
+        \\metadata. `noalias` is rejected on slices, variadic arguments, and
+        \\non-pointer values. It does not qualify the pointer value type, but it
+        \\is part of function-pointer compatibility: plain and `noalias`
+        \\callbacks cannot be implicitly converted to one another. Named/inline
+        \\function-pointer types and indirect calls retain the contract so LLVM
+        \\can attach the corresponding argument attribute.
+    );
+}
+
+render_section_47 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso variadic parameter is `name: ...T` or `name: ...`. It is
+        \\represented as an iterable rest sequence in the body.
+    );
+    code_block(1, "glosso", #string
+        \\all_true :: (values: ...bool) -> bool {
+        \\    for values {
+        \\        if !it return false;
+        \\    }
+        \\    return true;
+        \\}
+    );
+    paragraph(2, "Use spread syntax to pass an existing rest argument onward.");
+    code_block(3, "glosso", #string
+        \\log_all :: (items: ...any) {
+        \\    print("items: %\n", items...);
+        \\}
+    );
+    subheading(4, "Glosso packs and C ellipses");
+    paragraph(5, #string,oneline
+        \\A variadic parameter collects a call site's remaining arguments. Typed
+        \\variadics preserve one element contract, while foreign C varargs
+        \\follow separate promotion and ABI rules and should not be treated as
+        \\an ordinary Glosso collection.
+    );
+    bullet(6, #string,oneline
+        \\Use a typed variadic when every supplied argument has the same
+        \\semantic role and element type.
+    );
+    bullet(7, #string,oneline
+        \\Keep the variadic parameter last so fixed arguments and defaults
+        \\remain unambiguous.
+    );
+    bullet(8, #string,oneline
+        \\Forward variadic values only through syntax or helpers that preserve
+        \\their intended expansion.
+    );
+    bullet(9, #string,oneline
+        \\Use the `VarArg` facilities for C varargs; the caller is responsible
+        \\for the external function's expected promoted types.
+    );
+    table_header(10, "Form   —   Accepted argument pack");
+    table_row(11, #string,oneline
+        \\`items: ...T`   |   Homogeneous values coercible to concrete `T`; the
+        \\body observes array-like `items`
+    );
+    table_row(12, #string,oneline
+        \\`items: ...$T`   |   Homogeneous generic pack whose element type is
+        \\inferred for specialization
+    );
+    table_row(13, "`items: ...any`   |   Heterogeneous erased-value pack");
+    table_row(14, #string,oneline
+        \\`items: ...(ClassA && ClassB)`   |   Heterogeneous pack where each
+        \\value satisfies all listed unary typeclasses
+    );
+    table_row(15, #string,oneline
+        \\`items: ...`   |   Unconstrained rest form represented through the
+        \\variadic array machinery
+    );
+    table_row(16, #string,oneline
+        \\Bare `...` with no parameter name   |   C ellipsis; a distinct feature
+        \\covered in the C Varargs chapter
+    );
+    bullet(17, #string,oneline
+        \\A named Glosso variadic parameter cannot have a default and must use
+        \\one parameter name.
+    );
+    bullet(18, #string,oneline
+        \\Parameters following a Glosso variadic parameter are allowed only when
+        \\all of them have defaults.
+    );
+    bullet(19, #string,oneline
+        \\At a call, `array_or_pack...` spreads an existing compatible
+        \\array/rest value instead of adding it as one element.
+    );
+    bullet(20, #string,oneline
+        \\The body iterates the packed value with ordinary array/iterable
+        \\operations; it is not a C `va_list`.
+    );
+}
+
+render_section_48 :: () {
+    paragraph(0, #string,oneline
+        \\`#fn_ptr` declares a function pointer type. `#c_call` selects the C
+        \\ABI. The parser also accepts `#no_context` after a named
+        \\function-pointer declaration, but the current function-pointer type
+        \\representation does not retain that marker; do not rely on it to
+        \\distinguish callback types. `#no_context` is implemented on function
+        \\definitions, where it removes implicit context access.
+    );
+    code_block(1, "glosso", #string
+        \\Comparator :: #fn_ptr(a: int, b: int) -> int #no_context;
+        \\Thread_Proc :: #fn_ptr(data: *void) -> *void #c_call;
+    );
+    paragraph(2, #string,oneline
+        \\Function pointers are values and can be stored in structs, passed to
+        \\C, or called from Glosso when their ABI matches the use site.
+    );
+    subheading(3, "Signature and calling convention");
+    paragraph(4, #string,oneline
+        \\A function pointer is a callable value with a precise parameter,
+        \\return, and calling-convention contract. Matching source-level types
+        \\are not sufficient when the target function uses a different ABI or
+        \\implicit-context rule.
+    );
+    bullet(5, #string,oneline
+        \\Match parameter order, widths, return representation, and calling
+        \\convention exactly.
+    );
+    bullet(6, #string,oneline
+        \\Account for `#c_call` and `#no_context`; functions with different
+        \\implicit calling requirements are not interchangeable callbacks.
+    );
+    bullet(7, #string,oneline
+        \\Keep any captured state separate because a plain function pointer does
+        \\not carry a lambda environment.
+    );
+    bullet(8, #string,oneline
+        \\Check nullable callbacks before invocation when an external API uses
+        \\null to mean that no callback was installed.
+    );
+    table_header(9, "Declaration   —   Type identity");
+    table_row(10, #string,oneline
+        \\`F :: #fn_ptr(a: T) -> U;`   |   Ordinary Glosso function pointer with
+        \\the declared parameter/result types
+    );
+    table_row(11, #string,oneline
+        \\`F :: #fn_ptr(a: T) -> U #c_call;`   |   C-ABI function pointer; not
+        \\implicitly interchangeable with the ordinary form
+    );
+    table_row(12, #string,oneline
+        \\`F :: #fn_ptr(noalias p: *T);`   |   The `noalias` promise is retained
+        \\in callback compatibility
+    );
+    table_row(13, #string,oneline
+        \\`F :: #fn_ptr(first: T, ...) -> U #c_call;`   |   C-variadic function
+        \\pointer; requires at least one fixed parameter
+    );
+    paragraph(14, #string,oneline
+        \\Named function-pointer parameters require names and types. Omitting
+        \\`->` means `void`. Function values can be stored, passed, and invoked
+        \\indirectly after exact signature matching. Lambdas can initialize
+        \\non-variadic pointer types when their parameter/return types match,
+        \\but lambdas are noncapturing and cannot initialize a C-variadic
+        \\pointer.
+    );
+    note(15, #string,oneline
+        \\Current limitation: the named `#fn_ptr` parser accepts `#no_context`
+        \\but does not retain a separate no-context bit in the resulting pointer
+        \\type. `#no_context` is effective on function definitions; do not use
+        \\the pointer marker as an enforced compatibility distinction until the
+        \\compiler representation supports it.
+    );
+}
+
+render_section_49 :: () {
+    paragraph(0, #string,oneline
+        \\A lambda is a noncapturing function value. The expected
+        \\function-pointer type usually supplies its parameter and return types:
+    );
+    code_block(1, "glosso", #string
+        \\apply :: (callback: (int, int) -> int) -> int {
+        \\    return callback(20, 22);
+        \\}
+        \\
+        \\answer := apply(|a, b| { return a + b; });
+    );
+    paragraph(2, #string,oneline
+        \\Write `-> Type` when the return type should be explicit, including
+        \\when it binds a generic callback result:
+    );
+    code_block(3, "glosso", #string
+        \\sum3 := |a: int, b: int, c: int| -> int {
+        \\    return a + b + c;
+        \\};
+        \\
+        \\answer := apply3(
+        \\    |a, b, c| -> int { return a + b + c; },
+        \\    10, 20, 12,
+        \\);
+    );
+    paragraph(4, #string,oneline
+        \\An untyped lambda needs a function-pointer context. A standalone
+        \\lambda must annotate every parameter and its return type. `||`
+        \\introduces a zero-parameter lambda, and a lambda without an explicit
+        \\return annotation may use a single expression body, such as `|value|
+        \\value + 1`.
+    );
+    paragraph(5, #string,oneline
+        \\Lambdas currently use the ordinary raw function-pointer
+        \\representation. They may refer to globals and compile-time constants,
+        \\but capturing a runtime local is rejected. Pass such state explicitly
+        \\through a context argument.
+    );
+}
+
+render_section_50 :: () {
+    paragraph(0, #string,oneline
+        \\`$T` introduces an inferred compile-time type parameter. It is
+        \\syntactic sugar for a `#comptime T: type` parameter, so `T` is both
+        \\available in annotations and usable as a compile-time type value in
+        \\the specialized body. The body is checked for each instantiated type
+        \\that passes constraints.
+    );
+    code_block(1, "glosso", #string
+        \\swap :: (a: *$T, b: *T) {
+        \\    tmp := a.*;
+        \\    a.* = b.*;
+        \\    b.* = tmp;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Generics can use type parameters explicitly. Any parameter type may be
+        \\marked `#comptime`; its argument must be evaluable during compilation,
+        \\participates in specialization identity, and is erased from the
+        \\runtime calling convention. Passing a runtime value, such as a
+        \\command-line argument, is a compile error.
+    );
+    code_block(3, "glosso", #string
+        \\zero :: (#comptime T: type) -> T {
+        \\    out: T;
+        \\    return out;
+        \\}
+        \\
+        \\emit_tag :: (#comptime tag: string) {
+        \\    print("%\n", tag);
+        \\}
+    );
+    paragraph(4, #string,oneline
+        \\An explicit `T: type` parameter used by later annotations is promoted
+        \\to a compile-time type parameter. Required type parameters must
+        \\precede runtime parameters unless they have defaults. `$T` binds a
+        \\generic name only on first use; later occurrences use plain `T`.
+        \\Return-only generic variables are inferred and inserted as erased type
+        \\parameters when the signature permits it.
+    );
+}
+
+render_section_51 :: () {
+    paragraph(0, #string,oneline
+        \\Function directives follow the optional return type and must appear
+        \\before any `where` clauses. A normal function then has a block. A
+        \\`#magic` or `#foreign` declaration is bodyless; a typeclass
+        \\requirement may end in `;`.
+    );
+    bullet(1, #string,oneline
+        \\`#inline`, `#inline,always`, and `#inline,never` set the backend
+        \\inline mode.
+    );
+    bullet(2, "`#must` rejects silently discarded call results.");
+    bullet(3, #string,oneline
+        \\`#noreturn` requires every path to terminate without a normal return.
+    );
+    bullet(4, #string,oneline
+        \\`#returns_twice` marks low-level control-transfer functions that can
+        \\resume a call site more than once.
+    );
+    bullet(5, #string,oneline
+        \\`#no_context` removes implicit context passing and rejects `context`
+        \\access.
+    );
+    bullet(6, #string,oneline
+        \\`#c_call` selects the C ABI and also removes normal Glosso context
+        \\passing.
+    );
+    bullet(7, #string,oneline
+        \\`#dump` prints the lowered typed function representation during
+        \\compilation.
+    );
+    bullet(8, #string,oneline
+        \\`#magic "name"` binds a declaration to a compiler-implemented
+        \\intrinsic; users cannot define new magic names in source.
+    );
+    bullet(9, #string,oneline
+        \\`#modify expression` or `#modify { ... }` runs compile-time
+        \\declaration modification.
+    );
+    bullet(10, "`#memory ...` attaches temporal memory effects.");
+    bullet(11, #string,oneline
+        \\`#operator(...)`, `#precedence(...)`, `#expand`, and `#foreign` are
+        \\described in their dedicated chapters.
+    );
+    paragraph(12, #string,oneline
+        \\`#modify` runs with signature type variables available as mutable
+        \\compile-time bindings. It may replace inferred types and must return
+        \\`true` for the candidate to remain applicable. Returning false or
+        \\failing the modification removes that specialization. Struct
+        \\modification runs before its generic field types are finalized.
+    );
+    code_block(13, "glosso", #string
+        \\widen :: (value: $T) -> $R
+        \\#modify {
+        \\    R = T;
+        \\    if T == u8 R = u32;
+        \\    if T == s8 R = s32;
+        \\    return true;
+        \\}
+        \\{
+        \\    return value;
+        \\}
+        \\
+        \\Box :: struct #modify {
+        \\    T = s64;
+        \\    return true;
+        \\} {
+        \\    value: $T;
+        \\}
+    );
+    paragraph(14, #string,oneline
+        \\Struct directives appear between `struct` and its body: `#c_call`,
+        \\`#derive(...)`, `#magic "name"`, and `#modify`. Union directives are
+        \\`#raw`, `#derive(...)`, and `#magic "name"`. Directives not accepted
+        \\at that declaration site are parse errors rather than ignored
+        \\annotations.
+    );
+}
+
+render_section_52 :: () {
+    paragraph(0, #string,oneline
+        \\`where` keeps generic declarations honest. Constraints can call
+        \\ordinary compile-time predicates from `std/Meta` or user-defined
+        \\predicates.
+    );
+    code_block(1, "glosso", #string
+        \\square :: (x: $T) -> T where Is_Numeric(T) {
+        \\    return x * x;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\A failed constraint removes that instance or generic declaration from
+        \\consideration instead of producing a deep body error.
+    );
+    subheading(3, "Specialization constraints");
+    paragraph(4, #string,oneline
+        \\A `where` constraint defines the type domain in which a generic
+        \\declaration is valid. It is checked during specialization, before the
+        \\body becomes an implementation candidate for a concrete call.
+    );
+    bullet(5, #string,oneline
+        \\State the weakest constraint that guarantees every operation used by
+        \\the body.
+    );
+    bullet(6, #string,oneline
+        \\Keep constraints semantically disjoint when several overloads share a
+        \\name; Glosso does not rank overlapping candidates by cleverness.
+    );
+    bullet(7, #string,oneline
+        \\Move repeated capability checks into a typeclass or named compile-time
+        \\predicate so diagnostics and intent remain consistent.
+    );
+    bullet(8, #string,oneline
+        \\Test both accepted and deliberately rejected types to keep the
+        \\boundary from widening accidentally.
+    );
+    paragraph(9, #string,oneline
+        \\Function directives must appear before `where` clauses. A declaration
+        \\may contain several `where expression` clauses; all are evaluated with
+        \\the inferred type and compile-time value bindings. A false result
+        \\removes an overload/instance candidate. If no candidate remains, the
+        \\call diagnostic reports that the constraint failed instead of checking
+        \\an invalid specialized body.
+    );
+    code_block(10, "glosso", #string
+        \\clamp_zero :: (value: $T) -> T
+        \\    where Is_Numeric(T)
+        \\    where #meaningful { value < cast(T)0 }
+        \\{
+        \\    if value < cast(T)0 return cast(T)0;
+        \\    return value;
+        \\}
+    );
+    note(11, #string,oneline
+        \\Constraints affect applicability, not runtime branching. Every
+        \\expression they use must be evaluable in the specialization
+        \\environment. Use static `#if` inside the body when the declaration
+        \\should remain applicable but emit different code for different
+        \\compile-time cases.
+    );
+}
+
+render_section_53 :: () {
+    paragraph(0, #string,oneline
+        \\`#meaningful` asks whether a snippet typechecks. This is the main tool
+        \\for structural constraints.
+    );
+    code_block(1, "glosso", #string
+        \\HasLen :: (T: type) -> bool {
+        \\    return #meaningful {
+        \\        x: T;
+        \\        x.count;
+        \\    };
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Use it sparingly; a named predicate is clearer than repeating the same
+        \\probe.
+    );
+    subheading(3, "Compile-time expression probing");
+    paragraph(4, #string,oneline
+        \\`#meaningful` asks whether an expression is valid for the concrete
+        \\compile-time types currently being considered. It is a structural
+        \\capability probe and is most useful for selecting optional generic
+        \\behavior without executing the probed operation.
+    );
+    bullet(5, #string,oneline
+        \\Probe the exact expression the implementation will later use,
+        \\including qualifiers and argument order.
+    );
+    bullet(6, #string,oneline
+        \\Use the result in compile-time selection so an invalid alternative is
+        \\not emitted for that specialization.
+    );
+    bullet(7, #string,oneline
+        \\Prefer a named typeclass when the capability is a public abstraction
+        \\rather than a local implementation fallback.
+    );
+    bullet(8, #string,oneline
+        \\Do not use capability probing to create overlapping overload domains
+        \\that violate coherence.
+    );
+    table_header(9, "Probe form   —   Result");
+    table_row(10, #string,oneline
+        \\`#meaningful expression`   |   `true` when the expression can be typed
+        \\in the current compile-time environment
+    );
+    table_row(11, #string,oneline
+        \\`#meaningful { statements/expression }`   |   Checks the complete
+        \\snippet, including declarations, member lookup, calls, and result
+        \\expression
+    );
+    table_row(12, #string,oneline
+        \\A probe that fails name/type/constraint checking   |   `false`; the
+        \\probe records the internal failure for a surrounding constraint
+        \\diagnostic
+    );
+    paragraph(13, #string,oneline
+        \\The compiler typechecks a cloned probe with the currently inferred
+        \\generic bindings. It does not emit or execute the probed runtime
+        \\operation. Because the check uses the complete expression, pointer
+        \\qualifiers, overload selection, argument order, and result coercions
+        \\are part of the answer.
+    );
+}
+

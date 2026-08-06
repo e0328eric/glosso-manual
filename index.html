@@ -1,30 +1,240 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f0e8" />
-    <script>
-      (() => {
-        let savedTheme = null;
-        try {
-          savedTheme = localStorage.getItem("glosso-theme");
-        } catch {}
-        const theme = savedTheme === "light" || savedTheme === "dark"
-          ? savedTheme
-          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        document.documentElement.dataset.theme = theme;
-        document.querySelector('meta[name="theme-color"]').content = theme === "dark" ? "#101419" : "#f4f0e8";
-      })();
-    </script>
-    <meta
-      name="description"
-      content="The compiler-aligned Glosso language manual and standard library reference."
-    />
-    <title>Glosso — Language Manual</title>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f5f1">
+  <meta name="description" content="The Glosso language manual, rendered by Glosso and Clay in freestanding WebAssembly.">
+  <title>Glosso Language Manual</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-width: 320px; min-height: 100%; background: #f6f5f1; color: #191a21; }
+    body { overflow-x: hidden; }
+    #app { position: relative; width: 100%; min-height: 100vh; }
+    #scene { position: relative; width: 100%; min-height: 100vh; }
+    .clay-command { position: absolute; margin: 0; padding: 0; transform-origin: top left; }
+    .clay-text { overflow: hidden; white-space: pre; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #f6f5f1; z-index: 20; color: #6b54ee; font-weight: 700; letter-spacing: .08em; }
+    #loading[hidden] { display: none; }
+    #error { max-width: 760px; margin: 80px auto; padding: 24px; border-radius: 14px; background: #fff; color: #9c2432; white-space: pre-wrap; box-shadow: 0 12px 40px rgba(27, 25, 38, .08); }
+    canvas { display: none; }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+  </style>
+</head>
+<body>
+  <div id="app" aria-label="Glosso language manual">
+    <div id="scene"></div>
+  </div>
+  <div id="loading">COMPILING THE PAGE…</div>
+  <canvas id="measure"></canvas>
+  <script type="module">
+    const scene = document.querySelector("#scene");
+    const loading = document.querySelector("#loading");
+    const canvas = document.querySelector("#measure");
+    const context = canvas.getContext("2d");
+    const decoder = new TextDecoder("utf-8");
+    const fonts = [
+      'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+      'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+      '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    ];
+
+    let instance;
+    let view;
+    let scratchAddress = 0;
+    let pointerX = 0;
+    let pointerY = 0;
+    let pointerDown = false;
+    let pendingFrame = false;
+    let lastFrame = performance.now();
+
+    const align = (value, boundary) => (value + boundary - 1) & ~(boundary - 1);
+    const memoryView = () => {
+      if (!view || view.buffer !== instance.exports.memory.buffer) {
+        view = new DataView(instance.exports.memory.buffer);
+      }
+      return view;
+    };
+    const rgba = (address) => {
+      const data = memoryView();
+      return `rgba(${data.getFloat32(address, true)}, ${data.getFloat32(address + 4, true)}, ${data.getFloat32(address + 8, true)}, ${data.getFloat32(address + 12, true) / 255})`;
+    };
+    const cornerRadius = (element, address) => {
+      const data = memoryView();
+      element.style.borderRadius = [0, 4, 12, 8].map(offset => `${data.getFloat32(address + offset, true)}px`).join(" ");
+    };
+    const textAt = (address, length) => {
+      const memory = new Uint8Array(instance.exports.memory.buffer, address, length);
+      return decoder.decode(memory);
+    };
+
+    const imports = {
+      clay: {
+        measureTextFunction(addressOfDimensions, textSlice, config) {
+          const data = memoryView();
+          const length = data.getUint32(textSlice, true);
+          const chars = data.getUint32(textSlice + 4, true);
+          const fontId = data.getUint16(config + 20, true);
+          const fontSize = data.getUint16(config + 22, true);
+          const letterSpacing = data.getUint16(config + 24, true);
+          const value = textAt(chars, length);
+          context.font = `${fontSize}px ${fonts[fontId] || fonts[0]}`;
+          const metrics = context.measureText(value);
+          const width = metrics.width + Math.max(0, value.length - 1) * letterSpacing;
+          const height = (metrics.fontBoundingBoxAscent || fontSize * .8) + (metrics.fontBoundingBoxDescent || fontSize * .2);
+          data.setFloat32(addressOfDimensions, width, true);
+          data.setFloat32(addressOfDimensions + 4, height, true);
+        },
+        queryScrollOffsetFunction(addressOfOffset) {
+          const data = memoryView();
+          data.setFloat32(addressOfOffset, 0, true);
+          data.setFloat32(addressOfOffset + 4, 0, true);
+        },
+      },
+    };
+
+    function initializeClay() {
+      const memory = instance.exports.memory;
+      const heapBase = Number(instance.exports.__heap_base.value);
+      scratchAddress = align(heapBase, 16);
+      const arenaAddress = scratchAddress + 64;
+      const dimensionsAddress = scratchAddress + 80;
+      const errorHandlerAddress = scratchAddress + 96;
+      const arenaMemoryAddress = align(scratchAddress + 256, 64);
+      const memorySize = instance.exports.Clay_MinMemorySize();
+      const required = arenaMemoryAddress + memorySize;
+      if (required > memory.buffer.byteLength) {
+        memory.grow(Math.ceil((required - memory.buffer.byteLength) / 65536));
+      }
+      const data = memoryView();
+      for (let offset = scratchAddress; offset < arenaMemoryAddress; offset += 4) data.setUint32(offset, 0, true);
+      instance.exports.Clay_CreateArenaWithCapacityAndMemory(arenaAddress, memorySize, arenaMemoryAddress);
+      data.setFloat32(dimensionsAddress, window.innerWidth, true);
+      data.setFloat32(dimensionsAddress + 4, window.innerHeight, true);
+      data.setUint32(errorHandlerAddress, 0, true);
+      data.setUint32(errorHandlerAddress + 4, 0, true);
+      instance.exports.Clay_Initialize(arenaAddress, dimensionsAddress, errorHandlerAddress);
+    }
+
+    function commandElement(className = "") {
+      const element = document.createElement("div");
+      element.className = `clay-command ${className}`;
+      element.setAttribute("aria-hidden", "true");
+      return element;
+    }
+
+    function renderCommands(arrayAddress) {
+      const data = memoryView();
+      const length = data.getInt32(arrayAddress + 4, true);
+      const commands = data.getUint32(arrayAddress + 8, true);
+      const fragment = document.createDocumentFragment();
+      let maximumY = window.innerHeight;
+
+      for (let index = 0; index < length; index++) {
+        const command = commands + index * 72;
+        const x = data.getFloat32(command, true);
+        const y = data.getFloat32(command + 4, true);
+        const width = data.getFloat32(command + 8, true);
+        const height = data.getFloat32(command + 12, true);
+        const type = data.getUint8(command + 70);
+        if (![1, 2, 3].includes(type)) continue;
+
+        const element = commandElement(type === 3 ? "clay-text" : "");
+        element.style.left = `${Math.round(x)}px`;
+        element.style.top = `${Math.round(y)}px`;
+        element.style.width = `${Math.max(0, Math.round(width))}px`;
+        element.style.height = `${Math.max(0, Math.round(height))}px`;
+        element.style.zIndex = String(data.getInt16(command + 68, true));
+        maximumY = Math.max(maximumY, y + height + 28);
+
+        if (type === 1) {
+          element.style.background = rgba(command + 16);
+          cornerRadius(element, command + 32);
+        } else if (type === 2) {
+          const borderColor = rgba(command + 16);
+          const widths = [
+            data.getUint16(command + 48, true),
+            data.getUint16(command + 50, true),
+            data.getUint16(command + 52, true),
+            data.getUint16(command + 54, true),
+          ];
+          element.style.borderLeft = `${widths[0]}px solid ${borderColor}`;
+          element.style.borderRight = `${widths[1]}px solid ${borderColor}`;
+          element.style.borderTop = `${widths[2]}px solid ${borderColor}`;
+          element.style.borderBottom = `${widths[3]}px solid ${borderColor}`;
+          cornerRadius(element, command + 32);
+        } else {
+          const length = data.getInt32(command + 16, true);
+          const chars = data.getUint32(command + 20, true);
+          const fontId = data.getUint16(command + 44, true);
+          const fontSize = data.getUint16(command + 46, true);
+          const letterSpacing = data.getUint16(command + 48, true);
+          const lineHeight = data.getUint16(command + 50, true);
+          element.textContent = textAt(chars, length);
+          element.style.color = rgba(command + 28);
+          element.style.fontFamily = fonts[fontId] || fonts[0];
+          element.style.fontSize = `${fontSize}px`;
+          element.style.fontWeight = fontId === 1 ? "700" : "400";
+          element.style.letterSpacing = `${letterSpacing}px`;
+          element.style.lineHeight = `${lineHeight || fontSize}px`;
+        }
+        fragment.appendChild(element);
+      }
+      scene.replaceChildren(fragment);
+      scene.style.height = `${Math.ceil(maximumY)}px`;
+    }
+
+    function renderFrame(now = performance.now()) {
+      pendingFrame = false;
+      const delta = Math.min(.05, Math.max(0, (now - lastFrame) / 1000));
+      lastFrame = now;
+      const data = memoryView();
+      instance.exports.glo_main(
+        scratchAddress,
+        window.innerWidth,
+        window.innerHeight,
+        pointerX,
+        pointerY,
+        pointerDown ? 1 : 0,
+        delta,
+      );
+      renderCommands(scratchAddress);
+    }
+
+    function scheduleRender() {
+      if (pendingFrame || !instance) return;
+      pendingFrame = true;
+      requestAnimationFrame(renderFrame);
+    }
+
+    function updatePointer(event) {
+      pointerX = event.clientX;
+      pointerY = event.clientY + window.scrollY;
+    }
+
+    window.addEventListener("pointermove", event => { updatePointer(event); scheduleRender(); }, { passive: true });
+    window.addEventListener("pointerdown", event => { updatePointer(event); pointerDown = true; scheduleRender(); });
+    window.addEventListener("pointerup", event => { updatePointer(event); pointerDown = false; scheduleRender(); });
+    window.addEventListener("pointercancel", () => { pointerDown = false; scheduleRender(); });
+    window.addEventListener("resize", scheduleRender, { passive: true });
+
+    try {
+      const response = await fetch("manual.wasm");
+      if (!response.ok) throw new Error(`Could not load manual.wasm (${response.status})`);
+      const bytes = await response.arrayBuffer();
+      ({ instance } = await WebAssembly.instantiate(bytes, imports));
+      initializeClay();
+      loading.hidden = true;
+      renderFrame();
+    } catch (error) {
+      loading.hidden = true;
+      const message = document.createElement("pre");
+      message.id = "error";
+      message.textContent = `The manual could not start.\n\n${error?.stack || error}`;
+      scene.replaceChildren(message);
+      console.error(error);
+    }
+  </script>
+</body>
 </html>

@@ -1,0 +1,1212 @@
+// Sections 54-71: typeclasses, operators, and control flow.
+
+render_section_54 :: () {
+    paragraph(0, #string,oneline
+        \\A typeclass declares required behavior. Instances attach behavior to
+        \\concrete or generic argument-type tuples.
+    );
+    code_block(1, "glosso", #string
+        \\Combine :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    combine :: (left: L, right: R) -> Output;
+        \\}
+        \\
+        \\UserId :: struct { value: u64; }
+        \\(UserId, u64) :: instance Combine {
+        \\    Output :: UserId;
+        \\    combine :: (left: UserId, right: u64) -> Output {
+        \\        return .{ .value = left.value + right };
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Typeclass methods are called like ordinary functions. Because an
+        \\operation name has one owner, no import-order or explicit
+        \\operator-scope syntax is needed.
+    );
+    subheading(3, "Instance selection and laws");
+    paragraph(4, #string,oneline
+        \\A typeclass names a family of operations and associated types that
+        \\concrete instances must provide. Calls use ordinary function syntax;
+        \\instance selection supplies the implementation from the concrete
+        \\participating types.
+    );
+    bullet(5, #string,oneline
+        \\Design the required operations around one coherent abstraction, not as
+        \\an unrelated utility collection.
+    );
+    bullet(6, #string,oneline
+        \\Keep a single canonical instance for each concrete type tuple so
+        \\selection remains independent of imports and ordering.
+    );
+    bullet(7, #string,oneline
+        \\Use associated types when a relationship belongs to the instance and
+        \\cannot be inferred as a simple input parameter.
+    );
+    bullet(8, #string,oneline
+        \\Document laws such as ordering consistency or iterator progress
+        \\because the compiler checks signatures, not behavioral contracts.
+    );
+    table_header(9, "Typeclass part   —   Meaning");
+    table_row(10, #string,oneline
+        \\Header parameters `(T: type, ...)`   |   The type tuple used as
+        \\instance evidence and operation selection input
+    );
+    table_row(11, #string,oneline
+        \\Associated declaration `Output :: type;`   |   A type chosen by each
+        \\instance and usable in method signatures
+    );
+    table_row(12, #string,oneline
+        \\Bodyless method `method :: (...) -> T;`   |   Required operation
+        \\unless satisfied through an allowed default/minimal alternative
+    );
+    table_row(13, #string,oneline
+        \\Method with a body   |   Default implementation available to instances
+    );
+    table_row(14, #string,oneline
+        \\`Concrete :: instance Class { ... }`   |   Instance for one head type
+    );
+    table_row(15, #string,oneline
+        \\`(Left, Right) :: instance Class { ... }`   |   Instance for a
+        \\multi-parameter typeclass tuple
+    );
+    table_row(16, #string,oneline
+        \\Generic instance with `where`   |   Candidate specialized only when
+        \\its head unifies and all evidence/conditions hold
+    );
+    paragraph(17, #string,oneline
+        \\Typeclass methods enter ordinary call lookup under their method name.
+        \\The selected instance supplies associated types and the implementation
+        \\target. A bodyless requirement alone is not callable evidence: the
+        \\checker requires a matching instance binding before accepting it.
+    );
+}
+
+render_section_55 :: () {
+    paragraph(0, #string,oneline
+        \\A method body in a typeclass is its default implementation. An
+        \\instance may replace that body. `#minimal` describes which
+        \\alternatives an instance must supply when defaults are mutually
+        \\recursive. Negative instances record that a type intentionally does
+        \\not satisfy a typeclass.
+    );
+    code_block(1, "glosso", #string
+        \\PartialEq :: typeclass (L: type, R: type) #minimal('==' | '!=') {
+        \\    '==' :: (left: L, right: R) -> bool {
+        \\        return !(left != right);
+        \\    }
+        \\    '!=' :: (left: L, right: R) -> bool {
+        \\        return !(left == right);
+        \\    }
+        \\}
+        \\
+        \\Eq :: typeclass (T: type) where PartialEq(T, T) {}
+        \\$T :: instance !Eq where Is_Float(T) {}
+    );
+    paragraph(2, #string,oneline
+        \\Negative instances are useful when a broad generic rule would
+        \\otherwise look plausible but would be semantically wrong.
+    );
+    subheading(3, "Required methods and excluded instances");
+    paragraph(4, #string,oneline
+        \\Default methods derive convenient behavior from a smaller required
+        \\core. Negative instances exclude type combinations deliberately,
+        \\making the absence of an implementation part of the model instead of
+        \\an accidental missing definition.
+    );
+    bullet(5, #string,oneline
+        \\Keep the minimal required set sufficient to implement every default
+        \\without circular dependency.
+    );
+    bullet(6, #string,oneline
+        \\Override a default when a concrete type can provide stronger semantics
+        \\or substantially better complexity.
+    );
+    bullet(7, #string,oneline
+        \\Use negative instances to protect a meaningful boundary, especially
+        \\when a broad generic instance would otherwise match.
+    );
+    bullet(8, #string,oneline
+        \\When the typeclass evolves, verify that defaults and negative cases
+        \\still describe disjoint, complete intentions.
+    );
+    paragraph(9, #string,oneline
+        \\Without an explicit `#minimal`, the compiler derives an implicit
+        \\required set from methods that have no usable default body.
+        \\`#minimal(a, b)` requires both operations; `#minimal(a | b)` accepts
+        \\either alternative; parentheses combine conjunction and alternatives.
+        \\`#minimal()` explicitly requires no methods, which is useful for
+        \\evidence-only classes.
+    );
+    code_block(10, "glosso", #string
+        \\Parse :: typeclass (T: type) #minimal(parse_text | parse_bytes) {
+        \\    parse_text :: (text: string) -> T;
+        \\    parse_bytes :: (bytes: []u8) -> T;
+        \\}
+        \\
+        \\Exact_Order :: typeclass (T: type) #minimal() {}
+        \\// Explicit negative evidence for every floating type matched by
+        \\// the constraint.
+        \\$T :: instance !Exact_Order where Is_Float(T) {}
+    );
+    bullet(11, #string,oneline
+        \\A `#minimal` name must identify a method of that typeclass, and only
+        \\one `#minimal` directive is allowed.
+    );
+    bullet(12, #string,oneline
+        \\An instance that supplies none of the required alternative sets is
+        \\rejected at its declaration.
+    );
+    bullet(13, #string,oneline
+        \\Negative instances contribute evidence that the class intentionally
+        \\does not hold; they do not provide callable method bodies.
+    );
+    bullet(14, #string,oneline
+        \\A positive candidate that depends on evidence excluded by a matching
+        \\negative instance is not applicable.
+    );
+}
+
+render_section_56 :: () {
+    paragraph(0, #string,oneline
+        \\The std `Typeclass` module demonstrates typeclasses over type
+        \\constructors, such as `Functor(F)` where `F` maps one type to another.
+        \\Derive macros receive `Derive_Type_Info` and generate instances with
+        \\`#insert`.
+    );
+    code_block(1, "glosso", #string,oneline
+        \\Maybe :: union #derive(Functor) { some: $T; none: void; }
+    );
+    paragraph(2, #string,oneline
+        \\The built-in derive helpers reject raw unions and reject fields where
+        \\the focused type parameter occurs in a non-covariant position.
+    );
+    subheading(3, "Type constructors and generated instances");
+    paragraph(4, #string,oneline
+        \\Higher-kinded parameters abstract over type constructors such as
+        \\containers, not only over completed value types. Derivation then
+        \\reuses structural knowledge to synthesize instances where the required
+        \\operations are mechanically determined.
+    );
+    bullet(5, #string,oneline
+        \\Distinguish a constructor from one of its applications; the
+        \\abstraction should work across the element types it claims to support.
+    );
+    bullet(6, #string,oneline
+        \\Constrain the constructor at the operations actually required rather
+        \\than assuming every container has identical behavior.
+    );
+    bullet(7, #string,oneline
+        \\Use derive only when the generated semantics are canonical; ordering,
+        \\equality, or formatting may require a domain-specific implementation.
+    );
+    bullet(8, #string,oneline
+        \\Review generated instances when fields or variants change because
+        \\structural derivation follows the type's current shape.
+    );
+    paragraph(9, #string,oneline
+        \\A higher-kinded parameter stands for a type constructor that will
+        \\later be applied to an element type. The standard `Functor` machinery
+        \\inspects the focused generic parameter and derives mapping only when
+        \\every occurrence is covariant. Raw unions and non-covariant placements
+        \\are rejected rather than receiving an unsound generated instance.
+    );
+    paragraph(10, #string,oneline
+        \\`#derive(Name, ...)` on a struct or union invokes the named derive
+        \\facility with compile-time `Derive_Type_Info`. The expansion returns
+        \\declarations inserted for that concrete nominal type. Derivation is
+        \\therefore compile-time source generation, and its generated instances
+        \\obey the same uniqueness, constraints, and minimal-method checks as
+        \\handwritten instances.
+    );
+}
+
+render_section_57 :: () {
+    paragraph(0, #string,oneline
+        \\`Option(T)` and `Result(T, E)` are Prelude tagged unions. `Try`
+        \\exposes the associated `Output` and `Residual` types together with
+        \\`from_output`, `from_residual`, and `branch`. Its suffix member
+        \\operator `?` has an ordinary Glosso implementation which returns
+        \\`branch(value)`, with type `Try_Branch(Output, Residual)`; it is not a
+        \\magic function and instances do not redeclare it. An enclosing
+        \\explicit or implicit `#try` boundary interprets that returned control
+        \\token, exposing `Continue` as the expression's `Output` or converting
+        \\`Break` with `from_residual`. Consequently a user-defined carrier
+        \\participates by implementing the minimal `Try` methods and associated
+        \\types only. The compiler recognizes propagation from the resolved
+        \\`Try` member, so the `?` spelling itself comes from this Glosso
+        \\declaration rather than a compiler magic name.
+    );
+    paragraph(1, #string,oneline
+        \\A function whose declared return type implements `Try` is
+        \\automatically a propagation boundary. A normal `return` may supply
+        \\either the complete carrier or its `Output`; output values are wrapped
+        \\with `from_output`. Applying `?` either produces the operand carrier's
+        \\output or returns a carrier built from the residual.
+    );
+    code_block(2, "glosso", #string
+        \\load_count :: (source: Option(string)) -> Option(s64) {
+        \\    text := source?;
+        \\    count := from_string(s64, text)?;
+        \\    return count;
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\`#try { expression }` creates the same kind of boundary within an
+        \\expression. It contains exactly one expression: statements,
+        \\semicolons, and `return` are not allowed. Its carrier is inferred from
+        \\the propagated values, and the successful expression value is wrapped
+        \\with `from_output`.
+    );
+    code_block(4, "glosso", "x := #try { y? + z? + w? };");
+    paragraph(5, #string,oneline
+        \\`Result` residuals retain their error type and `Option` has its own
+        \\residual type, preventing unrelated carriers from propagating into one
+        \\another merely because their runtime representation happens to match.
+    );
+}
+
+render_section_58 :: () {
+    paragraph(0, #string,oneline
+        \\An operator is a typeclass function whose name is a quoted operator
+        \\token. Binary operators specify associativity and precedence. Prefix
+        \\and suffix operators specify only their position. There is no separate
+        \\`operator` declaration keyword.
+    );
+    code_block(1, "glosso", #string
+        \\Power :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '**' :: (left: L, right: R) -> Output #operator(right, 12);
+        \\}
+        \\
+        \\(int, u32) :: instance Power {
+        \\    Output :: int;
+        \\    '**' :: (left: int, right: u32) -> Output {
+        \\        out := 1;
+        \\        for 0..right out *= left;
+        \\        return out;
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\The parser scans visible operation typeclasses before parsing
+        \\expressions, so source order does not select an implementation.
+    );
+    subheading(3, "Rules for defining custom operators");
+    paragraph(4, #string,oneline
+        \\A custom operator is an operation typeclass method, not a specially
+        \\named free function. Declare the syntax once on the owning typeclass,
+        \\then provide implementations in instances for concrete or generic
+        \\operand types. The instance method normally omits `#operator` because
+        \\it inherits the operator's syntax from the typeclass declaration, as
+        \\in the example above.
+    );
+    bullet(5, #string,oneline
+        \\Write the method name as a quoted operator token, such as `'%%'`.
+        \\Usable punctuation tokens are composed from `+ - * / < > ! @ % ^ & | ~
+        \\? . , : =`; `#` begins a directive and is not an operator character.
+    );
+    bullet(6, #string,oneline
+        \\A unary operator has one operand and uses `#operator(prefix)` or
+        \\`#operator(suffix)`. Prefix and suffix declarations do not take a
+        \\numeric precedence.
+    );
+    bullet(7, #string,oneline
+        \\A binary operator has two operands and must use `#operator(left, n)`,
+        \\`#operator(right, n)`, or `#operator(assign, n)`. The non-negative
+        \\integer `n` is its precedence: larger values bind more tightly.
+    );
+    bullet(8, #string,oneline
+        \\`left` groups repeated operators from the left, `right` groups them
+        \\from the right, and `assign` is right-associative assignment syntax.
+        \\An assignment operator must return a value coercible to the left
+        \\operand type.
+    );
+    bullet(9, #string,oneline
+        \\Exactly one visible typeclass may own a given operator with the same
+        \\arity and fixity. Instances specialize that owner; two equally
+        \\specific implementations for the same operand tuple are ambiguous.
+    );
+    bullet(10, #string,oneline
+        \\Every declaration of the same binary token must agree on precedence
+        \\and associativity. If different operators share a precedence but use
+        \\different associativity, an unparenthesized chain is rejected as
+        \\ambiguous.
+    );
+    bullet(11, #string,oneline
+        \\The tokens `=`, `.`, `,`, `,,`, `:=`, `::`, `:`, `->`, `::=`, `.*`,
+        \\and `...`, plus the single- and double-backtick name markers, are
+        \\reserved and cannot be overloaded. A custom token cannot end in `.`
+        \\except for `..`.
+    );
+    bullet(12, #string,oneline
+        \\Square brackets are reserved for the special operations `[]` and
+        \\`[]=`. `[]` has exactly two parameters, `[]=` has exactly three, and
+        \\neither declares ordinary operator precedence.
+    );
+    bullet(13, #string,oneline
+        \\An all-star unary token such as `**` cannot be prefix because leading
+        \\stars are pointer syntax; if unary, it must be suffix. The same token
+        \\may still be a normal binary operator.
+    );
+    subheading(14, "Predefined standard-library precedence");
+    paragraph(15, #string,oneline
+        \\The standard library declares the following binary precedence levels.
+        \\Higher numbers bind more tightly. Operators at the same level share
+        \\associativity; assignment operators are right-associative.
+    );
+    table_header(16, "Precedence   —   Operators   —   Associativity");
+    table_row(17, "11   |   `*`, `/`, `%`, `*%`, `*|`   |   Left");
+    table_row(18, "10   |   `+`, `-`, `+%`, `-%`, `+|`, `-|`   |   Left");
+    table_row(19, "9   |   `<<`, `<<|`, `>>`   |   Left");
+    table_row(20, "8   |   `<=>`, `<`, `<=`, `>`, `>=`   |   Left");
+    table_row(21, "7   |   `==`, `!=`   |   Left");
+    table_row(22, "6   |   `&`   |   Left");
+    table_row(23, "5   |   `^`   |   Left");
+    table_row(24, "4   |   `|`   |   Left");
+    table_row(25, "3   |   `&&`   |   Left");
+    table_row(26, "2   |   `||`   |   Left");
+    table_row(27, "1   |   `..`, `..=`   |   Left");
+    table_row(28, #string,oneline
+        \\0   |   `+=`, `-=`, `*=`, `/=`, `%=`, `+%=`, `-%=`, `*%=`, `+|=`,
+        \\`-|=`, `*|=`, `<<=`, `<<|=`, `>>=`, `&=`, `|=`, `^=`, `&&=`, `||=`   |
+        \\  Right (assignment)
+    );
+    paragraph(29, #string,oneline
+        \\Prefix and suffix operators are positional and do not carry a numeric
+        \\precedence. They bind as part of prefix and postfix expression
+        \\parsing.
+    );
+    table_header(30, "Position   —   Operators");
+    table_row(31, "Prefix   |   `-`, `-%`, `~`, `!`, `..`, `..=`");
+    table_row(32, "Suffix   |   `..`, `?`");
+}
+
+render_section_59 :: () {
+    paragraph(0, #string,oneline
+        \\Assignment operators use `#operator(assign, 0)`. They parse at
+        \\assignment precedence and store their return value into the left side.
+    );
+    code_block(1, "glosso", #string
+        \\Counter :: struct { value: int; }
+        \\
+        \\CounterAddAssign :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '@=' :: (left: L, right: R) -> Output #operator(assign, 0);
+        \\}
+        \\
+        \\(Counter, int) :: instance CounterAddAssign {
+        \\    Output :: Counter;
+        \\    '@=' :: (left: Counter, right: int) -> Output {
+        \\        out := left;
+        \\        out.value += right;
+        \\        return out;
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\A custom binary operator does not automatically create a compound
+        \\assignment operator. Write the assignment form if you want one.
+    );
+    subheading(3, "Result and storage contract");
+    paragraph(4, #string,oneline
+        \\An assignment operator participates in a read-modify-write expression.
+        \\Its result must be usable as the new left-hand value, so the
+        \\declaration connects operator semantics to the storage type rather
+        \\than acting as an arbitrary side-effect hook.
+    );
+    bullet(5, "Return a value coercible to the left operand's type.");
+    bullet(6, #string,oneline
+        \\Keep the operation consistent with the corresponding non-assignment
+        \\operator when both exist.
+    );
+    bullet(7, #string,oneline
+        \\Avoid hidden ownership changes that would surprise callers using
+        \\familiar compound-assignment spelling.
+    );
+    bullet(8, #string,oneline
+        \\Declare the narrowest coherent operand domain to prevent ambiguity
+        \\with generic numeric or container operators.
+    );
+}
+
+render_section_60 :: () {
+    paragraph(0, #string,oneline
+        \\Operators at the same precedence must agree on associativity.
+        \\Separately, if more than one generic instance matches the same
+        \\concrete operand tuple with equal specificity, the compiler reports an
+        \\ambiguous operation instead of choosing by import order.
+    );
+    code_block(1, "glosso", #string
+        \\// Prefer explicit grouping when composing unfamiliar operators.
+        \\value := (a %% b) ** c;
+    );
+    subheading(2, "Lookup and ambiguity");
+    paragraph(3, #string,oneline
+        \\Operator lookup uses the same candidate matching and specificity
+        \\scoring as named typeclass operations. Import order never resolves a
+        \\conflict: one candidate must score above the rest, or the checker
+        \\reports ambiguity.
+    );
+    bullet(4, #string,oneline
+        \\Consider prefix, suffix, infix, and assignment forms separate
+        \\operation shapes.
+    );
+    bullet(5, #string,oneline
+        \\A concrete or otherwise more specific implementation may outrank a
+        \\broad generic one; equal-scoring overlaps remain ambiguous.
+    );
+    bullet(6, #string,oneline
+        \\Keep symmetric operations consistent for both operand orders, or
+        \\document why only one direction exists.
+    );
+    bullet(7, #string,oneline
+        \\Test downstream modules that import several operator-providing
+        \\packages together, where coherence conflicts become visible.
+    );
+    paragraph(8, #string,oneline
+        \\Parsing and implementation selection are separate. The visible
+        \\typeclass declaration supplies the operator token, position,
+        \\precedence, and associativity before expression parsing. After operand
+        \\types are known, the checker selects the instance implementation. Two
+        \\operators at the same precedence must advertise the same associativity
+        \\or their combined syntax is rejected as inconsistent.
+    );
+}
+
+render_section_61 :: () {
+    paragraph(0, #string,oneline
+        \\`[]` and `[]=` are special operation names. They are not parsed as
+        \\ordinary punctuation tokens but are called by index syntax.
+    );
+    code_block(1, "glosso", #string
+        \\Grid :: struct { data: []int; width: s64; }
+        \\
+        \\Indexable :: typeclass (Container: type, Key: type) {
+        \\    Output :: type;
+        \\    '[]' :: (container: Container, key: Key) -> Output;
+        \\}
+        \\
+        \\(Grid, s64) :: instance Indexable {
+        \\    Output :: int;
+        \\    '[]' :: (grid: Grid, row: s64) -> Output {
+        \\        return grid.data[row * grid.width];
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Built-in indexing covers strings, slices, dynamic arrays, and many
+        \\pointers. Built-in slicing uses range values.
+    );
+    subheading(3, "Read and write hooks");
+    paragraph(4, #string,oneline
+        \\Index operators let a type participate in bracket syntax, but read
+        \\access and write access are independent contracts. The argument types
+        \\determine whether the syntax means a single index, key lookup, range,
+        \\or another domain-specific selection.
+    );
+    bullet(5, #string,oneline
+        \\Define `[]` for reading and `[]=` separately for indexed mutation.
+    );
+    bullet(6, #string,oneline
+        \\Validate bounds or key validity inside the implementation unless the
+        \\API explicitly provides an unchecked operation.
+    );
+    bullet(7, #string,oneline
+        \\Return a view for borrowed slices and an owned value only when
+        \\allocation or copying is intentional.
+    );
+    bullet(8, #string,oneline
+        \\Keep range and scalar overload domains distinct so a bracket
+        \\expression has one coherent interpretation.
+    );
+}
+
+render_section_62 :: () {
+    paragraph(0, #string,oneline
+        \\A block contains statements. The statement forms are local
+        \\declarations, assignments, expression statements, nested declarations,
+        \\blocks, `return`, `break`, `continue`, `defer`, `using`, `if`, `#if`,
+        \\`while`, `for`, labels, context/allocator pushes, compile-time
+        \\insertion and diagnostics, memory overlays, inline bytes, and inline
+        \\assembly.
+    );
+    paragraph(1, #string,oneline
+        \\Semicolons terminate declarations and expression-like statements. The
+        \\parser accepts an omitted semicolon at many statement boundaries when
+        \\the following token is unambiguous, but aggregate members always
+        \\require `;`, and switch labels require `case expression;` or `else;`.
+        \\Consistent explicit semicolons avoid accidental token joining in
+        \\generated source.
+    );
+    paragraph(2, #string,oneline
+        \\`return;` returns no value or the current named-result variables. A
+        \\return may supply one expression or a comma-separated list for a tuple
+        \\result. `break` and `continue` apply to the nearest loop; they do not
+        \\accept labels.
+    );
+    code_block(3, "glosso", #string
+        \\classify :: (value: s64) -> (negative: bool, magnitude: s64) {
+        \\    if value < 0 return true, -value;
+        \\    magnitude = value;
+        \\    return;
+        \\}
+    );
+    paragraph(4, #string,oneline
+        \\`defer statement` registers one statement for the current scope.
+        \\Deferred statements run in last-in, first-out order on normal scope
+        \\exit, `return`, and structured loop exit. `defer` is not a general
+        \\exception/finally mechanism for nonlocal jump primitives.
+    );
+    code_block(5, "glosso", #string
+        \\file := open_read("data.txt");
+        \\defer _ := close(file);
+    );
+    paragraph(6, #string,oneline
+        \\A function, struct, union, or enum declaration written in a function
+        \\body is hoisted as a declaration rather than executed at runtime.
+        \\Top-level-only forms such as imports and library declarations cannot
+        \\be nested this way. Inside a `#code` quote, declarations remain syntax
+        \\nodes for later insertion.
+    );
+    paragraph(7, #string,oneline
+        \\`using value;` exposes fields of a struct-typed local as unqualified
+        \\reads for the remainder of the checked body. The current
+        \\implementation does not make an unqualified field an assignable
+        \\target; qualify writes as `value.field = ...`.
+    );
+}
+
+render_section_63 :: () {
+    paragraph(0, #string,oneline
+        \\A block introduces a scope and may appear anywhere a statement is
+        \\accepted. Local variables live until their scope exits. `defer`
+        \\statements run when the scope exits.
+    );
+    code_block(1, "glosso", #string
+        \\{
+        \\    file := open_read("input.txt");
+        \\    defer _ := close(file);
+        \\    text := read(file, 4096);
+        \\    print("%\n", text);
+        \\}
+    );
+    paragraph(2, "`defer` is useful for cleanup paths with early returns.");
+    subheading(3, "Lifetime and deferred execution");
+    paragraph(4, #string,oneline
+        \\A block creates a lexical scope and an ordered region for cleanup.
+        \\Locals introduced inside it cease to be nameable after the closing
+        \\brace, and deferred work belongs to the dynamic exits from that block.
+    );
+    bullet(5, #string,oneline
+        \\Declare resources near the start of the scope that owns their cleanup,
+        \\then place the corresponding `defer` immediately after successful
+        \\acquisition.
+    );
+    bullet(6, #string,oneline
+        \\Use nested blocks to shorten lifetimes and release large temporaries
+        \\before the surrounding function ends.
+    );
+    bullet(7, #string,oneline
+        \\A name introduced by a successful pattern belongs only to the
+        \\condition-controlled scope described by that construct.
+    );
+    bullet(8, #string,oneline
+        \\Prefer structured exits so cleanup and invariants stay visible;
+        \\reserve jump helpers for low-level cases that require them.
+    );
+    paragraph(9, #string,oneline
+        \\Each explicit block, loop body, branch body, and function body
+        \\establishes a defer scope. Deferred statements execute in
+        \\last-in-first-out order on normal scope completion and before
+        \\`return`, `break`, `continue`, or Try propagation leaves that scope.
+        \\Defers from inner scopes run before defers from surrounding scopes.
+    );
+    code_block(10, "glosso", #string
+        \\work :: () {
+        \\    acquire_a();
+        \\    defer release_a();
+        \\
+        \\    {
+        \\        acquire_b();
+        \\        defer release_b();
+        \\        if failed() return; // release_b(), then release_a()
+        \\    }
+        \\}
+    );
+    note(11, #string,oneline
+        \\The deferred statement is typechecked where it is declared but emitted
+        \\when its scope exits. Values it references must therefore remain valid
+        \\until that exit. A nonlocal jump facility may have a different
+        \\resource contract; consult `std/Jump` rather than assuming it behaves
+        \\like structured `return`.
+    );
+}
+
+render_section_64 :: () {
+    paragraph(0, #string,oneline
+        \\`if` controls execution based on a boolean condition. The body can be
+        \\a block or a single statement.
+    );
+    code_block(1, "glosso", #string
+        \\if count == 0 return;
+        \\if count > 10 {
+        \\    print("many\n");
+        \\} else {
+        \\    print("few\n");
+        \\}
+    );
+    paragraph(2, "The switch form uses `if subject == { ... }`.");
+    subheading(3, "Condition typing and branch results");
+    paragraph(4, #string,oneline
+        \\`if` selects execution from a boolean condition and can appear
+        \\wherever the language permits its statement or value form. Branches
+        \\should make both the happy path and the exceptional or absent path
+        \\explicit enough that the resulting type and state are clear.
+    );
+    bullet(5, #string,oneline
+        \\Conditions require boolean meaning; compare non-boolean domain values
+        \\explicitly rather than relying on truthiness.
+    );
+    bullet(6, #string,oneline
+        \\Use `else if` for one decision chain and nested `if` only when the
+        \\inner decision belongs exclusively to one outer branch.
+    );
+    bullet(7, #string,oneline
+        \\When an `if` supplies a value, keep branch result types compatible and
+        \\avoid hidden side effects that obscure the selected value.
+    );
+    bullet(8, #string,oneline
+        \\Pattern captures are available only in the successful branch and any
+        \\guard portion that follows the pattern test.
+    );
+    table_header(9, "Form   —   Parsed body");
+    table_row(10, #string,oneline
+        \\`if condition statement`   |   One statement controlled by a boolean
+        \\condition
+    );
+    table_row(11, "`if condition { ... }`   |   A scoped then body");
+    table_row(12, #string,oneline
+        \\`else statement` / `else { ... }`   |   Optional alternative body
+    );
+    table_row(13, "`else if ...`   |   Nested `if` forming one chain");
+    table_row(14, #string,oneline
+        \\`if subject == { case ... }`   |   Not an ordinary `if`; parsed as the
+        \\switch form documented next
+    );
+    paragraph(15, #string,oneline
+        \\The current parser represents ordinary `if` as a statement and its
+        \\branches do not yield an expression value. The condition must
+        \\synthesize as `bool`, except that `#pattern` conditions additionally
+        \\introduce captures into the successful branch environment. The `else`
+        \\environment does not receive those captures.
+    );
+}
+
+render_section_65 :: () {
+    paragraph(0, #string,oneline
+        \\Switch cases use `case value;` and an optional `else;`. Cases contain
+        \\statements until the next case or end of switch. `#falling` explicitly
+        \\continues to the next case.
+    );
+    code_block(1, "glosso", #string
+        \\if code == {
+        \\    case 200; print("ok\n");
+        \\    case 301; #falling;
+        \\    case 302; print("redirect\n");
+        \\    else; print("other\n");
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\For unions, case names are variant names. For patterns, cases are
+        \\pattern syntax.
+    );
+    paragraph(3, #string,oneline
+        \\A runtime switch may contain an `#inline for` expression in place of
+        \\an explicit case. Its compile-time expansion must produce switch-case
+        \\fragments. This is the generated-case mechanism used by
+        \\metaprogramming code; a static `#if value == { ... }` switch accepts
+        \\only explicit `case` and `else` arms.
+    );
+    subheading(4, "Selection, coverage, and fallthrough");
+    paragraph(5, #string,oneline
+        \\A switch compares one subject against several cases and makes the
+        \\chosen control path visible. Tagged unions and closed enums benefit
+        \\from exhaustive cases, while open-ended numeric or label domains
+        \\generally need an `else` policy.
+    );
+    bullet(6, #string,oneline
+        \\Keep cases non-overlapping so readers can identify the selected branch
+        \\without reasoning about ordering tricks.
+    );
+    bullet(7, #string,oneline
+        \\Use `#falling` only when execution must continue into the next case
+        \\and annotate the shared invariant.
+    );
+    bullet(8, #string,oneline
+        \\Prefer exhaustive handling for closed domains; use `#partial` only
+        \\when doing nothing for the remainder is deliberate.
+    );
+    bullet(9, #string,oneline
+        \\Use a pattern switch when a case must both select a variant and
+        \\destructure its payload.
+    );
+    table_header(10, "Switch subject   —   Coverage rule");
+    table_row(11, #string,oneline
+        \\Tagged union   |   Every declared variant must appear, or provide
+        \\`else`, unless the switch is marked `#partial`
+    );
+    table_row(12, "Raw union   |   Rejected because no active tag exists");
+    table_row(13, #string,oneline
+        \\Pattern switch   |   Requires `else` by default because the compiler
+        \\does not prove pattern coverage; `#partial` may omit it
+    );
+    table_row(14, #string,oneline
+        \\Other value (integer, enum, string, label, etc.)   |   Case
+        \\expressions are coerced to the subject type; `else` is optional and
+        \\enum coverage is not currently enforced
+    );
+    bullet(15, #string,oneline
+        \\Write `if #partial subject == { ... }` only for a switch; `#partial`
+        \\on an ordinary `if` is a parse error.
+    );
+    bullet(16, #string,oneline
+        \\A case begins with `case expression;` and continues until the next
+        \\`case`, `else`, or closing brace.
+    );
+    bullet(17, #string,oneline
+        \\`#falling` marks that case to continue into the next case body;
+        \\ordinary cases do not fall through.
+    );
+    bullet(18, #string,oneline
+        \\Range syntax is accepted as an ordinary case expression and is
+        \\prepared using the subject type's range/index operations.
+    );
+}
+
+render_section_66 :: () {
+    paragraph(0, #string,oneline
+        \\`#if` is evaluated at compile time. It is commonly used with target
+        \\information and compile-time constants.
+    );
+    code_block(1, "glosso", #string
+        \\#if OUT.os == Target_OS.Windows {
+        \\    print("windows path rules\n");
+        \\} else {
+        \\    print("non-windows path rules\n");
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Branches that are not selected are not emitted as runtime code.
+    );
+    paragraph(3, #string,oneline
+        \\`#if` also has a compile-time switch form. Its cases are ordinary
+        \\compile-time expressions and it accepts an optional `else;` arm.
+    );
+    code_block(4, "glosso", #string
+        \\word_bits :: () -> s64 {
+        \\    #if OUT.cpu == {
+        \\    case Target_CPU.X86_64;
+        \\        return 64;
+        \\    case Target_CPU.X86;
+        \\        return 32;
+        \\    else;
+        \\        return 0;
+        \\    }
+        \\}
+    );
+    paragraph(5, #string,oneline
+        \\Only the selected case body is typechecked and emitted for the
+        \\specialization; every case must still be lexically and syntactically
+        \\valid.
+    );
+    subheading(6, "Compile-time branch selection");
+    paragraph(7, #string,oneline
+        \\Static `#if` chooses a branch during compilation. It is appropriate
+        \\for target capabilities, compile-time parameters, and structural
+        \\differences that should disappear from the emitted program.
+    );
+    bullet(8, #string,oneline
+        \\Base the condition only on information available at compile time.
+    );
+    bullet(9, #string,oneline
+        \\Keep target-specific regions narrow so most behavior remains shared
+        \\and can be tested on every platform.
+    );
+    bullet(10, #string,oneline
+        \\Both branches must remain syntactically well formed even though only
+        \\the selected branch participates in the specialization.
+    );
+    bullet(11, #string,oneline
+        \\Use a runtime `if` when the choice depends on input or state that can
+        \\vary between executions.
+    );
+    paragraph(12, #string,oneline
+        \\The checker evaluates the `#if` condition with the compile-time
+        \\environment and checks only the selected body for that specialization.
+        \\The other body must still be lexically and syntactically parseable,
+        \\but its names and operations do not need to typecheck for the selected
+        \\target. No runtime condition or branch instruction is emitted.
+    );
+    code_block(13, "glosso", #string
+        \\read_clock :: () -> u64 {
+        \\    #if OUT.os == Target_OS.Windows {
+        \\        return windows_clock();
+        \\    } else #if OUT.os == Target_OS.Linux {
+        \\        return linux_clock();
+        \\    } else {
+        \\        #compile_error
+        \\            "read_clock is not implemented for this target";
+        \\    }
+        \\}
+    );
+}
+
+render_section_67 :: () {
+    paragraph(0, #string,oneline
+        \\`while` repeats while the condition is true. `#inline while` requests
+        \\compile-time expansion.
+    );
+    code_block(1, "glosso", #string
+        \\i := 0;
+        \\while i < 10 {
+        \\    print("%\n", i);
+        \\    i += 1;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Use `break` to leave the loop and `continue` to start the next
+        \\iteration.
+    );
+    subheading(3, "Condition scope and iteration");
+    paragraph(4, #string,oneline
+        \\A `while` loop repeats while its boolean or pattern-based condition
+        \\succeeds. The condition is re-evaluated before each iteration, so any
+        \\captures or guards describe the state for that iteration only.
+    );
+    bullet(5, #string,oneline
+        \\Make progress toward termination visible in the body, especially when
+        \\the condition depends on pointers or external state.
+    );
+    bullet(6, #string,oneline
+        \\Use `break` for a completed loop-wide decision and `continue` for an
+        \\early transition to the next condition check.
+    );
+    bullet(7, #string,oneline
+        \\Pattern captures are recreated for each successful test and do not
+        \\escape the loop.
+    );
+    bullet(8, #string,oneline
+        \\Use `#inline` only for compile-time-known iteration where expansion
+        \\cost and generated code size are acceptable.
+    );
+    paragraph(9, #string,oneline
+        \\The condition is checked before the first iteration and before every
+        \\later iteration. A `#pattern` condition is checked through the same
+        \\pattern-condition path as `if`; captures are bound in a fresh loop
+        \\environment for each successful test. `break` and `continue` are
+        \\rejected outside a loop and run defers for scopes they leave.
+    );
+    note(10, #string,oneline
+        \\`#inline while` invokes compile-time loop expansion rather than merely
+        \\suggesting machine-code inlining. Its condition and progress must be
+        \\evaluable by the compiler, and unbounded expansion is a compile-time
+        \\failure risk.
+    );
+}
+
+render_section_68 :: () {
+    paragraph(0, #string,oneline
+        \\`#inline while` and `#inline for` request compile-time expansion of a
+        \\loop. This use of `#inline` is different from a function inlining
+        \\attribute. The loop condition, range, or iterable expansion must
+        \\provide enough compile-time information for the checker to emit the
+        \\repeated body.
+    );
+    code_block(1, "glosso", #string
+        \\table: [4]s64;
+        \\#inline for i: 0..4 {
+        \\    table[i] = i * i;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\An inline loop can also appear in expression parsing contexts used by
+        \\compile-time generation. It is still a loop construct and does not
+        \\produce an ordinary runtime value by itself. Errors in an expanded
+        \\iteration are reported at the expansion site with the generated-source
+        \\chain when applicable.
+    );
+}
+
+render_section_69 :: () {
+    paragraph(0, #string,oneline
+        \\`for` loops are expanded through `Iterable`. Ranges and array-like
+        \\values work through prelude instances. The default iteration variable
+        \\is `it`; the default index is `it_index`. You can name either
+        \\explicitly.
+    );
+    code_block(1, "glosso", #string
+        \\for 0..3 print("%\n", it);
+        \\for value: values print("%\n", value);
+        \\for value, index: values print("%: %\n", index, value);
+        \\for < value: values print("reverse %\n", value);
+    );
+    paragraph(2, #string,oneline
+        \\A custom type can become iterable by implementing
+        \\`Iterable.for_expansion`. The optional expansion selector is written
+        \\immediately after `for` as `for :name ...`; it asks the iterable
+        \\implementation for that named expansion mode. Glosso does not use an
+        \\`in` keyword in `for` syntax.
+    );
+    code_block(3, "glosso", #string
+        \\for :expansion value: values {
+        \\    consume(value);
+        \\}
+    );
+    subheading(4, "Iterable expansion and bindings");
+    paragraph(5, #string,oneline
+        \\A `for` loop consumes the iterable protocol and binds each produced
+        \\element for one iteration. The loop form hides traversal mechanics but
+        \\does not change ownership or protect the source from mutation-induced
+        \\invalidation.
+    );
+    bullet(6, #string,oneline
+        \\Use the default element and index bindings when their conventional
+        \\names are clear, or spell bindings explicitly when several loops are
+        \\nested.
+    );
+    bullet(7, #string,oneline
+        \\The reverse form changes traversal direction; it does not
+        \\automatically make every custom iterable bidirectional.
+    );
+    bullet(8, #string,oneline
+        \\Do not resize or release a collection while an iterator derived from
+        \\its storage is active unless that iterator explicitly permits it.
+    );
+    bullet(9, #string,oneline
+        \\Use `#inline` for compile-time expansion only when each element is
+        \\available during compilation and code growth is intentional.
+    );
+    table_header(10, "Header   —   Bindings/selection");
+    table_row(11, #string,oneline
+        \\`for values`   |   Uses `it`; the default index name is available as
+        \\`it_index` when the expansion supplies it
+    );
+    table_row(12, "`for value: values`   |   Names the element binding");
+    table_row(13, #string,oneline
+        \\`for value, index: values`   |   Names element and index bindings
+    );
+    table_row(14, #string,oneline
+        \\`for < value: values`   |   Requests reverse iteration from the
+        \\iterable expansion
+    );
+    table_row(15, #string,oneline
+        \\`for :expansion value: values`   |   Selects a named expansion entry
+        \\instead of the default iterable expansion
+    );
+    table_row(16, #string,oneline
+        \\`#inline for ...`   |   Expands compile-time-known iterations into the
+        \\surrounding body
+    );
+    paragraph(17, #string,oneline
+        \\The checker resolves the iterable's `Iterable.for_expansion` protocol
+        \\(or the explicitly named expansion) and lowers the produced traversal.
+        \\Reverse iteration is a capability request passed to that expansion,
+        \\not a guarantee that every iterable supports reverse order. The loop
+        \\body receives a fresh lexical/temporary scope per iteration.
+    );
+}
+
+render_section_70 :: () {
+    paragraph(0, #string,oneline
+        \\Labels are values. The language surface supports label statements, and
+        \\`std/Jump` provides higher-level helpers such as `goto`, `throw`,
+        \\`try`, and coroutine helpers.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Jump";
+        \\
+        \\main :: () {
+        \\    target := 'done;
+        \\    goto(target);
+        \\    print("not reached\n");
+        \\'done:
+        \\    print("done\n");
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Use nonlocal jumps carefully because they bypass ordinary structured
+        \\control flow.
+    );
+    subheading(3, "Non-structured control transfer");
+    paragraph(4, #string,oneline
+        \\Labels and jump helpers expose non-structured control flow for
+        \\systems-level mechanisms that cannot be expressed naturally with
+        \\returns, loops, or switches. They make reachability and cleanup harder
+        \\to reason about and therefore deserve a very small, documented scope.
+    );
+    bullet(5, #string,oneline
+        \\Prefer ordinary structured control flow whenever it can express the
+        \\same transition.
+    );
+    bullet(6, #string,oneline
+        \\Keep every jump target in the smallest enclosing region that makes the
+        \\state requirements obvious.
+    );
+    bullet(7, #string,oneline
+        \\Document which variables and resources are valid at a target; a jump
+        \\must not manufacture initialized state.
+    );
+    bullet(8, #string,oneline
+        \\Use the standard `Jump` helpers according to their stated save/restore
+        \\contract rather than assuming an ordinary function call model.
+    );
+}
+
+render_section_71 :: () {
+    paragraph(0, #string,oneline
+        \\`#pattern` tests a value's structure and can introduce typed captures
+        \\at the same time. A direct pattern test returns `bool`; captures are
+        \\available in the successful `if` or `while` body and in later parts of
+        \\the same condition.
+    );
+    subheading(1, "Pattern syntax");
+    table_header(2, "Form   —   Meaning");
+    table_row(3, #string,oneline
+        \\`42`, `3.5`, `"text"`, `true`, `false`, `null`   |   Match the same
+        \\literal value.
+    );
+    table_row(4, "`name`   |   Capture the matched value as `name`.");
+    table_row(5, "`_`   |   Match any value without creating a capture.");
+    table_row(6, #string,oneline
+        \\`*name`   |   Capture a pointer to the matched storage, allowing
+        \\mutation through `name.*`.
+    );
+    table_row(7, #string,oneline
+        \\`.Variant` or `Type.Variant`   |   Match an enum value or a
+        \\payload-free tagged-union variant.
+    );
+    table_row(8, #string,oneline
+        \\`.Variant(pattern)` or `Type.Variant(pattern)`   |   Match a
+        \\tagged-union variant and recursively match its payload.
+    );
+    table_row(9, #string,oneline
+        \\`.{ fields }`   |   Match a struct whose type is inferred from the
+        \\tested value.
+    );
+    table_row(10, #string,oneline
+        \\`Type.{ fields }`   |   Match a struct and require the declared struct
+        \\type.
+    );
+    table_row(11, #string,oneline
+        \\`.field`   |   Match a named struct field and capture it using the
+        \\field's name.
+    );
+    table_row(12, #string,oneline
+        \\`.field = pattern`   |   Match a named struct field with a nested
+        \\pattern.
+    );
+    table_row(13, "`...`   |   Explicitly ignore remaining struct fields.");
+    table_row(14, "`(pattern)`   |   Group a pattern.");
+    code_block(15, "ebnf", #string
+        \\PatternTest   ::= "#pattern" PatternArm
+        \\                | "#pattern" "{"
+        \\                  PatternArm { (";" | ",") PatternArm }
+        \\                  [";" | ","] "}"
+        \\PatternArm    ::= Pattern "=" Expr
+        \\Pattern       ::= Literal | Ident | "_" | "*" Ident | "..."
+        \\                | [TypeName] "." Variant ["(" Pattern ")"]
+        \\                | [TypeName] ".{"
+        \\                  [FieldPattern { "," FieldPattern } [","]] "}"
+        \\                | "(" Pattern ")"
+        \\FieldPattern  ::= "." Ident ["=" Pattern] | Pattern | "..."
+    );
+    subheading(16, "Testing and capturing");
+    code_block(17, "glosso", #string
+        \\Point :: struct { x: int; y: int; }
+        \\Maybe_Point :: union { Some: Point; None: void; }
+        \\
+        \\point := Point.{ .x = 1, .y = 2 };
+        \\if #pattern Point.{ .x = 1, .y, ... } = point && y > 0 {
+        \\    print("y = %\n", y);
+        \\}
+        \\
+        \\maybe: Maybe_Point = .Some(point);
+        \\if #pattern .Some(.{ .x = *x, ... }) = maybe {
+        \\    x.* += 1;
+        \\}
+    );
+    paragraph(18, #string,oneline
+        \\A bare identifier is always a capture, not a constant comparison. Use
+        \\literals, enum members, or union variants for value matching. A
+        \\qualified struct or union pattern is checked against the subject's
+        \\actual type. A union variant accepts zero or one nested payload
+        \\pattern, according to whether that variant has a payload.
+    );
+    subheading(19, "Grouped pattern tests");
+    paragraph(20, #string,oneline
+        \\Braces combine multiple `pattern = value` arms into one boolean test.
+        \\Every arm must match. Captures from all arms are combined, and reusing
+        \\a capture name requires the captured types to agree.
+    );
+    code_block(21, "glosso", #string
+        \\while #pattern {
+        \\    Point.{ .x = *x, ... } = current;
+        \\    .Some(limit) = maybe_limit;
+        \\} {
+        \\    if x.* >= limit break;
+        \\    x.* += 1;
+        \\}
+    );
+    subheading(22, "Pattern switches");
+    paragraph(23, #string,oneline
+        \\A subject-based pattern switch matches every `case` against one value.
+        \\Write the pattern directly after `case`; do not repeat `#pattern`.
+        \\Captures exist only inside that case body.
+    );
+    code_block(24, "glosso", #string
+        \\if #pattern maybe == {
+        \\case .Some(.{ .x, .y, ... });
+        \\    print("point: %, %\n", x, y);
+        \\case .None;
+        \\    print("no point\n");
+        \\else;
+        \\    // Required unless the switch is marked #partial.
+        \\}
+    );
+    paragraph(25, #string,oneline
+        \\A subjectless pattern switch lets each case provide its own grouped
+        \\tests or an ordinary boolean condition. Pattern switches require
+        \\`else` by default because the compiler does not infer pattern
+        \\coverage; write `if #partial #pattern == { ... }` when intentionally
+        \\omitting it.
+    );
+    code_block(26, "glosso", #string
+        \\if #partial #pattern == {
+        \\case {
+        \\    .Some(left) = first;
+        \\    .Some(right) = second;
+        \\};
+        \\    print("both: %, %\n", left, right);
+        \\case ready;
+        \\    print("ready without captures\n");
+        \\}
+    );
+    bullet(27, #string,oneline
+        \\Use `&&` to add a guard after a pattern test; captures are available
+        \\to the guard and successful body.
+    );
+    bullet(28, #string,oneline
+        \\Use separate `case` clauses for alternatives. Pattern syntax itself
+        \\has no or-pattern form.
+    );
+    bullet(29, #string,oneline
+        \\Use `...` when omitted struct fields are intentional, making partial
+        \\destructuring explicit to readers.
+    );
+    bullet(30, #string,oneline
+        \\A failed match does not expose its captures to the `else` branch or
+        \\outside the condition-controlled scope.
+    );
+}
+

@@ -1,0 +1,1148 @@
+// Sections 72-87: compile time, interop, diagnostics, and style.
+
+render_section_72 :: () {
+    paragraph(0, #string,oneline
+        \\`#comptime` executes Glosso code during compilation and returns a
+        \\value.
+    );
+    code_block(1, "glosso", #string
+        \\Table_Size :: #comptime {
+        \\    base := 16;
+        \\    return base * base;
+        \\};
+    );
+    paragraph(2, #string,oneline
+        \\Because `#comptime` executes at compile time, it can call
+        \\compile-time-capable helpers, inspect types, build strings, and
+        \\generate configuration constants.
+    );
+    subheading(3, "Evaluation phase and restrictions");
+    paragraph(4, #string,oneline
+        \\`#comptime` requires an expression or block to be evaluated while the
+        \\program is compiled. Its result can guide specialization or generated
+        \\code, but it cannot depend on values known only when the executable
+        \\runs.
+    );
+    bullet(5, #string,oneline
+        \\Use compile-time evaluation for validation, layout decisions,
+        \\generated tables, and work that is invariant across executions.
+    );
+    bullet(6, #string,oneline
+        \\Keep failures diagnostic and deterministic; a compile-time error
+        \\becomes part of the user's build experience.
+    );
+    bullet(7, #string,oneline
+        \\Avoid unnecessary external I/O in reusable compile-time logic because
+        \\it weakens reproducibility and caching.
+    );
+    bullet(8, #string,oneline
+        \\Move work to runtime when its cost, inputs, or side effects properly
+        \\belong to each execution.
+    );
+    table_header(9, "Form   —   Result/effect");
+    table_row(10, #string,oneline
+        \\`value := #comptime expression;`   |   Evaluates the expression during
+        \\checking and embeds its resulting constant value
+    );
+    table_row(11, #string,oneline
+        \\`Value :: #comptime { ... return expression; };`   |   Runs a
+        \\compile-time block and defines its returned value as a constant
+    );
+    table_row(12, #string,oneline
+        \\`#comptime { statements }` at top level   |   Runs the block for
+        \\compile-time side effects; it does not emit a runtime function body
+    );
+    table_row(13, #string,oneline
+        \\`#comptime T: type` function parameter   |   Requires a compile-time
+        \\argument, participates in specialization identity, and is erased from
+        \\runtime parameters
+    );
+    table_row(14, #string,oneline
+        \\`$T`   |   Syntactic generic shorthand for an inferred compile-time
+        \\type parameter
+    );
+    paragraph(15, #string,oneline
+        \\Compile-time evaluation uses the compiler VM and the current constant
+        \\environment. Runtime locals and values obtained only after program
+        \\start are unavailable. Calls must have an implementation supported by
+        \\compile-time evaluation—ordinary evaluable Glosso bodies and compiler
+        \\`#magic` services may run, while unsupported foreign/runtime-only
+        \\behavior fails during compilation.
+    );
+    note(16, #string,oneline
+        \\A compile-time result is cached only through the mechanisms documented
+        \\by the operation being used (for example string `#insert` or native
+        \\archive caches). `#comptime` itself does not promise that arbitrary
+        \\filesystem/process side effects will be replayed or invalidated as a
+        \\build-system dependency.
+    );
+}
+
+render_section_73 :: () {
+    paragraph(0, #string,oneline
+        \\`#code { ... }` captures syntax as a `Code` value. It is not
+        \\immediately executed. It can be returned from functions, stored, and
+        \\inserted later.
+    );
+    code_block(1, "glosso", #string
+        \\make_increment :: (name: string) -> Code {
+        \\    return #code { ``name += 1; };
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Double backticks splice compile-time values or names into the captured
+        \\syntax.
+    );
+    paragraph(3, #string,oneline
+        \\Inside a code quote, declarations remain quoted declaration nodes
+        \\instead of being hoisted into the function containing the quote. A
+        \\bare switch fragment is also valid quoted syntax:
+    );
+    code_block(4, "glosso", #string
+        \\make_case :: (#comptime item: s64) -> Code {
+        \\    return #code {
+        \\        case ``item;
+        \\            handle(``item);
+        \\    };
+        \\}
+    );
+    paragraph(5, #string,oneline
+        \\Such a fragment is valid only when inserted where switch cases are
+        \\expected. Ordinary quoted bindings are hygienically renamed. A
+        \\single-backtick name resolves deliberately in the insertion
+        \\environment; a double-backtick name or type splices a compile-time
+        \\syntax value into that parser position.
+    );
+    subheading(6, "Syntax values and name capture");
+    paragraph(7, #string,oneline
+        \\A `Code` value stores parsed Glosso syntax for later insertion rather
+        \\than plain source text. Backtick names and splices control how the
+        \\fragment connects to its generation and insertion environments.
+    );
+    bullet(8, #string,oneline
+        \\Construct syntax with `#code` so the compiler can preserve structure
+        \\instead of concatenating strings.
+    );
+    bullet(9, #string,oneline
+        \\Use backtick capture deliberately for names that must resolve at the
+        \\insertion site.
+    );
+    bullet(10, #string,oneline
+        \\Keep generated fragments small and typed around a clear interface;
+        \\large opaque expansions are difficult to diagnose.
+    );
+    bullet(11, #string,oneline
+        \\Inspect expanded output when debugging name capture, source location,
+        \\or generated control flow.
+    );
+    table_header(12, "Inside `#code`   —   Meaning during insertion");
+    table_row(13, #string,oneline
+        \\Ordinary local declaration/name   |   Hygienic: generated bindings
+        \\receive fresh names and internal references are rewritten
+    );
+    table_row(14, #string,oneline
+        \\Single backtick `` `name ``   |   Non-hygienic name: preserves the
+        \\written name instead of receiving a fresh generated name
+    );
+    table_row(15, #string,oneline
+        \\Double backtick ` ``name `   |   Code splice: substitute the
+        \\compile-time macro argument/value/name into that syntax position
+    );
+    table_row(16, #string,oneline
+        \\`#insert code_value;`   |   Clone and insert the represented syntax
+        \\into the current body
+    );
+    table_row(17, #string,oneline
+        \\`#insert string_value;`   |   Parse generated Glosso source text,
+        \\cache the bytes, and insert the parsed declarations/statements
+    );
+    paragraph(18, #string,oneline
+        \\Splicing is supported in identifiers, type names, field names, labels,
+        \\and other parser positions that accept generated names. Hygiene
+        \\applies recursively to declarations and lambda parameters in the
+        \\inserted tree. Use a single backtick only when deliberate
+        \\caller-visible capture is required; ordinary generated temporaries
+        \\should remain hygienic.
+    );
+    note(19, #string,oneline
+        \\`#insert` accepts only a `Code` value or string source. A top-level
+        \\insertion must produce top-level-compatible syntax. Recursive
+        \\expansion is diagnosed with insertion-site notes rather than executing
+        \\without a boundary.
+    );
+}
+
+render_section_74 :: () {
+    paragraph(0, #string,oneline
+        \\A `#expand` procedure runs at compile time for its call site. It can
+        \\insert generated code.
+    );
+    code_block(1, "glosso", #string
+        \\emit_counter :: (name: string) #expand {
+        \\    #insert #code {
+        \\        ``name := 0;
+        \\        ``name += 1;
+        \\    };
+        \\}
+        \\
+        \\main :: () {
+        \\    emit_counter("calls");
+        \\    print("%\n", calls);
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\An expression macro is written with `#expand,expression`. Its body
+        \\must contain exactly one `return` with one expression, and its call
+        \\can appear anywhere an ordinary expression can appear.
+    );
+    code_block(3, "glosso", #string
+        \\twice :: (value: $T) #expand,expression {
+        \\    return value + value;
+        \\}
+        \\
+        \\answer := twice(21);
+    );
+    paragraph(4, #string,oneline
+        \\Expansion substitutes each argument at every parameter reference. This
+        \\intentionally preserves C-style macro evaluation: an argument
+        \\referenced twice is evaluated twice.
+    );
+    paragraph(5, #string,oneline
+        \\Generated macro parameters retain their Glosso operand types. Callers
+        \\should use the corresponding C-width types when C integer promotions
+        \\or overflow behavior matter; Bindgen skips syntax it cannot translate
+        \\safely rather than inventing a conversion.
+    );
+    paragraph(6, #string,oneline
+        \\Macros should generate clear code and use `#compile_error` for
+        \\unsupported inputs.
+    );
+    paragraph(7, #string,oneline
+        \\For a string-valued insertion, Glosso preserves the exact generated
+        \\bytes in its content-addressed cache. Diagnostics remain anchored at
+        \\the editable `#insert`, with notes showing the cached generated
+        \\location and any nested insertion sites. See _Compiler Cache and
+        \\Generated Sources_ for paths and controls.
+    );
+}
+
+render_section_75 :: () {
+    paragraph(0, #string,oneline
+        \\`std/Meta` exposes type names, sizes, kind tags, fields, enum items,
+        \\and union variants. Reflection is especially useful inside
+        \\compile-time code.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Meta";
+        \\#import "Io";
+        \\
+        \\print_fields :: (T: type) #expand {
+        \\    #inline for i: 0..field_count(T) {
+        \\        name :: field_name(T, i);
+        \\        #insert #code { print("field: %\n", ``name); };
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Reflection functions are compiler intrinsics, so they work on types
+        \\rather than runtime descriptors.
+    );
+    subheading(3, "Compile-time structural queries");
+    paragraph(4, #string,oneline
+        \\Reflection exposes compile-time facts about types and declarations so
+        \\generic or generated code can adapt to structure. The information
+        \\describes the compiler's model; it should not be confused with a
+        \\stable serialized schema unless the program defines one.
+    );
+    bullet(5, #string,oneline
+        \\Perform reflection during compilation and emit ordinary typed code for
+        \\runtime use.
+    );
+    bullet(6, #string,oneline
+        \\Filter fields, variants, and methods according to the abstraction
+        \\being generated rather than assuming every member participates.
+    );
+    bullet(7, #string,oneline
+        \\Do not make persistent formats depend accidentally on declaration
+        \\order or target-dependent layout.
+    );
+    bullet(8, #string,oneline
+        \\Pair reflection with constraints so unsupported shapes fail with a
+        \\focused explanation.
+    );
+    paragraph(9, #string,oneline
+        \\Reflection operations are compiler intrinsics exposed through
+        \\`std/Meta`. They consume compile-time `type` values and return
+        \\compile-time facts such as kind, name, size, alignment, field
+        \\count/name/type, enum items, union variants, generic arguments, and
+        \\covariance. No runtime RTTI object is created automatically.
+    );
+    table_header(10, "Question   —   Use");
+    table_row(11, #string,oneline
+        \\What kind of type is this?   |   Kind predicates/tags before selecting
+        \\structure-specific reflection
+    );
+    table_row(12, #string,oneline
+        \\Which struct fields exist?   |   `field_count`, `field_name`, and
+        \\field-type queries inside compile-time expansion
+    );
+    table_row(13, #string,oneline
+        \\Which enum/union alternatives exist?   |   Enum-item and union-variant
+        \\queries for generated switches, formatting, or bindings
+    );
+    table_row(14, #string,oneline
+        \\Can a generic parameter be mapped safely?   |   Occurrence/covariance
+        \\queries used by higher-kinded derive helpers
+    );
+    note(15, #string,oneline
+        \\Source field order and target storage layout are different contracts.
+        \\Reflection that enumerates fields follows the compiler's declaration
+        \\model; use explicit format metadata rather than raw field order for
+        \\persistent serialization.
+    );
+}
+
+render_section_76 :: () {
+    paragraph(0, #string,oneline
+        \\The implicit `context` carries allocator, temporary allocator, print
+        \\style, logger, random generator, and user data. Import `Context` to
+        \\name the field types and allocator constructors.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    #push_context {
+        \\        context.user_index = 99;
+        \\        context.allocator = heap_allocator();
+        \\        p := alloc(128);
+        \\        defer free(p);
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`#push_context` copies/pushes a context for a scope. Mutations inside
+        \\the scope do not need to leak out.
+    );
+    subheading(3, "Implicit parameter and scoped replacement");
+    paragraph(4, #string,oneline
+        \\The context carries ambient runtime services through ordinary Glosso
+        \\calls without repeating them in every source signature. Pushing a
+        \\context creates a scoped replacement, so code can override one service
+        \\and restore the previous environment automatically.
+    );
+    bullet(5, #string,oneline
+        \\Use context for cross-cutting services such as allocators and
+        \\diagnostics, not for arbitrary hidden business inputs.
+    );
+    bullet(6, #string,oneline
+        \\Keep overrides in narrow scopes and initialize every field the called
+        \\code expects.
+    );
+    bullet(7, #string,oneline
+        \\Remember that `#c_call` and `#no_context` functions do not receive the
+        \\ordinary implicit context.
+    );
+    bullet(8, #string,oneline
+        \\Pass essential domain dependencies explicitly when doing so makes the
+        \\function's behavior easier to test and reason about.
+    );
+    table_header(9, "Construct   —   Context behavior");
+    table_row(10, #string,oneline
+        \\Ordinary Glosso function   |   Receives the current context implicitly
+    );
+    table_row(11, #string,oneline
+        \\Function marked `#no_context`   |   No implicit context; referencing
+        \\`context` in its body is rejected
+    );
+    table_row(12, #string,oneline
+        \\Function marked `#c_call` / any `#foreign` call   |   Uses the C ABI
+        \\and has no implicit Glosso context parameter
+    );
+    table_row(13, #string,oneline
+        \\`#push_context { ... }`   |   Copies/pushes the current context for
+        \\the body, then restores the saved context on every structured exit
+    );
+    table_row(14, #string,oneline
+        \\`#push_context replacement { ... }`   |   Installs the supplied
+        \\`Context` value for the body and restores the previous one afterward
+    );
+    table_row(15, #string,oneline
+        \\`#push_allocator(allocator);`   |   Replaces `context.allocator` until
+        \\the enclosing defer scope exits, then restores it
+    );
+    paragraph(16, #string,oneline
+        \\The prelude `Context` value contains allocator, temporary allocator,
+        \\print style, logger, random generator, and user-data fields. A pushed
+        \\context is restored through the same LIFO defer machinery as user
+        \\`defer` statements, including early return and loop exits that leave
+        \\its scope.
+    );
+}
+
+render_section_77 :: () {
+    paragraph(0, #string,oneline
+        \\Temporary allocation is useful for formatting and transient strings.
+        \\`#push_allocator(context.temp_allocator);` routes following
+        \\allocations to the temp allocator in the compiler-managed region.
+    );
+    paragraph(1, #string,oneline
+        \\Memory allocated from `context.temp_allocator` lives until the
+        \\enclosing compiler-managed temporary scope is restored. Blocks, branch
+        \\bodies, loop bodies, and non-escaping function bodies form these
+        \\scopes; a returned temp-backed string or pointer-like value is still
+        \\only valid until the caller's enclosing temp scope exits. Copy data
+        \\into heap/context-owned storage when it must outlive that region.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Context";
+        \\#import "Format";
+        \\
+        \\make_message :: (name: string) -> string {
+        \\    #push_allocator(context.temp_allocator);
+        \\    return format("hello %", name);
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\Do not store temporary strings beyond the lifetime of the temp region.
+    );
+}
+
+render_section_78 :: () {
+    paragraph(0, #string,oneline
+        \\At `-O0`, the default allocator is the debug allocator. It tracks live
+        \\allocations and can report leaks. In optimized builds, the default is
+        \\the heap allocator.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    p := alloc(32);
+        \\    free(p);
+        \\    debug_allocator_report_leaks();
+        \\}
+    );
+    subheading(2, "Instrumentation and reports");
+    paragraph(3, #string,oneline
+        \\Debug allocation instruments allocation activity so leaks and
+        \\ownership mistakes are easier to locate. It is a diagnostic mode, not
+        \\a replacement for the program's release discipline or a guarantee that
+        \\production allocation behaves identically.
+    );
+    bullet(4, #string,oneline
+        \\Run representative success and error paths because leaks often occur
+        \\only after partial initialization.
+    );
+    bullet(5, #string,oneline
+        \\Release every owned allocation even when the debug allocator will
+        \\report it at process exit.
+    );
+    bullet(6, #string,oneline
+        \\Treat retained globals and caches explicitly so intentional lifetime
+        \\does not hide accidental retention.
+    );
+    bullet(7, #string,oneline
+        \\Recheck behavior in optimized builds after fixing ownership because
+        \\debug instrumentation can change timing and layout.
+    );
+}
+
+render_section_79 :: () {
+    paragraph(0, #string,oneline
+        \\Declare a library with `#library`; bind functions with `#foreign`. The
+        \\symbol name is optional when it matches the Glosso declaration name.
+    );
+    code_block(1, "glosso", #string
+        \\libc :: #library "c";
+        \\puts :: (text: *const s8) -> s32 #foreign libc "puts";
+    );
+    paragraph(2, #string,oneline
+        \\Link kind modifiers are `#library,system`, `#library,dyn`, and
+        \\`#library,static`.
+    );
+    subheading(3, "Declaration forms");
+    paragraph(4, #string,oneline
+        \\`#library` creates a compile-time library handle. `#foreign` creates a
+        \\bodyless function whose call uses the C ABI and whose external symbol
+        \\is resolved from either that handle or a directly written library
+        \\name. A library handle must be declared before a referencing
+        \\`#foreign` declaration is registered.
+    );
+    bullet(5, #string,oneline
+        \\`name :: #library[, static|system|dyn] "file";` declares a reusable
+        \\handle. The default kind is `static`; only one kind modifier is
+        \\allowed.
+    );
+    bullet(6, #string,oneline
+        \\`fn_name :: (parameters) -> Return #foreign library_handle
+        \\["symbol"];` uses a declared handle. An unknown handle is a compile
+        \\error.
+    );
+    bullet(7, #string,oneline
+        \\`fn_name :: (parameters) -> Return #foreign "file" ["symbol"];`
+        \\bypasses `#library` and behaves as a non-dynamic link input.
+    );
+    bullet(8, #string,oneline
+        \\When the optional symbol string is absent, the external symbol is the
+        \\Glosso declaration name. A foreign declaration has no Glosso body.
+    );
+    code_block(9, "glosso", #string
+        \\// Reusable library handle; `c` is the linker input.
+        \\libc :: #library "c";
+        \\strlen :: (text: *const s8) -> u64 #foreign libc "strlen";
+        \\
+        \\// The symbol string may be omitted when both names are equal.
+        \\puts :: (text: *const s8) -> s32 #foreign libc;
+        \\
+        \\// A direct library string needs no #library declaration.
+        \\memcmp :: (a: *const void, b: *const void, count: u64) -> s32
+        \\    #foreign "c" "memcmp";
+    );
+    subheading(10, "Library kinds");
+    table_header(11, #string,oneline
+        \\Declaration   —   Resolution time   —   Compiler behavior
+    );
+    table_row(12, #string,oneline
+        \\`#library "name"`   |   Link time   |   The default; identical to
+        \\`#library,static`. The name or path becomes a target-specific linker
+        \\input.
+    );
+    table_row(13, #string,oneline
+        \\`#library,static "name"`   |   Link time   |   Explicit spelling of
+        \\the default link kind. It does not force a system linker to choose a
+        \\static archive when only a shared/import library is available; use an
+        \\archive path to force one file.
+    );
+    table_row(14, #string,oneline
+        \\`#library,system "name"`   |   Link time   |   Marks the declaration
+        \\as a system library. It currently uses the same name translation and
+        \\linker search path as the default kind; Glosso does not scan system
+        \\directories itself.
+    );
+    table_row(15, #string,oneline
+        \\`#library,dyn "path-or-name"`   |   Runtime   |   Does not add that
+        \\library to the normal link. The generated program loads it with
+        \\`LoadLibraryA` on Windows or `dlopen(..., RTLD_NOW)` elsewhere, then
+        \\resolves the function with `GetProcAddress` or `dlsym`.
+    );
+    subheading(16, "Which libraries are linked");
+    paragraph(17, #string,oneline
+        \\Declaring a library does not by itself add it to the final link. After
+        \\lowering the program, the compiler walks runtime-reachable functions
+        \\and function references. A non-dynamic library is added only when a
+        \\reachable call or function value refers to one of its foreign
+        \\functions. Repeated library inputs are deduplicated. This is why a
+        \\target-specific foreign declaration may exist harmlessly when no
+        \\reachable code selects it.
+    );
+    subheading(18, "Name conversion and search");
+    paragraph(19, #string,oneline
+        \\Glosso converts a logical library spelling to the input shown below.
+        \\The linker then performs the actual directory search.
+        \\`#library,system` does not add another directory and does not call a
+        \\Glosso package resolver. Supply an explicit path to select a
+        \\particular file, or pass a target-appropriate search-path option
+        \\through `--linker-arg` or `Compiler.add_current_linker_arg`.
+    );
+    table_header(20, "Target   —   Logical spelling   —   Linker input");
+    table_row(21, #string,oneline
+        \\Windows MSVC   |   `c` or `libc`   |   `legacy_stdio_definitions.lib`
+        \\and `ucrt.lib`
+    );
+    table_row(22, #string,oneline
+        \\Windows MSVC   |   `user32` or `libuser32`   |   `user32.lib`
+    );
+    table_row(23, #string,oneline
+        \\Windows MSVC   |   A path or a name ending in `.lib`   |   Passed as
+        \\written; the Clang/lld-link SDK and `/LIBPATH:` directories resolve a
+        \\bare name
+    );
+    table_row(24, "Windows GNU   |   `c` or `libc`   |   `libmsvcrt.a`");
+    table_row(25, #string,oneline
+        \\Windows GNU   |   `user32`, `libuser32`, or `user32.lib`   |
+        \\  `libuser32.a`
+    );
+    table_row(26, #string,oneline
+        \\Windows GNU   |   A path or a name ending in `.a`   |   Passed as
+        \\written
+    );
+    table_row(27, #string,oneline
+        \\Linux, macOS, and other non-Windows targets   |   `c` or `libc`   |
+        \\  No extra input; the target C runtime is already part of the link
+        \\plan
+    );
+    table_row(28, #string,oneline
+        \\Linux, macOS, and other non-Windows targets   |   `ssl` or `libssl`
+        \\  |   `-lssl`
+    );
+    table_row(29, #string,oneline
+        \\Linux, macOS, and other non-Windows targets   |   A path or a name
+        \\ending in `.a`, `.so`, or `.dylib`   |   Passed as written
+    );
+    code_block(30, "text", #string
+        \\# Search an additional Unix directory
+        \\glosso app.glo --linker-arg -L/opt/vendor/lib
+        \\
+        \\# Search an additional MSVC directory
+        \\glosso app.glo --linker-arg /LIBPATH:C:\vendor\lib
+    );
+    subheading(31, "Dynamic-library behavior");
+    bullet(32, #string,oneline
+        \\The `dyn` string is embedded as the runtime loader input. It is not
+        \\converted to `-l...`, `.lib`, or `.a` form.
+    );
+    bullet(33, #string,oneline
+        \\The resolved function address is cached in a generated slot after the
+        \\first successful lookup.
+    );
+    bullet(34, #string,oneline
+        \\A program using dynamic foreign calls links the platform loader
+        \\support (`-ldl` on non-Windows native targets).
+    );
+    bullet(35, #string,oneline
+        \\Dynamic libraries are rejected for WebAssembly and WASI targets.
+    );
+    bullet(36, #string,oneline
+        \\The compile-time VM can execute dynamic foreign calls only in its
+        \\supported Windows/libffi configuration; ordinary linked executables
+        \\use the LLVM backend behavior described above.
+    );
+    bullet(37, #string,oneline
+        \\A missing library or symbol is a runtime loading failure for `dyn`,
+        \\but a missing non-dynamic library or symbol is normally a linker
+        \\error.
+    );
+    note(38, #string,oneline
+        \\`#foreign` declares a signature; it cannot verify a C header. Integer
+        \\widths, struct layout, pointer constness, nullability, ownership, and
+        \\the external symbol's real prototype must match. Use `#memory` effects
+        \\on opaque foreign functions when temporal checking needs to know
+        \\whether pointers are borrowed, stored, invalidated, released, or
+        \\returned.
+    );
+}
+
+render_section_80 :: () {
+    paragraph(0, #string,oneline
+        \\`#c_call` changes the calling convention and removes normal Glosso
+        \\context passing. Use it for callbacks and foreign ABI surfaces.
+    );
+    code_block(1, "glosso", #string,oneline
+        \\Callback :: #fn_ptr(data: *void) -> *void #c_call;
+    );
+    paragraph(2, #string,oneline
+        \\A `#c_call` function cannot rely on implicit `context` unless a
+        \\context is explicitly made available through supported mechanisms.
+    );
+    subheading(3, "C ABI validation");
+    paragraph(4, #string,oneline
+        \\`#foreign` declarations always use the C ABI. `#c_call` applies that
+        \\ABI to a Glosso function definition, function-pointer type, or
+        \\interoperable struct declaration. Unlike an ordinary Glosso call, a
+        \\C-ABI call has no implicit `context` parameter.
+    );
+    bullet(5, #string,oneline
+        \\Use `callback :: (...) -> T #c_call { ... }` for a Glosso body
+        \\callable through C, and `Callback :: #fn_ptr(...) -> T #c_call;` for
+        \\the matching pointer type.
+    );
+    bullet(6, #string,oneline
+        \\Accessing implicit `context` inside a `#c_call` body is a compile
+        \\error. Pass required state through an explicit pointer or parameter.
+    );
+    bullet(7, #string,oneline
+        \\A C function-pointer type is distinct from an ordinary Glosso
+        \\function-pointer type, even when its written parameters and return
+        \\type otherwise match.
+    );
+    bullet(8, #string,oneline
+        \\Mark structs used by value across the ABI as `struct #c_call`; their
+        \\fields are recursively checked for unsupported representations.
+    );
+    code_block(9, "glosso", #string
+        \\User_Data :: struct #c_call { total: s64; }
+        \\Callback :: #fn_ptr(data: *void, value: s32) -> s32 #c_call;
+        \\
+        \\add_to_total :: (data: *void, value: s32) -> s32 #c_call {
+        \\    user := cast(*User_Data)data;
+        \\    user.*.total += value;
+        \\    return value;
+        \\}
+        \\
+        \\// An ordinary Glosso wrapper may use context and call the C surface.
+        \\run_callback :: (callback: Callback, data: *void) -> s32 {
+        \\    return callback(data, 42);
+        \\}
+    );
+    subheading(10, "Rejected by-value representations");
+    paragraph(11, #string,oneline
+        \\The checker walks C-ABI parameters, returns, callback signatures, and
+        \\fields of non-generic `#c_call` structs. Complex primitives,
+        \\`Simd(...)`, and `Matrix(...)` are rejected because Glosso does not
+        \\declare a portable by-value C ABI for them. The check is recursive
+        \\through structs, unions, tuples, fixed arrays, and C function
+        \\pointers. Pass scalar components or compatible storage through a
+        \\pointer instead.
+    );
+    bullet(12, #string,oneline
+        \\On Windows x64, `#c_call` structs follow the platform aggregate ABI:
+        \\sizes 1, 2, 4, and 8 bytes travel as integers; other by-value
+        \\aggregates use indirect storage where required.
+    );
+    bullet(13, #string,oneline
+        \\Builtin `string` values are Glosso descriptors, not `char *`. A C text
+        \\parameter normally uses `*const s8`, `[*]const s8`, or another
+        \\prototype-matching pointer type.
+    );
+    bullet(14, #string,oneline
+        \\Pointer ownership and nullability are not inferred from the C ABI.
+        \\Describe temporal behavior with `#memory` and expose safer Glosso
+        \\wrappers where appropriate.
+    );
+    bullet(15, #string,oneline
+        \\The external header remains authoritative. Glosso validates supported
+        \\representation categories, but cannot prove that a handwritten
+        \\declaration matches a particular C prototype.
+    );
+}
+
+render_section_81 :: () {
+    paragraph(0, #string,oneline
+        \\A bare `...` is the C vararg marker. It must be last and must follow
+        \\at least one fixed parameter. Use `std/VarArg` to work with vararg
+        \\lists.
+    );
+    code_block(1, "glosso", #string
+        \\#import "VarArg";
+        \\
+        \\libc :: #library "c";
+        \\printf :: (fmt: *const s8, ...) -> s32
+        \\    #foreign libc "printf";
+    );
+    paragraph(2, #string,oneline
+        \\Prefer typed Glosso variadics for Glosso APIs; reserve C varargs for
+        \\foreign compatibility.
+    );
+    subheading(3, "Ellipsis rules and default promotions");
+    paragraph(4, #string,oneline
+        \\A bare `...` declares a C ellipsis, not a Glosso rest sequence. It is
+        \\allowed on a `#foreign` declaration or a `#c_call` definition and
+        \\becomes part of that function or function-pointer type.
+    );
+    bullet(5, #string,oneline
+        \\The marker must be last and must follow at least one fixed parameter.
+        \\`(...)` by itself is rejected.
+    );
+    bullet(6, #string,oneline
+        \\Fixed parameters must be concrete runtime parameters; compile-time or
+        \\generic fixed parameters are rejected.
+    );
+    bullet(7, #string,oneline
+        \\Operators and expansion procedures cannot be C-variadic. A lambda
+        \\cannot initialize a variadic function pointer.
+    );
+    bullet(8, #string,oneline
+        \\For each extra call argument, Glosso applies C default promotions:
+        \\`bool`, 8-bit integers, and 16-bit integers become 32-bit integers;
+        \\`f16` and `f32` become `f64`.
+    );
+    table_header(9, "Source argument type   —   Type passed through `...`");
+    table_row(10, "`bool`   |   32-bit integer");
+    table_row(11, "`s8`, `u8`, `s16`, `u16`   |   32-bit integer");
+    table_row(12, "`f16`, `f32`   |   `f64` / C `double`");
+    table_row(13, #string,oneline
+        \\Other supported scalar, pointer, or aggregate type   |   Its C-ABI
+        \\type without a default-promotion change
+    );
+    code_block(14, "glosso", #string
+        \\libc :: #library "c";
+        \\printf :: (format: *const s8, ...) -> s32 #foreign libc;
+        \\
+        \\main :: () {
+        \\    // `small` is promoted before the foreign call.
+        \\    small: u8 = 7;
+        \\    _ := printf("value=%d ratio=%f\n", small, 0.5f32);
+        \\}
+    );
+    paragraph(15, #string,oneline
+        \\A Glosso definition that receives C ellipsis arguments uses
+        \\`std/VarArg` to start, copy, read, and finish the platform vararg
+        \\list. The format string or another fixed discriminator must agree with
+        \\the promoted types; neither the callee nor the compiler receives
+        \\runtime type tags. Dynamic `#library,dyn` calls through the
+        \\compile-time VM do not support C varargs.
+    );
+}
+
+render_section_82 :: () {
+    paragraph(0, #string,oneline
+        \\`#asm` emits backend assembly. `#bytes` injects raw bytes. These
+        \\features are target-specific and should be hidden behind small
+        \\target-gated wrappers.
+    );
+    code_block(1, "glosso", #string
+        \\pause :: () {
+        \\    #if OUT.cpu == Target_CPU.X86_64 {
+        \\        #asm {
+        \\            \\pause
+        \\            clobber: .Memory;
+        \\        }
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Structured assembly starts with one or more `\\` instruction lines.
+        \\Operands have source-level names used as `{name}` placeholders in
+        \\those lines. `in`, `out`, and `inout` state data flow; the compiler
+        \\translates Prelude `Asm_Constraint` values such as `.Register`,
+        \\`.Byte_Register`, `.Memory`, and `.Immediate` to backend constraints.
+        \\`.Early_Clobber` is an optional output flag. `fixed(rax)` selects a
+        \\contextual register name validated for the output target. Clobbers use
+        \\contextual register names plus `.Memory` or `.Condition_Codes`.
+    );
+    code_block(3, "glosso", #string
+        \\increment :: (value: *s64) {
+        \\    current := value.*;
+        \\    #asm {
+        \\        \\incq {current}
+        \\        current: inout(.Register);
+        \\        clobber: .Condition_Codes;
+        \\    }
+        \\    value.* = current;
+        \\}
+    );
+    paragraph(4, #string,oneline
+        \\Constraint strings, positional operand numbers, and LLVM direction
+        \\markers are not needed in structured assembly. Write an ordinary `$`
+        \\once; the compiler escapes it for the backend. Use `{{` and `}}` when
+        \\the target assembly requires literal braces. The legacy
+        \\colon-separated `#asm` form remains accepted for source compatibility.
+    );
+}
+
+render_section_83 :: () {
+    paragraph(0, #string,oneline
+        \\Use `#compile_error` with a compile-time string expression for
+        \\intentional compile-time failures. Use `#must` on functions whose
+        \\result must be consumed. Use `#noreturn` on functions that never
+        \\return normally.
+    );
+    code_block(1, "glosso", #string
+        \\require_integer :: (T: type) #expand {
+        \\    if !Is_Integer(T) #compile_error "integer type required";
+        \\}
+    );
+    paragraph(2, "These annotations make errors local and explicit.");
+    subheading(3, "Compile-time and call-site enforcement");
+    paragraph(4, #string,oneline
+        \\Diagnostic directives turn violated compile-time assumptions into
+        \\focused build failures and annotate functions whose control-flow
+        \\contract matters to callers. Good diagnostics identify the unsupported
+        \\input and the requirement that would make it valid.
+    );
+    bullet(5, #string,oneline
+        \\Use compile errors for impossible specializations and configuration
+        \\mistakes that cannot be handled at runtime.
+    );
+    bullet(6, #string,oneline
+        \\Use `#must` when ignoring a result would discard an important error or
+        \\ownership action.
+    );
+    bullet(7, #string,oneline
+        \\Use `#noreturn` only when every path truly terminates or transfers
+        \\control away from the caller.
+    );
+    bullet(8, #string,oneline
+        \\Keep dump-style diagnostics temporary or intentionally gated so normal
+        \\builds remain readable.
+    );
+    table_header(9, "Directive   —   Enforced behavior");
+    table_row(10, #string,oneline
+        \\`#compile_error expression;`   |   Expression must evaluate to a
+        \\compile-time string; compilation fails at that statement with the
+        \\string as its message
+    );
+    table_row(11, #string,oneline
+        \\Function `#must`   |   Discarding a call result as an expression
+        \\statement is an error; `_ := call();` is an explicit acknowledged
+        \\discard
+    );
+    table_row(12, #string,oneline
+        \\Function `#noreturn`   |   The checker rejects an explicit return or a
+        \\body that can fall through normally; call sites treat a guaranteed
+        \\call as terminating
+    );
+    table_row(13, #string,oneline
+        \\Function `#returns_twice`   |   Marks lowered/LLVM function metadata
+        \\for control-flow operations with returns-twice semantics
+    );
+    table_row(14, #string,oneline
+        \\Function `#dump`   |   Prints that function's lowered typed IR during
+        \\compilation
+    );
+    code_block(15, "glosso", #string
+        \\Owned :: () -> string #must { return "value"; }
+        \\stop :: (message: string) #noreturn {
+        \\    print("%\n", message);
+        \\    exit(1);
+        \\}
+        \\
+        \\main :: () {
+        \\    _ := Owned(); // explicit discard satisfies #must
+        \\    #if OUT.os == Target_OS.Unknown
+        \\        #compile_error "unsupported target";
+        \\}
+    );
+}
+
+render_section_84 :: () {
+    paragraph(0, #string,oneline
+        \\The prelude target enums let code choose implementations at compile
+        \\time.
+    );
+    code_block(1, "glosso", #string
+        \\separator :: () -> string {
+        \\    #if OUT.os == Target_OS.Windows {
+        \\        return "\\";
+        \\    } else {
+        \\        return "/";
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Target gates should surround the smallest target-specific
+        \\implementation, leaving a portable wrapper around it.
+    );
+    subheading(3, "Target constants and static selection");
+    paragraph(4, #string,oneline
+        \\Target constants expose compile-time facts about the selected output
+        \\platform. Static selection can choose compatible declarations and
+        \\implementations without paying a runtime branch or compiling an
+        \\impossible foreign dependency.
+    );
+    bullet(5, #string,oneline
+        \\Gate the smallest target-specific layer and present one shared
+        \\interface to the rest of the program.
+    );
+    bullet(6, #string,oneline
+        \\Use target facts at compile time; runtime environment detection
+        \\belongs to ordinary program logic.
+    );
+    bullet(7, #string,oneline
+        \\Provide an explicit unsupported-target diagnostic when no
+        \\implementation exists.
+    );
+    bullet(8, #string,oneline
+        \\Build every supported target in automation so inactive branches do not
+        \\silently decay.
+    );
+    table_header(9, "Constant   —   Fields");
+    table_row(10, #string,oneline
+        \\`OUT: Output_Target`   |   Selected output `os`, `cpu`, and `abi`;
+        \\changes with `--target`
+    );
+    table_row(11, #string,oneline
+        \\`HOST: Host_Target`   |   Compiler host `os` and `cpu`; does not
+        \\change merely because the output is cross-compiled
+    );
+    table_row(12, #string,oneline
+        \\`target_endian()`   |   Prelude helper returning `.Little` or `.Big`
+        \\from the selected output CPU
+    );
+    paragraph(13, #string,oneline
+        \\`OUT.os`, `OUT.cpu`, and `OUT.abi` are installed as compile-time enum
+        \\values after the prelude target types are available. Use `OUT` for
+        \\emitted-code decisions and `HOST` only for compile-time tools that
+        \\execute on the build machine. Confusing them is especially visible
+        \\during cross-compilation.
+    );
+}
+
+render_section_85 :: () {
+    paragraph(0, #string,oneline
+        \\`std/Compiler` lets compile-time code create workspaces, add files or
+        \\strings, set options, and invoke the compiler. This is useful for
+        \\generators, tests, and build orchestration written in Glosso.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Compiler";
+        \\
+        \\result :: #comptime {
+        \\    opts: Compile_Options;
+        \\    set_backend(*opts, Compiler_Backend.LLVM_IR);
+        \\    set_target(*opts, Output_Target.{
+        \\        .os = Target_OS.Wasm,
+        \\        .cpu = Target_CPU.Wasm32,
+        \\        .abi = Target_ABI.Freestanding,
+        \\    });
+        \\    return compile("tool.glo", "tool.ll", opts);
+        \\};
+    );
+    subheading(2, "Build graph inputs and linker arguments");
+    paragraph(3, #string,oneline
+        \\Build helpers let compile-time code discover sources, construct
+        \\compilation units, and coordinate generated inputs. Because this work
+        \\participates in the build graph, deterministic paths and declared
+        \\inputs are essential for reliable caching.
+    );
+    bullet(4, #string,oneline
+        \\Derive outputs from explicit source and option inputs, and write
+        \\generated files to predictable build-owned locations.
+    );
+    bullet(5, #string,oneline
+        \\Avoid timestamps, random values, and undeclared environment
+        \\dependencies unless they are deliberately part of the build key.
+    );
+    bullet(6, #string,oneline
+        \\Keep host-tool behavior separate from target-program behavior when
+        \\cross-compiling.
+    );
+    bullet(7, #string,oneline
+        \\Report generated-command failures with the command purpose and
+        \\relevant path rather than only an exit number.
+    );
+    table_header(8, "API group   —   Purpose");
+    table_row(9, #string,oneline
+        \\`compile` / `compile_args`   |   Run a one-shot nested Glosso
+        \\compilation and return status plus captured output
+    );
+    table_row(10, #string,oneline
+        \\`compiler_create_workspace`, `add_build_file`, `add_build_string`   |
+        \\  Accumulate several source inputs under a workspace handle
+    );
+    table_row(11, #string,oneline
+        \\`get_build_options`, `set_build_options`   |   Read and replace
+        \\workspace output/backend/path/argument settings
+    );
+    table_row(12, #string,oneline
+        \\`compile_c_archive`   |   Compile target-aware C sources into a cached
+        \\native archive and return its artifact path
+    );
+    table_row(13, #string,oneline
+        \\`find_header`, `find_library`, `find_resource`   |   Locate
+        \\compiler/bundle resources for compile-time integration
+    );
+    table_row(14, #string,oneline
+        \\`add_current_linker_arg`   |   Add one raw argument to the final link
+        \\of the program currently being compiled
+    );
+    table_row(15, #string,oneline
+        \\`run_command`   |   Execute a host command at compile time and capture
+        \\its status/output
+    );
+    paragraph(16, #string,oneline
+        \\`Compile_Options` controls backend, target, optimization level,
+        \\compiler/linker arguments, sanitizers, temporal checking, color, and
+        \\temporary allocator size for a one-shot compile. Its `target` field
+        \\and `set_target` use an `Output_Target` struct with typed `os`, `cpu`,
+        \\and `abi` fields rather than an encoded target string. `Build_Options`
+        \\adds output kind/paths, import paths, source-string emission, and
+        \\workspace command-line settings. `C_Compile_Options` controls include
+        \\paths, definitions, native compiler arguments, optimization, and PIC
+        \\for archive generation.
+    );
+    note(17, #string,oneline
+        \\These are compile-time compiler services, not runtime subprocess APIs.
+        \\Results use `Compiler_Result` or `Native_Compile_Result`; always test
+        \\`.ok` and include `.output` in a generated diagnostic before using an
+        \\artifact path.
+    );
+}
+
+render_section_86 :: () {
+    paragraph(0, #string,oneline
+        \\The opt-in `Lua` module exposes Lua 5.5.0's C API. Importing it
+        \\locates the vendored source tree, compiles Lua's 32 library
+        \\translation units for `OUT`, caches a static archive, generates
+        \\target-aware declarations from `lua.h`, `lauxlib.h`, and `lualib.h`,
+        \\and adds the archive to the current link. It excludes the `lua` and
+        \\`luac` command-line translation units. A program that never imports
+        \\`Lua` performs none of this work.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Lua";
+        \\
+        \\main :: () {
+        \\    L := luaL_newstate();
+        \\    if L == null return;
+        \\    luaL_openlibs(L);
+        \\    status := luaL_dostring(L, "value = 40 + 2");
+        \\    if status == LUA_OK {
+        \\        _ := lua_getglobal(L, "value");
+        \\        value := lua_tointeger(L, -1);
+        \\        lua_pop(L, 1);
+        \\    }
+        \\    lua_close(L);
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Static source linkage is the default because it naturally follows the
+        \\output architecture and avoids shipping a matrix of prebuilt binaries.
+        \\Host-architecture Windows MSVC and Linux are supported, as are
+        \\cross-architecture Linux musl bundles; POSIX builds add `libm` but do
+        \\not silently enable `dlopen`, so Lua source modules are unaffected.
+        \\Targets without a coherent C runtime/sysroot are rejected instead of
+        \\compiling against host headers accidentally. The source is read from
+        \\`thirdparty/lua` in a checkout and from `lib/lua` in installed or
+        \\published bundles.
+    );
+    paragraph(3, #string,oneline
+        \\Applications that intentionally ship a matching Lua 5.5 shared library
+        \\can create their own bindings module with the side-effect-free
+        \\`Lua_Build` helper:
+    );
+    code_block(4, "glosso", #string
+        \\Lua_Build :: #import "Lua/Build";
+        \\#insert Lua_Build.dynamic_bindings_source("/path/to/liblua5.5.so");
+    );
+    paragraph(5, #string,oneline
+        \\This produces the same declarations and macro conveniences as `#import
+        \\"Lua"`; the application owns the shared library's path and deployment.
+        \\Dynamic mode is limited to host-architecture Windows MSVC and
+        \\dynamically linked Linux outputs; WASI, static musl, and unsupported
+        \\cross-host loaders are rejected. Do not combine the bundled 5.5.0
+        \\headers with a 5.4 library or a library built with incompatible
+        \\number, integer, calling-convention, or CRT options.
+    );
+}
+
+render_section_87 :: () {
+    paragraph(0, #string,oneline
+        \\Prefer explicit overflow operators when overflow behavior matters.
+        \\Prefer `where` constraints over letting generic bodies fail far from
+        \\the call site. Keep `#expand` macros small and emit understandable
+        \\code. Wrap low-level interop behind narrow APIs. Free dynamic arrays
+        \\that own storage, and distinguish array views from owners in API names
+        \\and comments.
+    );
+    subheading(1, "Public surface and internal conventions");
+    paragraph(2, #string,oneline
+        \\Glosso style aims to make ownership, compile-time behavior, and public
+        \\surface visible without depending on compiler-enforced privacy.
+        \\Consistency matters most at module boundaries, where names and
+        \\signatures become navigation for other programmers.
+    );
+    bullet(3, #string,oneline
+        \\Use clear public names and reserve a leading `__` for functions and
+        \\constants intended as implementation details; the prefix is a
+        \\convention and does not enforce privacy.
+    );
+    bullet(4, #string,oneline
+        \\Place `__` functions and constants after the public declarations of
+        \\the same category so the supported surface appears first.
+    );
+    bullet(5, #string,oneline
+        \\Use private sections when access must be enforced, and the `__`
+        \\convention when signaling internal intent is sufficient.
+    );
+    bullet(6, #string,oneline
+        \\Prefer explicit width, ownership, and borrowing information at APIs,
+        \\even when local inference could shorten the spelling.
+    );
+    bullet(7, #string,oneline
+        \\Keep compile-time metaprogramming behind ordinary typed interfaces and
+        \\document generated behavior that is not evident at the call site.
+    );
+}
+

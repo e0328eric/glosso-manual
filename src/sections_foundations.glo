@@ -1,0 +1,1591 @@
+// Sections 0-17: compiler fundamentals and language syntax.
+
+render_section_0 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso build begins from one source file. The compiler lexes
+        \\Unicode-aware tokens, parses declarations and expressions, scans
+        \\visible operator declarations so custom operators can affect later
+        \\expression parsing, typechecks and monomorphizes generic code, runs
+        \\compile-time constructs such as `#comptime` and `#expand`, performs
+        \\advisory temporal-memory analysis, lowers to IR, optimizes, and emits
+        \\through the selected backend.
+    );
+    paragraph(1, #string,oneline
+        \\`std/Prelude/module.glo` is loaded automatically. It supplies
+        \\primitive typeclasses, primitive operators, range iteration, dynamic
+        \\array helpers, target descriptors, `get_cmdline_args()`, and `exit()`.
+        \\Other standard modules are opt-in imports.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\#import "Strings";
+        \\
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    if args.count > 1 {
+        \\        print("first arg lowercased: %\n", to_lower(args[1]));
+        \\    }
+        \\}
+    );
+}
+
+render_section_1 :: () {
+    paragraph(0, #string,oneline
+        \\The command-line driver accepts a source file and options. The default
+        \\backend emits an LLVM-linked executable. `llvm-obj` emits an object
+        \\file and `llvm-ir` emits LLVM IR. `--std` overrides standard library
+        \\discovery. The default optimization level is `-O1`. At `-O0`, the
+        \\default context allocator is debug; optimized builds use heap
+        \\allocation.
+    );
+    code_block(1, "text", #string
+        \\glosso [options] <file.glo>
+        \\--backend <llvm|llvm-obj|llvm-ir>
+        \\--target <target>  (including wasm32-freestanding)
+        \\--print-targets | --targets
+        \\-O0 | -O1 | -O2 | -O3
+        \\-o <file>
+        \\--linker-arg <arg>
+        \\--memory-sanitizer
+        \\--thread-sanitizer
+        \\--borrow-check <off|warning|error>
+        \\--run
+        \\--cache-dir <absolute-dir>
+        \\--print-cache-dir
+        \\--show-generated
+        \\--color <auto|always|never>
+        \\--std <dir>
+    );
+    note(2, #string,oneline
+        \\`wasm32-freestanding` emits browser/embedded WebAssembly with no WASI
+        \\or C standard library. A `#c_call` main may accept host parameters and
+        \\return a C-ABI value; it is exported as `glo_main`.
+    );
+    paragraph(3, "A minimal workflow is:");
+    code_block(4, "text", #string
+        \\glosso hello.glo --run
+        \\glosso hello.glo -O2 -o hello
+        \\glosso hello.glo --backend llvm-ir -o hello.ll
+    );
+}
+
+render_section_2 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso stores purgeable compiler artifacts in a per-user cache, not in
+        \\the source checkout. `--cache-dir <absolute-dir>` has highest
+        \\precedence, followed by `GLOSSO_CACHE_DIR`. Without either override,
+        \\the cache root is:
+    );
+    bullet(1, "Windows: `%LOCALAPPDATA%\\glosso\\cache`");
+    bullet(2, #string,oneline
+        \\POSIX with an absolute `XDG_CACHE_HOME`: `$XDG_CACHE_HOME/glosso`
+    );
+    bullet(3, "macOS without that XDG setting: `~/Library/Caches/glosso`");
+    bullet(4, "other POSIX hosts without it: `~/.cache/glosso`");
+    paragraph(5, #string,oneline
+        \\Use `glosso --print-cache-dir` to print the effective root.
+        \\Command-line and Glosso environment overrides must be absolute. The
+        \\legacy `GLOSSO_NATIVE_CACHE_DIR` variable is a complete override for
+        \\native C artifacts only; it does not move generated Glosso source.
+    );
+    paragraph(6, #string,oneline
+        \\String-valued `#insert` output is cached verbatim under
+        \\`generated/insert/v1/<sha256>.glo`. Native C archives occupy
+        \\`native/v4/...`. `--show-generated` prints the generated paths used by
+        \\a successful compilation. The cache is never the source of truth and
+        \\may be deleted at any time; Glosso recreates entries when needed.
+    );
+    paragraph(7, #string,oneline
+        \\If generated code fails, the primary diagnostic points to the
+        \\outermost editable `#insert`. Source-framed notes point to the exact
+        \\location in the cached generated file and then through each
+        \\intermediate `#insert` in a nested expansion chain.
+    );
+}
+
+render_section_3 :: () {
+    paragraph(0, #string,oneline
+        \\`#import "Name"` loads a module by import name. `#load "file.glo"`
+        \\loads a concrete source file. Either form may be aliased so later code
+        \\can qualify names through the alias.
+    );
+    paragraph(1, #string,oneline
+        \\A standard module is stored either as one file, `std/Name.glo`, or as
+        \\a multi-file directory marked by `std/Name/module.glo`. A marked
+        \\directory loads all direct `.glo` siblings. An unmarked directory is
+        \\only a namespace for component modules, so names such as `Math` and
+        \\`Container` cannot become accidental umbrella imports.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\Html :: #import "Html";
+        \\Local :: #load "local_helpers.glo";
+        \\
+        \\main :: () {
+        \\    Io.print("loaded modules\n");
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\Aliases are namespace-like handles, not runtime values. Qualified
+        \\names use dot syntax, such as `Html.Html_Document`.
+    );
+    paragraph(4, #string,oneline
+        \\Imports may select their public surface with `only` or `hide`. The
+        \\feature is general: lists may name functions, quoted operator
+        \\declarations, constants, globals, types, or typeclasses, and work with
+        \\either qualified or unqualified imports.
+    );
+    code_block(5, "glosso", #string
+        \\#import,only (PI, TAU) "Math/Constants";
+        \\#import,hide (HALF_PI) "Math/Constants";
+        \\SF :: #import,only (airy_ai, bessel_j0) "Math/SpecialFunctions";
+        \\Cx :: #import,only ('/', complex128, real_part128) "Math/Complex";
+    );
+    paragraph(6, #string,oneline
+        \\`only` exposes the listed public declarations; `hide` exposes every
+        \\public declaration except those listed. Unknown and duplicate list
+        \\entries are errors. Selection affects the importing scope rather than
+        \\compilation: dependencies still load, and hidden declarations remain
+        \\usable as implementation helpers by selected declarations. Repeated
+        \\imports of the same module and alias combine their exposed names,
+        \\while an unselected import exposes the complete public API. Because
+        \\names produced by a top-level `#insert` are not known until checker
+        \\time, such generated declarations remain hidden under a selective
+        \\import. Typeclass instances remain available as global instance
+        \\evidence, following Haskell's instance-import behavior, but their
+        \\method names remain hidden unless the class itself is selected.
+        \\Selecting a class also selects its subordinate methods; for an aliased
+        \\import both the class and methods use that alias.
+    );
+    paragraph(7, #string,oneline
+        \\`Math` itself is intentionally a namespace, not an importable
+        \\umbrella. There is no `std/Math/module.glo`; import explicit
+        \\components such as `Math/Core`, `Math/Constants`, `Math/Bit`,
+        \\`Math/NumberTheory`, `Math/Complex`, `Math/Bignum`, `Math/Matrix`, and
+        \\`Math/SpecialFunctions`. Portable fixed-lane vectors are provided by
+        \\the separate top-level `Simd` module.
+    );
+}
+
+render_section_4 :: () {
+    paragraph(0, #string,oneline
+        \\A source file is a sequence of declarations and compile-time actions.
+        \\Imports, loads, library handles, type declarations, constants, mutable
+        \\globals, functions, typeclasses, instances, memory overlays, top-level
+        \\`#insert`, and top-level `#comptime` are all valid file items. Runtime
+        \\expression statements are not valid at file scope.
+    );
+    paragraph(1, "The binding punctuation determines the declaration kind:");
+    bullet(2, "`Name :: expression;` declares a compile-time constant.");
+    bullet(3, #string,oneline
+        \\`name: Type : expression;` declares a typed compile-time constant.
+    );
+    bullet(4, #string,oneline
+        \\`name: Type = expression;` or `name: Type := expression;` declares a
+        \\mutable global.
+    );
+    bullet(5, #string,oneline
+        \\`name := expression;` and `name ::= expression;` are inferred mutable
+        \\globals at file scope.
+    );
+    bullet(6, #string,oneline
+        \\`name: Type;` declares a typed mutable global with default
+        \\initialization.
+    );
+    code_block(7, "glosso", #string
+        \\Page_Size :: 4096;
+        \\Mask: u32 : 16#ff00;
+        \\request_count: u64 = 0;
+        \\cache: [..]string;
+    );
+    paragraph(8, #string,oneline
+        \\`#thread_local` may prefix only a top-level mutable global. Each
+        \\runtime thread receives a separate instance of that storage. It cannot
+        \\prefix a constant, function, type, import, or local declaration.
+    );
+    code_block(9, "glosso", #string
+        \\#thread_local current_worker: s32 = -1;
+        \\#thread_local scratch: [..]u8;
+    );
+    paragraph(10, #string,oneline
+        \\Initialization must still obey the ordinary global-initializer rules
+        \\for the selected backend. Thread-local storage does not make the
+        \\referenced objects or pointers thread-safe; it makes only the declared
+        \\global slot thread-specific.
+    );
+}
+
+render_section_5 :: () {
+    paragraph(0, #string,oneline
+        \\Visibility directives switch parser/import visibility for following
+        \\declarations. Public API should be declared before enabling private
+        \\mode or after disabling it. The `siblings` option is for module
+        \\implementations split across sibling files.
+    );
+    code_block(1, "glosso", #string
+        \\public_value :: 1;
+        \\
+        \\#enable(private_section);
+        \\helper :: () -> int { return 2; }
+        \\#disable(private_section);
+        \\
+        \\#enable(private_section, siblings);
+        \\shared_module_helper :: () {}
+        \\#disable(private_section);
+    );
+    paragraph(2, #string,oneline
+        \\`#enable(private_sections)` is accepted as the plural form. Private
+        \\declarations remain usable inside their implementation unit but are
+        \\hidden from normal import users.
+    );
+    subheading(3, "Visibility state and import filtering");
+    paragraph(4, #string,oneline
+        \\Visibility controls which declarations an importer may name. It does
+        \\not introduce a new runtime scope: the declarations still belong to
+        \\the source file, but the compiler filters them when another file
+        \\imports that file.
+    );
+    bullet(5, #string,oneline
+        \\`#enable(private_section)` affects declarations that follow it, so
+        \\place the matching `#disable(private_section)` immediately after the
+        \\implementation-only region.
+    );
+    bullet(6, #string,oneline
+        \\Add `siblings` only when neighboring implementation files must share
+        \\the hidden declarations; ordinary importers still cannot see them.
+    );
+    bullet(7, #string,oneline
+        \\A leading `__` is a Glosso naming convention for implementation
+        \\details, not an access-control mechanism. Use a private section when
+        \\the compiler must enforce the boundary.
+    );
+    bullet(8, #string,oneline
+        \\Apply `only(...)` and `hide(...)` at imports to make dependencies
+        \\explicit; those filters cannot restore a declaration already hidden by
+        \\its defining file.
+    );
+    table_header(9, "Directive   —   Visibility of following declarations");
+    table_row(10, #string,oneline
+        \\`#enable(private_section);`   |   Private to the defining source unit
+    );
+    table_row(11, #string,oneline
+        \\`#enable(private_sections);`   |   Accepted plural spelling; the same
+        \\behavior
+    );
+    table_row(12, #string,oneline
+        \\`#enable(private_section, siblings);`   |   Visible to sibling files
+        \\of the same logical module, but hidden from importers
+    );
+    table_row(13, "`#disable(private_section);`   |   Public again");
+    paragraph(14, #string,oneline
+        \\A feature directive changes parser state for declarations that follow
+        \\it; braces do not delimit the region. During source resolution the
+        \\compiler gives hidden declarations stable internal names and rewrites
+        \\implementation references, so private types, typeclass methods,
+        \\operators, instances, and `#foreign` library handles continue to work
+        \\internally without leaking their source spelling.
+    );
+    code_block(15, "glosso", #string
+        \\// module.glo
+        \\public_before :: () {}
+        \\
+        \\#enable(private_section);
+        \\helper :: () {}
+        \\Hidden :: struct { value: s64; }
+        \\#disable(private_section);
+        \\
+        \\public_after :: () { helper(); }
+        \\
+        \\// consumer.glo
+        \\#import,only (public_before, public_after) "module";
+        \\// `helper` and `Hidden` are not public names here.
+    );
+    note(16, #string,oneline
+        \\Import selection sees only public declarations. Naming a private or
+        \\unknown declaration in `#import,only(...)` or `#import,hide(...)` is
+        \\an error; the diagnostic lists available public names. Repeated `only`
+        \\imports of the same module combine their selected public declarations.
+    );
+}
+
+render_section_6 :: () {
+    paragraph(0, #string,oneline
+        \\Free functions and operation names are unique: declaring the same
+        \\function twice is an error. Every overloadable operation is owned by
+        \\exactly one typeclass, and another typeclass cannot redeclare the same
+        \\function or operator. Imports therefore cannot change behavior by
+        \\changing declaration order.
+    );
+    paragraph(1, #string,oneline
+        \\Operation typeclasses take the complete argument-type tuple as
+        \\parameters and normally expose an associated `Output` type. Candidate
+        \\selection first rejects signatures and `where` clauses that do not
+        \\apply, then ranks the surviving candidates by witness use and
+        \\specificity. An exact non-generic signature receives a large advantage
+        \\and concrete parameters rank above `any`. Equal best candidates are
+        \\ambiguous; source and import order never break a tie.
+    );
+    subheading(2, "Candidate uniqueness");
+    paragraph(3, #string,oneline
+        \\An operation spelling is owned by one protocol/typeclass interface,
+        \\but a call may still have several concrete and generic implementation
+        \\candidates. The current checker matches arguments and constraints,
+        \\scores the surviving candidates, and rejects a tie at the best score;
+        \\source or import order is not a tiebreaker.
+    );
+    bullet(4, #string,oneline
+        \\Arity, named/default binding, operand order, operator fixity, generic
+        \\unification, coercions, `#modify`, and `where` conditions all
+        \\participate in applicability.
+    );
+    bullet(5, #string,oneline
+        \\An exact non-generic signature receives a large score advantage;
+        \\parameters more specific than `any` also score above erased matches.
+    );
+    bullet(6, #string,oneline
+        \\A typeclass requirement declaration is discarded when a real
+        \\implementation candidate survives for the call.
+    );
+    bullet(7, #string,oneline
+        \\When the best candidates have the same witness status and score, the
+        \\compiler emits an ambiguous-operation diagnostic naming both
+        \\instances.
+    );
+    subheading(8, "Current selection sequence");
+    bullet(9, #string,oneline
+        \\Collect visible declarations for the operation spelling (or only the
+        \\explicitly scoped typeclass when a scope is present).
+    );
+    bullet(10, #string,oneline
+        \\Normalize named arguments when all overloaded interfaces agree on
+        \\parameter names; otherwise require positional arguments.
+    );
+    bullet(11, #string,oneline
+        \\Reject candidates whose arity, defaults, variadic position, parameter
+        \\types, generic bindings, or coercions do not fit.
+    );
+    bullet(12, #string,oneline
+        \\Evaluate `#modify` and every `where` clause using the inferred
+        \\compile-time bindings; a false condition removes the candidate.
+    );
+    bullet(13, #string,oneline
+        \\Sort applicable candidates by implicit empty-witness use and then
+        \\descending specificity score. Select the top candidate only when it
+        \\beats the next one.
+    );
+    note(14, #string,oneline
+        \\The scoring details describe the current compiler implementation, not
+        \\permission to create fragile overload sets. Public APIs should still
+        \\prefer domains whose intended winner is apparent from concrete
+        \\parameter types and constraints.
+    );
+}
+
+render_section_7 :: () {
+    paragraph(0, #string,oneline
+        \\`#memory` is Glosso's compile-time language for describing ownership,
+        \\aliasing, release, relocation, and escape behavior. It applies to
+        \\regular functions, magic functions, foreign declarations, selected
+        \\call sites, lexical or top-level overlays, and intentional-leak
+        \\bindings. It never changes runtime representation, ABI, pointer
+        \\syntax, assignment, or parameter-passing semantics. Values still copy
+        \\as ordinary Glosso values.
+    );
+    paragraph(1, #string,oneline
+        \\After type checking, the analyzer attaches invisible resource
+        \\identities and storage generations to memory-bearing values. It uses
+        \\those facts to diagnose use after release, double release, stale views
+        \\after relocation, incomplete release paths, local-address escape,
+        \\unknown foreign retention, incompatible releasers, and unintended
+        \\leaks for resources with a known cleanup function.
+    );
+    paragraph(2, #string,oneline
+        \\[ADVISORY, NOT A MOVE SYSTEM], [ Copies remain valid aliases. There is
+        \\no moved-from state and no explicit lifetime syntax. Releasing through
+        \\one alias changes the shared abstract resource state observed through
+        \\every alias.
+    );
+    subheading(3, "Complete grammar");
+    paragraph(4, #string,oneline
+        \\The following EBNF is the complete source grammar specific to
+        \\`#memory`. `identifier` and `integer` use the ordinary Glosso lexical
+        \\grammar.
+    );
+    code_block(5, "text", #string
+        \\memory-directive =
+        \\    "#memory" memory-effect
+        \\  | "#memory" "(" memory-effect ("," memory-effect)* ")"
+        \\
+        \\memory-effect =
+        \\    "returns_fresh"
+        \\  | "returns_borrow" "(" parameter-ref ")"
+        \\  | "returns_static"
+        \\  | "released_by" "(" qualified-name ")"
+        \\  | "resource" "(" "released_by" ":" qualified-name ")"
+        \\  | "leak"
+        \\  | "kills" "(" parameter-ref ")"
+        \\  | "invalidates" "(" parameter-ref ")"
+        \\  | "noescape" "(" parameter-ref ")"
+        \\  | "escapes" "(" parameter-ref ")"
+        \\  | "reads" "(" parameter-ref ")"
+        \\  | "writes" "(" parameter-ref ")"
+        \\  | "unknown"
+        \\
+        \\parameter-ref =
+        \\    identifier
+        \\  | "arg" "(" integer ")"
+        \\
+        \\qualified-name =
+        \\    identifier ("." identifier)*
+    );
+    paragraph(6, #string,oneline
+        \\An effect list must not be empty. Effects in parentheses are
+        \\comma-separated; the grouped form does not accept a trailing comma. A
+        \\bare directive contains exactly one effect. Directives may be
+        \\repeated, and repetition is equivalent to concatenating grouped effect
+        \\lists in source order.
+    );
+    code_block(7, "glosso", #string
+        \\#memory returns_fresh
+        \\
+        \\#memory(
+        \\    returns_fresh,
+        \\    released_by(Object_Destroy)
+        \\)
+    );
+    paragraph(8, #string,oneline
+        \\The grouped spelling may span lines; only the comma between effects is
+        \\required.
+    );
+    paragraph(9, "Memory overlays use a separate statement form:");
+    code_block(10, "text", #string
+        \\memory-overlay =
+        \\    "#memory" qualified-name "{"
+        \\        memory-effect ("," memory-effect)* [","]
+        \\    "}" [";"]
+    );
+    paragraph(11, #string,oneline
+        \\Unlike grouped directives, an overlay may have a trailing comma. An
+        \\overlay body must not be empty.
+    );
+    subheading(12, "Attachment sites");
+    paragraph(13, "There are four valid attachment sites.");
+    subheading(14, "Function contract");
+    paragraph(15, #string,oneline
+        \\Place one or more directives after the parameter and return signature,
+        \\among the other function directives, and before any `where` clauses or
+        \\body.
+    );
+    code_block(16, "glosso", #string
+        \\Object_Create :: () -> *Object
+        \\    #foreign "objectlib" "Object_Create"
+        \\    #memory(returns_fresh, released_by(Object_Destroy));
+        \\
+        \\Object_Destroy :: (object: *Object)
+        \\    #foreign "objectlib" "Object_Destroy"
+        \\    #memory(kills(object), noescape(object));
+    );
+    paragraph(17, #string,oneline
+        \\The same syntax is valid on regular, `#magic`, `#foreign`, `#c_call`,
+        \\prefix, suffix, binary, and assignment-operator functions. A regular
+        \\body is still analyzed; its explicit contract does not disable
+        \\inference.
+    );
+    subheading(18, "Call-site contract");
+    paragraph(19, #string,oneline
+        \\A memory directive may follow a call expression. The call must resolve
+        \\statically to one function.
+    );
+    code_block(20, "glosso", #string
+        \\object := Unannotated_Create()
+        \\    #memory resource(released_by: Object_Destroy);
+    );
+    paragraph(21, #string,oneline
+        \\At a call site, `released_by(f)` and `resource(released_by: f)` both
+        \\imply `returns_fresh` and create the same release obligation.
+        \\`resource(...)` exists only at call sites. Other effects can refine
+        \\one call without changing the declaration:
+    );
+    code_block(22, "glosso", #string
+        \\result := opaque_call(pointer)
+        \\    #memory(returns_borrow(arg(0)), reads(arg(0)), noescape(arg(0)));
+    );
+    paragraph(23, #string,oneline
+        \\A call-site contract augments the resolved function contract. It
+        \\cannot contradict the declaration's result origin, releaser, or escape
+        \\facts.
+    );
+    subheading(24, "Intentional-leak binding");
+    paragraph(25, #string,oneline
+        \\Only `leak` may annotate a variable declaration. The primary binding
+        \\form is an uninitialized aggregate owner:
+    );
+    code_block(26, "glosso", #string
+        \\rooms: [..]Room #memory leak;
+        \\state: Game_State #memory leak;
+        \\choice: Resource_Union #memory leak;
+    );
+    paragraph(27, #string,oneline
+        \\The accepted owner types are arrays, tuples, structs, and unions. The
+        \\policy also covers owned resources assigned later into nested fields.
+        \\This permits a Glosso struct or union to intentionally retain dynamic
+        \\arrays, C objects, or other resource-bearing Glosso aggregates.
+    );
+    paragraph(28, #string,oneline
+        \\To intentionally leak a newly acquired result directly, annotate the
+        \\call:
+    );
+    code_block(29, "glosso", #string,oneline
+        \\process_singleton := Process_Create() #memory leak;
+    );
+    paragraph(30, #string,oneline
+        \\The effective call contract must already identify a fresh result and
+        \\known releaser. `#memory leak` is not a way to turn an unknown pointer
+        \\into an owned resource.
+    );
+    subheading(31, "Overlay statement");
+    paragraph(32, #string,oneline
+        \\An overlay attaches effects to an existing declaration without editing
+        \\it. This is useful for generated bindings.
+    );
+    code_block(33, "glosso", #string
+        \\#memory Vendor.Image_Load {
+        \\    returns_fresh,
+        \\    released_by(Vendor.Image_Unload),
+        \\}
+        \\
+        \\#memory Vendor.Image_Unload {
+        \\    kills(arg(0)),
+        \\    noescape(arg(0)),
+        \\}
+    );
+    paragraph(34, #string,oneline
+        \\A top-level overlay augments the target declaration globally in the
+        \\current compilation. An overlay inside a block affects subsequent
+        \\calls in that lexical scope. The target must resolve uniquely; qualify
+        \\the name when namespaces would otherwise be ambiguous. There is
+        \\currently no syntax for selecting between true overloads that retain
+        \\the same qualified name.
+    );
+    subheading(35, "Effect reference");
+    paragraph(36, "`returns_fresh`");
+    bullet(37, "Valid on functions, overlays, and calls.");
+    bullet(38, #string,oneline
+        \\Says the result is a new abstract resource rather than an alias of an
+    );
+    paragraph(39, "argument or static storage.");
+    bullet(40, "By itself it describes provenance but does not name cleanup.");
+    paragraph(41, "`returns_borrow(parameter)`");
+    bullet(42, "Valid on functions, overlays, and calls.");
+    bullet(43, #string,oneline
+        \\Says the result aliases memory reachable from the selected argument.
+    );
+    bullet(44, #string,oneline
+        \\Multiple compatible borrowed origins are combined into a parameter
+        \\set.
+    );
+    paragraph(45, "`returns_static`");
+    bullet(46, "Valid on functions, overlays, and calls.");
+    bullet(47, #string,oneline
+        \\Says the returned memory remains valid for the program lifetime.
+    );
+    paragraph(48, "`released_by(function)`");
+    bullet(49, "Valid on functions, overlays, and calls.");
+    bullet(50, #string,oneline
+        \\Names the cleanup function for a fresh result and creates a
+        \\must-release
+    );
+    paragraph(51, "obligation at each acquisition.");
+    bullet(52, #string,oneline
+        \\On a function or overlay it must be combined with `returns_fresh`.
+    );
+    bullet(53, "At a call site it implies `returns_fresh`.");
+    bullet(54, #string,oneline
+        \\The releaser must resolve and accept a memory-capable first parameter.
+    );
+    paragraph(55, "`resource(released_by: function)`");
+    bullet(56, "Valid only on a call expression.");
+    bullet(57, #string,oneline
+        \\Explicit call-site shorthand for a fresh result released by the named
+    );
+    paragraph(58, "function.");
+    bullet(59, "Equivalent to call-site `released_by(function)`.");
+    paragraph(60, "`leak`");
+    bullet(61, "Valid only on an acquisition call or owner binding.");
+    bullet(62, #string,oneline
+        \\Marks a known release obligation as intentionally undischargeable.
+    );
+    bullet(63, #string,oneline
+        \\Suppresses only the missing-release diagnostic. It does not suppress
+        \\use
+    );
+    paragraph(64, #string,oneline
+        \\after release, double release, stale-reference, or contract
+        \\diagnostics.
+    );
+    bullet(65, "On a call it requires an effective `released_by(...)` fact.");
+    paragraph(66, "`kills(parameter)`");
+    bullet(67, "Valid on functions, overlays, and calls.");
+    bullet(68, #string,oneline
+        \\Says the call releases or permanently invalidates the selected
+        \\resource.
+    );
+    bullet(69, #string,oneline
+        \\All aliases then observe Dead; later use or another release is
+        \\diagnosed.
+    );
+    paragraph(70, "`invalidates(parameter)`");
+    bullet(71, "Valid on functions, overlays, and calls.");
+    bullet(72, "Keeps the resource alive but advances its storage generation.");
+    bullet(73, #string,oneline
+        \\The argument used as the owner is refreshed after the call; other
+        \\values
+    );
+    paragraph(74, "still observing an older generation become stale.");
+    bullet(75, #string,oneline
+        \\Use this for operations that may relocate backing storage, such as
+        \\growth.
+    );
+    paragraph(76, "`noescape(parameter)`");
+    bullet(77, "Valid on functions, overlays, and calls.");
+    bullet(78, #string,oneline
+        \\Promises the callee does not retain the selected argument beyond the
+        \\call.
+    );
+    bullet(79, "Especially important for opaque C boundaries.");
+    paragraph(80, "`escapes(parameter)`");
+    bullet(81, "Valid on functions, overlays, and calls.");
+    bullet(82, #string,oneline
+        \\Says the selected argument may outlive the call through storage, a
+        \\callback,
+    );
+    paragraph(83, "a global, or another retained location.");
+    bullet(84, "Conflicts with `noescape` for the same parameter.");
+    paragraph(85, "`reads(parameter)` and `writes(parameter)`");
+    bullet(86, "Valid on functions, overlays, and calls.");
+    bullet(87, #string,oneline
+        \\Record accesses to reachable memory for interprocedural checking.
+    );
+    bullet(88, #string,oneline
+        \\They do not imply ownership transfer, retention, relocation, or
+        \\release.
+    );
+    paragraph(89, "`unknown`");
+    bullet(90, "Valid on functions, overlays, and calls.");
+    bullet(91, #string,oneline
+        \\Records that the boundary cannot provide a stronger result or lifetime
+        \\fact.
+    );
+    bullet(92, #string,oneline
+        \\For a memory-capable result with no other result origin, it produces
+        \\an
+    );
+    paragraph(93, #string,oneline
+        \\Unknown result rather than pretending the value is fresh, borrowed, or
+        \\static.
+    );
+    subheading(94, "Parameter references and memory-capable types");
+    paragraph(95, #string,oneline
+        \\A parameter effect may use its declared name or `arg(n)`, where
+        \\indexing is zero-based. Positional references are useful for generated
+        \\bindings whose parameter names may change:
+    );
+    code_block(96, "glosso", #string
+        \\#memory Vendor.Release {
+        \\    kills(arg(0)),
+        \\    noescape(arg(0)),
+        \\}
+    );
+    paragraph(97, #string,oneline
+        \\The index must be non-negative and within the target signature. The
+        \\selected parameter must be memory-capable. The checker treats
+        \\pointers, many-pointers, strings, `any`, arrays, memory-bearing
+        \\tuples, and structs or unions conservatively as memory-capable.
+        \\Return-origin effects likewise require a memory-capable result.
+    );
+    subheading(98, "Release obligations and unintended leaks");
+    paragraph(99, #string,oneline
+        \\A must-release obligation is attached to an abstract resource, not a
+        \\variable name. Copies of a pointer, dynamic-array descriptor, struct,
+        \\or union may share that resource identity. A matching direct or
+        \\deferred releaser discharges the obligation.
+    );
+    code_block(100, "glosso", #string
+        \\object := Object_Create();
+        \\defer Object_Destroy(object);
+        \\
+        \\alias := object; // copy, not move
+        \\use(alias);
+    );
+    paragraph(101, #string,oneline
+        \\Defers are analyzed at scope exit in reverse registration order. Every
+        \\normal or early return executes the abstract deferred cleanup before
+        \\outstanding obligations are reported.
+    );
+    paragraph(102, #string,oneline
+        \\The checker creates obligations in three implemented ways:
+    );
+    bullet(103, "A call returns fresh memory and has `released_by(f)`.");
+    bullet(104, "A call site supplies `released_by(f)` or");
+    paragraph(105, "`resource(released_by: f)`.");
+    bullet(106, #string,oneline
+        \\`array_add` first establishes that a dynamic array owns storage
+        \\requiring
+    );
+    paragraph(107, "`array_free`.");
+    paragraph(108, #string,oneline
+        \\If an obligation remains Alive at scope exit, the checker reports that
+        \\the resource must be released. If only some paths release it, the
+        \\checker reports that it may remain unreleased. Calling an incompatible
+        \\cleanup function reports both the expected and actual releaser.
+    );
+    subheading(109, "Dynamic arrays");
+    paragraph(110, #string,oneline
+        \\Dynamic-array ownership is checked without requiring an annotation:
+    );
+    code_block(111, "glosso", #string
+        \\values: [..]s64;
+        \\array_add(*values, 1);
+        \\defer array_free(*values);
+    );
+    paragraph(112, #string,oneline
+        \\The obligation follows arrays stored in local structs and unions:
+    );
+    code_block(113, "glosso", #string
+        \\Bucket :: struct {
+        \\    values: [..]s64;
+        \\}
+        \\
+        \\bucket: Bucket;
+        \\array_add(*bucket.values, 1);
+        \\defer array_free(*bucket.values);
+    );
+    paragraph(114, #string,oneline
+        \\A higher-level aggregate constructor should name its public
+        \\deinitializer, not expose an implementation field's `array_free`
+        \\requirement:
+    );
+    code_block(115, "glosso", #string
+        \\bucket_make :: () -> Bucket
+        \\    #memory(returns_fresh, released_by(bucket_free)) {
+        \\    bucket: Bucket;
+        \\    array_add(*bucket.values, 1);
+        \\    return bucket;
+        \\}
+        \\
+        \\bucket_free :: (bucket: *Bucket)
+        \\    #memory(kills(bucket), noescape(bucket)) {
+        \\    array_free(*bucket.*.values);
+        \\}
+    );
+    paragraph(116, #string,oneline
+        \\The analyzer tracks owned member paths separately. Releasing one
+        \\dynamic-array field does not release sibling fields or the aggregate
+        \\descriptor. A deinitializer that releases parameter members discharges
+        \\corresponding member obligations at its callers.
+    );
+    subheading(117, "C libraries");
+    paragraph(118, #string,oneline
+        \\Foreign code has no body from which ownership can be inferred.
+        \\Annotate both the acquisition and release boundary:
+    );
+    code_block(119, "glosso", #string
+        \\C_Object_Create :: () -> *C_Object
+        \\    #foreign "clib" "c_object_create"
+        \\    #memory(returns_fresh, released_by(C_Object_Destroy));
+        \\
+        \\C_Object_Destroy :: (object: *C_Object)
+        \\    #foreign "clib" "c_object_destroy"
+        \\    #memory(kills(object), noescape(object));
+    );
+    paragraph(120, "Then ordinary use is checked:");
+    code_block(121, "glosso", #string
+        \\normal :: () {
+        \\    object := C_Object_Create();
+        \\    defer C_Object_Destroy(object);
+        \\}
+        \\
+        \\process_lifetime_singleton :: () {
+        \\    object := C_Object_Create() #memory leak;
+        \\}
+    );
+    paragraph(122, #string,oneline
+        \\For generated declarations, prefer a top-level companion overlay so
+        \\binding regeneration does not erase reviewed contracts. Use call-site
+        \\`resource(released_by: ...)` only as a local fallback.
+    );
+    subheading(123, "Struct and union leak policy");
+    paragraph(124, #string,oneline
+        \\An aggregate leak binding marks current and later owned descendants as
+        \\intentional:
+    );
+    code_block(125, "glosso", #string
+        \\Registry :: struct {
+        \\    objects: [..]*C_Object;
+        \\    cache: [..]u8;
+        \\}
+        \\
+        \\registry: Registry #memory leak;
+        \\array_add(*registry.cache, 0);
+        \\registry.objects = load_process_lifetime_objects();
+    );
+    paragraph(126, #string,oneline
+        \\The same rule applies to unions. Because union fields overlap at
+        \\runtime, the analysis remains conservative when multiple
+        \\resource-bearing alternatives are used. `#memory leak` is a policy for
+        \\the whole annotated owner, including any nested Glosso struct or union
+        \\reached through its tracked fields.
+    );
+    subheading(127, "Aliases, generations, and control flow");
+    paragraph(128, #string,oneline
+        \\Tracked resources have the states Alive, MaybeDead, and Dead. If one
+        \\branch releases a resource and another keeps it alive, the joined
+        \\state is MaybeDead. A later use then reports a
+        \\conditional-use-after-release warning.
+    );
+    paragraph(129, #string,oneline
+        \\Invalidation increments a generation instead of killing the resource:
+    );
+    code_block(130, "glosso", #string
+        \\grow :: (array: *[..]$T)
+        \\    #foreign "arraylib" "grow"
+        \\    #memory(invalidates(array), writes(array), noescape(array));
+        \\
+        \\values: [..]s64;
+        \\alias := values;
+        \\grow(*values);
+        \\_ := values.count; // refreshed owner
+        \\_ := alias.count;  // stale generation
+    );
+    paragraph(131, #string,oneline
+        \\Loops join their entry state with an analyzed iteration. Branch and
+        \\loop joins preserve owner refreshes while retaining stale generations
+        \\on independent aliases.
+    );
+    subheading(132, "Inference and composition");
+    paragraph(133, #string,oneline
+        \\Regular function bodies are analyzed symbolically. Effects on
+        \\parameters and returned values become an interprocedural summary.
+        \\Wrappers therefore inherit effects from their callees. Summaries are
+        \\recomputed to a fixed point so recursive and mutually recursive call
+        \\graphs can stabilize.
+    );
+    paragraph(134, #string,oneline
+        \\Explicit function effects seed the summary and document a public
+        \\guarantee; they do not hide inferred behavior. Compatible inferred
+        \\facts are merged. Contradictions, such as a body retaining a parameter
+        \\declared `noescape`, are diagnosed.
+    );
+    paragraph(135, #string,oneline
+        \\Top-level overlays augment a declaration before body analysis. Lexical
+        \\overlays augment calls after the overlay statement in that scope.
+        \\Call-site facts are merged last for that call. No layer may silently
+        \\weaken a known result origin, releaser, or escape fact.
+    );
+    subheading(136, "Contract validation");
+    paragraph(137, #string,oneline
+        \\The following are compile-time contract errors in all borrow-check
+        \\modes:
+    );
+    bullet(138, #string,oneline
+        \\Unknown effects, empty effect lists, missing punctuation, or
+        \\parameters on
+    );
+    paragraph(139, "parameterless effects.");
+    bullet(140, "An unknown or out-of-range parameter reference.");
+    bullet(141, "A parameter effect applied to a non-memory-capable scalar.");
+    bullet(142, "A return-origin effect on a void or scalar result.");
+    bullet(143, "Conflicting fresh, borrowed, or static return origins.");
+    bullet(144, "`noescape(p)` combined with `escapes(p)`.");
+    bullet(145, #string,oneline
+        \\`released_by(f)` without a fresh result on a function or overlay.
+    );
+    bullet(146, "An unknown, ambiguous, or incompatible releaser.");
+    bullet(147, "`resource(...)` on anything other than a call.");
+    bullet(148, "`leak` on a function or overlay.");
+    bullet(149, #string,oneline
+        \\A call-site contract that conflicts with its resolved declaration.
+    );
+    bullet(150, "A call-site `leak` without a known releaser.");
+    bullet(151, "Any variable effect except one non-duplicated `leak`.");
+    bullet(152, "`leak` on an uninitialized scalar or pointer binding.");
+    bullet(153, "An overlay with an unknown or ambiguous target.");
+    paragraph(154, #string,oneline
+        \\Contract validation still runs with `--borrow-check off`; that mode
+        \\disables dataflow diagnostics, not syntax or type checking.
+    );
+    subheading(155, "Diagnostics and checker modes");
+    paragraph(156, #string,oneline
+        \\`--borrow-check warning` is the default. Findings are rendered as
+        \\warnings and compilation continues. `--borrow-check error` promotes
+        \\the same findings to errors. `--borrow-check off` skips temporal
+        \\dataflow after validating every contract.
+    );
+    paragraph(157, "The analyzer can report:");
+    bullet(158, "use after release and possible use after release;");
+    bullet(159, "double release and possible double release;");
+    bullet(160, "release through a stale reference;");
+    bullet(161, "stale alias use after invalidation;");
+    bullet(162, "missing or path-conditional release;");
+    bullet(163, "incompatible releaser calls;");
+    bullet(164, "returning or storing pointers to local storage;");
+    bullet(165, "local-pointer retention through an opaque foreign call;");
+    bullet(166, "unknown lifetime for an opaque memory-bearing result; and");
+    bullet(167, "explicit-contract contradictions.");
+    paragraph(168, #string,oneline
+        \\Diagnostics point to the failing operation and, when available, the
+        \\resource origin, invalidation, first release, or obligation-creation
+        \\site.
+    );
+    subheading(169, "Recommended contract patterns");
+    paragraph(170, "Fresh C object:");
+    code_block(171, "glosso", #string
+        \\make :: () -> *T
+        \\    #foreign "c" "make"
+        \\    #memory(returns_fresh, released_by(free));
+        \\
+        \\free :: (value: *T)
+        \\    #foreign "c" "free"
+        \\    #memory(kills(value), noescape(value));
+    );
+    paragraph(172, "Borrowed view:");
+    code_block(173, "glosso", #string
+        \\view :: (buffer: []u8) -> []u8
+        \\    #memory(returns_borrow(buffer), reads(buffer), noescape(buffer)) {
+        \\    return buffer;
+        \\}
+    );
+    paragraph(174, "Relocating mutation:");
+    code_block(175, "glosso", #string
+        \\reserve :: (buffer: *Buffer, capacity: s64)
+        \\    #foreign "bufferlib" "reserve"
+        \\    #memory(invalidates(buffer), writes(buffer), noescape(buffer));
+    );
+    paragraph(176, "Retaining callback data:");
+    code_block(177, "glosso", #string
+        \\register :: (data: *void)
+        \\    #foreign "c" "register"
+        \\    #memory(escapes(data));
+    );
+    paragraph(178, "Unspecified foreign boundary:");
+    code_block(179, "glosso", #string
+        \\opaque :: (data: *void) -> *void
+        \\    #foreign "c" "opaque"
+        \\    #memory unknown;
+    );
+    subheading(180, "Trust model and limits");
+    paragraph(181, #string,oneline
+        \\For regular Glosso bodies, inference checks much of an explicit
+        \\promise. For opaque foreign code, a `#memory` contract is trusted like
+        \\the foreign signature itself. An incorrect FFI contract can hide a
+        \\bug.
+    );
+    paragraph(182, #string,oneline
+        \\This checker is not a complete proof of memory safety or leak freedom.
+        \\Untracked allocator APIs do not automatically create obligations.
+        \\Integer- pointer casts, arbitrary pointer arithmetic, type punning,
+        \\concurrency, and path-dependent foreign ownership may become Unknown
+        \\or remain outside the model. Add precise contracts at stable
+        \\boundaries and use runtime allocators or sanitizers when stronger
+        \\coverage is required.
+    );
+}
+
+render_section_8 :: () {
+    paragraph(0, #string,oneline
+        \\A compiled program starts at `main`. The entry procedure has no
+        \\parameters. It may omit its result type, or return a type that
+        \\implements `Termination`. To read command-line arguments, call
+        \\`get_cmdline_args()`.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("Hello, World!\n");
+        \\}
+    );
+    paragraph(2, "A program that reads arguments:");
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    for arg, i: args {
+        \\        print("arg[%] = %\n", i, arg);
+        \\    }
+        \\}
+    );
+    paragraph(4, #string,oneline
+        \\`exit` is marked `#noreturn`, so code after a guaranteed `exit` is not
+        \\expected to execute.
+    );
+    code_block(5, "glosso", #string
+        \\main :: () {
+        \\    if get_cmdline_args().count < 2 exit(2);
+        \\    // Normal execution continues only when enough arguments
+        \\    // were passed.
+        \\}
+    );
+    subheading(6, "Entry-point behavior and termination");
+    paragraph(7, #string,oneline
+        \\A linked executable starts at the top-level, zero-parameter `main`.
+        \\Omitting its return type gives the familiar `main :: ()` form and a
+        \\successful status on normal completion. Alternatively, `main` may
+        \\return any type that implements the prelude `Termination` typeclass;
+        \\the runtime passes the returned value to `termination_status` to
+        \\obtain the process status.
+    );
+    bullet(8, #string,oneline
+        \\`main` must not take source parameters. Use `get_cmdline_args()` for a
+        \\borrowed `[]string` view of process arguments, including the
+        \\executable entry according to the runtime platform's construction.
+    );
+    bullet(9, #string,oneline
+        \\A `main :: () { ... }` that reaches the end normally returns process
+        \\status 0. `exit(status: int)` remains available for immediate
+        \\termination and is marked `#noreturn`.
+    );
+    bullet(10, #string,oneline
+        \\Every integer type implements `Termination`; `termination_status`
+        \\casts the value to `s32`, after which the host applies its platform
+        \\exit-code rules.
+    );
+    bullet(11, #string,oneline
+        \\`Result(void, E)` implements `Termination` when `E` implements
+        \\`Error`. Success becomes status 0; an error is reported with
+        \\`report_error` and becomes status 1, making `?` convenient in fallible
+        \\entry points.
+    );
+    bullet(12, #string,oneline
+        \\Application-specific result types may implement `Termination` by
+        \\defining `termination_status(value: T) -> s32`. A non-void `main`
+        \\whose return type has no matching instance is rejected.
+    );
+    bullet(13, #string,oneline
+        \\The prelude and ordinary implicit context are available in `main`
+        \\unless the declaration is deliberately changed to a no-context/C-ABI
+        \\form.
+    );
+    table_header(14, "Entry signature   —   Normal process status");
+    table_row(15, "`main :: ()`   |   0 when execution reaches the end");
+    table_row(16, #string,oneline
+        \\`main :: () -> I` where `Is_Integer(I)`   |   The returned integer,
+        \\cast to `s32`
+    );
+    table_row(17, #string,oneline
+        \\`main :: () -> Result(void, E)` where `Error(E)`   |   0 for `Ok`;
+        \\report `Err` and return 1
+    );
+    table_row(18, #string,oneline
+        \\`main :: () -> T` where `Termination(T)`   |   The `s32` produced by
+        \\`termination_status`
+    );
+    subheading(19, "Returning an integer status");
+    code_block(20, "glosso", #string
+        \\main :: () -> int {
+        \\    if get_cmdline_args().count < 2 return 2;
+        \\    return 0;
+        \\}
+    );
+    subheading(21, "Propagating a typed error");
+    code_block(22, "glosso", #string
+        \\#import "File";
+        \\
+        \\main :: () -> Result(void, File_Error) {
+        \\    file := open_read("input.txt")?;
+        \\    _ := close(file)?;
+        \\}
+    );
+    note(23, #string,oneline
+        \\Falling through the end of a `Result(void, E)` entry point is the
+        \\successful `void` output and becomes `Ok`; a propagated `Err` is
+        \\reported through the error type's `Error` instance before the process
+        \\exits with status 1.
+    );
+    subheading(24, "Defining an application-specific status");
+    code_block(25, "glosso", #string
+        \\Exit_Status :: struct { code: s32; }
+        \\
+        \\Exit_Status :: instance Termination {
+        \\    termination_status :: (value: Exit_Status) -> s32 {
+        \\        return value.code;
+        \\    }
+        \\}
+        \\
+        \\main :: () -> Exit_Status {
+        \\    return .{ .code = 9 };
+        \\}
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    if args.count < 2 {
+        \\        print("usage: % <input>\n", args[0]);
+        \\        exit(2);
+        \\    }
+        \\    print("input: %\n", args[1]);
+        \\}
+    );
+}
+
+render_section_9 :: () {
+    paragraph(0, #string,oneline
+        \\Line comments start at `//` and continue to the end of the line. Block
+        \\comments start with `/*`, end with `*/`, and may be nested. Nested
+        \\comments are useful for temporarily disabling code that already
+        \\contains block comments.
+    );
+    code_block(1, "glosso", #string
+        \\// A line comment.
+        \\
+        \\/*
+        \\    A block comment.
+        \\    /* A nested block comment. */
+        \\*/
+    );
+    paragraph(2, #string,oneline
+        \\Comments are not documentation syntax in the compiler. They are
+        \\ignored by the lexer.
+    );
+    subheading(3, "Lexical behavior");
+    paragraph(4, #string,oneline
+        \\Comments are lexical whitespace: they never create declarations or
+        \\attach metadata to the following symbol. Line comments are best for
+        \\local intent, while nestable block comments are useful for temporarily
+        \\excluding a region that already contains comments.
+    );
+    bullet(5, #string,oneline
+        \\Use `//` for short explanations and `/* ... */` for multi-line prose
+        \\or temporary exclusion.
+    );
+    bullet(6, #string,oneline
+        \\Block comments nest, so commenting out code that already contains `/*
+        \\... */` remains well formed.
+    );
+    bullet(7, #string,oneline
+        \\Directives inside comments are inert. Keep required build, memory, and
+        \\calling-convention directives in code where the compiler can validate
+        \\them.
+    );
+    bullet(8, #string,oneline
+        \\Explain invariants and surprising decisions rather than restating the
+        \\syntax on the next line.
+    );
+}
+
+render_section_10 :: () {
+    paragraph(0, #string,oneline
+        \\Identifiers are Unicode-aware. The first character is `_` or
+        \\alphabetic; following characters may also be numeric. Keywords cannot
+        \\be used as plain identifiers. Backtick identifiers are available for
+        \\generated code when a macro needs to force a non-hygienic name.
+    );
+    code_block(1, "glosso", #string
+        \\ordinary_name := 1;
+        \\_compiler_visible := 2;
+        \\
+        \\make_counter :: () #expand {
+        \\    #insert #code {
+        \\        `counter := 0;
+        \\        counter += 1;
+        \\    };
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Qualified names use dot syntax through import aliases or nominal
+        \\scopes.
+    );
+    code_block(3, "glosso", #string
+        \\Html :: #import "Html";
+        \\doc: Html.Html_Document;
+    );
+    subheading(4, "Lookup and qualification");
+    paragraph(5, #string,oneline
+        \\Names identify declarations, fields, captures, and modules.
+        \\Qualification makes ownership explicit, while the backtick form
+        \\deliberately asks a macro-like facility to resolve a name in the
+        \\insertion environment instead of where the code value was created.
+    );
+    bullet(6, #string,oneline
+        \\Use module qualification when two imports expose the same spelling or
+        \\when ownership is important to the reader.
+    );
+    bullet(7, #string,oneline
+        \\Keep ordinary names stable across generated and handwritten code;
+        \\qualification is safer than relying on incidental import order.
+    );
+    bullet(8, #string,oneline
+        \\Reserve backtick names for `#code`, `#expand`, and generated fragments
+        \\that intentionally capture a caller-side binding.
+    );
+    bullet(9, #string,oneline
+        \\A leading `__` communicates implementation-only intent by convention,
+        \\but does not make a declaration private.
+    );
+}
+
+render_section_11 :: () {
+    paragraph(0, #string,oneline
+        \\Decimal integer literals use digits and may contain underscores
+        \\between digits. Based integers use base#digits, where the base is from
+        \\2 through 36 and alphabetic digits are case-insensitive. The 0x and 0b
+        \\prefixes are not part of Glosso syntax.
+    );
+    code_block(1, "glosso", #string
+        \\decimal := 1_032_000;
+        \\five := 2#101;
+        \\message := 16#4865_316F_774F_6C64;
+        \\max_digit := 36#Z;
+    );
+    subheading(2, "Typing and validation");
+    paragraph(3, #string,oneline
+        \\An integer literal begins as an exact compile-time value and is
+        \\checked against the type required by its context. This lets the same
+        \\spelling initialize different integer widths while still rejecting a
+        \\value that the destination cannot represent.
+    );
+    bullet(4, #string,oneline
+        \\Use `base#digits` for bases 2 through 36; alphabetic digits are
+        \\case-insensitive and must be valid for the chosen base.
+    );
+    bullet(5, #string,oneline
+        \\Underscores improve grouping but do not change the value. Group digits
+        \\according to the domain, such as bytes in hexadecimal or thousands in
+        \\decimal.
+    );
+    bullet(6, #string,oneline
+        \\Add an explicit type annotation when width or signedness is part of an
+        \\interface instead of relying on surrounding inference.
+    );
+    bullet(7, #string,oneline
+        \\A negative number is a prefix operation applied to a positive literal,
+        \\so the resulting value must still fit its selected signed type.
+    );
+}
+
+render_section_12 :: () {
+    paragraph(0, #string,oneline
+        \\Floating-point literals use a decimal fraction, an e or E exponent, or
+        \\both. The exponent may have a leading plus or minus sign, and digit
+        \\sequences may contain underscores.
+    );
+    code_block(1, "glosso", #string
+        \\pi := 3.141_592;
+        \\avogadro := 6.022_140_76e23;
+        \\milli := 1e-3;
+        \\large := 2E+10;
+    );
+    subheading(2, "Typing and precision");
+    paragraph(3, #string,oneline
+        \\Floating literals are converted to the floating type selected by
+        \\context. Decimal source text may not be exactly representable in
+        \\binary, so compile-time conversion establishes the same precision and
+        \\rounding constraints that later arithmetic uses.
+    );
+    bullet(4, #string,oneline
+        \\Use an explicit `f32`, `f64`, or other annotation at API and storage
+        \\boundaries where precision is significant.
+    );
+    bullet(5, #string,oneline
+        \\The exponent is decimal even when the value is very large or small;
+        \\based-integer syntax does not apply to floating literals.
+    );
+    bullet(6, #string,oneline
+        \\Underscores may group digits in the significand or exponent, but
+        \\should not obscure the decimal scale.
+    );
+    bullet(7, #string,oneline
+        \\Do not compare computed floating values for exact equality unless the
+        \\domain guarantees an exactly representable result.
+    );
+}
+
+render_section_13 :: () {
+    paragraph(0, #string,oneline
+        \\Strings are double quoted and store UTF-8 bytes. Supported C-style
+        \\escapes are `\a`, `\b`, `\f`, `\n`, `\r`, `\t`, `\v`, `\0`, `\\`, `"`,
+        \\`\'`, `\?`, and two-digit hexadecimal `\xNN`. For another escaped
+        \\character, the backslash is discarded and that character is retained.
+        \\`\%` is preserved as two bytes because the formatting library assigns
+        \\meaning to percent escapes.
+    );
+    code_block(1, "glosso", #string
+        \\hello := "hello\n";
+        \\quote := "\"quoted\"";
+        \\zero_byte := "a\0b";
+    );
+    paragraph(2, #string,oneline
+        \\`#string` reads one or more raw lines introduced by `\\` and joins
+        \\them with newlines. Apart from removing each leading `\\` marker, it
+        \\does not interpret escapes: `\t` remains a backslash and `t`, and `\\`
+        \\inside a line remains two backslashes.
+    );
+    code_block(3, "glosso", "text :: #string\n\\\\first line\n\\\\second line");
+    paragraph(4, #string,oneline
+        \\Add `oneline` to join the source lines with one space instead of a
+        \\newline, which lets a long logical line wrap readably in source. Add
+        \\`escape` to apply the same C-style escape decoding as a quoted string.
+        \\Modifiers may be combined in either order as `#string,oneline,escape`
+        \\or `#string,escape,oneline`.
+    );
+    code_block(5, "glosso", #string
+        \\query :: #string,oneline
+        \\\\SELECT name, email
+        \\\\FROM users WHERE active = 1
+        \\
+        \\escaped :: #string,escape
+        \\\\first\tcolumn
+        \\\\second line
+    );
+    subheading(6, "Encoding, length, and storage");
+    paragraph(7, #string,oneline
+        \\A string literal represents encoded text, not an array of Unicode
+        \\characters. Byte length, Unicode scalar count, and displayed width are
+        \\different measurements; choose the appropriate UTF library operation
+        \\when traversing human text.
+    );
+    bullet(8, #string,oneline
+        \\Use quoted strings or the `escape` modifier for quotes, control
+        \\characters, and values that would make source layout ambiguous.
+    );
+    bullet(9, #string,oneline
+        \\Use plain `#string` when backslashes must remain literal, and
+        \\`#string,oneline` when each source line break should become one space.
+    );
+    bullet(10, #string,oneline
+        \\Indexing or slicing raw string storage operates on encoding units. Do
+        \\not cut arbitrary byte positions when a valid UTF sequence must be
+        \\preserved.
+    );
+    bullet(11, #string,oneline
+        \\Use `cstring` or `cstring16` only at APIs that require
+        \\terminator-based strings, and account for embedded zero values at that
+        \\boundary.
+    );
+}
+
+render_section_14 :: () {
+    paragraph(0, #string,oneline
+        \\`#char "x"` returns the integer value of a single character or escape
+        \\sequence. It is commonly used when comparing bytes.
+    );
+    code_block(1, "glosso", #string
+        \\newline :: #char "\n";
+        \\slash := #char "/";
+        \\
+        \\if path[i] == slash {
+        \\    // Found a separator.
+        \\}
+    );
+    subheading(2, "Character values");
+    paragraph(3, #string,oneline
+        \\`#char` lexes exactly one Unicode scalar or one supported escape from
+        \\a string spelling and produces an integer character value. Its allowed
+        \\inferred destination types depend on whether the scalar is ASCII.
+    );
+    bullet(4, #string,oneline
+        \\The argument must denote exactly one character or escape, rather than
+        \\an arbitrary-length string.
+    );
+    bullet(5, #string,oneline
+        \\An ASCII `#char` may infer as `u8`, `s8`, or `u32`; another expected
+        \\integer type such as `s32` is rejected.
+    );
+    bullet(6, "A non-ASCII `#char` may infer only as `u32`.");
+    bullet(7, #string,oneline
+        \\A character value does not carry string encoding or length
+        \\information. Convert through the UTF facilities when appending it to
+        \\encoded text.
+    );
+    bullet(8, #string,oneline
+        \\User-perceived characters can contain several Unicode scalars, so
+        \\`#char` is not a grapheme-cluster literal for arbitrary displayed
+        \\text.
+    );
+    code_block(9, "glosso", #string
+        \\ascii_byte: u8 = #char "A";
+        \\signed_ascii: s8 = #char "|";
+        \\rune: u32 = #char "가";
+        \\newline: u8 = #char "\n";
+        \\
+        \\// Rejected:
+        \\// wrong: s32 = #char "A";
+        \\// too_small: u8 = #char "가";
+    );
+}
+
+render_section_15 :: () {
+    paragraph(0, #string,oneline
+        \\A label literal starts with a single quote and has no closing quote.
+        \\Labels are values of type `label` and are mainly consumed by
+        \\`std/Jump`.
+    );
+    code_block(1, "glosso", "target := 'done;");
+    paragraph(2, #string,oneline
+        \\`#undefined` is contextually typed uninitialized storage. It can
+        \\initialize a declaration, field, argument, or return only when the
+        \\surrounding construct supplies a concrete expected type. Reading the
+        \\value before replacing it is not made safe by the directive.
+    );
+    subheading(3, "Symbolic and uninitialized values");
+    paragraph(4, #string,oneline
+        \\Labels are symbolic values used by label-oriented APIs and control
+        \\helpers. `#undefined` deliberately supplies no initialized value and
+        \\should be limited to places where later initialization is structurally
+        \\guaranteed.
+    );
+    bullet(5, #string,oneline
+        \\Do not use a label where ordinary user text is expected; its identity
+        \\is symbolic rather than string data.
+    );
+    bullet(6, #string,oneline
+        \\Treat every read of a `#undefined` value before initialization as a
+        \\program error, even when a low-level layout makes the read appear to
+        \\work.
+    );
+    bullet(7, #string,oneline
+        \\Prefer a default value, tagged union, or `Option`-style representation
+        \\when absence can occur during normal execution.
+    );
+    bullet(8, #string,oneline
+        \\Keep undefined state local and short-lived so reviewers can see the
+        \\write that makes the value valid.
+    );
+}
+
+render_section_16 :: () {
+    paragraph(0, #string,oneline
+        \\Use `::` when a value is known at compile time. Use `:=` for inferred
+        \\mutable variables. Use `:` when declaring a type explicitly. Use `::=`
+        \\for inferred compile-time-style declarations supported by the parser.
+    );
+    code_block(1, "glosso", #string
+        \\Max_Count :: 64;
+        \\count := 0;
+        \\name: string = "Ada";
+        \\ready: bool;
+    );
+    paragraph(2, #string,oneline
+        \\A declaration without an initializer is default initialized. For
+        \\aggregates, that means fields take their defaults or zero-like values.
+    );
+    code_block(3, "glosso", #string
+        \\Point :: struct { x: int = 10; y: int; }
+        \\p: Point; // p.x is 10, p.y is default initialized.
+    );
+    subheading(4, "Declaration forms");
+    paragraph(5, #string,oneline
+        \\The declaration operator communicates both mutability and evaluation
+        \\time. Choosing it precisely lets readers distinguish a compile-time
+        \\fact, a mutable inferred local, and storage whose public type is
+        \\intentionally stated.
+    );
+    bullet(6, #string,oneline
+        \\Use `::` for compile-time constants and definitions, including
+        \\functions and types.
+    );
+    bullet(7, #string,oneline
+        \\Use `:=` for mutable storage whose type should be inferred from its
+        \\initializer.
+    );
+    bullet(8, #string,oneline
+        \\Use `name: Type` when the declared type is part of the contract; add
+        \\an initializer when the default value is not appropriate.
+    );
+    bullet(9, #string,oneline
+        \\Prefer the narrowest scope that contains all uses, especially for
+        \\mutable variables and temporary pointers.
+    );
+    table_header(10, "Form   —   Binding created");
+    table_row(11, #string,oneline
+        \\`Name :: expression;`   |   Compile-time constant. The expression must
+        \\be evaluable during compilation.
+    );
+    table_row(12, #string,oneline
+        \\`Name : Type : expression;`   |   Compile-time constant with an
+        \\explicit checked type.
+    );
+    table_row(13, #string,oneline
+        \\`name := expression;`   |   Mutable variable whose type is inferred
+        \\from the initializer.
+    );
+    table_row(14, #string,oneline
+        \\`name: Type = expression;`   |   Mutable variable with an explicit
+        \\type and initializer.
+    );
+    table_row(15, #string,oneline
+        \\`name: Type;`   |   Mutable variable initialized with the type's
+        \\default value.
+    );
+    table_row(16, #string,oneline
+        \\`name ::= expression;`   |   A body-local compile-time binding form;
+        \\the initializer is evaluated at compile time.
+    );
+    paragraph(17, #string,oneline
+        \\At top level, `::` also introduces named definitions such as
+        \\functions, structs, unions, enums, imports, libraries,
+        \\function-pointer types, and typeclasses; the token following `::`
+        \\determines which declaration parser is used. Inside a body, `::`
+        \\creates a constant variable and `::=` marks a compile-time local. `:=`
+        \\and typed `=` forms create mutable storage.
+    );
+    code_block(18, "glosso", #string
+        \\Limit :: 64;
+        \\Half : f32 : 0.5;
+        \\
+        \\main :: () {
+        \\    count := 0;          // inferred mutable int
+        \\    ratio: f32 = Half;  // explicit mutable f32
+        \\    cached ::= Limit * 2;
+        \\    count += cached;
+        \\}
+    );
+    note(19, #string,oneline
+        \\A declaration without an initializer uses the type's default
+        \\construction rules. Struct field defaults are applied; remaining
+        \\scalar and aggregate storage receives its type-default value. Use
+        \\`#undefined` only when deliberately bypassing meaningful
+        \\initialization and when every later read is dominated by a valid
+        \\write.
+    );
+}
+
+render_section_17 :: () {
+    paragraph(0, #string,oneline
+        \\Plain assignment stores into an assignable location. Compound
+        \\assignment calls the matching assignment operator and stores the
+        \\result back into the left side.
+    );
+    code_block(1, "glosso", "x := 1;\nx = 2;\nx += 3;\nx *= 4;");
+    paragraph(2, #string,oneline
+        \\The left side must be assignable: a local variable, a field, a
+        \\dereferenced pointer, or an index operation that has `[]=` support.
+    );
+    subheading(3, "Writable locations and update operators");
+    paragraph(4, #string,oneline
+        \\Assignment changes existing storage; it does not introduce a new
+        \\binding. Update assignment combines an operator with a write and
+        \\therefore depends on both the operator implementation and the
+        \\assignability of the left-hand location.
+    );
+    bullet(5, #string,oneline
+        \\The left side must denote mutable storage such as a variable,
+        \\dereferenced pointer, field, or writable index.
+    );
+    bullet(6, #string,oneline
+        \\Use plain `=` when replacing a value and a compound form such as `+=`
+        \\when the read-modify-write intent is meaningful.
+    );
+    bullet(7, #string,oneline
+        \\An overloaded assignment operator must still produce a value coercible
+        \\to the left operand's type.
+    );
+    bullet(8, #string,oneline
+        \\For custom containers, define `[]=` alongside `[]` when callers need
+        \\indexed mutation; a readable index result alone does not imply a
+        \\writable location.
+    );
+}

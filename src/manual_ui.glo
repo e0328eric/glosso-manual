@@ -1,0 +1,210 @@
+// Section dispatch, navigation, document layout, and Wasm entry point.
+
+render_section_case :: (index: s64) -> Code {
+    renderer_call := tprint("render_section_%();", format_int(index, 10));
+    return #code {
+        case ``index;
+            #insert renderer_call;
+    };
+}
+
+render_selected_section :: () {
+    #insert #code {
+        if selected_section == {
+            #inline for index: 0..SECTION_COUNT {
+                #insert render_section_case(index);
+            }
+        }
+    };
+}
+
+
+render_navigation_row :: (index: s32) {
+    id := Clay_GetElementIdWithIndex(clay_string("nav-row"), cast(u32)index);
+    row := column_box();
+    row.layout.padding = padding(13, 10);
+    row.cornerRadius = radius(9);
+    if index == selected_section {
+        row.backgroundColor = color(237, 233, 255);
+    } else if Clay_PointerOver(id) {
+        row.backgroundColor = color(241, 241, 244);
+    }
+    open_id(id, row);
+    emit_text(section_title(index), text_style(14, color(48, 49, 59), 0, 21));
+    close_element();
+}
+
+navigation_start :: () -> s32 {
+    start := selected_section - 4;
+    if start < 0 start = 0;
+    if start > SECTION_COUNT - 9 start = SECTION_COUNT - 9;
+    if start < 0 start = 0;
+    return start;
+}
+
+handle_navigation :: () {
+    pointer := Clay_GetPointerState();
+    if pointer.state != CLAY_POINTER_DATA_RELEASED_THIS_FRAME return;
+    start := navigation_start();
+    i := start;
+    while i < start + 9 && i < SECTION_COUNT {
+        id := Clay_GetElementIdWithIndex(clay_string("nav-row"), cast(u32)i);
+        if Clay_PointerOver(id) selected_section = i;
+        i = i + 1;
+    }
+    if selected_section > 0 &&
+       Clay_PointerOver(Clay_GetElementId(clay_string("previous-section"))) {
+        selected_section = selected_section - 1;
+    }
+    if selected_section + 1 < SECTION_COUNT &&
+       Clay_PointerOver(Clay_GetElementId(clay_string("next-section"))) {
+        selected_section = selected_section + 1;
+    }
+}
+
+render_sidebar :: () {
+    sidebar := column_box(6);
+    sidebar.layout.sizing.width = grow_axis();
+    sidebar.layout.padding = padding(14, 14);
+    sidebar.backgroundColor = color(255, 255, 255);
+    sidebar.cornerRadius = radius(14);
+    open_element("manual-sidebar", sidebar);
+    emit_text("CONTENTS", text_style(11, color(120, 122, 134), 1, 18));
+    start := navigation_start();
+    i := start;
+    while i < start + 9 && i < SECTION_COUNT {
+        render_navigation_row(i);
+        i = i + 1;
+    }
+    emit_text(#string,oneline
+        \\Showing nearby chapters
+    , text_style(12, color(145, 146, 155), 0, 18));
+    close_element();
+}
+
+render_pager_button :: (name: string, label: string, enabled: bool) {
+    button := column_box();
+    button.layout.sizing.width = grow_axis();
+    button.layout.padding = padding(16, 13);
+    button.backgroundColor = color(242, 241, 246);
+    button.cornerRadius = radius(10);
+    open_element(name, button);
+    if enabled {
+        emit_text(label, text_style(14, color(77, 59, 184), 1, 21));
+    } else {
+        emit_text(label, text_style(14, color(163, 163, 170), 1, 21));
+    }
+    close_element();
+}
+
+render_article :: () {
+    article := column_box(18);
+    article.layout.padding = padding(34, 34);
+    article.backgroundColor = color(255, 255, 255);
+    article.cornerRadius = radius(16);
+    open_element("manual-article", article);
+
+    emit_text(#string,oneline
+        \\GLOSSO LANGUAGE MANUAL
+    , text_style(12, color(107, 84, 238), 1, 18));
+    emit_text(
+        section_title(selected_section),
+        text_style(38, color(25, 26, 33), 1, 46),
+    );
+    render_selected_section();
+
+    pager: Clay_ElementDeclaration;
+    pager.layout.sizing.width = grow_axis();
+    pager.layout.sizing.height = fit_axis();
+    pager.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    pager.layout.childGap = 12;
+    pager.layout.padding = padding(0, 14);
+    open_element("manual-pager", pager);
+    render_pager_button("previous-section", #string,oneline
+        \\← Previous chapter
+    , selected_section > 0);
+    render_pager_button("next-section", #string,oneline
+        \\Next chapter →
+    , selected_section + 1 < SECTION_COUNT);
+    close_element();
+    close_element();
+}
+
+render_document :: (width: f32) {
+    root := column_box(22);
+    root.layout.sizing.width = fixed_axis(width);
+    root.layout.padding = padding(24, 24);
+    root.backgroundColor = color(246, 245, 241);
+    open_element("manual-root", root);
+
+    brand: Clay_ElementDeclaration;
+    brand.layout.sizing.width = grow_axis();
+    brand.layout.sizing.height = fit_axis();
+    brand.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    brand.layout.childGap = 14;
+    brand.layout.padding = padding(8, 4);
+    open_element("manual-brand", brand);
+    emit_text("G", text_style(28, color(107, 84, 238), 1, 34));
+    emit_text("Glosso", text_style(24, color(28, 29, 36), 1, 34));
+    emit_text(#string,oneline
+        \\Manual · Glosso + Clay + freestanding Wasm
+    , text_style(14, color(111, 112, 122), 0, 34));
+    close_element();
+
+    body: Clay_ElementDeclaration;
+    body.layout.sizing.width = grow_axis();
+    body.layout.sizing.height = fit_axis();
+    body.layout.childGap = 20;
+    if width < 860.0 {
+        body.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
+    } else {
+        body.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    }
+    open_element("manual-body", body);
+
+    sidebar_wrap := column_box();
+    if width < 860.0 {
+        sidebar_wrap.layout.sizing.width = grow_axis();
+    } else {
+        sidebar_wrap.layout.sizing.width = fixed_axis(285);
+    }
+    open_element("sidebar-wrap", sidebar_wrap);
+    render_sidebar();
+    close_element();
+
+    article_wrap := column_box();
+    article_wrap.layout.sizing.width = grow_axis(320, 1040);
+    open_element("article-wrap", article_wrap);
+    render_article();
+    close_element();
+
+    close_element();
+    close_element();
+}
+
+main :: (
+    width: f32,
+    height: f32,
+    pointer_x: f32,
+    pointer_y: f32,
+    pointer_down: bool,
+    delta_time: f32,
+) -> Clay_RenderCommandArray #c_call {
+    dimensions: Clay_Dimensions;
+    dimensions.width = width;
+    dimensions.height = height;
+    Clay_SetLayoutDimensions(dimensions);
+
+    pointer: Clay_Vector2;
+    pointer.x = pointer_x;
+    pointer.y = pointer_y;
+    Clay_SetPointerState(pointer, pointer_down);
+    handle_navigation();
+
+    // The HTML renderer uses the browser document as the scroll container.
+    // Emit off-screen commands so the host can size #scene to the full chapter.
+    Clay_SetCullingEnabled(false);
+    Clay_BeginLayout();
+    render_document(width);
+    return Clay_EndLayout(delta_time);
+}

@@ -1,0 +1,45 @@
+// The complete build entry point. main.glo loads the manual sources from src/.
+#import "Io";
+#import "Compiler";
+#import "File_System";
+#import "Os";
+
+build_manual :: () {
+    set_build_options_dc(.do_output = false);
+
+    if !os_fs_is_directory("dist") && !os_fs_create_directories("dist") {
+        print("could not create dist\n");
+        return;
+    }
+
+    wasm_target := Output_Target.{
+        .os = Target_OS.Wasm,
+        .cpu = Target_CPU.Wasm32,
+        .abi = Target_ABI.Freestanding,
+    };
+    cache_arg := str_cat("--cache-dir=", absolute("build/cache"));
+
+    options: Compile_Options;
+    set_target(*options, wasm_target);
+    set_optimization_level(*options, 2);
+    set_borrow_check(*options, Compiler_Borrow_Check.Error);
+    set_temp_allocator_size(*options, 1024 * 1024);
+    add_compiler_arg(*options, cache_arg);
+    add_linker_arg(*options, "--export=__heap_base");
+    add_linker_arg(*options, "--initial-memory=16777216");
+    add_linker_arg(*options, "--max-memory=67108864");
+    built := compile("main.glo", "dist/manual.wasm", options);
+    if !built.ok {
+        print("manual build failed:\n%", built.output);
+        return;
+    }
+
+    if !os_fs_copy_file("index.html", "dist/index.html", true) {
+        print("manual built, but index.html could not be staged\n");
+        return;
+    }
+    print("built dist/index.html and dist/manual.wasm\n");
+}
+
+#comptime build_manual();
+main :: () {}

@@ -1,0 +1,60 @@
+// Builds Clay for OUT and inserts matching declarations into this compilation.
+#import "Io";
+#import "Compiler";
+#import "Bindgen";
+
+clay_bindings_source :: () -> string #memory returns_fresh {
+    if OUT.os != Target_OS.Wasm ||
+       OUT.cpu != Target_CPU.Wasm32 ||
+       OUT.abi != Target_ABI.Freestanding
+        return "#compile_error \"Clay manual bindings require wasm32-freestanding\";";
+
+    header := find_header("clay.h", "vendor/clay");
+    if header.count == 0 {
+        print("Clay header was not found under vendor/clay\n");
+        return "#compile_error \"Clay header was not found\";";
+    }
+
+    sources: [..]string;
+    defer array_free(*sources);
+    array_add(*sources, header);
+
+    definitions: [..]string;
+    defer array_free(*definitions);
+    array_add(
+        *definitions,
+        "CLAY_IMPLEMENTATION",
+        "CLAY_WASM",
+        "CLAY_DISABLE_SIMD",
+    );
+
+    c_options: C_Compile_Options;
+    c_options.preprocessor_definitions = definitions;
+    add_c_include_path(*c_options, "vendor/clay");
+    add_c_compiler_arg(*c_options, "-ffreestanding");
+    add_c_compiler_arg(*c_options, "-fno-builtin");
+    clay := compile_c_archive("clay", sources, c_options);
+    if !clay.ok {
+        print("Clay compilation failed:\n%", clay.output);
+        return "#compile_error \"Clay compilation failed\";";
+    }
+
+    bindgen_options: Bindgen_Options;
+    add_include_path(*bindgen_options, "vendor/clay");
+    add_bindgen_preprocessor_definition(*bindgen_options, "CLAY_WASM");
+    add_bindgen_preprocessor_definition(*bindgen_options, "CLAY_DISABLE_SIMD");
+    add_bindgen_compiler_arg(*bindgen_options, "--target=wasm32-unknown-unknown");
+    add_bindgen_compiler_arg(*bindgen_options, "-ffreestanding");
+    bindings := generate_source(
+        header,
+        static_library("clay", clay.artifact),
+        bindgen_options,
+    );
+    if !bindings.ok {
+        print("Clay Bindgen failed:\n%", bindings.output);
+        return "#compile_error \"Clay Bindgen failed\";";
+    }
+    return bindings.output;
+}
+
+#insert clay_bindings_source();
