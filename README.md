@@ -19,6 +19,8 @@ private Glosso repository or compile the project in GitHub Actions.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
 - `src/section_catalog.glo` contains section state and titles.
 - `src/sections_*.glo` contains the manual chapters, grouped by topic.
+- `src/generated/docs.ts` is the checked-in legacy documentation snapshot used
+  as the source for reference-data regeneration.
 - `src/generated/std_reference.glo` is the generated standard-library data
   rendered by Glosso and Clay.
 - `src/reference_ui.glo` contains reference, search-result, and browser-bridge
@@ -63,9 +65,10 @@ glosso first.glo -- gen-reference
 
 `build` compiles `main.glo` and stages the complete site in `dist/`.
 `tree-sitter` updates the query embedded in `app.js` from
-`tree-sitter/highlights.scm`. `gen-reference` reads the sibling legacy
-documentation snapshot and regenerates the Glosso and browser reference data;
-an alternative snapshot path can be supplied after the command.
+`tree-sitter/highlights.scm`. `gen-reference` reads the checked-in legacy
+documentation snapshot at `src/generated/docs.ts` and regenerates the Glosso
+and browser reference data; an alternative snapshot path can be supplied after
+the command.
 
 ## Compile locally
 
