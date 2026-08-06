@@ -1,0 +1,824 @@
+// Standard-library reference, global search, and browser-facing application state.
+
+APP_VIEW_MANUAL : s32 : 0;
+APP_VIEW_STANDARD_LIBRARY : s32 : 1;
+APP_VIEW_SEARCH : s32 : 2;
+
+MODULES_PER_PAGE : s32 : 176;
+SYMBOLS_PER_PAGE : s32 : 24;
+SEARCH_RESULTS_PER_PAGE : s32 : 20;
+MAX_SEARCH_RESULTS : s32 : 100;
+
+Search_Result :: struct {
+    kind: s32; // 0 = manual section, 1 = module, 2 = standard-library symbol
+    index: s32;
+}
+
+app_view: s32 = APP_VIEW_MANUAL;
+selected_module: s32 = -1;
+module_page: s32 = 0;
+symbol_page: s32 = 0;
+search_page: s32 = 0;
+search_result_count: s32 = 0;
+search_results: [MAX_SEARCH_RESULTS]Search_Result;
+reference_viewport_width: f32 = 1280.0;
+
+manual_set_view :: (view: s32) #c_call {
+    if view < APP_VIEW_MANUAL || view > APP_VIEW_SEARCH return;
+    app_view = view;
+    if view == APP_VIEW_STANDARD_LIBRARY {
+        selected_module = -1;
+        module_page = 0;
+        symbol_page = 0;
+    }
+    if view == APP_VIEW_SEARCH search_page = 0;
+}
+
+manual_select_section :: (section: s32) #c_call {
+    if section < 0 || section >= SECTION_COUNT return;
+    selected_section = section;
+    app_view = APP_VIEW_MANUAL;
+}
+
+manual_select_module :: (module: s32) #c_call {
+    app_view = APP_VIEW_STANDARD_LIBRARY;
+    if module < 0 || module >= STD_MODULE_COUNT {
+        selected_module = -1;
+        module_page = 0;
+        symbol_page = 0;
+        return;
+    }
+    selected_module = module;
+    module_page = module / MODULES_PER_PAGE;
+    symbol_page = 0;
+}
+
+manual_set_search_results :: (data: [*]const s32, count: s32) #c_call
+    #memory(reads(data), noescape(data)) {
+    if count < 0 count = 0;
+    if count > MAX_SEARCH_RESULTS count = MAX_SEARCH_RESULTS;
+    search_result_count = count;
+    search_page = 0;
+    i: s32 = 0;
+    while i < count {
+        search_results[i].kind = data[i * 2];
+        search_results[i].index = data[i * 2 + 1];
+        i = i + 1;
+    }
+}
+
+manual_get_view :: () -> s32 #c_call { return app_view; }
+manual_get_section :: () -> s32 #c_call { return selected_section; }
+manual_get_module :: () -> s32 #c_call { return selected_module; }
+
+// Freestanding executables keep only procedures reachable from main. The
+// browser asks wasm-ld to export these C-ABI procedures, so keep a runtime
+// reference chain that LLVM can later remove from ordinary positive-width
+// frames.
+manual_keep_browser_exports_reachable :: () {
+    empty_results: [*]const s32;
+    manual_set_view(APP_VIEW_MANUAL);
+    manual_select_section(0);
+    manual_select_module(-1);
+    manual_set_search_results(empty_results, 0);
+    manual_get_view();
+    manual_get_section();
+    manual_get_module();
+}
+
+clamp_page :: (page: s32, count: s32, page_size: s32) -> s32 {
+    if page < 0 return 0;
+    maximum := (count - 1) / page_size;
+    if maximum < 0 maximum = 0;
+    if page > maximum return maximum;
+    return page;
+}
+
+render_small_badge :: (index: s32, value: string) {
+    badge := column_box();
+    badge.layout.sizing.width = fit_axis();
+    badge.layout.padding = padding(9, 5);
+    badge.backgroundColor = color(244, 240, 232);
+    badge.border.color = color(216, 209, 197);
+    badge.border.width.left = 1;
+    badge.border.width.right = 1;
+    badge.border.width.top = 1;
+    badge.border.width.bottom = 1;
+    open_indexed("badge", index, badge);
+    emit_text(value, text_style(10, color(109, 107, 102), FONT_MONO_BOLD, 16));
+    close_element();
+}
+
+render_reference_pager :: (
+    previous_name: string,
+    next_name: string,
+    page: s32,
+    count: s32,
+    page_size: s32,
+) {
+    pages := (count + page_size - 1) / page_size;
+    if pages <= 1 return;
+
+    pager: Clay_ElementDeclaration;
+    pager.layout.sizing.width = grow_axis();
+    pager.layout.sizing.height = fit_axis();
+    pager.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    pager.layout.childGap = 12;
+    pager.layout.padding = padding(0, 12);
+    open_element("reference-pager", pager);
+    render_pager_button(previous_name, "Previous page", page > 0);
+    label_box := column_box();
+    label_box.layout.sizing.width = fixed_axis(132);
+    label_box.layout.padding = padding(10, 13);
+    open_element("page-count", label_box);
+    emit_text(tprint("Page % of %", page + 1, pages), text_style(12, color(109, 107, 102), FONT_MONO_BOLD, 21));
+    close_element();
+    render_pager_button(next_name, "Next page", page + 1 < pages);
+    close_element();
+}
+
+module_sidebar_start :: () -> s32 {
+    if selected_module < 0 return module_page * 9;
+    start := selected_module - 4;
+    if start < 0 start = 0;
+    if start > STD_MODULE_COUNT - 9 start = STD_MODULE_COUNT - 9;
+    if start < 0 start = 0;
+    return start;
+}
+
+render_module_navigation_row :: (index: s32) {
+    id := Clay_GetElementIdWithIndex(clay_string("module-nav-row"), cast(u32)index);
+    row := column_box();
+    row.layout.padding = padding(12, 9);
+    if index == selected_module {
+        row.backgroundColor = color(255, 253, 248);
+        row.border.color = color(36, 73, 216);
+        row.border.width.left = 2;
+    } else if Clay_PointerOver(id) {
+        row.backgroundColor = color(255, 253, 248);
+    }
+    open_id(id, row);
+    if index == selected_module {
+        emit_text(STD_MODULE_DOCS[index].name, text_style(13, color(36, 73, 216), FONT_SANS_BOLD, 20));
+    } else {
+        emit_text(STD_MODULE_DOCS[index].name, text_style(13, color(109, 107, 102), FONT_SANS, 20));
+    }
+    close_element();
+}
+
+render_standard_sidebar :: (height: f32) {
+    // Native DOM scrolling avoids rebuilding all 176 module rows for every
+    // wheel event. This placeholder only reserves the Clay layout column.
+    sidebar := column_box();
+    sidebar.layout.sizing.width = grow_axis();
+    sidebar.layout.sizing.height = fixed_axis(height);
+    sidebar.backgroundColor = color(238, 233, 223);
+    open_element("standard-sidebar", sidebar);
+    close_element();
+}
+
+render_source_link :: (index: s32, path: string, line: s32) {
+    label := path;
+    if line > 0 label = tprint("%:% ↗", path, line);
+    emit_text(label, source_text_style(10, color(109, 107, 102), 18));
+}
+
+render_count_badge :: (index: s32, value: s32) {
+    render_small_badge(index, tprint("%", value));
+}
+
+render_signature_box :: (index: s32, value: string) {
+    signature := column_box();
+    signature.layout.padding = padding(13, 10);
+    signature.backgroundColor = color(244, 241, 234);
+    signature.border.color = color(233, 104, 45);
+    signature.border.width.left = 2;
+    open_indexed("signature-box", index, signature);
+    emit_text(
+        value,
+        tagged_text_style(13, color(23, 50, 158), FONT_MONO, 22, CLAY_TEXT_WRAP_WORDS, 1),
+    );
+    close_element();
+}
+
+render_section_heading :: (index: s32, title: string, count: s32) {
+    row: Clay_ElementDeclaration;
+    row.layout.sizing.width = grow_axis();
+    row.layout.sizing.height = fit_axis();
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.layout.childGap = 12;
+    row.layout.padding = padding(0, 10);
+    row.border.color = color(23, 26, 31);
+    row.border.width.bottom = 2;
+    open_indexed("section-heading", index, row);
+    title_box := column_box();
+    title_box.layout.sizing.width = grow_axis();
+    open_indexed("section-title", index, title_box);
+    emit_text(title, text_style(24, color(23, 26, 31), FONT_SERIF_BOLD, 32));
+    close_element();
+    render_count_badge(200000 + index, count);
+    close_element();
+}
+
+render_compact_section_heading :: (index: s32, title: string, count: s32) {
+    row: Clay_ElementDeclaration;
+    row.layout.sizing.width = grow_axis();
+    row.layout.sizing.height = fit_axis();
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.layout.childGap = 12;
+    row.layout.padding = padding(0, 4);
+    open_indexed("compact-section-heading", index, row);
+    title_box := column_box();
+    title_box.layout.sizing.width = grow_axis();
+    open_indexed("compact-section-title", index, title_box);
+    emit_text(title, text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 18));
+    close_element();
+    render_count_badge(205000 + index, count);
+    close_element();
+}
+
+render_detail_cell :: (name: string, index: s32, value: string, style_kind: s32) {
+    cell := column_box();
+    cell.layout.sizing.width = grow_axis(80);
+    cell.layout.padding = padding(0, 12);
+    open_indexed(name, index, cell);
+    if style_kind == 1 {
+        emit_text(value, text_style(13, color(23, 50, 158), FONT_MONO, 22));
+    } else if style_kind == 2 {
+        emit_text(value, text_style(13, color(109, 107, 102), FONT_SANS, 22));
+    } else {
+        emit_text(value, text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 20));
+    }
+    close_element();
+}
+
+render_detail_table :: (
+    index: s32,
+    first_row: s32,
+    count: s32,
+    first_header: string,
+    second_header: string,
+    third_header: string,
+    columns: s32,
+) {
+    table := column_box();
+    table.layout.padding = padding(0, 2);
+    open_indexed("detail-table", index, table);
+    header: Clay_ElementDeclaration;
+    header.layout.sizing.width = grow_axis();
+    header.layout.sizing.height = fit_axis();
+    header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    header.border.color = color(23, 26, 31);
+    header.border.width.bottom = 2;
+    open_indexed("detail-table-header", index, header);
+    render_detail_cell("detail-head-one", index, first_header, 0);
+    render_detail_cell("detail-head-two", index, second_header, 0);
+    if columns == 3 render_detail_cell("detail-head-three", index, third_header, 0);
+    close_element();
+
+    relative: s32 = 0;
+    while relative < count {
+        row_index := first_row + relative;
+        row_value := STD_DETAIL_ROWS[row_index];
+        row: Clay_ElementDeclaration;
+        row.layout.sizing.width = grow_axis();
+        row.layout.sizing.height = fit_axis();
+        row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        row.border.color = color(216, 209, 197);
+        row.border.width.bottom = 1;
+        open_indexed("detail-table-row", row_index, row);
+        render_detail_cell("detail-one", row_index, row_value.first, 1);
+        render_detail_cell("detail-two", row_index, row_value.second, 1);
+        if columns == 3 render_detail_cell("detail-three", row_index, row_value.third, 2);
+        close_element();
+        relative = relative + 1;
+    }
+    close_element();
+}
+
+render_module_card :: (index: s32) {
+    module := STD_MODULE_DOCS[index];
+    id := Clay_GetElementIdWithIndex(clay_string("module-card"), cast(u32)index);
+    card := column_box(12);
+    if reference_viewport_width >= 900.0 {
+        // The grid lives inside the 880px article and its 52px side padding.
+        // Keep both cards within that content box so they cannot widen the
+        // article underneath the status rail.
+        card_width := (reference_viewport_width - 374.0) / 2.0;
+        if card_width > 388.0 card_width = 388.0;
+        card.layout.sizing.width = fixed_axis(card_width);
+    }
+    card.layout.sizing.height = fixed_axis(176);
+    card.layout.padding = padding(20, 20);
+    card.border.color = color(216, 209, 197);
+    card.border.width.left = 1;
+    card.border.width.right = 1;
+    card.border.width.top = 1;
+    card.border.width.bottom = 1;
+    if Clay_PointerOver(id) card.backgroundColor = color(248, 245, 238);
+    if !Clay_PointerOver(id) card.backgroundColor = color(255, 253, 248);
+    open_id(id, card);
+    header: Clay_ElementDeclaration;
+    header.layout.sizing.width = grow_axis();
+    header.layout.sizing.height = fit_axis();
+    header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    header.layout.childGap = 10;
+    open_indexed("module-card-header", index, header);
+    title := column_box();
+    title.layout.sizing.width = grow_axis();
+    open_indexed("module-card-title", index, title);
+    emit_text(module.name, text_style(14, color(23, 50, 158), FONT_MONO_BOLD, 23));
+    close_element();
+    render_count_badge(210000 + index, module.symbol_count);
+    close_element();
+    emit_text(module.compact_summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
+    close_element();
+}
+
+render_standard_index :: () {
+    heading: Clay_ElementDeclaration;
+    heading.layout.sizing.width = grow_axis();
+    heading.layout.sizing.height = fit_axis();
+    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    heading.layout.childGap = 20;
+    heading.layout.padding = padding(0, 20);
+    heading.border.color = color(216, 209, 197);
+    heading.border.width.bottom = 1;
+    open_element("module-index-heading", heading);
+    titles := column_box(10);
+    titles.layout.sizing.width = grow_axis();
+    open_element("module-index-titles", titles);
+    emit_text("STANDARD LIBRARY", text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
+    emit_text("Public modules", text_style(48, color(23, 26, 31), FONT_SERIF_BOLD, 52));
+    close_element();
+    badge := column_box();
+    badge.layout.sizing.width = fit_axis();
+    badge.layout.padding = padding(12, 8);
+    badge.border.color = color(216, 209, 197);
+    badge.border.width.left = 1;
+    badge.border.width.right = 1;
+    badge.border.width.top = 1;
+    badge.border.width.bottom = 1;
+    open_element("source-file-count", badge);
+    emit_text(tprint("% SOURCE FILES", STD_MODULE_COUNT), text_style(10, color(109, 107, 102), FONT_MONO_BOLD, 18));
+    close_element();
+    close_element();
+    paragraph(9000, #string,oneline
+        \\The index is generated from public declarations before each module's private section. Open a module to browse types, typeclasses, constants, functions, and typeclass methods with direct source links.
+    );
+    module_page = clamp_page(module_page, STD_MODULE_COUNT, MODULES_PER_PAGE);
+    start := module_page * MODULES_PER_PAGE;
+    i := start;
+    while i < start + MODULES_PER_PAGE && i < STD_MODULE_COUNT {
+        row: Clay_ElementDeclaration;
+        row.layout.sizing.width = grow_axis();
+        row.layout.sizing.height = fixed_axis(176);
+        row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        open_indexed("module-card-row", i, row);
+        render_module_card(i);
+        if reference_viewport_width >= 900.0 && i + 1 < start + MODULES_PER_PAGE && i + 1 < STD_MODULE_COUNT render_module_card(i + 1);
+        close_element();
+        if reference_viewport_width >= 900.0 {
+            i = i + 2;
+        } else {
+            i = i + 1;
+        }
+    }
+}
+
+render_symbol_header :: (index: s32, name: string, kind: string, path: string, line: s32) {
+    header: Clay_ElementDeclaration;
+    header.layout.sizing.width = grow_axis();
+    header.layout.sizing.height = fit_axis();
+    header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    header.layout.childGap = 12;
+    open_indexed("symbol-header", index, header);
+    identity: Clay_ElementDeclaration;
+    identity.layout.sizing.width = grow_axis();
+    identity.layout.sizing.height = fit_axis();
+    identity.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    identity.layout.childGap = 12;
+    open_indexed("symbol-identity", index, identity);
+    emit_text(name, text_style(18, color(23, 50, 158), FONT_MONO_BOLD, 27));
+    render_small_badge(220000 + index, kind);
+    close_element();
+    render_source_link(index, path, line);
+    close_element();
+}
+
+render_function_details :: (
+    index: s32,
+    first_parameter: s32,
+    parameter_count: s32,
+    return_type: string,
+    first_memory: s32,
+    memory_count: s32,
+) {
+    layout: Clay_ElementDeclaration;
+    layout.layout.sizing.width = grow_axis();
+    layout.layout.sizing.height = fit_axis();
+    layout.layout.childGap = 24;
+    if reference_viewport_width >= 1120.0 {
+        layout.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    } else {
+        layout.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
+    }
+    open_indexed("function-details", index, layout);
+    parameters := column_box(10);
+    parameters.layout.sizing.width = grow_axis(280);
+    open_indexed("function-parameters", index, parameters);
+    render_section_heading(300000 + index, "Parameters", parameter_count);
+    if parameter_count > 0 {
+        render_detail_table(310000 + index, first_parameter, parameter_count, "PARAMETER", "TYPE", "DETAILS", 3);
+    } else {
+        emit_text("No parameters.", text_style(13, color(109, 107, 102), FONT_SANS, 22));
+    }
+    close_element();
+    side := column_box(20);
+    if reference_viewport_width >= 1120.0 {
+        side.layout.sizing.width = fixed_axis(300);
+    } else {
+        side.layout.sizing.width = grow_axis();
+    }
+    open_indexed("function-side", index, side);
+    emit_text("RETURN TYPE", text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 18));
+    render_signature_box(320000 + index, return_type);
+    memory := column_box(10);
+    open_indexed("function-memory", index, memory);
+    render_compact_section_heading(330000 + index, "#MEMORY CONTRACTS", memory_count);
+    if memory_count > 0 {
+        render_detail_table(340000 + index, first_memory, memory_count, "EFFECT", "TARGETS / VALUES", "", 2);
+    } else {
+        emit_text("No #memory contract declared.", text_style(13, color(109, 107, 102), FONT_SANS, 22));
+    }
+    close_element();
+    close_element();
+    close_element();
+}
+
+render_type_details :: (index: s32, symbol: Std_Symbol_Doc) {
+    if symbol.detail_kind.count == 0 return;
+    if symbol.detail_kind == "fields" {
+        render_section_heading(350000 + index, "Fields", symbol.detail_count);
+        if symbol.detail_count > 0 render_detail_table(360000 + index, symbol.first_detail, symbol.detail_count, "FIELD", "TYPE", "DETAILS", 3);
+    } else if symbol.detail_kind == "values" {
+        render_section_heading(350000 + index, "Variants", symbol.detail_count);
+        if symbol.detail_count > 0 render_detail_table(360000 + index, symbol.first_detail, symbol.detail_count, "VARIANT", "DECLARED VALUE", "", 2);
+    } else {
+        render_section_heading(350000 + index, "Variants", symbol.detail_count);
+        if symbol.detail_count > 0 render_detail_table(360000 + index, symbol.first_detail, symbol.detail_count, "VARIANT", "PAYLOAD TYPE", "", 2);
+    }
+}
+
+render_typeclass_member :: (member_index: s32) {
+    member := STD_MEMBER_DOCS[member_index];
+    card := column_box(10);
+    card.layout.padding = padding(0, 16);
+    card.border.color = color(216, 209, 197);
+    card.border.width.top = 1;
+    open_indexed("typeclass-member", member_index, card);
+    badge := "required";
+    if member.has_default badge = "default";
+    render_symbol_header(400000 + member_index, member.name, badge, member.source_path, member.source_line);
+    render_signature_box(410000 + member_index, member.signature);
+    if member.summary.count > 0 emit_text(member.summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
+    if member.kind == "method" {
+        render_function_details(
+            420000 + member_index,
+            member.first_parameter,
+            member.parameter_count,
+            member.return_type,
+            member.first_memory,
+            member.memory_count,
+        );
+    }
+    close_element();
+}
+
+render_typeclass_members :: (symbol_index: s32, symbol: Std_Symbol_Doc, member_kind: string) {
+    count := symbol.associated_count;
+    title := "Associated types";
+    if member_kind == "method" {
+        count = symbol.method_count;
+        title = "Methods";
+    }
+    if count <= 0 return;
+    section := column_box(0);
+    section.layout.padding = padding(16, 10);
+    section.border.color = color(216, 209, 197);
+    section.border.width.left = 1;
+    open_indexed("typeclass-members", 430000 + symbol_index + count, section);
+    render_section_heading(440000 + symbol_index + count, title, count);
+    relative: s32 = 0;
+    while relative < symbol.member_count {
+        member_index := symbol.first_member + relative;
+        if STD_MEMBER_DOCS[member_index].kind == member_kind render_typeclass_member(member_index);
+        relative = relative + 1;
+    }
+    close_element();
+}
+
+render_typeclass_instances :: (symbol_index: s32, symbol: Std_Symbol_Doc) {
+    if symbol.instance_count <= 0 return;
+    section := column_box(0);
+    section.layout.padding = padding(16, 10);
+    section.border.color = color(216, 209, 197);
+    section.border.width.left = 1;
+    open_indexed("instances", symbol_index, section);
+    summary: Clay_ElementDeclaration;
+    summary.layout.sizing.width = grow_axis();
+    summary.layout.sizing.height = fit_axis();
+    summary.layout.padding = padding(12, 10);
+    summary.border.color = color(23, 26, 31);
+    summary.border.width.left = 2;
+    summary.border.width.right = 2;
+    summary.border.width.top = 2;
+    summary.border.width.bottom = 2;
+    open_indexed("instances-summary", symbol_index, summary);
+    emit_text(tprint("INSTANCES (%)", symbol.instance_count), text_style(11, color(109, 107, 102), FONT_MONO_BOLD, 18));
+    close_element();
+    relative: s32 = 0;
+    while relative < symbol.instance_count {
+        instance_index := symbol.first_instance + relative;
+        instance := STD_INSTANCE_DOCS[instance_index];
+        card := column_box(10);
+        card.layout.padding = padding(0, 16);
+        card.border.color = color(216, 209, 197);
+        card.border.width.bottom = 1;
+        open_indexed("instance-card", instance_index, card);
+        render_symbol_header(460000 + instance_index, instance.head, "instance", instance.source_path, instance.source_line);
+        emit_text(instance.module, text_style(10, color(109, 107, 102), FONT_MONO_BOLD, 18));
+        render_signature_box(470000 + instance_index, instance.signature);
+        close_element();
+        relative = relative + 1;
+    }
+    close_element();
+}
+
+render_typeclass_details :: (index: s32, symbol: Std_Symbol_Doc) {
+    minimal := column_box(10);
+    minimal.layout.padding = padding(16, 10);
+    minimal.border.color = color(233, 104, 45);
+    minimal.border.width.left = 2;
+    open_indexed("minimal-implementation", index, minimal);
+    emit_text("MINIMAL COMPLETE IMPLEMENTATION", text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 18));
+    render_signature_box(480000 + index, symbol.minimal);
+    if symbol.minimal_explicit {
+        emit_text("Declared by #minimal. A comma requires both sides; a vertical bar permits either side.", text_style(13, color(109, 107, 102), FONT_SANS, 22));
+    } else {
+        emit_text("Implicit: every method without a default implementation must be supplied by an instance.", text_style(13, color(109, 107, 102), FONT_SANS, 22));
+    }
+    close_element();
+    render_typeclass_members(index, symbol, "associated-type");
+    render_typeclass_members(index, symbol, "method");
+    render_typeclass_instances(index, symbol);
+}
+
+render_symbol_card :: (index: s32) {
+    symbol := STD_SYMBOL_DOCS[index];
+    card := column_box(12);
+    card.layout.padding = padding(0, 22);
+    card.backgroundColor = color(255, 253, 248);
+    card.border.color = color(216, 209, 197);
+    card.border.width.bottom = 1;
+    open_indexed("symbol-card", index, card);
+    render_symbol_header(index, symbol.name, symbol.kind, symbol.source_path, symbol.source_line);
+    render_signature_box(index, symbol.signature);
+    if symbol.summary.count > 0 emit_text(symbol.summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
+    if symbol.kind == "type" render_type_details(index, symbol);
+    if symbol.kind == "function" || symbol.kind == "method" {
+        render_function_details(
+            index,
+            symbol.first_parameter,
+            symbol.parameter_count,
+            symbol.return_type,
+            symbol.first_memory,
+            symbol.memory_count,
+        );
+    }
+    if symbol.kind == "typeclass" render_typeclass_details(index, symbol);
+    close_element();
+}
+
+symbol_group_title :: (kind: string) -> string {
+    if kind == "type" return "Types";
+    if kind == "typeclass" return "Typeclasses";
+    if kind == "constant" return "Constants";
+    if kind == "function" return "Functions";
+    if kind == "method" return "Typeclass methods";
+    return "Declarations";
+}
+
+module_kind_count :: (module: Std_Module_Doc, kind: string) -> s32 {
+    count: s32 = 0;
+    relative: s32 = 0;
+    while relative < module.symbol_count {
+        if STD_SYMBOL_DOCS[module.first_symbol + relative].kind == kind count = count + 1;
+        relative = relative + 1;
+    }
+    return count;
+}
+
+render_standard_module :: () {
+    module := STD_MODULE_DOCS[selected_module];
+    heading: Clay_ElementDeclaration;
+    heading.layout.sizing.width = grow_axis();
+    heading.layout.sizing.height = fit_axis();
+    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    heading.layout.childGap = 18;
+    heading.layout.padding = padding(0, 20);
+    heading.border.color = color(216, 209, 197);
+    heading.border.width.bottom = 1;
+    open_element("module-heading", heading);
+    title := column_box(10);
+    title.layout.sizing.width = grow_axis();
+    open_element("module-heading-title", title);
+    emit_text("STANDARD LIBRARY MODULE", text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
+    emit_text(module.name, text_style(48, color(23, 26, 31), FONT_SERIF_BOLD, 52));
+    close_element();
+    render_source_link(9101, module.source_path, 0);
+    close_element();
+    paragraph(9100, module.summary);
+    symbol_page = clamp_page(symbol_page, module.symbol_count, SYMBOLS_PER_PAGE);
+    relative_start := symbol_page * SYMBOLS_PER_PAGE;
+    relative := relative_start;
+    previous_kind := "";
+    while relative < relative_start + SYMBOLS_PER_PAGE && relative < module.symbol_count {
+        symbol := STD_SYMBOL_DOCS[module.first_symbol + relative];
+        // Typeclass methods are rendered inside their owning typeclass, just
+        // like the original reference. They remain indexed for search.
+        if symbol.kind != "method" {
+            if symbol.kind != previous_kind {
+                render_section_heading(
+                    500000 + module.first_symbol + relative,
+                    symbol_group_title(symbol.kind),
+                    module_kind_count(module, symbol.kind),
+                );
+                previous_kind = symbol.kind;
+            }
+            render_symbol_card(module.first_symbol + relative);
+        }
+        relative = relative + 1;
+    }
+    if module.symbol_count == 0 paragraph(9102, "This module has no public declarations.");
+    render_reference_pager(
+        "previous-symbol-page", "next-symbol-page",
+        symbol_page, module.symbol_count, SYMBOLS_PER_PAGE,
+    );
+}
+
+render_standard_article :: () {
+    if selected_module < 0 {
+        render_standard_index();
+    } else {
+        render_standard_module();
+    }
+}
+
+search_result_title :: (result: Search_Result) -> string {
+    if result.kind == 0 return section_title(result.index);
+    if result.kind == 1 return STD_MODULE_DOCS[result.index].name;
+    return STD_SYMBOL_DOCS[result.index].name;
+}
+
+search_result_meta :: (result: Search_Result) -> string {
+    if result.kind == 0 return "Language manual";
+    if result.kind == 1 return tprint("Module · % symbols", STD_MODULE_DOCS[result.index].symbol_count);
+    symbol := STD_SYMBOL_DOCS[result.index];
+    return tprint("% · %", symbol.kind, STD_MODULE_DOCS[symbol.module_index].name);
+}
+
+render_search_result :: (position: s32, result: Search_Result) {
+    id := Clay_GetElementIdWithIndex(clay_string("search-result"), cast(u32)position);
+    card := column_box(12);
+    card.layout.padding = padding(20, 20);
+    card.cornerRadius = radius(0);
+    card.backgroundColor = color(255, 253, 248);
+    card.border.color = color(216, 209, 197);
+    card.border.width.left = 1;
+    card.border.width.right = 1;
+    card.border.width.top = 1;
+    card.border.width.bottom = 1;
+    if Clay_PointerOver(id) {
+        card.backgroundColor = color(248, 245, 238);
+    }
+    open_id(id, card);
+    emit_text(search_result_title(result), text_style(18, color(23, 50, 158), FONT_MONO_BOLD, 26));
+    emit_text(search_result_meta(result), text_style(10, color(109, 107, 102), FONT_MONO_BOLD, 18));
+    if result.kind == 1 {
+        emit_text(STD_MODULE_DOCS[result.index].summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
+    } else if result.kind == 2 {
+        symbol := STD_SYMBOL_DOCS[result.index];
+        render_signature_box(600000 + position, symbol.signature);
+        if symbol.summary.count > 0 {
+            emit_text(symbol.summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
+        }
+    }
+    close_element();
+}
+
+render_search_article :: () {
+    emit_text("TYPE-DIRECTED DOCUMENTATION SEARCH", text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
+    emit_text("Ask by name. Or ask by shape.", text_style(48, color(23, 26, 31), FONT_SERIF_BOLD, 52));
+    paragraph(9200, #string,oneline
+        \\Search the language manual and all public standard-library declarations. Function-shape queries such as `(int, int) -> int` unify compatible generic signatures.
+    );
+
+    if search_result_count == 0 {
+        note(9201, "Type in the search field above. Use Ctrl+K or / to focus it from anywhere.");
+        return;
+    }
+
+    emit_text(tprint("% MATCHES", search_result_count), text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
+    search_page = clamp_page(search_page, search_result_count, SEARCH_RESULTS_PER_PAGE);
+    start := search_page * SEARCH_RESULTS_PER_PAGE;
+    i := start;
+    while i < start + SEARCH_RESULTS_PER_PAGE && i < search_result_count {
+        render_search_result(i, search_results[i]);
+        i = i + 1;
+    }
+    render_reference_pager(
+        "previous-search-page", "next-search-page",
+        search_page, search_result_count, SEARCH_RESULTS_PER_PAGE,
+    );
+}
+
+handle_standard_navigation :: () {
+    i: s32 = 0;
+    while i < STD_MODULE_COUNT {
+        id := Clay_GetElementIdWithIndex(clay_string("module-nav-row"), cast(u32)i);
+        if Clay_PointerOver(id) {
+            selected_module = i;
+            module_page = i / MODULES_PER_PAGE;
+            symbol_page = 0;
+            return;
+        }
+        i = i + 1;
+    }
+
+    if selected_module < 0 {
+        card_start := module_page * MODULES_PER_PAGE;
+        i = card_start;
+        while i < card_start + MODULES_PER_PAGE && i < STD_MODULE_COUNT {
+            id := Clay_GetElementIdWithIndex(clay_string("module-card"), cast(u32)i);
+            if Clay_PointerOver(id) {
+                selected_module = i;
+                symbol_page = 0;
+                return;
+            }
+            i = i + 1;
+        }
+        if module_page > 0 && Clay_PointerOver(Clay_GetElementId(clay_string("previous-module-page"))) {
+            module_page = module_page - 1;
+        }
+        if (module_page + 1) * MODULES_PER_PAGE < STD_MODULE_COUNT &&
+           Clay_PointerOver(Clay_GetElementId(clay_string("next-module-page"))) {
+            module_page = module_page + 1;
+        }
+        return;
+    }
+
+    module := STD_MODULE_DOCS[selected_module];
+    if symbol_page > 0 && Clay_PointerOver(Clay_GetElementId(clay_string("previous-symbol-page"))) {
+        symbol_page = symbol_page - 1;
+    }
+    if (symbol_page + 1) * SYMBOLS_PER_PAGE < module.symbol_count &&
+       Clay_PointerOver(Clay_GetElementId(clay_string("next-symbol-page"))) {
+        symbol_page = symbol_page + 1;
+    }
+}
+
+handle_search_navigation :: () {
+    start := search_page * SEARCH_RESULTS_PER_PAGE;
+    i := start;
+    while i < start + SEARCH_RESULTS_PER_PAGE && i < search_result_count {
+        id := Clay_GetElementIdWithIndex(clay_string("search-result"), cast(u32)i);
+        if Clay_PointerOver(id) {
+            result := search_results[i];
+            if result.kind == 0 {
+                selected_section = result.index;
+                app_view = APP_VIEW_MANUAL;
+            } else if result.kind == 1 {
+                selected_module = result.index;
+                module_page = result.index / MODULES_PER_PAGE;
+                symbol_page = 0;
+                app_view = APP_VIEW_STANDARD_LIBRARY;
+            } else {
+                symbol := STD_SYMBOL_DOCS[result.index];
+                selected_module = symbol.module_index;
+                module := STD_MODULE_DOCS[selected_module];
+                symbol_page = (result.index - module.first_symbol) / SYMBOLS_PER_PAGE;
+                app_view = APP_VIEW_STANDARD_LIBRARY;
+            }
+            return;
+        }
+        i = i + 1;
+    }
+    if search_page > 0 && Clay_PointerOver(Clay_GetElementId(clay_string("previous-search-page"))) {
+        search_page = search_page - 1;
+    }
+    if (search_page + 1) * SEARCH_RESULTS_PER_PAGE < search_result_count &&
+       Clay_PointerOver(Clay_GetElementId(clay_string("next-search-page"))) {
+        search_page = search_page + 1;
+    }
+}

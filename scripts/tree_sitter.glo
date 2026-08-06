@@ -1,0 +1,94 @@
+// Synchronize Tree-sitter query data into the browser host.
+
+TREE_SITTER_QUERY_BEGIN :: "// BEGIN GENERATED TREE-SITTER QUERY\n";
+TREE_SITTER_QUERY_END :: "// END GENERATED TREE-SITTER QUERY";
+
+tree_sitter_write_escaped_string :: (
+    out: *String_Builder,
+    value: string,
+) {
+    builder_write_byte(out, #char "\"");
+    i: s64 = 0;
+    while i < value.count {
+        byte := value[i];
+        if byte == #char "\"" {
+            write_string(out, "\\\"");
+        } else if byte == #char "\\" {
+            write_string(out, "\\\\");
+        } else if byte == #char "\n" {
+            write_string(out, "\\n");
+        } else if byte == #char "\r" {
+            write_string(out, "\\r");
+        } else if byte == #char "\t" {
+            write_string(out, "\\t");
+        } else if byte < 32 {
+            write_string(out, " ");
+        } else if i + 2 < value.count && byte == 16#e2 &&
+                  value[i + 1] == 16#80 &&
+                  (value[i + 2] == 16#a8 || value[i + 2] == 16#a9) {
+            if value[i + 2] == 16#a8 write_string(out, "\\u2028");
+            else write_string(out, "\\u2029");
+            i += 2;
+        } else {
+            builder_write_byte(out, byte);
+        }
+        i += 1;
+    }
+    builder_write_byte(out, #char "\"");
+}
+
+tree_sitter_append_text :: (path: string, text: string) -> bool {
+    opened := append_file(path);
+    if result_is_err(opened) return false;
+    file := opened.Ok;
+    wrote := write(file, text);
+    closed := close_file(file);
+    return result_is_ok(wrote) && wrote.Ok == text.count &&
+        result_is_ok(closed);
+}
+
+sync_tree_sitter :: () -> bool {
+    query_result := read_file("tree-sitter/highlights.scm", 1024 * 1024);
+    app_result := read_file("app.js", 4 * 1024 * 1024);
+    query: string;
+    app: string;
+    if query_result == {
+        case .Err;
+            print("could not read tree-sitter/highlights.scm\n");
+            return false;
+        case .Ok; query = query_result.Ok;
+    }
+    if app_result == {
+        case .Err;
+            print("could not read app.js\n");
+            return false;
+        case .Ok; app = app_result.Ok;
+    }
+
+    begin := index_of(app, TREE_SITTER_QUERY_BEGIN);
+    if begin < 0 {
+        print("app.js is missing the Tree-sitter query begin marker\n");
+        return false;
+    }
+    content_start := begin + TREE_SITTER_QUERY_BEGIN.count;
+    finish := index_of_from(app, TREE_SITTER_QUERY_END, content_start);
+    if finish < 0 {
+        print("app.js is missing the Tree-sitter query end marker\n");
+        return false;
+    }
+
+    replacement := builder_make_len_cap(0, query.count + 128);
+    write_string(*replacement, "const GLOSSO_HIGHLIGHTS_QUERY = ");
+    tree_sitter_write_escaped_string(*replacement, query);
+    write_string(*replacement, ";\n");
+    replacement_text := builder_into_temporary_string(replacement);
+    initialized := write_file("app.js", app[0..content_start]);
+    if result_is_err(initialized) ||
+       !tree_sitter_append_text("app.js", replacement_text) ||
+       !tree_sitter_append_text("app.js", app[finish..app.count]) {
+        print("could not update app.js\n");
+        return false;
+    }
+    print("Embedded % bytes from tree-sitter/highlights.scm into app.js.\n", query.count);
+    return true;
+}

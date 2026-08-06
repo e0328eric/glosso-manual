@@ -1,0 +1,863 @@
+// Standard-library reference generator invoked by first.glo.
+
+#import "File_System";
+#import "Format";
+#import "Io";
+#import "Serialization/Json";
+#import "Sort";
+#import "String_Builder";
+#import "Strings/Utf8";
+
+reference_json_field :: (
+    value: *Serialization_Value,
+    name: string,
+) -> *Serialization_Value {
+    if value == null return null;
+    return serialization_field_value(value, name);
+}
+
+reference_json_text :: (
+    value: *Serialization_Value,
+    name: string,
+    fallback: string = "",
+) -> string {
+    field := reference_json_field(value, name);
+    if field == null return fallback;
+    if #partial field.* == {
+        case .text; return field.*.text;
+    }
+    return fallback;
+}
+
+reference_json_bool :: (
+    value: *Serialization_Value,
+    name: string,
+    fallback: bool = false,
+) -> bool {
+    field := reference_json_field(value, name);
+    if field == null return fallback;
+    if #partial field.* == {
+        case .boolean; return field.*.boolean;
+    }
+    return fallback;
+}
+
+reference_json_int :: (
+    value: *Serialization_Value,
+    name: string,
+    fallback: s64 = 0,
+) -> s64 {
+    field := reference_json_field(value, name);
+    if field == null return fallback;
+    if #partial field.* == {
+        case .signed_integer; return cast(s64)field.*.signed_integer;
+        case .unsigned_integer; return cast(s64)field.*.unsigned_integer;
+        case .floating; return cast(s64)field.*.floating;
+    }
+    return fallback;
+}
+
+reference_json_array :: (
+    value: *Serialization_Value,
+    name: string,
+) -> []Serialization_Value {
+    empty: []Serialization_Value;
+    field := reference_json_field(value, name);
+    if field == null return empty;
+    if #partial field.* == {
+        case .sequence; return array_view(field.*.sequence);
+    }
+    return empty;
+}
+
+reference_root_array :: (value: *Serialization_Value) -> []Serialization_Value {
+    empty: []Serialization_Value;
+    if #partial value.* == {
+        case .sequence; return array_view(value.*.sequence);
+    }
+    return empty;
+}
+
+reference_is_space :: (byte: u8) -> bool {
+    return byte == #char " " || byte == #char "\t" ||
+        byte == #char "\n" || byte == #char "\r" ||
+        byte == 11 || byte == 12;
+}
+
+reference_one_line :: (value: string) -> string {
+    out := builder_make_len_cap(0, value.count);
+    pending_space := false;
+    wrote := false;
+    for i: 0..value.count {
+        byte := value[i];
+        if reference_is_space(byte) {
+            if wrote pending_space = true;
+            continue;
+        }
+        if pending_space {
+            builder_write_byte(*out, #char " ");
+            pending_space = false;
+        }
+        builder_write_byte(*out, byte);
+        wrote = true;
+    }
+    return builder_into_string(out);
+}
+
+reference_compact_summary :: (value: string, limit: s64 = 150) -> string {
+    summary := value;
+    if summary.count <= limit return summary;
+    cut := limit;
+    i := limit - 1;
+    while i >= 0 {
+        if summary[i] == #char " " {
+            if i > limit * 3 / 5 cut = i;
+            break;
+        }
+        i -= 1;
+    }
+    out := builder_make_len_cap(0, cut + 3);
+    write_string(*out, summary[0..cut]);
+    write_string(*out, "...");
+    return builder_into_string(out);
+}
+
+reference_join_json_texts :: (
+    values: []Serialization_Value,
+    separator: string,
+) -> string {
+    out := builder_make_len_cap(0, values.count * 8);
+    wrote := false;
+    for i: 0..values.count {
+        value := *values[i];
+        text := reference_json_text(value, "");
+        if text.count == 0 {
+            if #partial value.* == {
+                case .text; text = value.*.text;
+            }
+        }
+        if text.count == 0 continue;
+        if wrote write_string(*out, separator);
+        write_string(*out, text);
+        wrote = true;
+    }
+    return builder_into_string(out);
+}
+
+reference_details_cell :: (value: *Serialization_Value) -> string {
+    out := builder_make_len_cap(0, 32);
+    wrote := false;
+    modifiers := reference_json_array(value, "modifiers");
+    if modifiers.count > 0 {
+        write_string(*out, reference_join_json_texts(modifiers, ", "));
+        wrote = true;
+    }
+    default_value := reference_json_text(value, "defaultValue");
+    if default_value.count > 0 {
+        if wrote write_string(*out, " / ");
+        write_string(*out, "Default: ");
+        write_string(*out, default_value);
+        wrote = true;
+    }
+    if !wrote write_string(*out, "-");
+    return builder_into_string(out);
+}
+
+reference_kind_order :: (kind: string) -> s64 {
+    if kind == "type" return 0;
+    if kind == "typeclass" return 1;
+    if kind == "constant" return 2;
+    if kind == "function" return 3;
+    if kind == "method" return 4;
+    return 99;
+}
+
+reference_collation_weight :: (byte: u8) -> s64 {
+    if byte == #char "_" return 1;
+    if byte == #char "-" return 2;
+    if byte == #char "!" return 3;
+    if byte == #char "." return 4;
+    if byte == #char "[" || byte == #char "]" return 5;
+    if byte == #char "*" return 6;
+    if byte == #char "/" return 7;
+    if byte == #char "&" return 8;
+    if byte == #char "%" return 9;
+    if byte == #char "^" return 10;
+    if byte == #char "+" return 11;
+    if byte == #char "<" return 12;
+    if byte == #char "=" return 13;
+    if byte == #char ">" return 14;
+    if byte == #char "|" return 15;
+    if byte == #char "~" return 16;
+    if byte >= #char "0" && byte <= #char "9"
+        return 100 + cast(s64)(byte - #char "0");
+    if byte >= #char "A" && byte <= #char "Z"
+        return 200 + cast(s64)(byte - #char "A");
+    if byte >= #char "a" && byte <= #char "z"
+        return 200 + cast(s64)(byte - #char "a");
+    return 50 + cast(s64)byte;
+}
+
+reference_compare_strings :: (left: string, right: string) -> Ordering {
+    count := left.count;
+    if right.count < count count = right.count;
+    for i: 0..count {
+        left_weight := reference_collation_weight(left[i]);
+        right_weight := reference_collation_weight(right[i]);
+        if left_weight != right_weight return left_weight <=> right_weight;
+    }
+    if left.count != right.count return left.count <=> right.count;
+    for i: 0..count {
+        if left[i] == right[i] continue;
+        left_upper := left[i] >= #char "A" && left[i] <= #char "Z";
+        right_upper := right[i] >= #char "A" && right[i] <= #char "Z";
+        if left_upper != right_upper return cast(s64)left_upper <=> cast(s64)right_upper;
+        return left[i] <=> right[i];
+    }
+    return Ordering.Equal;
+}
+
+reference_compare_symbols :: (
+    left: *Serialization_Value,
+    right: *Serialization_Value,
+) -> Ordering {
+    left_kind := reference_kind_order(reference_json_text(left, "kind"));
+    right_kind := reference_kind_order(reference_json_text(right, "kind"));
+    if left_kind != right_kind return left_kind <=> right_kind;
+    left_name := reference_json_text(left, "name");
+    right_name := reference_json_text(right, "name");
+    return reference_compare_strings(left_name, right_name);
+}
+
+reference_add_search_piece :: (out: *String_Builder, value: string) {
+    if value.count == 0 return;
+    if builder_len(out.*) > 0 builder_write_byte(out, #char " ");
+    write_string(out, value);
+}
+
+reference_manual_body :: (section: *Serialization_Value) -> string {
+    raw := builder_make_len_cap(0, 256);
+    blocks := reference_json_array(section, "blocks");
+    for i: 0..blocks.count {
+        block := *blocks[i];
+        reference_add_search_piece(*raw, reference_json_text(block, "text"));
+        names: [3]string = .["items", "columns", "rows"];
+        for name: names {
+            values := reference_json_array(block, name);
+            for j: 0..values.count {
+                value := *values[j];
+                if #partial value.* == {
+                    case .text;
+                        reference_add_search_piece(*raw, value.*.text);
+                    case .sequence;
+                        nested := array_view(value.*.sequence);
+                        for k: 0..nested.count {
+                            cell := *nested[k];
+                            if #partial cell.* == {
+                                case .text;
+                                    reference_add_search_piece(*raw, cell.*.text);
+                            }
+                        }
+                }
+            }
+        }
+    }
+    return reference_one_line(builder_into_string(raw));
+}
+
+reference_exported_json :: (snapshot: string, name: string) -> string {
+    marker := str_cat(str_cat("export const ", name), " = ");
+    marker_index := index_of(snapshot, marker);
+    if marker_index < 0 return "";
+    start := index_of_from(snapshot, "[", marker_index + marker.count);
+    if start < 0 return "";
+    depth: s64 = 0;
+    quoted := false;
+    escaped := false;
+    i := start;
+    while i < snapshot.count {
+        character := snapshot[i];
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if character == #char "\\" {
+                escaped = true;
+            } else if character == #char "\"" {
+                quoted = false;
+            }
+            i += 1;
+            continue;
+        }
+        if character == #char "\"" {
+            quoted = true;
+        } else if character == #char "[" {
+            depth += 1;
+        } else if character == #char "]" {
+            depth -= 1;
+            if depth == 0 return snapshot[start..i + 1];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+reference_write_integer :: (out: *String_Builder, value: s64) {
+    write_string(out, format_int(value, 10));
+}
+
+reference_write_boolean :: (out: *String_Builder, value: bool) {
+    if value write_string(out, "true");
+    else write_string(out, "false");
+}
+
+reference_write_escaped_string :: (
+    out: *String_Builder,
+    value: string,
+    glosso: bool,
+) {
+    builder_write_byte(out, #char "\"");
+    i: s64 = 0;
+    while i < value.count {
+        byte := value[i];
+        if byte == #char "\"" {
+            write_string(out, "\\\"");
+        } else if byte == #char "\\" {
+            write_string(out, "\\\\");
+        } else if byte == #char "\n" {
+            write_string(out, "\\n");
+        } else if byte == #char "\r" {
+            write_string(out, "\\r");
+        } else if byte == #char "\t" {
+            write_string(out, "\\t");
+        } else if byte < 32 {
+            write_string(out, " ");
+        } else if i + 2 < value.count && byte == 16#e2 &&
+                  value[i + 1] == 16#80 &&
+                  (value[i + 2] == 16#a8 || value[i + 2] == 16#a9) {
+            if glosso {
+                if value[i + 2] == 16#a8 write_string(out, "\\u{2028}");
+                else write_string(out, "\\u{2029}");
+            } else {
+                if value[i + 2] == 16#a8 write_string(out, "\\u2028");
+                else write_string(out, "\\u2029");
+            }
+            i += 2;
+        } else {
+            builder_write_byte(out, byte);
+        }
+        i += 1;
+    }
+    builder_write_byte(out, #char "\"");
+}
+
+reference_stream_detail_row :: (
+    out: *String_Builder,
+    first: string,
+    second: string,
+    third: string = "",
+) {
+    write_string(out, "    .{ .first = ");
+    reference_write_escaped_string(out, first, true);
+    write_string(out, ", .second = ");
+    reference_write_escaped_string(out, second, true);
+    write_string(out, ", .third = ");
+    reference_write_escaped_string(out, third, true);
+    write_string(out, " },\n");
+}
+
+reference_stream_function_rows :: (
+    function: *Serialization_Value,
+    details: *String_Builder,
+    detail_count: *s64,
+) -> (s64, s64, string, s64, s64) {
+    first_parameter := detail_count.*;
+    if function == null
+        return first_parameter, 0, "", detail_count.*, 0;
+
+    parameters := reference_json_array(function, "parameters");
+    for i: 0..parameters.count {
+        parameter := *parameters[i];
+        reference_stream_detail_row(
+            details,
+            reference_json_text(parameter, "name"),
+            reference_json_text(parameter, "type"),
+            reference_details_cell(parameter),
+        );
+        detail_count.* += 1;
+    }
+    parameter_count := detail_count.* - first_parameter;
+    return_type := reference_json_text(function, "returnType");
+    first_memory := detail_count.*;
+    contracts := reference_json_array(function, "memoryContracts");
+    for i: 0..contracts.count {
+        contract := *contracts[i];
+        arguments := reference_json_array(contract, "arguments");
+        argument_text := "-";
+        if arguments.count > 0
+            argument_text = reference_join_json_texts(arguments, ", ");
+        reference_stream_detail_row(
+            details,
+            reference_json_text(contract, "effect"),
+            argument_text,
+        );
+        detail_count.* += 1;
+    }
+    return first_parameter, parameter_count, return_type,
+        first_memory, detail_count.* - first_memory;
+}
+
+reference_stream_type_details :: (
+    symbol: *Serialization_Value,
+    details: *String_Builder,
+    detail_count: *s64,
+) -> (string, s64, s64) {
+    first := detail_count.*;
+    kind := "";
+    type_info := reference_json_field(symbol, "typeInfo");
+    if type_info == null return kind, first, 0;
+    type_kind := reference_json_text(type_info, "kind");
+    if type_kind == "struct" {
+        kind = "fields";
+        fields := reference_json_array(type_info, "fields");
+        for i: 0..fields.count {
+            field := *fields[i];
+            reference_stream_detail_row(
+                details,
+                reference_json_text(field, "name"),
+                reference_json_text(field, "type"),
+                reference_details_cell(field),
+            );
+            detail_count.* += 1;
+        }
+    } else if type_kind == "union" || type_kind == "enum" {
+        if type_kind == "union" kind = "variants";
+        else kind = "values";
+        variants := reference_json_array(type_info, "variants");
+        for i: 0..variants.count {
+            variant := *variants[i];
+            second := "-";
+            if type_kind == "enum" second = "automatic";
+            value := reference_json_text(variant, "type");
+            if type_kind == "enum" value = reference_json_text(variant, "value");
+            if value.count > 0 second = value;
+            reference_stream_detail_row(
+                details,
+                reference_json_text(variant, "name"),
+                second,
+            );
+            detail_count.* += 1;
+        }
+    }
+    return kind, first, detail_count.* - first;
+}
+
+reference_stream_typeclass_members :: (
+    symbol: *Serialization_Value,
+    details: *String_Builder,
+    detail_count: *s64,
+    members_out: *String_Builder,
+    member_count: *s64,
+) -> (string, bool, s64, s64, s64, s64) {
+    first := member_count.*;
+    associated: s64 = 0;
+    methods: s64 = 0;
+    minimal := "No methods are required.";
+    explicit := false;
+    typeclass := reference_json_field(symbol, "typeclass");
+    if typeclass == null return minimal, explicit, first, 0, associated, methods;
+    raw_minimal := reference_json_text(typeclass, "minimal");
+    if raw_minimal.count > 0 minimal = raw_minimal;
+    explicit = reference_json_bool(typeclass, "minimalExplicit");
+    members := reference_json_array(typeclass, "members");
+    for i: 0..members.count {
+        member := *members[i];
+        kind := reference_json_text(member, "kind");
+        if kind == "associated-type" associated += 1;
+        if kind == "method" methods += 1;
+        first_parameter, parameter_count, return_type,
+            first_memory, memory_count := reference_stream_function_rows(
+                reference_json_field(member, "function"),
+                details,
+                detail_count,
+            );
+        write_string(members_out, "    .{ .name = ");
+        reference_write_escaped_string(members_out, reference_json_text(member, "name"), true);
+        write_string(members_out, ", .signature = ");
+        reference_write_escaped_string(members_out, reference_json_text(member, "signature"), true);
+        write_string(members_out, ", .summary = ");
+        reference_write_escaped_string(members_out, reference_one_line(reference_json_text(member, "summary")), true);
+        write_string(members_out, ", .source_path = ");
+        reference_write_escaped_string(members_out, reference_json_text(member, "sourcePath"), true);
+        write_string(members_out, ", .source_line = "); reference_write_integer(members_out, reference_json_int(member, "sourceLine"));
+        write_string(members_out, ", .kind = "); reference_write_escaped_string(members_out, kind, true);
+        write_string(members_out, ", .has_default = "); reference_write_boolean(members_out, reference_json_bool(member, "hasDefault"));
+        write_string(members_out, ", .first_parameter = "); reference_write_integer(members_out, first_parameter);
+        write_string(members_out, ", .parameter_count = "); reference_write_integer(members_out, parameter_count);
+        write_string(members_out, ", .return_type = "); reference_write_escaped_string(members_out, return_type, true);
+        write_string(members_out, ", .first_memory = "); reference_write_integer(members_out, first_memory);
+        write_string(members_out, ", .memory_count = "); reference_write_integer(members_out, memory_count);
+        write_string(members_out, " },\n");
+        member_count.* += 1;
+    }
+    return minimal, explicit, first, member_count.* - first, associated, methods;
+}
+
+reference_stream_instances :: (
+    symbol: *Serialization_Value,
+    all_instances: []Serialization_Value,
+    instances_out: *String_Builder,
+    instance_count: *s64,
+) -> (s64, s64) {
+    first := instance_count.*;
+    if reference_json_text(symbol, "kind") != "typeclass" return first, 0;
+    typeclass := reference_json_text(symbol, "name");
+    for i: 0..all_instances.count {
+        instance := *all_instances[i];
+        if reference_json_text(instance, "typeclass") != typeclass continue;
+        write_string(instances_out, "    .{ .head = ");
+        reference_write_escaped_string(instances_out, reference_json_text(instance, "head"), true);
+        write_string(instances_out, ", .signature = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "signature"), true);
+        write_string(instances_out, ", .module = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "module"), true);
+        write_string(instances_out, ", .source_path = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "sourcePath"), true);
+        write_string(instances_out, ", .source_line = "); reference_write_integer(instances_out, reference_json_int(instance, "sourceLine"));
+        write_string(instances_out, ", .negative = "); reference_write_boolean(instances_out, reference_json_bool(instance, "negative"));
+        write_string(instances_out, " },\n");
+        instance_count.* += 1;
+    }
+    return first, instance_count.* - first;
+}
+
+reference_flush_builder_to_file :: (
+    file: File,
+    builder: *String_Builder,
+) -> bool {
+    if builder_len(builder.*) == 0 return true;
+    wrote := write(file, to_string(builder.*));
+    if result_is_err(wrote) || wrote.Ok != builder_len(builder.*) return false;
+    builder_reset(builder);
+    return true;
+}
+
+reference_flush_large_builder_to_file :: (
+    file: File,
+    builder: *String_Builder,
+) -> bool {
+    if builder_len(builder.*) < 96 * 1024 return true;
+    return reference_flush_builder_to_file(file, builder);
+}
+
+reference_generate_outputs :: (
+    manual: []Serialization_Value,
+    modules: []Serialization_Value,
+    instances: []Serialization_Value,
+) -> bool {
+    glo_modules := builder_make_len_cap(0, 128 * 1024);
+    glo_symbols := builder_make_len_cap(0, 128 * 1024);
+    glo_details := builder_make_len_cap(0, 128 * 1024);
+    glo_members := builder_make_len_cap(0, 128 * 1024);
+    glo_instances := builder_make_len_cap(0, 128 * 1024);
+    js_modules := builder_make_len_cap(0, 128 * 1024);
+    js_symbols := builder_make_len_cap(0, 128 * 1024);
+    js_manual := builder_make_len_cap(0, 128 * 1024);
+    part_paths: [8]string = .[
+        "build/reference-modules.glo.part",
+        "build/reference-symbols.glo.part",
+        "build/reference-details.glo.part",
+        "build/reference-members.glo.part",
+        "build/reference-instances.glo.part",
+        "build/reference-modules.js.part",
+        "build/reference-symbols.js.part",
+        "build/reference-manual.js.part",
+    ];
+    part_files: [8]File;
+    for i: 0..part_paths.count {
+        initialized := write_file(part_paths[i], "");
+        if result_is_err(initialized) return false;
+        opened := open_read_write(part_paths[i]);
+        if result_is_err(opened) return false;
+        part_files[i] = opened.Ok;
+    }
+    symbol_count: s64 = 0;
+    detail_count: s64 = 0;
+    member_count: s64 = 0;
+    instance_count: s64 = 0;
+
+    for module_index: 0..modules.count {
+        module := *modules[module_index];
+        first_symbol := symbol_count;
+        raw_symbols := reference_json_array(module, "symbols");
+        ordered: [..]*Serialization_Value;
+        for i: 0..raw_symbols.count array_add(*ordered, *raw_symbols[i]);
+        _ := sort_by(array_view(ordered), reference_compare_symbols);
+        for i: 0..ordered.count {
+            symbol := ordered[i];
+            detail_kind, first_detail, type_detail_count :=
+                reference_stream_type_details(symbol, *glo_details, *detail_count);
+            first_parameter, parameter_count, return_type,
+                first_memory, memory_count := reference_stream_function_rows(
+                    reference_json_field(symbol, "function"),
+                    *glo_details,
+                    *detail_count,
+                );
+            minimal, minimal_explicit, first_member, symbol_member_count,
+                associated_count, method_count := reference_stream_typeclass_members(
+                    symbol,
+                    *glo_details,
+                    *detail_count,
+                    *glo_members,
+                    *member_count,
+                );
+            first_instance, symbol_instance_count := reference_stream_instances(
+                symbol,
+                instances,
+                *glo_instances,
+                *instance_count,
+            );
+            name := reference_json_text(symbol, "name");
+            signature := reference_json_text(symbol, "signature");
+            searchable_signature := reference_json_text(symbol, "searchableSignature");
+            summary := reference_one_line(reference_json_text(symbol, "summary"));
+            kind := reference_json_text(symbol, "kind");
+
+            write_string(*glo_symbols, "    .{ .name = "); reference_write_escaped_string(*glo_symbols, name, true);
+            write_string(*glo_symbols, ", .signature = "); reference_write_escaped_string(*glo_symbols, signature, true);
+            write_string(*glo_symbols, ", .searchable_signature = "); reference_write_escaped_string(*glo_symbols, searchable_signature, true);
+            write_string(*glo_symbols, ", .summary = "); reference_write_escaped_string(*glo_symbols, summary, true);
+            write_string(*glo_symbols, ", .source_path = "); reference_write_escaped_string(*glo_symbols, reference_json_text(symbol, "sourcePath"), true);
+            write_string(*glo_symbols, ", .source_line = "); reference_write_integer(*glo_symbols, reference_json_int(symbol, "sourceLine"));
+            write_string(*glo_symbols, ", .kind = "); reference_write_escaped_string(*glo_symbols, kind, true);
+            write_string(*glo_symbols, ", .module_index = "); reference_write_integer(*glo_symbols, module_index);
+            write_string(*glo_symbols, ", .first_instance = "); reference_write_integer(*glo_symbols, first_instance);
+            write_string(*glo_symbols, ", .instance_count = "); reference_write_integer(*glo_symbols, symbol_instance_count);
+            write_string(*glo_symbols, ", .detail_kind = "); reference_write_escaped_string(*glo_symbols, detail_kind, true);
+            write_string(*glo_symbols, ", .first_detail = "); reference_write_integer(*glo_symbols, first_detail);
+            write_string(*glo_symbols, ", .detail_count = "); reference_write_integer(*glo_symbols, type_detail_count);
+            write_string(*glo_symbols, ", .first_parameter = "); reference_write_integer(*glo_symbols, first_parameter);
+            write_string(*glo_symbols, ", .parameter_count = "); reference_write_integer(*glo_symbols, parameter_count);
+            write_string(*glo_symbols, ", .return_type = "); reference_write_escaped_string(*glo_symbols, return_type, true);
+            write_string(*glo_symbols, ", .first_memory = "); reference_write_integer(*glo_symbols, first_memory);
+            write_string(*glo_symbols, ", .memory_count = "); reference_write_integer(*glo_symbols, memory_count);
+            write_string(*glo_symbols, ", .minimal = "); reference_write_escaped_string(*glo_symbols, minimal, true);
+            write_string(*glo_symbols, ", .minimal_explicit = "); reference_write_boolean(*glo_symbols, minimal_explicit);
+            write_string(*glo_symbols, ", .first_member = "); reference_write_integer(*glo_symbols, first_member);
+            write_string(*glo_symbols, ", .member_count = "); reference_write_integer(*glo_symbols, symbol_member_count);
+            write_string(*glo_symbols, ", .associated_count = "); reference_write_integer(*glo_symbols, associated_count);
+            write_string(*glo_symbols, ", .method_count = "); reference_write_integer(*glo_symbols, method_count);
+            write_string(*glo_symbols, " },\n");
+
+            if symbol_count > 0 builder_write_byte(*js_symbols, #char ",");
+            builder_write_byte(*js_symbols, #char "[");
+            reference_write_escaped_string(*js_symbols, name, false); builder_write_byte(*js_symbols, #char ",");
+            reference_write_escaped_string(*js_symbols, signature, false); builder_write_byte(*js_symbols, #char ",");
+            reference_write_escaped_string(*js_symbols, searchable_signature, false); builder_write_byte(*js_symbols, #char ",");
+            reference_write_escaped_string(*js_symbols, summary, false); builder_write_byte(*js_symbols, #char ",");
+            reference_write_integer(*js_symbols, module_index); builder_write_byte(*js_symbols, #char ",");
+            reference_write_escaped_string(*js_symbols, kind, false); builder_write_byte(*js_symbols, #char "]");
+            symbol_count += 1;
+            if !reference_flush_large_builder_to_file(part_files[1], *glo_symbols) ||
+               !reference_flush_large_builder_to_file(part_files[2], *glo_details) ||
+               !reference_flush_large_builder_to_file(part_files[3], *glo_members) ||
+               !reference_flush_large_builder_to_file(part_files[4], *glo_instances) ||
+               !reference_flush_large_builder_to_file(part_files[6], *js_symbols)
+                return false;
+        }
+        array_free(*ordered);
+        module_summary := reference_one_line(reference_json_text(module, "summary"));
+        module_name := reference_json_text(module, "name");
+        module_symbol_count := symbol_count - first_symbol;
+        write_string(*glo_modules, "    .{ .name = "); reference_write_escaped_string(*glo_modules, module_name, true);
+        write_string(*glo_modules, ", .summary = "); reference_write_escaped_string(*glo_modules, module_summary, true);
+        write_string(*glo_modules, ", .compact_summary = "); reference_write_escaped_string(*glo_modules, reference_compact_summary(module_summary), true);
+        write_string(*glo_modules, ", .source_path = "); reference_write_escaped_string(*glo_modules, reference_json_text(module, "sourcePath"), true);
+        write_string(*glo_modules, ", .first_symbol = "); reference_write_integer(*glo_modules, first_symbol);
+        write_string(*glo_modules, ", .symbol_count = "); reference_write_integer(*glo_modules, module_symbol_count);
+        write_string(*glo_modules, " },\n");
+
+        if module_index > 0 builder_write_byte(*js_modules, #char ",");
+        builder_write_byte(*js_modules, #char "[");
+        reference_write_escaped_string(*js_modules, module_name, false); builder_write_byte(*js_modules, #char ",");
+        reference_write_escaped_string(*js_modules, module_summary, false); builder_write_byte(*js_modules, #char ",");
+        reference_write_integer(*js_modules, first_symbol); builder_write_byte(*js_modules, #char ",");
+        reference_write_integer(*js_modules, module_symbol_count); builder_write_byte(*js_modules, #char "]");
+        if !reference_flush_large_builder_to_file(part_files[0], *glo_modules) ||
+           !reference_flush_large_builder_to_file(part_files[5], *js_modules)
+            return false;
+    }
+
+    for i: 0..manual.count {
+        section := *manual[i];
+        if i > 0 builder_write_byte(*js_manual, #char ",");
+        builder_write_byte(*js_manual, #char "[");
+        reference_write_escaped_string(*js_manual, reference_json_text(section, "title"), false);
+        builder_write_byte(*js_manual, #char ",");
+        reference_write_escaped_string(*js_manual, reference_manual_body(section), false);
+        builder_write_byte(*js_manual, #char "]");
+        if !reference_flush_large_builder_to_file(part_files[7], *js_manual)
+            return false;
+    }
+    part_builders: [8]*String_Builder = .[
+        *glo_modules,
+        *glo_symbols,
+        *glo_details,
+        *glo_members,
+        *glo_instances,
+        *js_modules,
+        *js_symbols,
+        *js_manual,
+    ];
+    for i: 0..part_paths.count {
+        if !reference_flush_builder_to_file(part_files[i], part_builders[i])
+            return false;
+        closed := close_in_place(*part_files[i]);
+        if result_is_err(closed) return false;
+    }
+
+    glo := builder_make_len_cap(0, 16 * 1024);
+    write_string(*glo, #string
+        \\// Generated by `glosso first.glo -- gen-reference`. Do not edit by hand.
+        \\
+        \\Std_Module_Doc :: struct {
+        \\    name: string;
+        \\    summary: string;
+        \\    compact_summary: string;
+        \\    source_path: string;
+        \\    first_symbol: s32;
+        \\    symbol_count: s32;
+        \\}
+        \\
+        \\Std_Symbol_Doc :: struct {
+        \\    name: string;
+        \\    signature: string;
+        \\    searchable_signature: string;
+        \\    summary: string;
+        \\    source_path: string;
+        \\    source_line: s32;
+        \\    kind: string;
+        \\    module_index: s32;
+        \\    first_instance: s32;
+        \\    instance_count: s32;
+        \\    detail_kind: string;
+        \\    first_detail: s32;
+        \\    detail_count: s32;
+        \\    first_parameter: s32;
+        \\    parameter_count: s32;
+        \\    return_type: string;
+        \\    first_memory: s32;
+        \\    memory_count: s32;
+        \\    minimal: string;
+        \\    minimal_explicit: bool;
+        \\    first_member: s32;
+        \\    member_count: s32;
+        \\    associated_count: s32;
+        \\    method_count: s32;
+        \\}
+        \\
+        \\Std_Detail_Row_Doc :: struct {
+        \\    first: string;
+        \\    second: string;
+        \\    third: string;
+        \\}
+        \\
+        \\Std_Member_Doc :: struct {
+        \\    name: string;
+        \\    signature: string;
+        \\    summary: string;
+        \\    source_path: string;
+        \\    source_line: s32;
+        \\    kind: string;
+        \\    has_default: bool;
+        \\    first_parameter: s32;
+        \\    parameter_count: s32;
+        \\    return_type: string;
+        \\    first_memory: s32;
+        \\    memory_count: s32;
+        \\}
+        \\
+        \\Std_Instance_Doc :: struct {
+        \\    head: string;
+        \\    signature: string;
+        \\    module: string;
+        \\    source_path: string;
+        \\    source_line: s32;
+        \\    negative: bool;
+        \\}
+        \\
+    );
+    write_string(*glo, "\n");
+    write_string(*glo, "STD_MODULE_COUNT :: "); reference_write_integer(*glo, modules.count); write_string(*glo, ";\n");
+    write_string(*glo, "STD_SYMBOL_COUNT :: "); reference_write_integer(*glo, symbol_count); write_string(*glo, ";\n");
+    write_string(*glo, "STD_INSTANCE_COUNT :: "); reference_write_integer(*glo, instance_count); write_string(*glo, ";\n");
+    write_string(*glo, "STD_DETAIL_ROW_COUNT :: "); reference_write_integer(*glo, detail_count); write_string(*glo, ";\n");
+    write_string(*glo, "STD_MEMBER_COUNT :: "); reference_write_integer(*glo, member_count); write_string(*glo, ";\n\n");
+    write_string(*glo, "STD_MODULE_DOCS: ["); reference_write_integer(*glo, modules.count); write_string(*glo, "]Std_Module_Doc = .[\n");
+    layout_ok := result_is_ok(write_file("build/reference-glo-header.part", to_string(glo)));
+    separator := builder_make_len_cap(0, 256);
+    write_string(*separator, "];\n\nSTD_SYMBOL_DOCS: ["); reference_write_integer(*separator, symbol_count); write_string(*separator, "]Std_Symbol_Doc = .[\n");
+    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-modules.part", to_string(separator)));
+    builder_reset(*separator);
+    write_string(*separator, "];\n\nSTD_DETAIL_ROWS: ["); reference_write_integer(*separator, detail_count); write_string(*separator, "]Std_Detail_Row_Doc = .[\n");
+    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-symbols.part", to_string(separator)));
+    builder_reset(*separator);
+    write_string(*separator, "];\n\nSTD_MEMBER_DOCS: ["); reference_write_integer(*separator, member_count); write_string(*separator, "]Std_Member_Doc = .[\n");
+    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-details.part", to_string(separator)));
+    builder_reset(*separator);
+    write_string(*separator, "];\n\nSTD_INSTANCE_DOCS: ["); reference_write_integer(*separator, instance_count); write_string(*separator, "]Std_Instance_Doc = .[\n");
+    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-members.part", to_string(separator)));
+    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-footer.part", "];\n\n"));
+    if !layout_ok return false;
+    print(
+        "Generated % modules, % symbols, % typeclass instances, and % manual search entries.\n",
+        modules.count,
+        symbol_count,
+        instance_count,
+        manual.count,
+    );
+    return true;
+}
+
+generate_reference :: (snapshot_path: string) -> bool {
+    loaded := read_file(snapshot_path, 16 * 1024 * 1024);
+    snapshot: string;
+    if loaded == {
+        case .Err;
+            print("could not read reference snapshot %\n", snapshot_path);
+            return false;
+        case .Ok; snapshot = loaded.Ok;
+    }
+    manual_json := reference_exported_json(snapshot, "manualSections");
+    modules_json := reference_exported_json(snapshot, "stdModules");
+    instances_json := reference_exported_json(snapshot, "stdInstances");
+    if manual_json.count == 0 || modules_json.count == 0 || instances_json.count == 0 {
+        print("reference snapshot is missing a required exported JSON array\n");
+        return false;
+    }
+    parsed_manual := json_value_from_string(manual_json, 256);
+    parsed_modules := json_value_from_string(modules_json, 256);
+    parsed_instances := json_value_from_string(instances_json, 256);
+    manual_value: Serialization_Value;
+    module_value: Serialization_Value;
+    instance_value: Serialization_Value;
+    if parsed_manual == { case .Err; print("manual JSON: % at %\n", parsed_manual.Err.message, parsed_manual.Err.offset); return false; case .Ok; manual_value = parsed_manual.Ok; }
+    if parsed_modules == { case .Err; print("module JSON: % at %\n", parsed_modules.Err.message, parsed_modules.Err.offset); return false; case .Ok; module_value = parsed_modules.Ok; }
+    if parsed_instances == { case .Err; print("instance JSON: % at %\n", parsed_instances.Err.message, parsed_instances.Err.offset); return false; case .Ok; instance_value = parsed_instances.Ok; }
+
+    if !is_directory("src/generated") {
+        created := create_directories("src/generated");
+        if result_is_err(created) {
+            print("could not create src/generated\n");
+            return false;
+        }
+    }
+    return reference_generate_outputs(
+        reference_root_array(*manual_value),
+        reference_root_array(*module_value),
+        reference_root_array(*instance_value),
+    );
+}
+
+main :: () {
+    args := get_cmdline_args();
+    snapshot := "../glosso-manual-old/src/generated/docs.ts";
+    if args.count > 1 snapshot = args[1];
+    if !generate_reference(snapshot) exit(1);
+}

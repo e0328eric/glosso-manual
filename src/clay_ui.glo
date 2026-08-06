@@ -4,10 +4,59 @@
 #memory Clay_GetElementId { returns_borrow(arg(0)), };
 #memory Clay_GetElementIdWithIndex { returns_borrow(arg(0)), };
 #memory Clay_GetPointerState { returns_static, };
+#memory Clay_GetScrollOffset { returns_static, };
+
+GLOSSO_SOURCE_MARKER :: "glosso-source";
+CODE_GLOSSO_MARKER :: "code-glosso";
+CODE_SOURCE_MARKER :: "code-source";
+CODE_COPY_MARKER :: "code-copy";
+SOURCE_LINK_MARKER :: "source-link";
+FONT_SANS : u16 : 0;
+FONT_SANS_BOLD : u16 : 1;
+FONT_MONO : u16 : 2;
+FONT_MONO_BOLD : u16 : 3;
+FONT_SERIF_BOLD : u16 : 4;
+FRAME_TEXT_CAPACITY : s64 : 2 * 1024 * 1024;
+frame_text_storage: [FRAME_TEXT_CAPACITY]u8;
+frame_text_cursor: s64 = 0;
+content_table_open: bool = false;
+
+frame_string_from_raw_parts :: (
+    data: [*]u8,
+    count: s64,
+    capacity: s64,
+) -> string #magic "string_from_raw_parts"
+    #memory(returns_static, reads(data), noescape(data));
+
+reset_frame_text_storage :: () {
+    frame_text_cursor = 0;
+}
+
+frame_text_copy :: (value: string) -> string #memory returns_static {
+    if value.count <= 0 return "";
+    if frame_text_cursor + value.count > FRAME_TEXT_CAPACITY return "";
+
+    start := frame_text_cursor;
+    index: s64 = 0;
+    while index < value.count {
+        frame_text_storage[start + index] = value[index];
+        index += 1;
+    }
+    frame_text_cursor += value.count;
+
+    return frame_string_from_raw_parts(
+        cast([*]u8)*frame_text_storage + start,
+        value.count,
+        value.count,
+    );
+}
 
 clay_string :: (value: string) -> Clay_String #memory returns_borrow(value) {
     result: Clay_String;
-    result.isStaticallyAllocated = true;
+    // Glosso strings can come from frame-local formatting as well as literals.
+    // Hash the contents so Clay's text cache never treats reused temporary
+    // addresses as stable string identities.
+    result.isStaticallyAllocated = false;
     result.length = cast(s32)value.count;
     result.chars = cast([*]const s8)value.data;
     return result;
@@ -73,6 +122,53 @@ text_style :: (
     return config;
 }
 
+// userData is preserved on Clay render commands. The browser host uses tag 1
+// to identify Glosso source that should be tokenized by tree-sitter WASM.
+tagged_text_style :: (
+    size: u16,
+    ink: Clay_Color,
+    font: u16 = 0,
+    line_height: u16 = 0,
+    wrap: u8 = CLAY_TEXT_WRAP_WORDS,
+    tag: u32 = 0,
+) -> Clay_TextElementConfig {
+    config := text_style(size, ink, font, line_height, wrap);
+    if tag != 0 config.userData = cast(*void)GLOSSO_SOURCE_MARKER.data;
+    return config;
+}
+
+code_body_text_style :: (highlight: bool) -> Clay_TextElementConfig {
+    config := text_style(
+        13, color(216, 224, 237), FONT_MONO, 24,
+        CLAY_TEXT_WRAP_NEWLINES,
+    );
+    if highlight {
+        config.userData = cast(*void)CODE_GLOSSO_MARKER.data;
+    } else {
+        config.userData = cast(*void)CODE_SOURCE_MARKER.data;
+    }
+    return config;
+}
+
+code_copy_text_style :: () -> Clay_TextElementConfig {
+    config := text_style(
+        10, color(36, 73, 216), FONT_MONO, 16,
+        CLAY_TEXT_WRAP_NONE,
+    );
+    config.userData = cast(*void)CODE_COPY_MARKER.data;
+    return config;
+}
+
+source_text_style :: (
+    size: u16,
+    ink: Clay_Color,
+    line_height: u16 = 0,
+) -> Clay_TextElementConfig {
+    config := text_style(size, ink, FONT_MONO_BOLD, line_height, CLAY_TEXT_WRAP_NONE);
+    config.userData = cast(*void)SOURCE_LINK_MARKER.data;
+    return config;
+}
+
 open_id :: (id: Clay_ElementId, declaration: Clay_ElementDeclaration) {
     Clay__OpenElementWithId(id);
     Clay__ConfigureOpenElement(declaration);
@@ -95,8 +191,16 @@ open_indexed :: (
 
 close_element :: () { Clay__CloseElement(); }
 
+finish_content_table :: () {
+    if !content_table_open return;
+    close_element();
+    content_table_open = false;
+}
+
 emit_text :: (value: string, style: Clay_TextElementConfig) {
-    Clay__OpenTextElement(clay_string(value), style);
+    // Clay retains text pointers until Clay_EndLayout. Frame-local formatted
+    // strings can otherwise be recycled while later elements are emitted.
+    Clay__OpenTextElement(clay_string(frame_text_copy(value)), style);
 }
 
 column_box :: (gap: u16 = 0) -> Clay_ElementDeclaration {
@@ -109,36 +213,77 @@ column_box :: (gap: u16 = 0) -> Clay_ElementDeclaration {
 }
 
 paragraph :: (index: s32, value: string) {
+    finish_content_table();
     box := column_box();
     box.layout.padding = padding(0, 2);
     open_indexed("paragraph", index, box);
-    emit_text(value, text_style(17, color(64, 67, 78), 0, 28));
+    emit_text(value, text_style(15, color(66, 65, 62), FONT_SANS, 27));
     close_element();
 }
 
 subheading :: (index: s32, value: string) {
+    finish_content_table();
     box := column_box();
-    box.layout.padding = padding(0, 8);
+    box.layout.padding = padding(16, 8);
+    box.border.color = color(233, 104, 45);
+    box.border.width.left = 4;
     open_indexed("subheading", index, box);
-    emit_text(value, text_style(24, color(25, 27, 35), 1, 32));
+    emit_text(value, text_style(24, color(23, 26, 31), FONT_SERIF_BOLD, 32));
     close_element();
 }
 
 code_block :: (index: s32, language: string, value: string) {
-    box := column_box(10);
-    box.layout.padding = padding(20, 18);
-    box.backgroundColor = color(24, 26, 34);
-    box.cornerRadius = radius(12);
+    finish_content_table();
+    highlight := language == "glosso" || language == "glo";
+    language_label := language;
+    if highlight language_label = "GLOSSO";
+    if language == "text" language_label = "TEXT";
+    if language == "ebnf" language_label = "EBNF";
+
+    box := column_box();
+    box.backgroundColor = color(17, 23, 34);
+    box.cornerRadius = radius(0);
+    box.border.color = color(41, 51, 69);
+    box.border.width.left = 1;
+    box.border.width.right = 1;
+    box.border.width.top = 1;
+    box.border.width.bottom = 1;
     open_indexed("code", index, box);
-    emit_text(language, text_style(11, color(157, 142, 255), 1, 16));
-    emit_text(
-        value,
-        text_style(14, color(231, 232, 238), 2, 22, CLAY_TEXT_WRAP_NEWLINES),
-    );
+
+    header: Clay_ElementDeclaration;
+    header.layout.sizing.width = grow_axis();
+    header.layout.sizing.height = fit_axis();
+    header.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    header.layout.padding = padding(20, 12);
+    header.border.color = color(41, 51, 69);
+    header.border.width.bottom = 1;
+    open_indexed("code-header", index, header);
+
+    language_box := column_box();
+    language_box.layout.sizing.width = grow_axis();
+    open_indexed("code-language", index, language_box);
+    emit_text(language_label, text_style(10, color(36, 73, 216), FONT_MONO, 16));
+    close_element();
+
+    copy_box := column_box();
+    copy_box.layout.sizing.width = fit_axis();
+    open_indexed("code-copy", index, copy_box);
+    // Trailing spaces reserve enough command width for the temporary
+    // "Copied" confirmation without shifting the header layout.
+    emit_text("Copy  ", code_copy_text_style());
+    close_element();
+    close_element();
+
+    body := column_box();
+    body.layout.padding = padding(20, 18);
+    open_indexed("code-body", index, body);
+    emit_text(value, code_body_text_style(highlight));
+    close_element();
     close_element();
 }
 
 bullet :: (index: s32, value: string) {
+    finish_content_table();
     row: Clay_ElementDeclaration;
     row.layout.sizing.width = grow_axis();
     row.layout.sizing.height = fit_axis();
@@ -146,40 +291,161 @@ bullet :: (index: s32, value: string) {
     row.layout.childGap = 10;
     row.layout.padding = padding(4, 2);
     open_indexed("bullet", index, row);
-    emit_text("•", text_style(18, color(112, 91, 255), 1, 28));
-    emit_text(value, text_style(16, color(64, 67, 78), 0, 27));
+    emit_text("▪", text_style(15, color(233, 104, 45), FONT_SANS_BOLD, 27));
+    emit_text(value, text_style(15, color(66, 65, 62), FONT_SANS, 27));
     close_element();
 }
 
 note :: (index: s32, value: string) {
+    finish_content_table();
     box := column_box(8);
     box.layout.padding = padding(18, 16);
-    box.backgroundColor = color(242, 239, 255);
-    box.cornerRadius = radius(12);
-    box.border.color = color(112, 91, 255);
-    box.border.width.left = 4;
+    box.backgroundColor = color(244, 241, 234);
+    box.cornerRadius = radius(0);
+    box.border.color = color(233, 104, 45);
+    box.border.width.left = 3;
     open_indexed("note", index, box);
-    emit_text("NOTE", text_style(11, color(89, 67, 224), 1, 16));
-    emit_text(value, text_style(16, color(62, 55, 94), 0, 26));
+    emit_text("NOTE", text_style(10, color(36, 73, 216), FONT_MONO_BOLD, 16));
+    emit_text(value, text_style(15, color(66, 65, 62), FONT_SANS, 26));
     close_element();
 }
 
+TABLE_HEADER_SEPARATOR :: "   —   ";
+TABLE_ROW_SEPARATOR :: "   |   ";
+
+table_trim :: (value: string) -> string {
+    start: s64 = 0;
+    finish := value.count;
+    while start < finish && (
+        value[start] == #char " " || value[start] == #char "\t" ||
+        value[start] == #char "\r" || value[start] == #char "\n"
+    ) start += 1;
+    while finish > start && (
+        value[finish - 1] == #char " " || value[finish - 1] == #char "\t" ||
+        value[finish - 1] == #char "\r" || value[finish - 1] == #char "\n"
+    ) finish -= 1;
+    return value[start..finish];
+}
+
+table_display_text :: (value: string, uppercase: bool) -> string
+    #memory returns_static {
+    if frame_text_cursor + value.count > FRAME_TEXT_CAPACITY return "";
+    start := frame_text_cursor;
+    source: s64 = 0;
+    while source < value.count {
+        byte := value[source];
+        // Table source uses Markdown-style backticks for inline code. The
+        // cell's typography carries that distinction, so do not print them.
+        if byte != #char "`" {
+            if uppercase && byte >= #char "a" && byte <= #char "z"
+                byte = byte - 32;
+            frame_text_storage[frame_text_cursor] = byte;
+            frame_text_cursor += 1;
+        }
+        source += 1;
+    }
+    return frame_string_from_raw_parts(
+        cast([*]u8)*frame_text_storage + start,
+        frame_text_cursor - start,
+        frame_text_cursor - start,
+    );
+}
+
+render_table_cell :: (
+    row_index: s32,
+    column_index: s32,
+    columns: s32,
+    value: string,
+    header: bool,
+) {
+    cell := column_box();
+    if columns == 3 && column_index == 0 {
+        cell.layout.sizing.width = fixed_axis(112);
+    } else if columns == 3 && column_index == 2 {
+        cell.layout.sizing.width = fixed_axis(168);
+    } else if columns == 2 && column_index == 0 {
+        cell.layout.sizing.width = fixed_axis(128);
+    } else {
+        cell.layout.sizing.width = grow_axis(72);
+    }
+    if header cell.layout.padding = padding(8, 8);
+    else cell.layout.padding = padding(8, 12);
+    cell_name := "table-data-cell";
+    if header cell_name = "table-header-cell";
+    open_indexed(cell_name, row_index * 4 + column_index, cell);
+    display := table_display_text(table_trim(value), header);
+    if header {
+        emit_text(display, text_style(10, color(109, 107, 102), FONT_SANS_BOLD, 18));
+    } else if index_of(value, "`") >= 0 {
+        emit_text(display, text_style(13, color(23, 50, 158), FONT_MONO, 22));
+    } else {
+        emit_text(display, text_style(14, color(66, 65, 62), FONT_SANS, 22));
+    }
+    close_element();
+}
+
+render_table_cells :: (
+    row_index: s32,
+    value: string,
+    separator: string,
+    header: bool,
+) {
+    first := index_of(value, separator);
+    columns: s32 = 1;
+    second: s64 = -1;
+    if first >= 0 {
+        columns = 2;
+        second = index_of_from(value, separator, first + separator.count);
+        if second >= 0 columns = 3;
+    }
+
+    if columns == 1 {
+        render_table_cell(row_index, 0, columns, value, header);
+        return;
+    }
+    render_table_cell(row_index, 0, columns, value[0..first], header);
+    if columns == 2 {
+        render_table_cell(
+            row_index, 1, columns,
+            value[first + separator.count..value.count], header,
+        );
+        return;
+    }
+    render_table_cell(
+        row_index, 1, columns,
+        value[first + separator.count..second], header,
+    );
+    render_table_cell(
+        row_index, 2, columns,
+        value[second + separator.count..value.count], header,
+    );
+}
+
 table_header :: (index: s32, value: string) {
-    box := column_box();
-    box.layout.padding = padding(14, 12);
-    box.backgroundColor = color(236, 235, 240);
-    box.cornerRadius = radius(8);
-    open_indexed("table-head", index, box);
-    emit_text(value, text_style(13, color(38, 40, 49), 1, 20));
+    finish_content_table();
+    table := column_box();
+    open_indexed("content-table", index, table);
+    content_table_open = true;
+
+    row: Clay_ElementDeclaration;
+    row.layout.sizing.width = grow_axis();
+    row.layout.sizing.height = fit_axis();
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.border.color = color(23, 26, 31);
+    row.border.width.bottom = 2;
+    open_indexed("table-head", index, row);
+    render_table_cells(index, value, TABLE_HEADER_SEPARATOR, true);
     close_element();
 }
 
 table_row :: (index: s32, value: string) {
-    box := column_box();
-    box.layout.padding = padding(14, 11);
-    box.backgroundColor = color(249, 249, 251);
-    box.cornerRadius = radius(8);
-    open_indexed("table-row", index, box);
-    emit_text(value, text_style(14, color(62, 65, 77), 0, 23));
+    row: Clay_ElementDeclaration;
+    row.layout.sizing.width = grow_axis();
+    row.layout.sizing.height = fit_axis();
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    row.border.color = color(216, 209, 197);
+    row.border.width.bottom = 1;
+    open_indexed("table-row", index, row);
+    render_table_cells(index, value, TABLE_ROW_SEPARATOR, false);
     close_element();
 }
