@@ -57,25 +57,51 @@ assemble_reference_parts :: () -> bool {
     if !append_generated_part("reference-index.js", "build/reference-modules.js.part") return false;
     if !append_reference_text("reference-index.js", "],\"symbols\":[") return false;
     if !append_generated_part("reference-index.js", "build/reference-symbols.js.part") return false;
-    if !append_reference_text("reference-index.js", "],\"manual\":[") return false;
+    if !append_reference_text("reference-index.js", "],\"manual\":") return false;
     if !append_generated_part("reference-index.js", "build/reference-manual.js.part") return false;
-    if !append_reference_text("reference-index.js", "]};\n") return false;
+    if !append_reference_text("reference-index.js", "};\n") return false;
 
     return true;
 }
 
-run_reference_generator :: (snapshot: string) -> bool {
+run_reference_generator :: (std_directory: string) -> bool {
     if !os_fs_is_directory("build") &&
        !os_fs_create_directories("build") {
         print("could not create build\n");
         return false;
     }
+
+    source_generator := "build/generate-reference-source";
+    #if OUT.os == Target_OS.Windows
+        source_generator = "build/generate-reference-source.exe";
+
+    source_options: Compile_Options;
+    set_optimization_level(*source_options, .Optimized);
+    set_borrow_check(*source_options, Compiler_Borrow_Check.Off);
+    set_temp_allocator_size(*source_options, 1024 * 1024 * 1024);
+    source_built := compile("scripts/generate-reference-source.glo", source_generator, source_options);
+    if !source_built.ok {
+        print("reference source extractor build failed:\n%", source_built.output);
+        return false;
+    }
+
+    source_command := command_make(source_generator);
+    command_add_argument(*source_command, std_directory);
+    command_add_argument(*source_command, "build/reference-source.json");
+    extracted := command_run(source_command);
+    command_destroy(*source_command);
+    if result_is_err(extracted) {
+        print("could not run the Glosso reference source extractor\n");
+        return false;
+    }
+    if !extracted.Ok.status.exited || extracted.Ok.status.code != 0 return false;
+
     generator := "build/generate-reference";
     #if OUT.os == Target_OS.Windows
         generator = "build/generate-reference.exe";
 
     options: Compile_Options;
-    set_optimization_level(*options, .Very_Debug);
+    set_optimization_level(*options, .Optimized);
     set_borrow_check(*options, Compiler_Borrow_Check.Warning);
     set_temp_allocator_size(*options, 256 * 1024 * 1024);
     built := compile("scripts/generate-reference.glo", generator, options);
@@ -85,7 +111,7 @@ run_reference_generator :: (snapshot: string) -> bool {
     }
 
     command := command_make(generator);
-    command_add_argument(*command, snapshot);
+    command_add_argument(*command, "build/reference-source.json");
     generated := command_run(command);
     command_destroy(*command);
     if result_is_err(generated) {
@@ -161,7 +187,7 @@ manual_task_usage :: () {
         \\commands:
         \\  build                    build main.glo and stage dist
         \\  tree-sitter              embed tree-sitter/highlights.scm in app.js
-        \\  gen-reference [snapshot] generate the Glosso and browser reference data
+        \\  gen-reference <std-dir>  regenerate reference data from a Glosso std directory
     );
 }
 
@@ -178,9 +204,12 @@ run_manual_task :: () {
     case "build"; build_manual(); return;
     case "tree-sitter"; if !sync_tree_sitter() exit(1); return;
     case "gen-reference";
-        snapshot := "src/generated/docs.ts";
-        if args.count > 1 snapshot = args[1];
-        if !run_reference_generator(snapshot) exit(1);
+        if args.count < 2 {
+            print("gen-reference requires a standard-library directory\n\n");
+            manual_task_usage();
+            exit(1);
+        }
+        if !run_reference_generator(args[1]) exit(1);
         return;
     else;
         print("unknown manual task: %\n\n", command);

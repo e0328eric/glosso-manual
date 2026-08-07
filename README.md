@@ -19,16 +19,16 @@ private Glosso repository or compile the project in GitHub Actions.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
 - `src/section_catalog.glo` contains section state and titles.
 - `src/sections_*.glo` contains the manual chapters, grouped by topic.
-- `src/generated/docs.ts` is the checked-in legacy documentation snapshot used
-  as the source for reference-data regeneration.
 - `src/generated/std_reference.glo` is the generated standard-library data
   rendered by Glosso and Clay.
 - `src/reference_ui.glo` contains reference, search-result, and browser-bridge
   UI state.
 - `src/manual_ui.glo` contains section dispatch, navigation, layout, and the
   Wasm entry point.
-- `scripts/generate-reference.glo` regenerates both compact reference data
-  files from the documentation snapshot.
+- `scripts/generate-reference-source.glo` extracts public declarations directly
+  from a supplied Glosso standard-library directory into an ignored JSON file.
+- `scripts/generate-reference.glo` converts that intermediate data into the
+  compact Glosso and browser reference files.
 - `scripts/tree_sitter.glo` embeds the Tree-sitter highlight query in the
   browser host.
 - `vendor/clay/clay.h` is the pinned Clay source used during compilation.
@@ -60,15 +60,31 @@ separator:
 ```sh
 glosso first.glo -- build
 glosso first.glo -- tree-sitter
-glosso first.glo -- gen-reference
+glosso first.glo -- gen-reference ../glosso/std
 ```
 
 `build` compiles `main.glo` and stages the complete site in `dist/`.
 `tree-sitter` updates the query embedded in `app.js` from
-`tree-sitter/highlights.scm`. `gen-reference` reads the checked-in legacy
-documentation snapshot at `src/generated/docs.ts` and regenerates the Glosso
-and browser reference data; an alternative snapshot path can be supplied after
-the command.
+`tree-sitter/highlights.scm`. `gen-reference <std-directory>` reads public
+standard-library declarations and comments from the supplied directory, then
+updates `src/generated/std_reference.glo` and `reference-index.js`. Its temporary
+`build/reference-source.json` input is ignored and is never checked in.
+
+## Update the standard-library reference
+
+The reference extractor is written in Glosso and requires a current Glosso
+source checkout. After changing declarations or documentation comments under
+`glosso/std/`, run:
+
+```sh
+glosso first.glo -- gen-reference ../glosso/std
+glosso first.glo -- build
+```
+
+Review and commit the regenerated `src/generated/std_reference.glo`,
+`reference-index.js`, and staged files under `dist/`. The extractor preserves
+the existing language-manual search entries while rebuilding the modules,
+symbols, signatures, and typeclass instances directly from Glosso sources.
 
 ## Compile locally
 

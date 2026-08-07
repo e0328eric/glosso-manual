@@ -418,10 +418,16 @@ render_section_7 :: () {
         \\
         \\memory-effect =
         \\    "returns_fresh"
+        \\  | "returns_fresh" "(" return-place ")"
         \\  | "returns_borrow" "(" parameter-ref ")"
+        \\  | "returns_borrow" "(" return-place "," parameter-ref ")"
         \\  | "returns_static"
+        \\  | "returns_static" "(" return-place ")"
         \\  | "released_by" "(" qualified-name ")"
+        \\  | "released_by" "(" return-place "," qualified-name ")"
         \\  | "resource" "(" "released_by" ":" qualified-name ")"
+        \\  | "resource" "(" return-place "," "released_by" ":"
+        \\        qualified-name ")"
         \\  | "leak"
         \\  | "kills" "(" parameter-ref ")"
         \\  | "invalidates" "(" parameter-ref ")"
@@ -430,10 +436,15 @@ render_section_7 :: () {
         \\  | "reads" "(" parameter-ref ")"
         \\  | "writes" "(" parameter-ref ")"
         \\  | "unknown"
+        \\  | "unknown" "(" return-place ")"
         \\
         \\parameter-ref =
         \\    identifier
         \\  | "arg" "(" integer ")"
+        \\
+        \\return-place =
+        \\    "returned" "." identifier ("." identifier)*
+        \\  | identifier ("." identifier)*
         \\
         \\qualified-name =
         \\    identifier ("." identifier)*
@@ -443,7 +454,11 @@ render_section_7 :: () {
         \\comma-separated; the grouped form does not accept a trailing comma. A
         \\bare directive contains exactly one effect. Directives may be
         \\repeated, and repetition is equivalent to concatenating grouped effect
-        \\lists in source order.
+        \\lists in source order. `returned` is contextual only inside these
+        \\return-place arguments; it is not a language keyword or binding. A
+        \\different leading identifier must name a result variable from a fully
+        \\named multiple-return tuple. Every return-origin effect and every
+        \\result releaser accepts the same return-place notation.
     );
     code_block(7, "glosso", #string
         \\#memory returns_fresh
@@ -484,6 +499,14 @@ render_section_7 :: () {
         \\Object_Destroy :: (object: *Object)
         \\    #foreign "objectlib" "Object_Destroy"
         \\    #memory(kills(object), noescape(object));
+        \\
+        \\open :: (path: string) -> Result(File, Fs_Error)
+        \\    #memory(returns_fresh(returned.Ok),
+        \\            released_by(returned.Ok, close));
+        \\
+        \\foo :: () -> (x: Result(T, V), y: Option(U))
+        \\    #memory(returns_fresh(x.Ok), released_by(x.Ok, close),
+        \\            returns_static(y.Some));
     );
     paragraph(17, #string,oneline
         \\The same syntax is valid on regular, `#magic`, `#foreign`, `#c_call`,
@@ -568,48 +591,73 @@ render_section_7 :: () {
         \\the same qualified name.
     );
     subheading(35, "Effect reference");
-    paragraph(36, "`returns_fresh`");
+    paragraph(36, "`returns_fresh` and `returns_fresh(return-place)`");
     bullet(37, "Valid on functions, overlays, and calls.");
     bullet(38, #string,oneline
-        \\Says the result is a new abstract resource rather than an alias of an
+        \\The bare form says the whole result is a new abstract resource rather
     );
-    paragraph(39, "argument or static storage.");
-    bullet(40, "By itself it describes provenance but does not name cleanup.");
-    paragraph(41, "`returns_borrow(parameter)`");
+    paragraph(39, #string,oneline
+        \\than an alias of an argument or static storage. The return-place form
+        \\makes only the named result or tagged-union payload fresh. For example,
+        \\`returned.Ok` selects an anonymous result payload, while `x.Ok` selects
+        \\the `Ok` payload of named result `x`.
+    );
+    bullet(40, #string,oneline
+        \\Both forms describe provenance but do not name cleanup by themselves.
+    );
+    paragraph(41, #string,oneline
+        \\`returns_borrow(parameter)` and
+        \\`returns_borrow(return-place, parameter)`
+    );
     bullet(42, "Valid on functions, overlays, and calls.");
     bullet(43, #string,oneline
-        \\Says the result aliases memory reachable from the selected argument.
+        \\The bare form says the whole result aliases memory reachable from the
+        \\selected argument. The return-place form applies that borrowed origin
+        \\only to the selected named result or union payload.
     );
     bullet(44, #string,oneline
         \\Multiple compatible borrowed origins are combined into a parameter
         \\set.
     );
-    paragraph(45, "`returns_static`");
+    paragraph(45, "`returns_static` and `returns_static(return-place)`");
     bullet(46, "Valid on functions, overlays, and calls.");
     bullet(47, #string,oneline
-        \\Says the returned memory remains valid for the program lifetime.
+        \\The bare form says all returned memory remains valid for the program
+        \\lifetime. The return-place form applies that fact only to the selected
+        \\named result or union payload.
     );
-    paragraph(48, "`released_by(function)`");
+    paragraph(48, #string,oneline
+        \\`released_by(function)` and `released_by(return-place, function)`
+    );
     bullet(49, "Valid on functions, overlays, and calls.");
     bullet(50, #string,oneline
-        \\Names the cleanup function for a fresh result and creates a
-        \\must-release
+        \\Names the cleanup function for a fresh whole result or selected union
+        \\payload and creates a must-release
     );
     paragraph(51, "obligation at each acquisition.");
     bullet(52, #string,oneline
-        \\On a function or overlay it must be combined with `returns_fresh`.
+        \\On a function or overlay it must be combined with the corresponding
+        \\bare or return-place `returns_fresh` effect.
     );
-    bullet(53, "At a call site it implies `returns_fresh`.");
+    bullet(53, #string,oneline
+        \\At a call site it implies the corresponding `returns_fresh` effect.
+    );
     bullet(54, #string,oneline
         \\The releaser must resolve and accept a memory-capable first parameter.
     );
-    paragraph(55, "`resource(released_by: function)`");
+    paragraph(55, #string,oneline
+        \\`resource(released_by: function)` and
+        \\`resource(return-place, released_by: function)`
+    );
     bullet(56, "Valid only on a call expression.");
     bullet(57, #string,oneline
-        \\Explicit call-site shorthand for a fresh result released by the named
+        \\Explicit call-site shorthand for a fresh whole result or return place
+        \\released by the named
     );
     paragraph(58, "function.");
-    bullet(59, "Equivalent to call-site `released_by(function)`.");
+    bullet(59, #string,oneline
+        \\Equivalent to the corresponding call-site `released_by` spelling.
+    );
     paragraph(60, "`leak`");
     bullet(61, "Valid only on an acquisition call or owner binding.");
     bullet(62, #string,oneline
@@ -670,11 +718,12 @@ render_section_7 :: () {
         \\They do not imply ownership transfer, retention, relocation, or
         \\release.
     );
-    paragraph(89, "`unknown`");
+    paragraph(89, "`unknown` and `unknown(return-place)`");
     bullet(90, "Valid on functions, overlays, and calls.");
     bullet(91, #string,oneline
         \\Records that the boundary cannot provide a stronger result or lifetime
-        \\fact.
+        \\fact. The return-place form limits that uncertainty to the selected
+        \\named result or union payload.
     );
     bullet(92, #string,oneline
         \\For a memory-capable result with no other result origin, it produces
@@ -707,8 +756,9 @@ render_section_7 :: () {
     paragraph(99, #string,oneline
         \\A must-release obligation is attached to an abstract resource, not a
         \\variable name. Copies of a pointer, dynamic-array descriptor, struct,
-        \\or union may share that resource identity. A matching direct or
-        \\deferred releaser discharges the obligation.
+        \\or union may share that resource identity. The named releaser, or
+        \\another applicable function whose contract explicitly `kills` the
+        \\value, discharges the obligation directly or through `defer`.
     );
     code_block(100, "glosso", #string
         \\object := Object_Create();
@@ -736,8 +786,9 @@ render_section_7 :: () {
     paragraph(108, #string,oneline
         \\If an obligation remains Alive at scope exit, the checker reports that
         \\the resource must be released. If only some paths release it, the
-        \\checker reports that it may remain unreleased. Calling an incompatible
-        \\cleanup function reports both the expected and actual releaser.
+        \\checker reports that it may remain unreleased. A call that neither
+        \\matches the named releaser nor has an applicable `kills` contract does
+        \\not discharge the obligation.
     );
     subheading(109, "Dynamic arrays");
     paragraph(110, #string,oneline
@@ -830,18 +881,22 @@ render_section_7 :: () {
         \\registry.objects = load_process_lifetime_objects();
     );
     paragraph(126, #string,oneline
-        \\The same rule applies to unions. Because union fields overlap at
-        \\runtime, the analysis remains conservative when multiple
-        \\resource-bearing alternatives are used. `#memory leak` is a policy for
-        \\the whole annotated owner, including any nested Glosso struct or union
-        \\reached through its tracked fields.
+        \\The same rule applies to unions. Return-place contracts track an
+        \\obligation only while its tagged alternative is active, including
+        \\through exhaustive switches, payload extraction, and postfix `?`.
+        \\Named multiple results are tracked positionally when a call is
+        \\destructured, so facts for `x.Ok` cannot leak into the binding for `y`.
+        \\`#memory leak` remains a policy for the whole annotated owner,
+        \\including nested Glosso structs or unions reached through its fields.
     );
     subheading(127, "Aliases, generations, and control flow");
     paragraph(128, #string,oneline
         \\Tracked resources have the states Alive, MaybeDead, and Dead. If one
         \\branch releases a resource and another keeps it alive, the joined
         \\state is MaybeDead. A later use then reports a
-        \\conditional-use-after-release warning.
+        \\conditional-use-after-release warning. An inactive tagged-union
+        \\payload is absent rather than alive, so an `Err` path does not create
+        \\a false missing-release warning for `returned.Ok`.
     );
     paragraph(129, #string,oneline
         \\Invalidation increments a generation instead of killing the resource:
