@@ -12,7 +12,7 @@ append_reference_text :: (path: string, text: string) -> bool {
     if result_is_err(opened) return false;
     file := opened.Ok;
     wrote := write(file, text);
-    closed := close_file(file);
+    closed := close(*file);
     return result_is_ok(wrote) && wrote.Ok == text.count &&
         result_is_ok(closed);
 }
@@ -42,8 +42,15 @@ assemble_reference_parts :: () -> bool {
         "build/reference-instances.glo.part",
         "build/reference-glo-footer.part",
     ];
+    if !os_fs_is_directory("src/generated") && !os_fs_create_directories("src/generated") {
+        print("could not create src/generated\n");
+        return false;
+    }
     initialized_glo := write_file("src/generated/std_reference.glo", "");
-    if result_is_err(initialized_glo) return false;
+    if result_is_err(initialized_glo) {
+        print("could not initialize src/generated/std_reference.glo\n");
+        return false;
+    }
     for path: glo_parts {
         if !append_generated_part("src/generated/std_reference.glo", path)
             return false;
@@ -80,8 +87,9 @@ run_reference_generator :: (std_directory: string) -> bool {
     set_borrow_check(*source_options, Compiler_Borrow_Check.Off);
     set_temp_allocator_size(*source_options, 1024 * 1024 * 1024);
     source_built := compile("scripts/generate-reference-source.glo", source_generator, source_options);
-    if !source_built.ok {
-        print("reference source extractor build failed:\n%", source_built.output);
+    if result_is_err(source_built) {
+        print("reference source extractor build failed:\n");
+        report_error(source_built.Err);
         return false;
     }
 
@@ -105,8 +113,9 @@ run_reference_generator :: (std_directory: string) -> bool {
     set_borrow_check(*options, Compiler_Borrow_Check.Warning);
     set_temp_allocator_size(*options, 256 * 1024 * 1024);
     built := compile("scripts/generate-reference.glo", generator, options);
-    if !built.ok {
-        print("reference generator build failed:\n%", built.output);
+    if result_is_err(built) {
+        print("reference generator build failed:\n");
+        report_error(built.Err);
         return false;
     }
 
@@ -133,12 +142,20 @@ build_manual :: () {
         .cpu = Target_CPU.Wasm32,
         .abi = Target_ABI.Freestanding,
     };
-    cache_arg := str_cat("--cache-dir=", absolute("build/cache"));
+    cache_arg_result := #try { str_cat("--cache-dir=", absolute("build/cache")?) };
+    cache_arg: string;
+    if cache_arg_result == {
+    case .Ok; cache_arg = cache_arg_result.Ok;
+    case .Err;
+        print("cannot get the absolute path \"build/cache\"\n");
+        return;
+    }
 
     options: Compile_Options;
     set_target(*options, wasm_target);
     set_optimization_level(*options, .Optimized_Tiny);
     set_borrow_check(*options, Compiler_Borrow_Check.Error);
+    set_color(*options, .Always);
     set_temp_allocator_size(*options, 1024 * 1024);
     add_compiler_arg(*options, cache_arg);
     add_linker_arg(*options, "--export=__heap_base");
@@ -153,8 +170,9 @@ build_manual :: () {
     add_linker_arg(*options, "--initial-memory=134217728");
     add_linker_arg(*options, "--max-memory=268435456");
     built := compile("main.glo", "dist/manual.wasm", options);
-    if !built.ok {
-        print("manual build failed:\n%", built.output);
+    if result_is_err(built) {
+        print("manual build failed:\n");
+        report_error(built.Err);
         return;
     }
 
