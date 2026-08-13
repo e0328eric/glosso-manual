@@ -1,0 +1,2691 @@
+// Sections 100, 104-107: the reference tier. These chapters index the
+// language rather than teach it: the full grammar, the intrinsic registry,
+// the implicit prelude, the runtime failure catalogue, and the toolchain
+// environment.
+
+render_section_100 :: () {
+    paragraph(0, #string,oneline
+        \\This chapter is the manual's single canonical grammar. Every EBNF
+        \\block that appears in a teaching chapter is an excerpt of a
+        \\production listed here, and the productions are grouped in the order
+        \\the compiler applies them: lexical structure, file level,
+        \\declarations, types, statements, expressions, patterns, directives,
+        \\and the driver command line. The grammar describes what the parser
+        \\accepts. Rules the parser cannot express — a value that must be a
+        \\single literal token, an argument that must be compile-time
+        \\foldable, an ordering the checker enforces — are recorded as
+        \\parenthesised comments beside the production they constrain, with
+        \\the phase named.
+    );
+    paragraph(1, #string,oneline
+        \\Nothing here teaches a construct. Each group opens with one
+        \\paragraph saying what the group covers and which chapter explains
+        \\it, and the rest is production text. Where a production is
+        \\deliberately absent — there is no empty statement, no top-level
+        \\`#if`, no way to name a function or tuple type with `::` — that is
+        \\stated in prose beside the group, because a grammar cannot say what
+        \\it does not contain.
+    );
+    subheading(2, "Notation");
+    paragraph(3, #string,oneline
+        \\The blocks use one meta-syntax throughout. Production names are
+        \\`lower_snake_case`. Anything in double quotes is literal token text
+        \\as the lexer produces it, not a character sequence to be re-lexed.
+    );
+    table_header(4, "Form   —   Meaning");
+    table_row(5, #string,oneline
+        \\`name ::= body`   |   Defines the production `name`. A production is
+        \\defined exactly once in this chapter.
+    );
+    table_row(6, #string,oneline
+        \\`a | b`   |   Alternation. Alternatives are listed in the order the
+        \\parser tries them wherever that order is observable.
+    );
+    table_row(7, #string,oneline
+        \\`{ a }`   |   Zero or more repetitions.
+    );
+    table_row(8, #string,oneline
+        \\`[ a ]`   |   Optional; zero or one occurrence.
+    );
+    table_row(9, #string,oneline
+        \\`( a b )`   |   Grouping, with no meaning of its own.
+    );
+    table_row(10, #string,oneline
+        \\`"if"`   |   A literal token. Double quotes are the quoting
+        \\mechanism and are never part of the token.
+    );
+    table_row(11, #string,oneline
+        \\`(* text *)`   |   A constraint the grammar cannot carry, naming the
+        \\phase that enforces it.
+    );
+    table_row(12, #string,oneline
+        \\`? text ?`   |   A special sequence: a lexical class defined by
+        \\prose rather than by a production.
+    );
+    note(13, #string,oneline
+        \\Two structural facts govern the whole grammar and are stated once
+        \\here. The value-expression grammar has exactly five layers and no
+        \\more: `expr` is a Pratt loop over declared binary operators;
+        \\`unary_expr` is a fixed, ordered chain of eleven directive and
+        \\keyword prefixes plus the declared prefix operators, each recursing
+        \\into `unary_expr`; `postfix_expr` is a loop over eleven suffix
+        \\forms; `primary` is a set of 22 atoms. Ranges are not a sixth layer.
+        \\The pattern grammar is a completely separate five-layer parser — or,
+        \\range, unary, postfix, primary — and is reproduced in the Pattern
+        \\Vocabulary and Case Guards chapter rather than here.
+    );
+    subheading(14, "Lexical structure");
+    paragraph(15, #string,oneline
+        \\The lexer produces a flat token stream with no significant
+        \\indentation and no automatic semicolon insertion. The Lexical
+        \\Structure and the Token Table chapter owns this material; the
+        \\literal chapters own the individual literal kinds.
+    );
+    code_block(16, "ebnf", #string
+        \\source_file   ::= { whitespace | line_comment | block_comment
+        \\                  | token } eof
+        \\whitespace    ::= " " | "\t" | "\r" | "\n"
+        \\line_comment  ::= "//" { ? any codepoint except "\n" ? }
+        \\block_comment ::= "/*" { block_comment | ? any codepoint ? } "*/"
+        \\eof           ::= ? end of input ?
+    );
+    paragraph(17, #string,oneline
+        \\The whitespace set is exactly those four characters. Form feed,
+        \\vertical tab, no-break space and every other Unicode space
+        \\character are hard lex errors, and so is a UTF-8 byte-order mark, so
+        \\a BOM-prefixed source file cannot compile. Block comments are
+        \\depth-counted but textually naive: the counter has no knowledge of
+        \\line comments or string literals inside the block, so a `*/` written
+        \\inside a `//` line inside a block comment still closes it. An
+        \\unclosed `/*` consumes the rest of the file and produces no
+        \\diagnostic of its own.
+    );
+    code_block(18, "ebnf", #string
+        \\identifier           ::= ( alpha | "_" ) { alnum | "_" }
+        \\alpha                ::= ? one codepoint that is alphabetic ?
+        \\alnum                ::= ? one codepoint that is alphanumeric ?
+        \\backtick_name        ::= "`" identifier
+        \\double_backtick_name ::= "``" identifier
+        \\generic_binder       ::= "$" identifier
+        \\
+        \\keyword ::= "if" | "ifx" | "else" | "while" | "for" | "return"
+        \\          | "break" | "continue" | "struct" | "union" | "case"
+        \\          | "enum" | "using" | "defer" | "context" | "cast"
+        \\          | "acast" | "where" | "noalias"
+    );
+    paragraph(19, #string,oneline
+        \\The reserved-keyword set is exactly those 19 words. Everything else
+        \\that reads like a keyword is an ordinary identifier: `true`,
+        \\`false`, `null`, `distinct`, `typeclass`, `instance`, `enum_flags`
+        \\and `goto` are all `identifier` tokens, and `distinct := 1;
+        \\instance := 2; typeclass := 3; goto := 4;` compiles. `distinct`,
+        \\`typeclass`, `instance` and `enum_flags` are recognised
+        \\contextually, by position after `::`, not by the lexer. Directive
+        \\names live in their own lexical namespace and are never
+        \\identifiers; a declaration may be named `if` or `for` only through
+        \\the backtick forms.
+    );
+    code_block(20, "ebnf", #string
+        \\int_literal    ::= decimal | base_n_literal
+        \\decimal        ::= digit { digit | "_" }
+        \\base_n_literal ::= decimal "#" radix36 { radix36 | "_" }
+        \\radix36        ::= "0".."9" | "a".."z" | "A".."Z"
+        \\
+        \\float_literal  ::= decimal [ "." digit { digit | "_" } ] [ exponent ]
+        \\               |   decimal exponent
+        \\exponent       ::= ( "e" | "E" ) [ "+" | "-" ] digit { digit | "_" }
+    );
+    paragraph(21, #string,oneline
+        \\The base of a `base_n_literal` must be 2 through 36 and each digit
+        \\must be less than the base; alphabetic digits are
+        \\case-insensitive. A `_` may not lead, trail or repeat in any part of
+        \\any numeric literal. The magnitude cap is 128 bits, applied by the
+        \\lexer before any type is known. In `float_literal` the `.` is taken
+        \\only when a digit follows immediately, which is why `1.` and `.5`
+        \\are not floats. There are no `0x` or `0b` prefixes, no typed literal
+        \\suffix of any kind, and no imaginary or complex literal spelling.
+    );
+    code_block(22, "ebnf", #string
+        \\string_literal   ::= '"' { escape_sequence
+        \\                         | ? any codepoint except '"' and "\" ? } '"'
+        \\escape_sequence  ::= "\" ? any codepoint ?
+        \\multiline_string ::= "#string" { "," ( "oneline" | "escape" ) }
+        \\                     mlstr_line { mlstr_line }
+        \\mlstr_line       ::= "\\" { ? any codepoint except "\n" ? }
+        \\char_literal     ::= "#char" { " " | "\t" }
+        \\                     '"' ( escape_sequence | ? one codepoint ? ) '"'
+    );
+    paragraph(23, #string,oneline
+        \\A `string_literal` may contain raw newlines. The lexer stores the
+        \\raw text and a separate decoding pass maps the escapes: the letters
+        \\`a b f n r t v 0` and the characters `\`, `"`, `'` and `?` become
+        \\control bytes; `x` followed by two hex digits becomes one byte, with
+        \\one digit or none decoding to the literal characters instead of
+        \\erroring; `%` becomes the two bytes backslash and percent so the
+        \\formatter still sees the escape; anything else becomes that
+        \\character with the backslash dropped. A `mlstr_line` outside
+        \\`#string` is accepted only inside the two `#asm` forms.
+    );
+    code_block(24, "ebnf", #string
+        \\label_literal     ::= "'" identifier   (* not followed by "'" *)
+        \\operator_name     ::= "'" { ? any codepoint except "'" ? } "'"
+        \\undefined_literal ::= "#undefined"
+    );
+    paragraph(25, #string,oneline
+        \\The presence of the closing quote is the entire disambiguation
+        \\between the two: `'foo` is a label literal of type `label`, and
+        \\`'foo'` is an operator-name token. Nothing else distinguishes them,
+        \\and a label may contain digits after its first character.
+    );
+    code_block(26, "ebnf", #string
+        \\op_char        ::= "+" | "-" | "*" | "/" | "<" | ">" | "!" | "@"
+        \\                 | "%" | "^" | "&" | "|" | "~" | "?" | "." | ","
+        \\                 | ":" | "="
+        \\operator_token ::= op_char { op_char } | "$=" | ":$="
+        \\punctuation    ::= ".." | "..=" | "..." | "->" | "::" | "::="
+        \\                 | ":=" | ":" | "=" | ".{" | ".[" | ".*" | "."
+        \\                 | ",," | "," | ";" | "$" | "(" | ")" | "{" | "}"
+        \\                 | "[" | "]" | "?" | "@"
+        \\directive_name ::= "#" ( alpha | "_" ) { alnum | "_" }
+    );
+    paragraph(27, #string,oneline
+        \\Operator tokens are scanned by maximal munch with four carve-outs.
+        \\`?` is always emitted alone. `,` may never begin a run but may
+        \\continue one, so `'+,'` is a legal operator name. `$` is not an
+        \\`op_char`, yet `$=` and `:$=` are hard-coded operator tokens and are
+        \\usable as custom operators. A trailing `.` is pushed back when the
+        \\next codepoint is a space, a quote, `(`, `{`, `[`, `_` or an
+        \\alphanumeric, and no token may end in `.` except `..` itself. The
+        \\tokens `=`, `.`, `,`, `,,`, `:=`, `::`, `:`, `->`, `::=`, `.*`,
+        \\`...`, `@`, backtick and double backtick are reserved and can never
+        \\be declared as operators.
+    );
+    subheading(28, "File level");
+    paragraph(29, #string,oneline
+        \\A source file is a sequence of items with no ordering requirement
+        \\among them. The Top-Level Declarations and Thread-Local Storage
+        \\chapter explains the item set; the Strict Conversions and Feature
+        \\Gates chapter explains `#enable` and `#disable`.
+    );
+    code_block(30, "ebnf", #string
+        \\program           ::= { file_item }
+        \\file_item         ::= feature_directive
+        \\                    | memory_overlay
+        \\                    | insert_decl
+        \\                    | "#thread_local" global_decl
+        \\                    | comptime_block
+        \\                    | import_decl
+        \\                    | load_decl
+        \\                    | instance_decl
+        \\                    | global_decl
+        \\feature_directive ::= ( "#enable" | "#disable" )
+        \\                      "(" feature [ "," "siblings" ] ")" [ ";" ]
+        \\feature           ::= "lossy_numerics" | "pointer_punning"
+        \\                    | "union_unwrap"
+        \\                    | "private_section" | "private_sections"
+        \\insert_decl       ::= "#insert" expr [ ";" ]
+        \\comptime_block    ::= "#comptime" ( block
+        \\                                  | "->" type block
+        \\                                  | expr [ ";" ] )
+        \\(* ",siblings" is accepted only on the two private_section forms;
+        \\   "#thread_local" must resolve to a global variable declaration *)
+    );
+    code_block(31, "ebnf", #string
+        \\global_decl     ::= decl_name ( inferred_global
+        \\                              | "::" const_rhs
+        \\                              | ":" typed_tail )
+        \\decl_name       ::= identifier | operator_name
+        \\inferred_global ::= ( ":=" | "::=" ) expr [ ";" ]
+        \\typed_tail      ::= [ type ] ( ( ":" | "::" ) expr [ ";" ]
+        \\                             | ( "=" | ":=" ) expr [ ";" ]
+        \\                             | ";"
+        \\                             | eof )
+        \\const_rhs       ::= typeclass_decl
+        \\                  | distinct_decl
+        \\                  | import_decl
+        \\                  | load_decl
+        \\                  | library_decl
+        \\                  | fn_ptr_decl
+        \\                  | struct_decl
+        \\                  | union_decl
+        \\                  | enum_decl
+        \\                  | enum_flags_decl
+        \\                  | function_tail          (* any leading "(" *)
+        \\                  | expr [ ";" ]           (* constant or alias *)
+        \\(* at file scope ":=" and "::=" build the same node, and both
+        \\   reject a non-foldable initializer with "unknown const" *)
+    );
+    code_block(32, "ebnf", #string
+        \\import_decl  ::= [ decl_name "::" ] "#import" import_tail
+        \\import_tail  ::= [ "," ( "only" | "hide" )
+        \\                   "(" [ import_name { "," import_name } [ "," ] ]
+        \\                   ")" ]
+        \\                 string_literal [ ";" ]
+        \\import_name  ::= identifier | backtick_name
+        \\               | double_backtick_name | operator_name
+        \\load_decl    ::= [ decl_name "::" ] "#load" string_literal [ ";" ]
+        \\library_decl ::= identifier "::" "#library"
+        \\                 { "," ( "system" | "dyn" | "static" ) }
+        \\                 string_literal [ ";" ]
+        \\(* at most one distinct link-kind modifier; repeating the same one
+        \\   is accepted, two different ones is
+        \\   "#library accepts only one link-kind modifier" *)
+    );
+    note(33, #string,oneline
+        \\Three constructs a reader will expect at file scope are statements
+        \\only, and each fails as an unrecognised declaration name rather than
+        \\as a positional error. `#if` at file scope is `error: bad decl name
+        \\'if'`, `#assert` is `error: bad decl name 'assert'`, and
+        \\`#compile_error` is `error: bad decl name 'compile_error'`.
+        \\Conditional selection of file-scope declarations therefore has to go
+        \\through `#insert` or a `#comptime` block. There is also no
+        \\`#private_section` directive: `private_section` is a feature name
+        \\inside `#enable(...)` and `#disable(...)`, and `#private_section;`
+        \\is `error: bad decl name 'private_section'`.
+    );
+    subheading(34, "Declarations");
+    paragraph(35, #string,oneline
+        \\Declaration forms are shared between file scope and procedure
+        \\bodies, with two differences noted in the productions. Values,
+        \\Constants, and Variables owns the binding forms; Function
+        \\Declarations and the parameter chapters own `function_tail`; the
+        \\aggregate chapters own `struct_decl`, `union_decl` and `enum_decl`.
+    );
+    code_block(36, "ebnf", #string
+        \\var_decl   ::= name_list local_tail { memory_directive } [ ";" ]
+        \\name_list  ::= local_name { "," local_name }
+        \\local_name ::= identifier | backtick_name | double_backtick_name
+        \\local_tail ::= "::=" expr                    (* comptime local *)
+        \\             | ":=" expr                     (* mutable *)
+        \\             | "::" expr                     (* constant, alias *)
+        \\             | ":" [ type ] [ ":=" expr      (* COMPTIME local *)
+        \\                            | "=" expr       (* typed mutable *)
+        \\                            | ( "::" | ":" ) expr ]
+        \\             |                               (* default-init *)
+        \\(* the comma is taken only before a name-like token; one
+        \\   initializer is broadcast to every name in the list *)
+    );
+    paragraph(37, #string,oneline
+        \\The `":" type ":=" expr` row is the trap the grammar makes visible.
+        \\In a procedure body that spelling declares a compile-time local, and
+        \\a run-time initializer is `error: comptime variable initializer must
+        \\be compile-time evaluable`. At file scope the identical spelling is
+        \\an ordinary mutable global. `name: T : expr` and `name: T :: expr`
+        \\are both typed constants at both scopes.
+    );
+    code_block(38, "ebnf", #string
+        \\func_decl      ::= decl_name "::" function_tail
+        \\function_tail  ::= "(" [ param_list ] ")" [ "->" result ]
+        \\                   { func_directive } { where_clause }
+        \\                   ( block | ";" )
+        \\param_list     ::= param { "," param } [ "," "..." ]
+        \\param          ::= { "using" | "noalias" }
+        \\                   { "#comptime" | "#lazy" } param_core
+        \\param_core     ::= "#comptime" identifier { "," identifier }
+        \\                   ":" type [ "=" expr ]
+        \\                 | "#empty" ":" type { "," type }
+        \\                 | identifier ":=" expr          (* type param *)
+        \\                 | identifier { "," identifier }
+        \\                   ":" ( variadic_param | type ) [ "=" expr ]
+        \\variadic_param ::= "..." [ "(" identifier { "&&" identifier } ")"
+        \\                         | "$" identifier
+        \\                         | identifier ]
+        \\result         ::= type
+        \\where_clause   ::= "where" expr
+        \\(* every directive must precede the first where clause; a bodiless
+        \\   ";" is legal only for #magic, #foreign, and a typeclass
+        \\   requirement; a trailing "..." is C varargs and needs at least
+        \\   one fixed parameter *)
+    );
+    paragraph(39, #string,oneline
+        \\`result` is an ordinary type, so multiple returns are a tuple type
+        \\and named results are a tuple type whose elements are all named:
+        \\`-> (quotient: s64, remainder: s64)`. A `variadic_param` with a bare
+        \\type is a homogeneous pack, and one naming a typeclass is a
+        \\heterogeneous constrained pack; the parenthesised `&&` form
+        \\constrains a pack by several classes at once.
+    );
+    code_block(40, "ebnf", #string
+        \\fn_ptr_decl ::= identifier "::" "#fn_ptr"
+        \\                "(" [ fnptr_param { "," fnptr_param }
+        \\                      [ "," "..." ] ] ")"
+        \\                [ "->" type ] { "#c_call" | "#no_context" } [ ";" ]
+        \\fnptr_param ::= [ "noalias" ] identifier ":" type
+        \\(* "#no_context" is parsed here and silently discarded; only
+        \\   "#c_call" is recorded on the node *)
+    );
+    code_block(41, "ebnf", #string
+        \\struct_decl      ::= "struct" { struct_directive }
+        \\                     "{" { struct_member } "}"
+        \\struct_directive ::= "#c_call" | "#packed"
+        \\                   | "#derive" "(" identifier { "," identifier } ")"
+        \\                   | "#modify" ( expr | block )
+        \\                   | "#magic" string_literal
+        \\struct_member    ::= [ "using" ] empty_field
+        \\                   | [ "using" ] [ "#as" [ "using" ] ]
+        \\                     identifier ":" field_type [ "=" expr ] ";"
+        \\empty_field      ::= "#empty" ":" type { "," type } ";"
+        \\field_type       ::= type | inline_aggregate_type
+        \\
+        \\union_decl      ::= "union" { union_directive }
+        \\                    "{" { variant } "}"
+        \\union_directive ::= "#raw"
+        \\                  | "#derive" "(" identifier { "," identifier } ")"
+        \\                  | "#magic" string_literal
+        \\variant         ::= [ "#from" ] identifier ":" field_type ";"
+        \\(* a variant takes no default, no "using", no "#empty", no "#as";
+        \\   an aggregate declaration must not be followed by ";" *)
+    );
+    code_block(42, "ebnf", #string
+        \\enum_decl       ::= "enum" [ type ] enum_body
+        \\enum_flags_decl ::= "enum_flags" type enum_body
+        \\enum_body       ::= "{" { enum_member } "}"
+        \\enum_member     ::= identifier [ "::" int_literal ] ";"
+        \\(* enums accept no directives; the backing type is optional for
+        \\   "enum" and mandatory for "enum_flags"; the member value must be
+        \\   a single integer-literal token, so a constant, an expression and
+        \\   a negative value are all parse errors *)
+    );
+    code_block(43, "ebnf", #string
+        \\typeclass_decl       ::= "typeclass"
+        \\                         "(" [ identifier ":" type
+        \\                               { "," identifier ":" type } ] ")"
+        \\                         { where_clause }
+        \\                         { typeclass_clause }
+        \\                         "{" { typeclass_member } "}"
+        \\typeclass_clause     ::= derive_macro_clause | minimal_clause
+        \\derive_macro_clause  ::= "#derive" "(" identifier
+        \\                         { "," identifier } ")"
+        \\minimal_clause       ::= "#minimal" "(" [ minimal_expr ] ")"
+        \\minimal_expr         ::= minimal_and { "|" minimal_and }
+        \\minimal_and          ::= minimal_atom { "," minimal_atom }
+        \\minimal_atom         ::= "(" minimal_expr ")"
+        \\                       | identifier | operator_name
+        \\typeclass_member     ::= ( identifier | operator_name ) "::"
+        \\                         ( function_tail | associated_type_decl )
+        \\associated_type_decl ::= type ";"
+        \\
+        \\instance_decl ::= instance_head "::" "instance" [ "!" ] identifier
+        \\                  { where_clause }
+        \\                  "{" { ( identifier | operator_name ) "::"
+        \\                        ( function_tail | type ";" ) } "}"
+        \\instance_head ::= ? every token up to the top-level "::",
+        \\                    re-parsed as a type ?
+        \\                | double_backtick_name
+        \\distinct_decl ::= "distinct" type [ ";" ]
+    );
+    paragraph(44, #string,oneline
+        \\`minimal_expr` uses `,` for conjunction and `|` for disjunction, not
+        \\the operators `&&` and `||`: `#minimal(a, b | c)` reads "either both
+        \\`a` and `b`, or `c`", and `#minimal(a && b)` is `error: unexpected
+        \\token '&&'`. An operator entry inside `#minimal` must be written as
+        \\an `operator_name`, in quotes. At most one `#minimal` clause is
+        \\allowed per typeclass, and `#minimal` is not accepted on an
+        \\instance.
+    );
+    code_block(45, "ebnf", #string
+        \\nested_decl ::= ( identifier | operator_name ) "::"
+        \\                ( function_tail | struct_decl | enum_decl
+        \\                | union_decl | distinct_decl )
+        \\(* recognised by three tokens of lookahead in statement position and
+        \\   hoisted to file scope; the statement slot becomes a no-op.
+        \\   "#fn_ptr", "#import", "#load", "#library" and "typeclass" cannot
+        \\   nest. Because any "Name :: (" in statement position is a nested
+        \\   procedure, a parenthesised constant such as "X :: (1 + 2);" is a
+        \\   parse error *)
+    );
+    subheading(46, "Types");
+    paragraph(47, #string,oneline
+        \\One `type` production covers annotation position, field position,
+        \\parameter position and type-argument position. Type Syntax and Type
+        \\Values explains the forms; the pointer, array, view and SIMD
+        \\chapters explain the individual constructors.
+    );
+    code_block(48, "ebnf", #string
+        \\type       ::= inline_aggregate_type
+        \\             | soa_aos_type
+        \\             | "$" identifier              (* new generic binder *)
+        \\             | double_backtick_name        (* source splice *)
+        \\             | many_pointer_type
+        \\             | array_type
+        \\             | context_type
+        \\             | pointer_type
+        \\             | paren_type
+        \\             | named_type
+        \\soa_aos_type      ::= ( "#aos" | "#soa" ) type
+        \\many_pointer_type ::= "[" "*" "]" qualifiers type
+        \\array_type        ::= "[" [ ".." | int_literal | identifier ] "]"
+        \\                      [ qualifiers ] type
+        \\pointer_type      ::= "*" { "*" } qualifiers type
+        \\context_type      ::= "#Context"
+        \\qualifiers        ::= { "const" | "volatile" }
+        \\(* "[]T" is a view, "[..]T" a dynamic array, "[N]T" a fixed array;
+        \\   qualifiers are parsed only after a star run, after "[*]", and
+        \\   after an empty "[]" *)
+    );
+    code_block(49, "ebnf", #string
+        \\paren_type ::= "(" [ tuple_elem { "," tuple_elem } ] ")"
+        \\               [ "->" type ]
+        \\tuple_elem ::= [ "noalias" ] [ identifier ":" ] type
+        \\(* with "->" this is a function type and "noalias" is allowed;
+        \\   without it this is a tuple type and "noalias" is
+        \\   "noalias is only valid on function parameters".
+        \\   One unnamed element collapses to that element, so "(T)" is
+        \\   grouping; "()" is the empty tuple type, of size 0 *)
+        \\
+        \\named_type ::= identifier { "." identifier } [ type_args ]
+        \\               { "." identifier }
+        \\type_args  ::= "(" [ type { "," type } ] ")"
+        \\             | "(" type "," dim "," dim ")"      (* Matrix *)
+        \\             | "(" type "," int_literal ")"      (* Simd *)
+        \\dim        ::= [ "-" ] int_literal | identifier
+        \\(* the trailing "." identifier run after type_args is the
+        \\   associated-type form Class(Args).Assoc; Class.Assoc(Args) is
+        \\   diagnosed and rejected *)
+        \\
+        \\inline_aggregate_type ::= struct_decl | union_decl
+        \\                        | enum_decl | enum_flags_decl
+        \\(* legal only as an aggregate field type; hoisted under the
+        \\   nominal name "Owner.field" *)
+    );
+    code_block(50, "ebnf", #string
+        \\builtin_type ::= "int" | "uint"
+        \\               | "s8" | "s16" | "s32" | "s64" | "s128"
+        \\               | "u8" | "u16" | "u32" | "u64" | "u128"
+        \\               | "f16" | "f32" | "f64" | "f80" | "f128"
+        \\               | "c32" | "c64" | "c128" | "c160" | "c256"
+        \\               | "bool" | "string" | "cstring"
+        \\               | "string16" | "cstring16"
+        \\               | "type" | "void" | "any" | "label" | "Code"
+        \\               | "int8_t" | "int16_t" | "int32_t" | "int64_t"
+        \\               | "uint8_t" | "uint16_t" | "uint32_t" | "uint64_t"
+        \\               | "__int128" | "unsigned __int128"
+        \\(* the parser records only an identifier; the checker maps these
+        \\   names, so they are not reserved words and may be shadowed *)
+    );
+    paragraph(51, #string,oneline
+        \\Two forms are unspellable rather than merely unusual. A function
+        \\type and a tuple type cannot be named with `::` at any scope,
+        \\because a `(` after `::` always begins a function declaration:
+        \\`F :: (s32) -> s32;` is `error: unexpected token ')'` and
+        \\`P :: (s32, s32);` is `error: unexpected token ','`. Only
+        \\`fn_ptr_decl` can name a function-pointer type, and a tuple type
+        \\cannot be named at all. Writing the built-in context type as bare
+        \\`Context` is also rejected; the spelling is `#Context`.
+    );
+    subheading(52, "Statements");
+    paragraph(53, #string,oneline
+        \\Statement forms are tried in the order listed, which is observable
+        \\wherever two forms could match the same prefix. Statements,
+        \\Semicolons, and Nested Declarations owns this group; the control
+        \\flow chapters own the individual forms.
+    );
+    code_block(54, "ebnf", #string
+        \\block     ::= "{" { statement } "}"
+        \\body      ::= block | statement
+        \\statement ::= memory_overlay_stmt | nested_decl | case_clause
+        \\            | block | bytes_stmt | asm_stmt | label_stmt
+        \\            | return_stmt | break_stmt | continue_stmt
+        \\            | while_stmt | for_stmt | inline_for
+        \\            | try_defer_stmt | defer_stmt | using_stmt
+        \\            | if_stmt | push_context_stmt | push_allocator_stmt
+        \\            | comptime_stmt | static_if_stmt | assert_stmt
+        \\            | compile_error_stmt | insert_stmt
+        \\            | var_decl | assign_stmt | expr_stmt
+        \\(* "body" is used by if, else, while, for, "#if" and
+        \\   "#push_context" *)
+    );
+    paragraph(55, #string,oneline
+        \\There is no empty statement. A bare `;` in statement position is
+        \\`error: unexpected token ';'`; a semicolon exists only as the
+        \\optional terminator written into the individual productions.
+    );
+    code_block(56, "ebnf", #string
+        \\expr_stmt        ::= expr [ ";" ]
+        \\assign_stmt      ::= expr "=" expr [ ";" ]
+        \\                   | expr update_assign_op expr [ ";" ]
+        \\update_assign_op ::= ? any operator declared #operator(assign, n) ?
+        \\case_clause      ::= "case" expr ";" case_body
+        \\(* a bare case_clause is a statement only inside a "#code" quote;
+        \\   plain "=" is statement syntax and never an expression, so
+        \\   "y := (x = 2)" is "error: unexpected token '='" *)
+    );
+    code_block(57, "ebnf", #string
+        \\if_stmt      ::= "if" [ "#partial" ]
+        \\                 ( switch_stmt | pattern_switch_stmt | conditional )
+        \\conditional  ::= expr body [ "else" ( if_stmt | body ) ]
+        \\switch_stmt  ::= expr "==" "{" { case_clause | default_clause
+        \\                                | inline_case_gen } "}"
+        \\default_clause  ::= "else" ";" case_body
+        \\inline_case_gen ::= "#inline" for_header block
+        \\case_body       ::= { statement | falling_flag }
+        \\falling_flag    ::= "#falling" [ ";" ]
+        \\
+        \\pattern_switch_stmt ::= "#pattern"
+        \\                        ( "{" { pattern_case | default_clause } "}"
+        \\                        | [ expr ] "==" "{"
+        \\                          { pattern_case | default_clause } "}" )
+        \\pattern_case ::= "case" ( pattern | pattern_test_body )
+        \\                 [ "if" expr ] ";" case_body
+        \\
+        \\static_if_stmt ::= "#if" ( expr "==" "{" { case_clause
+        \\                                         | default_clause } "}"
+        \\                         | expr body [ "else" ( static_if_stmt
+        \\                                              | body ) ] )
+        \\(* "==" must be followed immediately by "{"; "#partial" applies only
+        \\   to a switch, and must precede "#pattern"; "#falling" is a flag on
+        \\   the whole case and may appear anywhere in the case body;
+        \\   inline_case_gen materialises only inside a "#code" quote, and the
+        \\   static switch does not allow it *)
+    );
+    code_block(58, "ebnf", #string
+        \\while_stmt    ::= "while" expr body
+        \\for_stmt      ::= "for" for_header body
+        \\for_header    ::= [ "<" ] [ ":" identifier ]
+        \\                  [ identifier [ "," identifier ] ":" ] expr
+        \\inline_for    ::= "#inline" ( "while" expr body | for_stmt )
+        \\return_stmt   ::= "return" [ expr { "," expr } ] [ ";" ]
+        \\break_stmt    ::= "break" [ ";" ]
+        \\continue_stmt ::= "continue" [ ";" ]
+        \\defer_stmt    ::= "defer" statement
+        \\try_defer_stmt::= "#try" "defer" statement
+        \\using_stmt    ::= "using" identifier [ ";" ]
+        \\label_stmt    ::= "'" identifier ( ":" | ";" )
+        \\(* "while" has no label clause. Neither "break" nor "continue"
+        \\   parses a label operand: "break 'outer;" is a plain break
+        \\   followed by a dead label-literal expression statement, with no
+        \\   diagnostic. "using" takes a bare identifier, not an expression.
+        \\   "goto" is not a keyword; it is a "#magic" procedure called as an
+        \\   ordinary expression statement *)
+    );
+    code_block(59, "ebnf", #string
+        \\comptime_stmt      ::= "#comptime" ( "->" type block
+        \\                                   | block
+        \\                                   | expr [ ";" ] )
+        \\insert_stmt        ::= "#insert" expr [ ";" ]
+        \\assert_stmt        ::= "#assert" [ "#comptime" ] expr
+        \\                       [ "," expr ] [ ";" ]
+        \\compile_error_stmt ::= "#compile_error" expr [ ";" ]
+        \\bytes_stmt         ::= "#bytes" expr [ ";" ]
+        \\push_context_stmt  ::= "#push_context" [ expr ] body
+        \\push_allocator_stmt::= "#push_allocator" "(" expr ")" [ ";" ]
+        \\memory_overlay_stmt::= memory_overlay
+        \\(* the "#comptime" block form runs during checking; the
+        \\   "#comptime" expr form in statement position silently drops the
+        \\   directive and the expression runs at run time.
+        \\   "#push_allocator" requires its parentheses *)
+    );
+    code_block(60, "ebnf", #string
+        \\asm_stmt      ::= structured_asm | legacy_asm
+        \\structured_asm::= "#asm" "{" mlstr_line { mlstr_line }
+        \\                  { asm_operand } [ asm_clobber ] "}" [ ";" ]
+        \\asm_operand   ::= identifier ":" ( "in" | "out" | "inout" )
+        \\                  "(" asm_constraint [ "," ".Early_Clobber" ] ")"
+        \\                  [ "=" ( identifier | expr ) ] ";"
+        \\asm_constraint::= "." ( "Register" | "Byte_Register"
+        \\                      | "Floating_Register" | "Vector_Register"
+        \\                      | "Predicate_Register" | "Memory"
+        \\                      | "Immediate" | "Constant" | "Address"
+        \\                      | "Register_Or_Memory"
+        \\                      | "Register_Or_Immediate"
+        \\                      | "Register_Memory_Or_Immediate" | "Any" )
+        \\                | "fixed" "(" identifier ")"
+        \\asm_clobber   ::= "clobber" ":" clob { "," clob } ";"
+        \\clob          ::= identifier | ".Memory" | ".Condition_Codes"
+        \\
+        \\legacy_asm    ::= "#asm" ( mlstr_line { mlstr_line } | expr )
+        \\                  [ ":" [ out_operand { "," out_operand } ]
+        \\                  [ ":" [ in_operand { "," in_operand } ]
+        \\                  [ ":" [ string_literal
+        \\                          { "," string_literal } ] ] ] ] [ ";" ]
+        \\out_operand   ::= ( "out" | "inout" )
+        \\                  "(" string_literal "," identifier ")"
+        \\in_operand    ::= "in" "(" string_literal "," expr ")"
+    );
+    paragraph(61, #string,oneline
+        \\There are 13 `asm_constraint` names. At most one `asm_clobber`
+        \\clause is allowed and every operand must precede it, and
+        \\`.Early_Clobber` is rejected on an `in` operand. The two forms
+        \\differ in template escaping as well as in shape: structured `#asm`
+        \\escapes `$` for the backend, so a literal `$` is written once, while
+        \\the legacy form passes `$` through and a legacy immediate needs
+        \\`$$5`. Inline Assembly and Bytes explains both.
+    );
+    subheading(62, "Expressions");
+    paragraph(63, #string,oneline
+        \\The five layers below are the whole expression grammar. `expr` is a
+        \\Pratt loop; `unary_expr` is an ordered chain that recurses into
+        \\itself; `postfix_expr` is a loop; `primary` is a flat set of atoms.
+        \\Member Access, Calls, and Argument Expansion, Casts and Contextual
+        \\Conversion, and Operator Declarations own the individual forms.
+    );
+    code_block(64, "ebnf", #string
+        \\expr             ::= expr_with(0, allow_assign)
+        \\expr_with(min, a)::= unary_expr
+        \\                     { binary_op(p >= min)
+        \\                       expr_with(p + (left ? 1 : 0), a) }
+        \\(* the loop stops on an undeclared operator token, on p < min, on an
+        \\   assignment operator when assignment is not allowed (statement
+        \\   head), on "==" immediately followed by "{" (a switch head, never
+        \\   a comparison), and on ".." immediately followed by a range
+        \\   boundary token, which is folded into a suffix instead.
+        \\   Two operators at one precedence with different associativity,
+        \\   neither being assign, is a parse error demanding parentheses *)
+    );
+    code_block(65, "text", #string
+        \\level  operators                                    assoc
+        \\  18   *  /  %  *%  *|                              left
+        \\  17   +  -  +%  -%  +|  -|                         left
+        \\  16   <<  <<|  >>                                  left
+        \\  14   &                                            left
+        \\  13   ^                                            left
+        \\  12   |                                            left
+        \\  10   <=>  <  <=  >  >=                            left
+        \\   8   ==  !=                                       left
+        \\   6   &&                                           left
+        \\   4   ||                                           left
+        \\   2   ..  ..=                                      left
+        \\   0   +=  -=  *=  /=  %=  +%=  -%=  *%=  +|=  -|=  assign
+        \\       *|=  <<=  <<|=  >>=  &=  |=  ^=  &&=  ||=    (right)
+    );
+    paragraph(66, #string,oneline
+        \\Those are the only levels the stock Prelude occupies; 1, 3, 5, 7, 9,
+        \\11, 15, 19 and 20 are unused, and a `#operator` or `#precedence`
+        \\level may be any integer from 0 through 1000. The right operand of
+        \\`&&` and of `||` is a `#lazy` parameter, which is where
+        \\short-circuiting comes from rather than from the parser. Plain `=`
+        \\is not in the table at all — it is a reserved token
+        \\and statement syntax. Operator Declarations gives the full table
+        \\with the typeclass behind each row.
+    );
+    code_block(67, "ebnf", #string
+        \\unary_expr ::= lambda
+        \\             | "#comptime" ( "->" type block | block )
+        \\             | "#comptime" unary_expr
+        \\             | "#try" "{" expr "}"
+        \\             | ifx_expr
+        \\             | pattern_test
+        \\             | "#meaningful" ( block | unary_expr )
+        \\             | cast_expr
+        \\             | acast_expr
+        \\             | address_of unary_expr
+        \\             | prefix_op unary_expr
+        \\             | range_full_lit
+        \\             | postfix_expr
+        \\cast_expr  ::= "cast" "(" type ")" unary_expr
+        \\acast_expr ::= "acast" unary_expr
+        \\address_of ::= ? a token made only of "*"; a single "*" is
+        \\                 address-of ?
+        \\prefix_op  ::= ? any operator declared #operator(prefix) ?
+        \\(* the Prelude declares "-", "-%", "~", "!", ".." and "..=" as
+        \\   prefix operators *)
+    );
+    code_block(68, "ebnf", #string
+        \\postfix_expr ::= primary { postfix_op }
+        \\postfix_op   ::= "." "cast" "(" type ")"
+        \\               | "." "acast"
+        \\               | "." int_literal              (* tuple index *)
+        \\               | "." ( identifier | backtick_name
+        \\                     | double_backtick_name | operator_name )
+        \\               | call
+        \\               | index_expr
+        \\               | nonlocal_label
+        \\               | struct_literal
+        \\               | "#memory" memory_args
+        \\               | deref_expr
+        \\               | try_expr
+        \\               | ? any operator declared #operator(suffix) ?
+        \\call           ::= "(" [ call_arg { "," call_arg } [ "," ] ] ")"
+        \\call_arg       ::= [ "." identifier "=" ] expr
+        \\                   [ argument_expansion ]
+        \\argument_expansion ::= "..."
+        \\index_expr     ::= "[" expr "]"
+        \\nonlocal_label ::= ",," label_literal
+        \\struct_literal ::= ".{" struct_lit_fields "}"
+        \\deref_expr     ::= ".*"
+        \\try_expr       ::= "?"
+        \\(* index_expr takes exactly ONE expression: "m[1, 0]" is
+        \\   "error: unexpected token ','". "." int_literal is a lexer trap:
+        \\   "t.1.0" lexes "1.0" as a float. There is no auto-dereference:
+        \\   "p.field" through a pointer is "error: member of non-struct",
+        \\   so ".*" is mandatory. ".{" keeps the type name only when the
+        \\   base is a bare identifier token *)
+    );
+    code_block(69, "ebnf", #string
+        \\primary ::= int_literal | float_literal | string_literal
+        \\          | char_literal
+        \\          | label_literal
+        \\          | "context"
+        \\          | undefined_literal
+        \\          | "#simd" array_literal
+        \\          | multiline_string
+        \\          | "$" identifier
+        \\          | "#inline" ( "while" expr body | for_stmt )
+        \\          | code_quote
+        \\          | backtick_name
+        \\          | double_backtick_name
+        \\          | lambda
+        \\          | tuple_literal
+        \\          | "." ( identifier | backtick_name
+        \\                | double_backtick_name )     (* shorthand member *)
+        \\          | identifier                       (* true/false/null *)
+        \\          | operator_name_value
+        \\          | struct_literal
+        \\          | array_literal
+        \\          | "(" expr ")"
+        \\array_literal        ::= ".[" { expr [ "," ] } "]"
+        \\struct_lit_fields    ::= { ( "." name "=" expr | expr ) [ "," ] }
+        \\tuple_literal        ::= "." "(" [ expr { "," expr } [ "," ] ] ")"
+        \\code_quote           ::= "#code" block
+        \\operator_name_value  ::= operator_name
+        \\(* commas are entirely optional in array_literal and in
+        \\   struct_lit_fields: ".[1 2 3]" and "P.{ 3 4 }" both compile *)
+    );
+    code_block(70, "ebnf", #string
+        \\lambda      ::= "||" [ "->" type ] lambda_body
+        \\              | "||->" type block
+        \\              | "|" lambda_params ( "|" | "|->" )
+        \\                [ "->" type ] lambda_body
+        \\lambda_params ::= [ lambda_param { "," lambda_param } [ "," ] ]
+        \\lambda_param  ::= [ "noalias" ] identifier [ ":" type ]
+        \\lambda_body   ::= block | expr
+        \\(* "||->" is one token that the parser splits; an expression body
+        \\   is legal only when there is no "-> type"; duplicate parameter
+        \\   names are rejected at parse time *)
+        \\
+        \\ifx_expr ::= "ifx" expr "else" expr
+        \\           | "ifx" expr "==" "{" { case_clause
+        \\                                 | default_clause } "}"
+        \\           | "ifx" "#pattern" expr "==" "{" { pattern_case
+        \\                                            | default_clause } "}"
+        \\           | "ifx" "#pattern" "==" "{" { pattern_case
+        \\                                       | default_clause } "}"
+        \\(* the "else" of the conditional form is mandatory, and both arms
+        \\   use the full expression parser, so the else arm swallows every
+        \\   operator to its right. "ifx #pattern {" without "==" is a parse
+        \\   error, unlike the "if" statement *)
+    );
+    code_block(71, "ebnf", #string
+        \\range_expr     ::= expr ( ".." | "..=" ) expr   (* binary, prec 2 *)
+        \\               |   ( ".." | "..=" ) expr        (* prefix operator *)
+        \\               |   expr ".." &range_boundary    (* suffix re-read *)
+        \\range_full_lit ::= ".." &range_boundary
+        \\range_boundary ::= eof | "{" | "}" | ")" | "]" | ";" | ","
+        \\                 | "case" | "else"
+        \\(* ranges are not a precedence layer of their own. The suffix form
+        \\   exists only because the binary ".." is re-read as a suffix when
+        \\   the next token is a range_boundary *)
+    );
+    note(72, #string,oneline
+        \\`cast`, `acast`, `#comptime`, `#try`, `#pattern` and `#meaningful`
+        \\each bind exactly one `unary_expr` operand, which is looser than it
+        \\looks: `cast(s8) 200 + 1` parses as `(cast(s8) 200) + 1`, and
+        \\`#comptime 2 + n` parses as `(#comptime 2) + n` and folds only the
+        \\`2`. Parenthesise the operand when the intent is the whole
+        \\expression.
+    );
+    subheading(73, "Patterns");
+    paragraph(74, #string,oneline
+        \\The pattern grammar is a separate parser with its own five layers —
+        \\or, range, unary, postfix, primary — and is reproduced in full in
+        \\Pattern Matching with `#pattern` and again in Pattern Vocabulary and
+        \\Case Guards, where each pattern form has a worked example. Only the
+        \\two productions that join patterns to the expression grammar are
+        \\repeated here.
+    );
+    code_block(75, "ebnf", #string
+        \\pattern_test      ::= "#pattern" pattern_arm
+        \\                    | "#pattern" pattern_test_body
+        \\pattern_test_body ::= "{" pattern_arm { ( ";" | "," ) pattern_arm }
+        \\                      [ ";" | "," ] "}"
+        \\pattern_arm       ::= pattern "="
+        \\                      expr_with(max(prec("&&"), prec("||")) + 1)
+        \\(* the arm value is parsed with a precedence FLOOR above both
+        \\   short-circuit operators — 7 with the stock Prelude — so the arm
+        \\   stops before a top-level "&&" or "||". That is what makes
+        \\   "if #pattern P = point && y > 0" group as
+        \\   "(#pattern P = point) && (y > 0)".
+        \\   A pattern_test yields bool and its captures escape into the
+        \\   enclosing scope. Guards are not allowed inside a
+        \\   pattern_test_body; combine with "&&" instead *)
+    );
+    subheading(76, "Directives");
+    paragraph(77, #string,oneline
+        \\There are exactly 51 directive names. The table gives each one's
+        \\legal positions; the argument grammar for the directives that take
+        \\one is in the productions above and below. A directive written at a
+        \\position that does not accept it is normally a parse error, with one
+        \\documented exception: `#no_context` on a `#fn_ptr` parses and is
+        \\discarded.
+    );
+    table_header(78, "Directive   —   Legal positions");
+    table_row(79, #string,oneline
+        \\`#Context`   |   Type position only, as `context_type`. Takes no
+        \\argument. Bare `Context` in type position is rejected.
+    );
+    table_row(80, #string,oneline
+        \\`#aos`   |   Type position, immediately before an array annotation.
+        \\No argument.
+    );
+    table_row(81, #string,oneline
+        \\`#as`   |   Struct body, as a field prefix: `#as name: T;` or
+        \\`#as using name: T;`. No argument.
+    );
+    table_row(82, #string,oneline
+        \\`#asm`   |   Statement only, in the structured brace form or the
+        \\legacy colon-clause form.
+    );
+    table_row(83, #string,oneline
+        \\`#assert`   |   Statement only. `#assert [#comptime] cond
+        \\[, message];`. At file scope: `bad decl name 'assert'`.
+    );
+    table_row(84, #string,oneline
+        \\`#bytes`   |   Statement only. The operand must fold to a list of
+        \\integers 0 through 255.
+    );
+    table_row(85, #string,oneline
+        \\`#c_call`   |   Function signature after the return type, struct
+        \\header, and `#fn_ptr` tail. No argument.
+    );
+    table_row(86, #string,oneline
+        \\`#char`   |   Expression position. Re-scanned by the lexer; the
+        \\string must follow on the same line.
+    );
+    table_row(87, #string,oneline
+        \\`#code`   |   Expression position, followed by a block. Yields a
+        \\`Code` value.
+    );
+    table_row(88, #string,oneline
+        \\`#compile_error`   |   Statement only. At file scope: `bad decl name
+        \\'compile_error'`.
+    );
+    table_row(89, #string,oneline
+        \\`#comptime`   |   Five positions: file item, statement, unary
+        \\expression, parameter prefix, and modifier on `#assert`.
+    );
+    table_row(90, #string,oneline
+        \\`#derive`   |   Struct or union header, where the argument names a
+        \\typeclass; typeclass header, where it names a macro procedure.
+    );
+    table_row(91, #string,oneline
+        \\`#disable`   |   File scope only, between declarations. Takes a
+        \\feature name and optionally `siblings`.
+    );
+    table_row(92, #string,oneline
+        \\`#dump`   |   Function signature, after the return type. No
+        \\argument.
+    );
+    table_row(93, #string,oneline
+        \\`#empty`   |   Struct body and parameter list, in both cases
+        \\`#empty: T[, U, ...]` with no name written.
+    );
+    table_row(94, #string,oneline
+        \\`#enable`   |   File scope only, between declarations. Same argument
+        \\shape as `#disable`.
+    );
+    table_row(95, #string,oneline
+        \\`#expand`   |   Function signature. `#expand` or
+        \\`#expand,expression`.
+    );
+    table_row(96, #string,oneline
+        \\`#falling`   |   Inside a switch case body, as a statement. A flag
+        \\on the whole case, not a positional jump.
+    );
+    table_row(97, #string,oneline
+        \\`#fn_ptr`   |   Right-hand side of a top-level named declaration
+        \\only. Cannot be nested in a body.
+    );
+    table_row(98, #string,oneline
+        \\`#foreign`   |   Function signature. Takes a library handle or file
+        \\string and an optional symbol string.
+    );
+    table_row(99, #string,oneline
+        \\`#from`   |   Union body, as a variant prefix. A struct body rejects
+        \\it.
+    );
+    table_row(100, #string,oneline
+        \\`#if`   |   Statement only, in the conditional form and the
+        \\compile-time switch form.
+    );
+    table_row(101, #string,oneline
+        \\`#import`   |   Bare file item, or the right-hand side of a named
+        \\declaration for an aliased import.
+    );
+    table_row(102, #string,oneline
+        \\`#inline`   |   Four positions: function signature, statement prefix
+        \\on a loop, expression prefix on a loop, and case generator inside a
+        \\`#code` quote.
+    );
+    table_row(103, #string,oneline
+        \\`#insert`   |   File item and statement. The operand must fold to a
+        \\source string or a `Code` value.
+    );
+    table_row(104, #string,oneline
+        \\`#lazy`   |   Parameter prefix. Commutes with `#comptime` in either
+        \\order.
+    );
+    table_row(105, #string,oneline
+        \\`#library`   |   Right-hand side of a top-level named declaration
+        \\only.
+    );
+    table_row(106, #string,oneline
+        \\`#load`   |   Bare file item, or the right-hand side of a named
+        \\declaration.
+    );
+    table_row(107, #string,oneline
+        \\`#magic`   |   Function signature, struct header, union header.
+        \\Always takes a string. Makes a procedure declaration bodyless.
+    );
+    table_row(108, #string,oneline
+        \\`#meaningful`   |   Expression position, taking a block or exactly
+        \\one unary operand.
+    );
+    table_row(109, #string,oneline
+        \\`#memory`   |   Five positions: file-scope overlay, statement
+        \\overlay, function signature, variable declaration, and postfix
+        \\annotation on an expression.
+    );
+    table_row(110, #string,oneline
+        \\`#minimal`   |   Typeclass header only, after the parameter list and
+        \\any `where` clauses. At most one per typeclass.
+    );
+    table_row(111, #string,oneline
+        \\`#modify`   |   Function signature and struct header, each taking a
+        \\block or an expression. Not accepted on a union.
+    );
+    table_row(112, #string,oneline
+        \\`#must`   |   Function signature. No argument.
+    );
+    table_row(113, #string,oneline
+        \\`#no_context`   |   Function signature, and `#fn_ptr` tail where it
+        \\parses and is discarded. No argument.
+    );
+    table_row(114, #string,oneline
+        \\`#noreturn`   |   Function signature. No argument.
+    );
+    table_row(115, #string,oneline
+        \\`#operator`   |   Function signature, on typeclass method
+        \\declarations and optionally repeated on instance methods.
+    );
+    table_row(116, #string,oneline
+        \\`#packed`   |   Struct header only. No argument.
+    );
+    table_row(117, #string,oneline
+        \\`#partial`   |   Immediately after the `if` keyword of a switch, and
+        \\before `#pattern` when both are present.
+    );
+    table_row(118, #string,oneline
+        \\`#pattern`   |   Three positions: expression test, pattern switch
+        \\after `if`, and subject-less pattern switch.
+    );
+    table_row(119, #string,oneline
+        \\`#precedence`   |   Function signature, on typeclass method
+        \\declarations. Binary and assign modes only.
+    );
+    table_row(120, #string,oneline
+        \\`#push_allocator`   |   Statement only. The parentheses around the
+        \\operand are mandatory.
+    );
+    table_row(121, #string,oneline
+        \\`#push_context`   |   Statement only, in the bodyless form and the
+        \\replacement-value form.
+    );
+    table_row(122, #string,oneline
+        \\`#raw`   |   Union header only. No argument.
+    );
+    table_row(123, #string,oneline
+        \\`#returns_twice`   |   Function signature. No argument.
+    );
+    table_row(124, #string,oneline
+        \\`#simd`   |   Expression position, and must be followed immediately
+        \\by a `.[...]` array literal.
+    );
+    table_row(125, #string,oneline
+        \\`#soa`   |   Type position, immediately before a dynamic-array or
+        \\view annotation. No argument.
+    );
+    table_row(126, #string,oneline
+        \\`#string`   |   Expression position, with the modifiers `oneline`
+        \\and `escape`, followed by one or more `\\` lines.
+    );
+    table_row(127, #string,oneline
+        \\`#thread_local`   |   Top-level declaration prefix only.
+    );
+    table_row(128, #string,oneline
+        \\`#try`   |   Two productions: the expression `#try { e }` and the
+        \\statement `#try defer stmt;`.
+    );
+    table_row(129, #string,oneline
+        \\`#undefined`   |   Expression position, wherever the surrounding
+        \\construct supplies an expected type. No argument.
+    );
+    paragraph(130, #string,oneline
+        \\Two spellings a reader may expect are not in the list. `#run` has
+        \\been removed from the language and survives only as a
+        \\resynchronisation token in the parser's error recovery; `VALUE ::
+        \\#run 1;` is `error: bad decl name 'run'`. `#private_section` is not
+        \\a directive at all; `private_section` is a feature name inside
+        \\`#enable(...)` and `#disable(...)`.
+    );
+    code_block(131, "ebnf", #string
+        \\func_directive ::= "#operator" "(" ( "prefix" | "suffix" ) ")"
+        \\                 | "#operator" "(" assoc [ "," int_literal ] ")"
+        \\                 | "#precedence" "(" assoc [ "," int_literal ] ")"
+        \\                 | "#expand" [ "," "expression" ]
+        \\                 | "#inline" [ "," ( "always" | "never" ) ]
+        \\                 | "#magic" string_literal
+        \\                 | "#foreign" ( string_literal | identifier )
+        \\                   [ string_literal ]
+        \\                 | "#modify" ( expr | block )
+        \\                 | "#memory" memory_args
+        \\                 | "#c_call" | "#no_context" | "#noreturn"
+        \\                 | "#returns_twice" | "#dump" | "#must"
+        \\assoc          ::= "left" | "right" | "assign"
+        \\(* "#precedence" rejects "prefix" and "suffix" with
+        \\   "parse error: #precedence expects left, right, or assign";
+        \\   otherwise the two directives are interchangeable. The level must
+        \\   be an integer literal in 0..=1000. Every operator is a typeclass
+        \\   method: "#operator" on a free function is
+        \\   "operator '<x>' must be declared by a typeclass and implemented
+        \\   by its instances" *)
+    );
+    code_block(132, "ebnf", #string
+        \\memory_directive ::= "#memory" memory_args
+        \\memory_args      ::= memory_effect
+        \\                   | "(" memory_effect { "," memory_effect } ")"
+        \\memory_overlay   ::= "#memory" qualified_name
+        \\                     "{" memory_effect { "," memory_effect }
+        \\                     [ "," ] "}" [ ";" ]
+        \\qualified_name   ::= identifier { "." identifier }
+        \\(* memory_effect has 13 forms and is given production-for-
+        \\   production in Memory Contracts and Temporal Checking. The
+        \\   grouped argument list rejects a trailing comma; the overlay body
+        \\   allows one *)
+        \\
+        \\aggregate_magic ::= "option" | "result"
+        \\                  | "jump_context_storage_struct"
+        \\(* "option" and "result" are niche markers and require a union;
+        \\   "jump_context_storage_struct" requires a struct and must be
+        \\   non-generic and field-less. Any other string on an aggregate is
+        \\   "unknown aggregate #magic". On a procedure, "#magic" accepts any
+        \\   string at the declaration and an unknown one fails only at
+        \\   lowering *)
+    );
+    subheading(133, "Driver command line");
+    paragraph(134, #string,oneline
+        \\The driver grammar is part of the language surface because
+        \\`#comptime` build code constructs the same command line for nested
+        \\compilations. Using the Compiler explains the options and
+        \\Bare-Metal and Freestanding Targets explains the target rules.
+    );
+    code_block(135, "ebnf", #string
+        \\driver_command  ::= "glosso" { option | source_file }
+        \\                    [ "--" { comptime_arg } ]
+        \\option          ::= terminal_action
+        \\                  | "--print-cache-dir" | "--show-generated"
+        \\                  | "--memory-sanitizer" | "--thread-sanitizer"
+        \\                  | "--no-main" | "--run"
+        \\                  | optimization_option
+        \\                  | "-o" " " path
+        \\                  | valued_option
+        \\terminal_action ::= "-h" | "--help" | "--print-targets" | "--targets"
+        \\valued_option   ::= ( "--cache-dir"           value_sep abs_dir )
+        \\                  | ( "--backend"             value_sep backend_name )
+        \\                  | ( "--target"              value_sep target_spec )
+        \\                  | ( "--color"               value_sep color_mode )
+        \\                  | ( "--linker-arg"          value_sep raw_arg )
+        \\                  | ( "--borrow-check"        value_sep borrow_mode )
+        \\                  | ( "--temp-allocator-size" value_sep positive_int )
+        \\                  | ( "--std"                 value_sep std_dir )
+        \\value_sep       ::= " " | "="
+        \\(* the last source_file wins; parsing stops at "--"; a source file
+        \\   is required unless a terminal_action was seen; "-o" has no "="
+        \\   form and never fixes an extension *)
+    );
+    code_block(136, "ebnf", #string
+        \\backend_name        ::= "llvm" | "object" | "static-lib"
+        \\                      | "shared-lib" | "llvm-ir"
+        \\optimization_option ::= "-O" ( "0" | "1" | "2" | "3" )
+        \\                      | "-Os" | "-Oz" | "-Ozz"
+        \\color_mode          ::= "auto" | "always" | "never"
+        \\borrow_mode         ::= "off" | "warning" | "error"
+        \\(* defaults: backend llvm, color auto, borrow-check warning.
+        \\   Exactly these optimization spellings are accepted, "-O4" and
+        \\   "-O 2" are unknown options, and the last occurrence wins *)
+    );
+    code_block(137, "ebnf", #string
+        \\target_spec ::= { part "-" } [ part ]
+        \\target_rule ::= wasm_first
+        \\              | cpu_freestanding
+        \\              | legacy_wasi
+        \\              | cpu_os_abi
+        \\              | positional_zip
+        \\(* the spec is split on "-" and interpreted by the FIRST matching
+        \\   rule; every field the spec does not determine keeps the host
+        \\   value.
+        \\   wasm_first:       part[0] is wasm32 or wasm64
+        \\   cpu_freestanding: exactly two parts, target_cpu then the literal
+        \\                     "freestanding"
+        \\   legacy_wasi:      part[0] is "wasi" and part[1] is a wasm cpu
+        \\   cpu_os_abi:       two or more parts, target_cpu then target_os
+        \\   positional_zip:   otherwise zip the parts onto (os, cpu, abi),
+        \\                     discarding the fourth and later, with NO
+        \\                     validation - "foo-bar-baz" is accepted *)
+    );
+    code_block(138, "ebnf", #string
+        \\target_cpu ::= "x86_64" | "amd64" | "x86" | "i386" | "i686"
+        \\             | "aarch64" | "arm64" | "arm" | "armv5" | "armv7"
+        \\             | "thumb" | "loongarch64"
+        \\             | "mips" | "mipsel" | "mips64" | "mips64el"
+        \\             | "powerpc" | "ppc" | "ppc32" | "ppc64le"
+        \\             | "riscv64" | "s390x" | "wasm32" | "wasm64"
+        \\target_os  ::= "linux" | "macos" | "darwin" | "osx"
+        \\             | "windows" | "win32" | "freebsd"
+        \\             | "wasm" | "webassembly" | "freestanding"
+        \\(* canonicalisation: amd64 to x86_64, arm64 to aarch64, i686 to
+        \\   i386, ppc and ppc32 to powerpc; darwin and osx to macos, win32
+        \\   to windows, webassembly and wasi to wasm *)
+    );
+    paragraph(139, #string,oneline
+        \\Because `positional_zip` is the last rule and validates nothing, a
+        \\bare CPU name is silently read as an operating system: `--target
+        \\x86_64` produces the triple `x86_64-unknown-x86_64-msvc`. The
+        \\ordering also explains why `--target x86_64-linux-freestanding`
+        \\matches `cpu_os_abi` and drops the ABI from the emitted triple while
+        \\`OUT.abi` still reads `Freestanding`.
+    );
+}
+
+render_section_104 :: () {
+    paragraph(0, #string,oneline
+        \\An intrinsic is a procedure whose implementation the compiler
+        \\supplies. The declaration is written in Glosso, has no body, and
+        \\carries `#magic "name"`; the name selects an entry in one of the
+        \\compiler's intrinsic tables, and the call is replaced during
+        \\lowering. Almost everything primitive in the language arrives this
+        \\way: `+` on integers, `[]` on views, `size_of`, `alloc`, the range
+        \\operators, the file system, and the process API are all ordinary
+        \\standard-library declarations bound to intrinsics.
+    );
+    paragraph(1, #string,oneline
+        \\Three tables decide what a name means, and none of them is complete
+        \\on its own. The runtime and compile-time registry in `magic.rs` holds
+        \\exactly 478 names and is the table the compile-time virtual machine
+        \\and the C backend consult; a test asserts the count. The native
+        \\classifier in `backend_llvm.rs` is a superset: it also handles the
+        \\`simd_*` family, `label_none` and `crypto_native_execution`, and
+        \\returns an unclassified verdict for anything it does not know. A
+        \\third set never reaches either table and is resolved in the checker:
+        \\`array_add`, `array_reset`, `array_free`, `array_view`, the seven
+        \\derive-reflection queries, `heap_alloc`, `heap_realloc`, `heap_free`,
+        \\the three thread-sanitizer annotations, and the aggregate magic names.
+        \\Across the whole standard library 463 distinct intrinsic names are
+        \\bound by a declaration, so the reachable surface and the registry are
+        \\close but not identical.
+    );
+    subheading(2, "The mechanism");
+    paragraph(3, #string,oneline
+        \\`#magic` is accepted at exactly three declaration sites: a procedure
+        \\(including an operator method inside an `instance` block, which is how
+        \\the Prelude binds every primitive operator), a `struct`, and a
+        \\`union`. Its argument is a string literal.
+    );
+    code_block(4, "ebnf", #string
+        \\magic_directive ::= "#magic" string_literal
+        \\
+        \\proc_decl   ::= ident "::" "(" params ")" [ "->" type ]
+        \\                { func_directive } ";"
+        \\struct_decl ::= ident "::" "struct" { struct_directive } "{" "}"
+        \\union_decl  ::= ident "::" "union" { union_directive }
+        \\                "{" variants "}"
+        \\(* magic_directive is one alternative of each of the three
+        \\   directive sets *)
+    );
+    paragraph(5, #string,oneline
+        \\At parse time the directive makes the declaration bodyless. The parser
+        \\records the declaration as signature-only, consumes an optional
+        \\semicolon and installs no body, so a block after the directive is not
+        \\an alternative implementation — it is a syntax error, and the message
+        \\is the generic one for a declaration that did not end where it should.
+    );
+    code_block(6, "text", #string
+        \\error: bad decl name '{'
+        \\  --> magic.glo:1:40
+        \\  |
+        \\1 | f :: (T: type) -> s64 #magic "size_of" { return 0; }
+        \\  |                                        ^
+    );
+    paragraph(7, #string,oneline
+        \\At check time the string is not validated. Any name at all is
+        \\accepted, the declaration type-checks, calls to it type-check against
+        \\the written signature, and the program proceeds to code generation.
+        \\The signature is taken at face value: the compiler does not compare it
+        \\against the intrinsic's real shape except for the three reserved
+        \\memory names described below.
+    );
+    paragraph(8, #string,oneline
+        \\Because the binding is by name and the checker trusts the signature, a
+        \\user may declare a private wrapper over an intrinsic the standard
+        \\library already exposes, or over one it does not expose at all. This
+        \\is the only sense in which `#magic` is available to user code: it
+        \\rebinds an existing implementation under a new name and a new
+        \\signature. It cannot introduce a new implementation.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\my_size :: (T: type) -> s64            #magic "size_of";
+        \\my_add  :: (a: s64, b: s64) -> s64     #magic "int_add";
+        \\is_int  :: (T: type) -> bool           #magic "is_integer";
+        \\same    :: (a: type, b: type) -> bool  #magic "type_eq";
+        \\
+        \\main :: () {
+        \\    print("% % % %\n", my_size(f64), my_add(2, 3),
+        \\        is_int(u16), same(s32, s32));
+        \\}
+    );
+    code_block(10, "text", #string
+        \\8 5 1 1
+    );
+    note(11, #string,oneline
+        \\`is_integer` and `type_eq` in that program are reachable only this
+        \\way. Nine kind predicates — `is_integer`, `is_float`, `is_bool`,
+        \\`is_string`, `is_struct`, `is_enum`, `is_union`, `is_pointer`,
+        \\`is_array` — plus `type_eq` are in the registry and no
+        \\standard-library declaration binds them. The `Is_Integer` family in
+        \\`where` clauses is a set of ordinary Glosso procedures written on
+        \\`type_info(T).tag`, not these intrinsics.
+    );
+    subheading(12, "Registration flags and the phase a call runs in");
+    paragraph(13, #string,oneline
+        \\Each registry entry carries three flags, and together they decide
+        \\which phases a call may appear in. A reader cannot see them from the
+        \\declaration, which is why an intrinsic that compiles in one context
+        \\fails in another with no change to its call site.
+    );
+    table_header(14, "Flag   —   What it controls");
+    table_row(15, #string,oneline
+        \\`has_vm`   |   The compile-time virtual machine has a service
+        \\implementation. Entries without it are native-only and cannot be
+        \\reached from `#comptime`, `#if` or a constant initializer. The flag is
+        \\not the whole gate: the VM has its own broader dispatch, which is why
+        \\`get_cmdline_args` is registered without `has_vm` and nevertheless
+        \\works inside a top-level `#comptime` block.
+    );
+    table_row(16, #string,oneline
+        \\`c`   |   An optional C or expression template used by the C backend,
+        \\such as `({0} + 1)` for `int_next` or `glo_ctx_alloc({0})` for
+        \\`ctx_alloc`. Entries without one have no C lowering.
+    );
+    table_row(17, #string,oneline
+        \\`compile_time`   |   The intrinsic must be, and can be, folded before
+        \\lowering. A call to a procedure with a `type`-valued parameter is
+        \\constant-folded when the procedure has no `#magic` at all, or when its
+        \\magic is registered with this flag. That is why `size_of`,
+        \\`type_info`, `field_count`, the `is_*` predicates and `type_eq` may
+        \\appear in `#if`, in a `where` clause and in a constant initializer.
+    );
+    paragraph(18, #string,oneline
+        \\Four distinct failures follow from the flags, and each has its own
+        \\text. An unknown name is diagnosed twice over, once per phase: the
+        \\compile-time VM reports it when the call is folded, and the native
+        \\backend reports it when the call survives to lowering. Neither
+        \\diagnostic carries a source frame, because the failure is raised
+        \\against an IR instruction rather than a token.
+    );
+    code_block(19, "text", #string
+        \\error: #magic intrinsic 'ctx_alloc' is not available during
+        \\compile-time evaluation
+        \\
+        \\error: unknown #magic intrinsic 'no_such_intrinsic_xyz'
+        \\
+        \\error: native LLVM lowering has no classification for #magic 'sqrt'
+        \\while lowering 'main' at IR instruction 2
+        \\
+        \\error: #magic 'compiler_executable_path' must not reach native LLVM
+        \\lowering: compiler service or type query must be folded before native
+        \\lowering while lowering 'main' at IR instruction 1
+        \\
+        \\error: native LLVM lowering rejects #magic 'sb_new': string-builder
+        \\runtime representation is not lowered while lowering 'main' at IR
+        \\instruction 1
+    );
+    note(20, #string,oneline
+        \\A misspelled intrinsic name therefore produces no diagnostic at all
+        \\until code generation, and the message names the enclosing procedure
+        \\rather than the call. There is no earlier check to enable.
+    );
+    subheading(21, "Aggregate `#magic`");
+    paragraph(22, #string,oneline
+        \\On a `struct` or a `union` the directive selects a layout behaviour
+        \\rather than an implementation, and exactly three names are legal. The
+        \\checker validates them at declaration time, so these are the one
+        \\family of magic names that fails early.
+    );
+    table_header(23, "Name   —   Declaration kind and effect");
+    table_row(24, #string,oneline
+        \\`option`   |   Union only. Marks a two-variant union as a
+        \\niche-optimization candidate: when exactly one variant's payload has a
+        \\spare representation, such as a pointer's null, the tag is elided and
+        \\the union is the size of its payload.
+    );
+    table_row(25, #string,oneline
+        \\`result`   |   Union only. The same niche marker, applied by the
+        \\Prelude to `Result`.
+    );
+    table_row(26, #string,oneline
+        \\`jump_context_storage_struct`   |   Struct only. Declares an opaque
+        \\struct whose size and alignment the compiler chooses. It must be
+        \\non-generic and must declare no fields. This is the backing store for
+        \\the jump helpers; it measures 640 bytes on `x86_64-pc-windows-msvc`.
+    );
+    paragraph(27, #string,oneline
+        \\The niche markers are not reserved to the standard library. A user
+        \\union carrying `#magic "option"` keeps its own generic parameters and
+        \\its own variant names and still gets the layout.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Maybe :: union  #magic "option" { None: void; Some: $T; }
+        \\Store :: struct #magic "jump_context_storage_struct" {}
+        \\
+        \\main :: () {
+        \\    p: Maybe(*void);
+        \\    n: Maybe(s64);
+        \\    print("niche=% tagged=% store=%\n",
+        \\        size_of(type_of(p)), size_of(type_of(n)), size_of(Store));
+        \\}
+    );
+    code_block(29, "text", #string
+        \\niche=8 tagged=16 store=640
+    );
+    paragraph(30, #string,oneline
+        \\Every other spelling is rejected, and each rejection has its own text:
+        \\an unrecognised name, a niche marker on a struct, the opaque marker on
+        \\a union, an opaque struct with generic parameters, and an opaque
+        \\struct with fields.
+    );
+    code_block(31, "text", #string
+        \\error: unknown aggregate #magic "not_a_thing"
+        \\
+        \\error: #magic "option" requires a union declaration
+        \\
+        \\error: #magic "jump_context_storage_struct" requires a struct
+        \\declaration
+        \\
+        \\error: aggregate #magic "jump_context_storage_struct" cannot be
+        \\generic
+        \\
+        \\error: aggregate #magic "jump_context_storage_struct" must be opaque
+        \\and have no fields
+    );
+    note(32, #string,oneline
+        \\A generic aggregate declared this way is still only nameable in
+        \\annotation position. Writing `size_of(Maybe(s64))` as an expression is
+        \\`error: unknown function Maybe`; the size has to be taken through a
+        \\declared local, as the program above does.
+    );
+    subheading(33, "The reserved memory intrinsics");
+    paragraph(34, #string,oneline
+        \\Three names are treated specially by the checker because the backend
+        \\emits calls to them itself and needs their declarations to have a
+        \\fixed shape. They are the only intrinsics whose declaration is
+        \\validated at all.
+    );
+    table_header(35, "Name   —   Required signature");
+    table_row(36, #string,oneline
+        \\`memory_copy_nonoverlapping_magic`   |   `(destination, source,
+        \\count: s64)` returning `void`. The non-overlapping copy.
+    );
+    table_row(37, #string,oneline
+        \\`memory_copy_magic`   |   `(destination, source, count: s64)`
+        \\returning `void`. The overlap-tolerant copy.
+    );
+    table_row(38, #string,oneline
+        \\`memory_fill_magic`   |   `(destination, byte: u8, count: s64)`
+        \\returning `void`. Byte fill.
+    );
+    paragraph(39, #string,oneline
+        \\The rules the checker enforces are: exactly three ordinary runtime
+        \\parameters, none of them an `#empty` witness and none variadic; no
+        \\default values; no C varargs; a `void` return type; a third parameter
+        \\whose type is exactly `s64`; and, for the fill, a second parameter
+        \\whose type is exactly `u8`. Each violation has its own message, and
+        \\all of them are anchored at the offending token.
+    );
+    code_block(40, "text", #string
+        \\error: invalid #magic 'memory_copy_nonoverlapping_magic' declaration:
+        \\expected exactly three runtime parameters
+        \\
+        \\error: invalid #magic 'memory_copy_magic' declaration: count parameter
+        \\must have type s64, got s32
+        \\
+        \\error: invalid #magic 'memory_fill_magic' declaration: byte value
+        \\parameter must have type u8, got int
+        \\
+        \\error: invalid #magic 'memory_fill_magic' declaration: return type
+        \\must be void, got int
+    );
+    subheading(41, "Family index");
+    paragraph(42, #string,oneline
+        \\The rest of this chapter lists the intrinsic names by family. The list
+        \\is a map of what exists, not a tutorial: for most families the
+        \\standard library already provides the declaration, and the reason to
+        \\know the name is to recognise it in a diagnostic, to predict that a
+        \\capability is present, or to bind it directly when no declaration
+        \\does. Where a family is compile-time only or native-only, that is
+        \\stated, because it is the difference between a program that builds and
+        \\one that fails at lowering.
+    );
+    subheading(43, "SIMD");
+    paragraph(44, #string,oneline
+        \\Twenty-two names, handled by the native classifier and the
+        \\compile-time VM but absent from the runtime registry. All of them are
+        \\declared in `std/Simd.glo` and guarded `where Is_Simd(V)`.
+    );
+    table_header(45, "Name   —   Meaning");
+    table_row(46, #string,oneline
+        \\`simd_zero`   |   `(V: type) -> V`. All lanes zero.
+    );
+    table_row(47, #string,oneline
+        \\`simd_splat`   |   `(V: type, value: $T) -> V`. One scalar broadcast
+        \\to every lane.
+    );
+    table_row(48, #string,oneline
+        \\`simd_load`   |   `(V: type, source: [*]$T) -> V`. Loads through a
+        \\many-pointer, not a view.
+    );
+    table_row(49, #string,oneline
+        \\`simd_store`   |   `(destination: [*]$T, value: $V)`. Stores through a
+        \\many-pointer.
+    );
+    table_row(50, #string,oneline
+        \\`simd_reverse`   |   `(value: $V) -> V`. Lane order reversed.
+    );
+    table_row(51, #string,oneline
+        \\`simd_reduce_add` `simd_reduce_mul`   |   `(value: $V, initial: $T) ->
+        \\T`. Horizontal reduction seeded by `initial`.
+    );
+    table_row(52, #string,oneline
+        \\`simd_reduce_xor` `simd_reduce_or`   |   The same shape, additionally
+        \\requiring an integer lane type.
+    );
+    table_row(53, #string,oneline
+        \\`simd_add` `simd_sub` `simd_mul` `simd_div` `simd_neg` `simd_and`
+        \\`simd_or` `simd_xor` `simd_shl` `simd_shr` `simd_not`   |   Eleven
+        \\operator intrinsics bound to the ordinary operator typeclasses.
+        \\`simd_add` lowers to a floating-point add for float lanes and an
+        \\integer add otherwise.
+    );
+    table_row(54, #string,oneline
+        \\`simd_element_type` `simd_lane_count`   |   `(V: type)` shape queries,
+        \\compile-time only.
+    );
+    subheading(55, "Matrix");
+    paragraph(56, #string,oneline
+        \\Seven names, all compile-time-only shape queries over
+        \\`Matrix(T, Row, Col)`. There are no matrix arithmetic intrinsics: the
+        \\operations are written in Glosso and use these to name their own
+        \\result types.
+    );
+    table_header(57, "Name   —   Meaning");
+    table_row(58, #string,oneline
+        \\`matrix_element_type`   |   `(M: type) -> type`. The element type.
+    );
+    table_row(59, #string,oneline
+        \\`matrix_row_count` `matrix_column_count`   |   `(M: type) -> uint`.
+        \\The two dimensions.
+    );
+    table_row(60, #string,oneline
+        \\`matrix_element_count`   |   `(M: type) -> uint`. Rows times columns.
+    );
+    table_row(61, #string,oneline
+        \\`matrix_transpose_type`   |   `(M: type) -> type`. The shape of the
+        \\transpose.
+    );
+    table_row(62, #string,oneline
+        \\`matrix_product_type`   |   `(A: type, B: type) -> type`. The shape of
+        \\`A * B`, so generic code can declare its return type.
+    );
+    table_row(63, #string,oneline
+        \\`matrix_matvec_result_type`   |   `(M: type, V: type) -> type`. The
+        \\shape of a matrix-vector product.
+    );
+    subheading(64, "Complex");
+    paragraph(65, #string,oneline
+        \\Sixteen names. These are the only math-adjacent intrinsics in the
+        \\compiler; each is bound five times in `std/Math/Complex.glo`, once per
+        \\complex width.
+    );
+    table_header(66, "Name   —   Meaning");
+    table_row(67, #string,oneline
+        \\`c32_make` `c64_make` `c128_make` `c160_make` `c256_make`   |
+        \\  `(real: F, imaginary: F) -> cN`. One constructor per width: `c32`
+        \\from `f16`, `c64` from `f32`, `c128` from `f64`, `c160` from `f80`,
+        \\`c256` from `f128`.
+    );
+    table_row(68, #string,oneline
+        \\`complex_real` `complex_imag`   |   Component access.
+    );
+    table_row(69, #string,oneline
+        \\`complex_conjugate` `complex_norm`   |   Conjugate and norm.
+    );
+    table_row(70, #string,oneline
+        \\`complex_add` `complex_sub` `complex_mul` `complex_div` `complex_neg`
+        \\   |   The five arithmetic operations, bound to the operator
+        \\typeclasses.
+    );
+    table_row(71, #string,oneline
+        \\`complex_eq` `complex_ne`   |   The `PartialEq` methods.
+    );
+    subheading(72, "Strings, showing and formatting");
+    paragraph(73, #string,oneline
+        \\These back the `string` type, the `Show` protocol and `%`
+        \\interpolation. All are available at compile time except
+        \\`string_from_raw_parts`, which is native-only.
+    );
+    table_header(74, "Name   —   Meaning");
+    table_row(75, #string,oneline
+        \\`str_concat`   |   Backs `+` on strings. Exposed as `str_cat`.
+    );
+    table_row(76, #string,oneline
+        \\`str_eq` `str_ne`   |   The `PartialEq` instance for strings.
+    );
+    table_row(77, #string,oneline
+        \\`str_repeat`   |   `(s: string, n: s32) -> string`. Note the `s32`
+        \\count.
+    );
+    table_row(78, #string,oneline
+        \\`substring`   |   `(text, start, end)`. Exposed by
+        \\`std/Strings/Utf8`.
+    );
+    table_row(79, #string,oneline
+        \\`byte_string` `byte_slice_to_string` `byte_array_into_string`   |
+        \\  Byte-to-string conversions: one byte, a borrowed `[]u8`, and a
+        \\`[..]u8` consumed into a string.
+    );
+    table_row(80, #string,oneline
+        \\`string_from_raw_parts`   |   Builds a `string` from a pointer and a
+        \\length. Native-only.
+    );
+    table_row(81, #string,oneline
+        \\`index_string` `index_string16`   |   The `Indexable` methods for the
+        \\UTF-8 and UTF-16 string types.
+    );
+    table_row(82, #string,oneline
+        \\`show_int` `show_float` `show_bool` `show_enum` `show_pointer`
+        \\`show_label`   |   The six primitive `Show` instances.
+    );
+    table_row(83, #string,oneline
+        \\`show_any`   |   The `Show` instance for `any`. Dispatches at run time
+        \\through the `shower` field of the value's `Type_Info`.
+    );
+    table_row(84, #string,oneline
+        \\`format_int`   |   `(value, base)`. Bound twice in `std/Format.glo`,
+        \\guarded `where Is_Integer(T)`.
+    );
+    table_row(85, #string,oneline
+        \\`add_s32` `sub_s32` `mul_s32` `div_s32` `lt_s32` `le_s32` `eq_s32`   |
+        \\  Seven C-template intrinsics that exist for backend bootstrapping. No
+        \\standard-library declaration binds them.
+    );
+    subheading(86, "The string builder, which is compile-time only");
+    paragraph(87, #string,oneline
+        \\Three names build source text during compilation. They read like
+        \\ordinary library calls, the Prelude puts them in scope with no import,
+        \\and the native backend refuses them. Nothing in the declaration says
+        \\so; the first sign is a lowering error.
+    );
+    table_header(88, "Name   —   Meaning");
+    table_row(89, #string,oneline
+        \\`sb_new`   |   `() -> String_Builder`. Fresh builder.
+    );
+    table_row(90, #string,oneline
+        \\`sb_append`   |   `(sb: *String_Builder, s: ...string)`. Variadic
+        \\append through a pointer.
+    );
+    table_row(91, #string,oneline
+        \\`sb_to_string`   |   `(sb: String_Builder) -> string`. Consumes the
+        \\builder.
+    );
+    code_block(92, "glosso", #string
+        \\main :: () {
+        \\    sb := sb_new();
+        \\    sb_append(*sb, "hi");
+        \\    s := sb_to_string(sb);
+        \\}
+    );
+    code_block(93, "text", #string
+        \\error: native LLVM lowering rejects #magic 'sb_new': string-builder
+        \\runtime representation is not lowered while lowering 'main' at IR
+        \\instruction 1
+    );
+    note(94, #string,oneline
+        \\The run-time string builder is a different, ordinary API on the same
+        \\`String_Builder` struct: `builder_make_len`, `write_string`,
+        \\`builder_into_string`, `builder_free`. Those are Glosso procedures and
+        \\compile normally.
+    );
+    subheading(95, "Pointers, indexing and slicing");
+    paragraph(96, #string,oneline
+        \\Seven pointer intrinsics plus the indexing and slicing sets. All of
+        \\the pointer arithmetic is native-only, so none of it is reachable from
+        \\`#comptime`; `ptr_eq` is the exception and is a C-template intrinsic.
+    );
+    table_header(97, "Name   —   Meaning");
+    table_row(98, #string,oneline
+        \\`ptr_add` `ptr_sub_offset` `ptr_diff`   |   Many-pointer arithmetic:
+        \\pointer plus integer, pointer minus integer, and pointer difference.
+        \\A plain `*T` has none of these — `p + 1` on a `*u8` is `error: no
+        \\operator '+' for *u8, int`.
+    );
+    table_row(99, #string,oneline
+        \\`ptr_index` `ptr_index_set`   |   `Indexable` and `IndexSet` for
+        \\many-pointers.
+    );
+    table_row(100, #string,oneline
+        \\`ptr_eq`   |   The `PartialEq` instance for every `Is_Addressable`
+        \\type, that is, pointers and procedures.
+    );
+    table_row(101, #string,oneline
+        \\`slice_from_pointer`   |   Builds a view from a many-pointer and a
+        \\length.
+    );
+    table_row(102, #string,oneline
+        \\`index_array` `index_set_array`   |   Read and write indexing for
+        \\views, dynamic arrays and many-pointers. `index_set_array` is
+        \\native-only.
+    );
+    table_row(103, #string,oneline
+        \\`slice` `slice_inclusive` `slice_from` `slice_to`
+        \\`slice_to_inclusive` `slice_full`   |   Six intrinsics, one per range
+        \\shape, implementing `container[range]`.
+    );
+    table_row(104, #string,oneline
+        \\`slice16` `slice_inclusive16` `slice_from16` `slice_to16`
+        \\`slice_to_inclusive16` `slice_full16`   |   The same six for
+        \\`string16` and `cstring16`. The UTF-16 split is why the family has
+        \\twelve members rather than six.
+    );
+    subheading(105, "Allocation");
+    paragraph(106, #string,oneline
+        \\Four allocator families, none of which is available during
+        \\compile-time evaluation. The declarations live in `std/Context.glo`
+        \\and the platform modules; the leading underscores in the temporary,
+        \\heap and debug names are the standard library's own convention for a
+        \\raw binding that a wrapper is expected to cover.
+    );
+    table_header(107, "Name   —   Meaning");
+    table_row(108, #string,oneline
+        \\`ctx_alloc` `ctx_free`   |   The intrinsics behind `alloc` and `free`.
+        \\They route through `context.allocator`.
+    );
+    table_row(109, #string,oneline
+        \\`temp_alloc` `temp_free_all`   |   The temporary arena. Free-all is a
+        \\restore to mark zero rather than a release.
+    );
+    table_row(110, #string,oneline
+        \\`heap_alloc` `heap_realloc` `heap_free`   |   The system heap.
+        \\Checker-level, not in the runtime registry. On freestanding and WASI
+        \\targets the backend synthesises the allocator itself.
+    );
+    table_row(111, #string,oneline
+        \\`debug_alloc` `debug_realloc` `debug_free` `debug_report_leaks`   |
+        \\  The leak-tracking allocator, exposed as `debug_allocator()` and
+        \\`debug_allocator_report_leaks()`.
+    );
+    subheading(112, "C varargs");
+    paragraph(113, #string,oneline
+        \\Seven native-only intrinsics in `std/VarArg.glo`, alongside the two
+        \\opaque types `Va_List` and `C_File`. None of them is usable in
+        \\compile-time code.
+    );
+    table_header(114, "Name   —   Meaning");
+    table_row(115, #string,oneline
+        \\`va_start` `va_end` `va_copy`   |   Exposed as `start`, `end` and
+        \\`copy`, each taking a `*Va_List`.
+    );
+    table_row(116, #string,oneline
+        \\`va_arg`   |   Exposed as `arg(#empty: $T, ap: *Va_List) -> T`. The
+        \\leading `#empty` witness selects the extracted type without becoming a
+        \\runtime argument.
+    );
+    table_row(117, #string,oneline
+        \\`vararg_vprintf` `vararg_vfprintf` `vararg_vsnprintf`   |   The three
+        \\C `v`-family formatters.
+    );
+    subheading(118, "Jumps and labels");
+    paragraph(119, #string,oneline
+        \\Seven intrinsics plus the opaque storage struct. The three `jump_*`
+        \\entries are native-only; the label queries are handled by the native
+        \\classifier and never appear in the runtime registry.
+    );
+    table_header(120, "Name   —   Meaning");
+    table_row(121, #string,oneline
+        \\`jump_context_save`   |   Exposed as `context_save`. The only
+        \\declaration in the language that carries `#returns_twice`.
+    );
+    table_row(122, #string,oneline
+        \\`jump_context_prepare`   |   Exposed as `context_prepare`. Initialises
+        \\a saved context for a later jump.
+    );
+    table_row(123, #string,oneline
+        \\`jump_goto`   |   Exposed as `goto`, declared `#noreturn`.
+    );
+    table_row(124, #string,oneline
+        \\`label_is_valid` `label_is_local`   |   Predicates on a `label` value.
+    );
+    table_row(125, #string,oneline
+        \\`label_eq`   |   The `PartialEq` instance for `label`.
+    );
+    table_row(126, #string,oneline
+        \\`label_none`   |   Backend-only, bound by no declaration.
+    );
+    subheading(127, "The build service");
+    paragraph(128, #string,oneline
+        \\Seventeen intrinsics drive the compiler from inside a compile-time
+        \\program. All are compile-time only: reaching native lowering with one
+        \\is the "compiler service or type query must be folded" error quoted
+        \\above. Dispatch is by the `compiler_` name prefix, and the
+        \\declarations are in `std/Compiler.glo` and `std/Bindgen.glo`.
+    );
+    table_header(129, "Name   —   Meaning");
+    table_row(130, #string,oneline
+        \\`compiler_executable_path`   |   The path of the running compiler.
+    );
+    table_row(131, #string,oneline
+        \\`compiler_find_header` `compiler_find_library`
+        \\`compiler_find_resource`   |   Toolchain discovery.
+    );
+    table_row(132, #string,oneline
+        \\`compiler_run_command`   |   Runs an external command during the
+        \\build.
+    );
+    table_row(133, #string,oneline
+        \\`compiler_create_workspace`   |   Creates the workspace every other
+        \\build call is addressed to.
+    );
+    table_row(134, #string,oneline
+        \\`compiler_get_build_options` `compiler_set_build_options`
+        \\`compiler_set_build_options_dc`   |   Read and write a workspace's
+        \\options. The `_dc` form is the one that also suppresses the current
+        \\program's own output.
+    );
+    table_row(135, #string,oneline
+        \\`compiler_add_build_file` `compiler_add_build_string`   |   Add a
+        \\source file, or a string of source, to a workspace.
+    );
+    table_row(136, #string,oneline
+        \\`compiler_compile` `compiler_compile_args`
+        \\`compiler_compile_c_archive`   |   Compile the workspace, compile a
+        \\raw argument vector, and build a C archive.
+    );
+    table_row(137, #string,oneline
+        \\`compiler_add_current_linker_arg`   |   Appends a linker argument to
+        \\the current compilation.
+    );
+    table_row(138, #string,oneline
+        \\`bindgen_generate` `bindgen_generate_source`   |   Run the C header
+        \\binding generator, writing a file or returning source text. Without an
+        \\installed binding service the VM reports `bindgen_generate requires an
+        \\installed BindgenMagicService`.
+    );
+    subheading(139, "Processes");
+    paragraph(140, #string,oneline
+        \\`std/Process` binds 45 `process_*` names. Most of them run in the
+        \\compile-time VM as well as natively, so a build program can inspect
+        \\the machine, read the environment and spawn tools; `process_abort`,
+        \\`process_command_exec`, `process_signal_install`,
+        \\`process_pipe_create` and the named-pipe server trio are native-only.
+    );
+    table_header(141, "Group   —   Names");
+    table_row(142, #string,oneline
+        \\Identity and handles   |   `process_id`, `process_parent_id`,
+        \\`process_thread_id`, `process_executable_path`,
+        \\`process_current_handle`, `process_open`, `process_inspect`,
+        \\`process_handle_close`.
+    );
+    table_row(143, #string,oneline
+        \\Environment   |   `process_environment_has`,
+        \\`process_environment_get`, `process_environment_set`,
+        \\`process_environment_unset`, `process_environment_entries`.
+    );
+    table_row(144, #string,oneline
+        \\Machine query   |   `process_host_name`, `process_cpu_count`,
+        \\`process_cpu_topology`, `process_page_size`, `process_total_memory`,
+        \\`process_available_memory`, `process_user_permissions`.
+    );
+    table_row(145, #string,oneline
+        \\Spawning and children   |   `process_command_spawn`,
+        \\`process_command_exec`, `process_child_wait`, `process_child_poll`,
+        \\`process_child_terminate`, `process_child_kill`,
+        \\`process_child_close`.
+    );
+    table_row(146, #string,oneline
+        \\Signals   |   `process_signal_send`, `process_signal_raise`,
+        \\`process_signal_mask`, `process_signal_install`.
+    );
+    table_row(147, #string,oneline
+        \\Limits and scheduling   |   `process_limit_get`, `process_limit_set`,
+        \\`process_priority_get`, `process_priority_set`,
+        \\`process_affinity_get`, `process_affinity_set`.
+    );
+    table_row(148, #string,oneline
+        \\Pipes   |   `process_pipe_create`, `process_named_pipe_create`,
+        \\`process_named_pipe_server`, `process_named_pipe_connect`,
+        \\`process_named_pipe_accept`.
+    );
+    table_row(149, #string,oneline
+        \\Errors and termination   |   `process_error_text`,
+        \\`process_current_os_error`, `process_abort`. `process_abort` is the
+        \\shared abort primitive behind every panic.
+    );
+    subheading(150, "Files and the file system");
+    paragraph(151, #string,oneline
+        \\The file and file-system operations exist mostly under the platform
+        \\prefix described in the next section. Twenty-one file operations and
+        \\thirty-seven path operations make up the bulk of it, and a handful of
+        \\unprefixed names round it out.
+    );
+    table_header(152, "Group   —   Names");
+    table_row(153, #string,oneline
+        \\File handles   |   `file_open`, `file_open_options`, `file_close`,
+        \\`file_duplicate`, `file_read`, `file_read_at`, `file_read_byte`,
+        \\`file_read_into`, `file_write`, `file_write_at`, `file_write_from`,
+        \\`file_seek`, `file_flush`, `file_truncate`, `file_stat_raw`.
+    );
+    table_row(154, #string,oneline
+        \\Mapping and locking   |   `file_advise`, `file_lock`, `file_unlock`,
+        \\`file_map`, `file_unmap`, `file_map_flush`.
+    );
+    table_row(155, #string,oneline
+        \\Result-shaped reads and writes   |   `file_read_result`,
+        \\`file_read_byte_result`, `file_write_result`. These return a
+        \\`Result`-shaped value instead of a raw code, and are the only file
+        \\names bound without a platform prefix.
+    );
+    table_row(156, #string,oneline
+        \\Predicates   |   `fs_exists`, `fs_is_regular_file`,
+        \\`fs_is_directory`, `fs_is_symlink`, `fs_is_empty`, `fs_access`,
+        \\`fs_file_size`.
+    );
+    table_row(157, #string,oneline
+        \\Path algebra   |   `fs_absolute`, `fs_canonical`,
+        \\`fs_weakly_canonical`, `fs_relative`, `fs_proximate`,
+        \\`fs_parent_path`, `fs_filename`, `fs_stem`, `fs_extension`,
+        \\`fs_replace_extension`, `fs_join_path`. These are pure string
+        \\operations on paths and do not touch the disk.
+    );
+    table_row(158, #string,oneline
+        \\Working directory and temporaries   |   `fs_current_path`,
+        \\`fs_set_current_path`, `fs_temp_directory_path`.
+    );
+    table_row(159, #string,oneline
+        \\Mutation   |   `fs_create_directory`, `fs_create_directories`,
+        \\`fs_remove_path`, `fs_remove_all`, `fs_copy_file`, `fs_rename_path`.
+    );
+    table_row(160, #string,oneline
+        \\Listing   |   `fs_directory_entries`, `fs_directory_filenames`.
+    );
+    table_row(161, #string,oneline
+        \\Raw POSIX-shaped operations   |   `fs_change_mode`, `fs_change_owner`,
+        \\`fs_set_times`, `fs_hard_link`, `fs_symbolic_link`, `fs_read_link`,
+        \\`fs_info_raw`, `fs_stat_raw`.
+    );
+    table_row(162, #string,oneline
+        \\Handle-based directory walking   |   `fs_directory_open_native`,
+        \\`fs_directory_next_native`, `fs_directory_rewind_native`,
+        \\`fs_directory_close_native`, plus `fs_remove_native`,
+        \\`fs_rename_native`, `fs_current_directory_native`,
+        \\`fs_set_current_directory_native`, `fs_canonical_native`,
+        \\`fs_temporary_directory_native`. Available at compile time.
+    );
+    table_row(163, #string,oneline
+        \\Sandboxed containment   |   `fs_directory_open_at_native`,
+        \\`fs_secure_contains_native`, `fs_sandbox_open_native`,
+        \\`fs_sandbox_close_native`, `fs_sandbox_open_at_native`,
+        \\`fs_sandbox_open_file_native`, `fs_sandbox_stat_native`,
+        \\`fs_sandbox_create_directory_native`, `fs_sandbox_remove_native`,
+        \\`fs_sandbox_rename_native`, `fs_sandbox_contains_native`.
+        \\Deliberately native-only: a sandboxed handle cannot be opened inside
+        \\the compiler.
+    );
+    subheading(164, "Terminal, entropy, clocks, sanitizer");
+    table_header(165, "Name   —   Meaning");
+    table_row(166, #string,oneline
+        \\`terminal_query` `terminal_set_mode`   |   Terminal capability query
+        \\and raw-mode switching, registered under the platform prefix and
+        \\native-only.
+    );
+    table_row(167, #string,oneline
+        \\`random_wasi_fill` `random_linux_x86_64_getrandom`   |   The two
+        \\entropy sources, exposed by `std/Random/Entropy.glo`. Both are
+        \\native-only, so a compile-time program cannot draw entropy.
+    );
+    table_row(168, #string,oneline
+        \\`time_wasi_now` `time_wasi_resolution` `time_wasi_sleep`   |   The
+        \\three WASI clock operations. Native-only.
+    );
+    table_row(169, #string,oneline
+        \\`tsan_mutex_lock` `tsan_mutex_unlock` `tsan_sync`   |   Thread-
+        \\sanitizer annotations declared in `std/Thread.glo`. They are not in
+        \\the runtime registry, and the backend lowers each to nothing unless
+        \\the thread sanitizer is enabled.
+    );
+    table_row(170, #string,oneline
+        \\`crypto_native_execution`   |   `() -> bool`. True in native code,
+        \\hard-coded false in the compile-time VM.
+        \\`std/Crypto/ConstantTime.glo` uses it to disable constant-time paths
+        \\that an interpreter cannot honour.
+    );
+    subheading(171, "Ranges, stepping and primitive arithmetic");
+    paragraph(172, #string,oneline
+        \\The operator typeclasses in the Prelude bind a further set of small
+        \\names that a reader will otherwise only meet in a lowering error:
+        \\`int_add` through `int_neg`, `int_wrap_add`, `int_wrap_sub`,
+        \\`int_wrap_mul`, `int_wrap_neg`, `int_sat_add`, `int_sat_sub`,
+        \\`int_sat_mul`, `int_sat_shl`, `int_and`, `int_or`, `int_xor`,
+        \\`int_shl`, `int_shr`, `int_not`, the `flt_*` counterparts, `num_eq`,
+        \\`num_cmp`, `enum_eq`, `enum_cmp`, `bool_and`, `bool_or`, `bool_not`,
+        \\and `int_next` and `int_prev` behind the `Step` protocol.
+    );
+    paragraph(173, #string,oneline
+        \\The range operators have their own five: `range`, `range_inclusive`,
+        \\`range_from`, `range_to`, `range_to_inclusive`, plus `range_origin`,
+        \\whose C template is literally `0` and which supplies the implicit
+        \\lower bound of a prefix range.
+    );
+    note(174, #string,oneline
+        \\The `bool` instances of `&&` and `||` are the only `#magic`
+        \\declarations in the language permitted to take `#lazy` parameters. Any
+        \\other attempt is rejected during checking.
+    );
+    subheading(175, "The platform prefix");
+    paragraph(176, #string,oneline
+        \\Roughly three hundred of the 478 registry entries are generated by
+        \\prefixing a base operation with an operating-system tag. The rule is
+        \\mechanical and is nowhere visible in a declaration, so a reader who
+        \\does not know it cannot predict that `os_linux_fs_exists` is a real
+        \\name.
+    );
+    code_block(177, "ebnf", #string
+        \\platform_magic_name ::= "os_" os_tag "_" base_magic_name
+        \\os_tag              ::= "linux" | "windows" | "wasm"
+        \\(* the compiler registers the full cross product; the VM strips the
+        \\   prefix before dispatch, so the prefixed form selects a specific
+        \\   platform backing for the same operation *)
+    );
+    paragraph(178, #string,oneline
+        \\The base set is identical for all three tags. The standard library
+        \\binds 60 base operations under each prefix — the 21 file operations,
+        \\the 37 file-system operations and the two terminal operations listed
+        \\above — for 180 declarations that differ only in the tag. Selecting
+        \\the right one is what `std/Os/Linux.glo`, `std/Os/Windows.glo` and
+        \\`std/Os/Wasm.glo` exist to do.
+    );
+    code_block(179, "glosso", #string
+        \\#import "Io";
+        \\
+        \\win_exists :: (path: string) -> bool #magic "os_windows_fs_exists";
+        \\
+        \\main :: () {
+        \\    print("% %\n", win_exists("t.glo"), win_exists("nope.glo"));
+        \\}
+    );
+    code_block(180, "text", #string
+        \\1 0
+    );
+    subheading(181, "What does not exist");
+    paragraph(182, #string,oneline
+        \\A reader arriving from C or Rust will look for four things that are
+        \\not here. Each is stated because the absence is otherwise
+        \\indistinguishable from a name the manual forgot to list.
+    );
+    table_header(183, "Expected   —   Reality");
+    table_row(184, #string,oneline
+        \\`align_of`   |   Does not exist, at any spelling. Alignment is
+        \\reachable only as `type_info(T).alignment`.
+    );
+    table_row(185, #string,oneline
+        \\`offset_of`   |   Does not exist. Field offsets must be measured with
+        \\the run-time pointer-difference idiom, which is not valid at compile
+        \\time.
+    );
+    table_row(186, #string,oneline
+        \\Atomic operations   |   There are no atomic intrinsics anywhere in the
+        \\compiler — no atomic load, store, exchange, compare-exchange or fence.
+        \\Concurrency in `std/Thread.glo` goes through foreign pthread and Win32
+        \\calls plus the three `tsan_*` annotations. The module
+        \\`File_System/Atomic.glo` is atomic file replacement, not memory
+        \\atomics.
+    );
+    table_row(187, #string,oneline
+        \\Math   |   There are no `sqrt`, `sin`, `cos` or `fma` intrinsics.
+        \\`std/Math` — including `Core`, `Bignum`, `NumberTheory` and
+        \\`SpecialFunctions` — is written in Glosso. The sixteen complex names
+        \\and the seven matrix shape queries are the only math-adjacent
+        \\intrinsics.
+    );
+    paragraph(188, #string,oneline
+        \\`align_of` and `offset_of` fail at the call, as ordinary unknown
+        \\functions, because no declaration binds them. A hand-written `#magic
+        \\"sqrt"` or `#magic "atomic_load"` declaration instead compiles and
+        \\type-checks, and fails only when the backend finds no classification
+        \\for the name.
+    );
+    code_block(189, "text", #string
+        \\error: unknown function align_of
+        \\  --> intrinsics.glo:2:27
+        \\  |
+        \\2 |     print("%\n", align_of(s32));
+        \\  |                  ^^^^^^^^
+    );
+}
+
+render_section_105 :: () {
+    paragraph(0, #string,oneline
+        \\Every Glosso file is compiled with the Prelude already loaded. The
+        \\driver loads `std/Prelude` unqualified before user source, so its
+        \\declarations are in the file's own namespace rather than behind a
+        \\module name: there is nothing to import and nothing to qualify. This
+        \\chapter is the complete inventory of what that puts in scope.
+    );
+    paragraph(1, #string,oneline
+        \\The Prelude is eight files, loaded in this order.
+    );
+    code_block(2, "glosso", #string
+        \\#load "Show_and_Read.glo";
+        \\#load "Primitive_Typeclasses.glo";
+        \\#load "Primitive_Operators.glo";
+        \\#load "Option.glo";
+        \\#load "Result.glo";
+        \\#load "Array.glo";
+        \\#load "Assembly.glo";
+        \\#load "Utilities.glo";
+    );
+    paragraph(3, #string,oneline
+        \\The inventory is larger than those eight files, because two of them
+        \\import other modules and an unqualified load carries the imports
+        \\through. `Show_and_Read.glo` and `Primitive_Typeclasses.glo` each
+        \\begin with `#import "Meta"`, `#import "Typeclass"`,
+        \\`#import "String_Builder"` and `#import "Format"`, and
+        \\`String_Builder` itself imports `Context`. Those five modules are
+        \\therefore in scope in every file with no import line of its own. That
+        \\is why `size_of`, `type_info`, `tprint`, `sb_new`, `alloc` and
+        \\`context` resolve in a file that imports nothing.
+    );
+    note(4, #string,oneline
+        \\Writing `#import "Meta";` is harmless but redundant. The convention
+        \\this manual follows is to import only modules that are genuinely
+        \\opt-in — `Io`, `Thread`, `Math`, `Serialization`, `Compiler`,
+        \\`Bindgen` and the rest — and to rely on the Prelude for everything
+        \\listed here.
+    );
+    subheading(5, "Carrier types");
+    table_header(6, "Name   —   What it is");
+    table_row(7, #string,oneline
+        \\`Option`   |   `union #magic "option" { None: void; Some: $T; }`. The
+        \\niche marker makes `Option(*T)` the size of a pointer. Ships with a
+        \\`LogicalNot` instance, so `!opt` is the is-none test, and a full `Try`
+        \\instance, so `?` works on it.
+    );
+    table_row(8, #string,oneline
+        \\`Option_Residual`   |   `enum { None; }`. The residual `Option`'s
+        \\`Try` instance breaks with. Needed to interoperate with a
+        \\hand-written `Try` type.
+    );
+    table_row(9, #string,oneline
+        \\`Result`   |   `union #magic "result" { Ok: $T; Err: $E; }`. Two
+        \\generic parameters. Ships with `LogicalNot` (is-err), a `Try`
+        \\instance, a `Propagate` instance between residuals, and a
+        \\`Termination` instance for `Result(void, $E) where Error(E)` so that
+        \\`main` may return one.
+    );
+    table_row(10, #string,oneline
+        \\`Result_Residual`   |   `struct { error: $E; }`. Carries the
+        \\`Propagate` instance that lets `?` widen an error type on the way up.
+    );
+    subheading(11, "Reflection types");
+    table_header(12, "Name   —   What it is");
+    table_row(13, #string,oneline
+        \\`Type_Info`   |   `struct { tag; name; size; alignment; shower; }`.
+        \\Five fields and no more: there is no `signed` flag, no `packed` flag,
+        \\no field list and no variant list.
+    );
+    table_row(14, #string,oneline
+        \\`Type_Info_Tag`   |   The eighteen kind tags with explicit values:
+        \\`Void` 0, `Integer` 1, `Float` 2, `Bool` 3, `String` 4, `Pointer` 5,
+        \\`Array` 6, `Struct` 7, `Enum` 8, `Union` 9, `Procedure` 10, `Tuple`
+        \\11, `Type` 12, `Any` 13, `Label` 14, `Complex` 15, `Simd` 16, `Matrix`
+        \\17. `Pointer` covers `*T` and `[*]T` alike; `Array` covers `[N]T`,
+        \\`[]T` and `[..]T` alike.
+    );
+    table_row(15, #string,oneline
+        \\`Any_Show_Proc`   |   `#fn_ptr(value: *void) -> string`. The type of
+        \\`Type_Info.shower`, and the mechanism by which an `any` value reaches
+        \\its own `Show` instance at run time.
+    );
+    table_row(16, #string,oneline
+        \\`Derive_Type_Info`   |   The richer descriptor a derive macro
+        \\receives: `base`, `params`, `fields`, `variants`, `raw_union`.
+    );
+    table_row(17, #string,oneline
+        \\`Type_Param_Info` `Derive_Field_Info` `Derive_Variant_Info`   |   One
+        \\generic parameter, one struct field, one union variant. A payload-less
+        \\variant reports `void`.
+    );
+    table_row(18, #string,oneline
+        \\`Derive_Options`   |   `struct { focus_params: []string; }`. The
+        \\options a `#derive(Class, ...)` site passes through.
+    );
+    subheading(19, "Range types");
+    paragraph(20, #string,oneline
+        \\Six value types, five of which carry an `Iterable` instance.
+    );
+    table_header(21, "Name   —   Produced by");
+    table_row(22, #string,oneline
+        \\`Range`   |   `a..b`. `struct { start: $T; end: T; }`, half-open.
+    );
+    table_row(23, #string,oneline
+        \\`RangeInclusive`   |   `a..=b`.
+    );
+    table_row(24, #string,oneline
+        \\`RangeFrom`   |   `a..`. Its `for_expansion` loops forever; an
+        \\unbounded range never terminates on its own.
+    );
+    table_row(25, #string,oneline
+        \\`RangeTo` `RangeToInclusive`   |   `..b` and `..=b`. The implicit
+        \\lower bound comes from the `RangeOrigin` protocol.
+    );
+    table_row(26, #string,oneline
+        \\`RangeFull`   |   A bare `..`. It has no `Iterable` instance and
+        \\exists only as an index key.
+    );
+    subheading(27, "Target descriptors");
+    table_header(28, "Name   —   Members");
+    table_row(29, #string,oneline
+        \\`Target_OS`   |   Seven members, ordinals 0 to 6: `Unknown`, `Linux`,
+        \\`Macos`, `Windows`, `Freebsd`, `Wasm`, `Freestanding`.
+    );
+    table_row(30, #string,oneline
+        \\`Target_CPU`   |   Twenty-one members in declaration order:
+        \\`Unknown`, `X86_64`, `Aarch64`, `Arm`, `Thumb`, `I386`, `Powerpc`,
+        \\`Powerpc64`, `Powerpc64le`, `Riscv64`, `Wasm32`, `Wasm64`, `Armv7`,
+        \\`Loongarch64`, `S390x`, `X86`, `Armv5`, `Mips`, `Mipsel`, `Mips64`,
+        \\`Mips64el`. The order is not alphabetical and `X86` sits after
+        \\`S390x`.
+    );
+    table_row(31, #string,oneline
+        \\`Target_ABI`   |   Ten members: `None`, `Unknown`, `Gnu`, `Musl`,
+        \\`Msvc`, `Mingw`, `Wasi`, `Freestanding`, `Emscripten`, `Uefi`. Note
+        \\that both `None` and `Unknown` exist.
+    );
+    table_row(32, #string,oneline
+        \\`Target_Endian`   |   `Little`, `Big`.
+    );
+    table_row(33, #string,oneline
+        \\`Output_Target`   |   `struct { os: Target_OS; cpu: Target_CPU; abi:
+        \\Target_ABI; }`. The type of `OUT`.
+    );
+    table_row(34, #string,oneline
+        \\`Host_Target`   |   `struct { os: Target_OS; cpu: Target_CPU; }`. The
+        \\type of `HOST`. It has no `abi` field; that is the whole difference
+        \\between the two.
+    );
+    subheading(35, "Inline-assembly vocabulary");
+    table_header(36, "Name   —   Members");
+    table_row(37, #string,oneline
+        \\`Asm_Constraint`   |   Thirteen portable operand kinds: `Register`,
+        \\`Byte_Register`, `Floating_Register`, `Vector_Register`,
+        \\`Predicate_Register`, `Memory`, `Immediate`, `Constant`, `Address`,
+        \\`Register_Or_Memory`, `Register_Or_Immediate`,
+        \\`Register_Memory_Or_Immediate`, `Any`. The compiler translates them to
+        \\the backend's constraint language, so user code never writes one.
+    );
+    table_row(38, #string,oneline
+        \\`Asm_Operand_Flags`   |   `enum_flags u32 { None :: 0; Early_Clobber
+        \\:: 1; }`. Only the one modifier exists.
+    );
+    table_row(39, #string,oneline
+        \\`Asm_Clobber`   |   `Memory`, `Condition_Codes`.
+    );
+    subheading(40, "Context and builder types");
+    paragraph(41, #string,oneline
+        \\These arrive through `String_Builder`'s own import of `Context`. They
+        \\resolve in ordinary type positions with no import; the chapters on the
+        \\context and the allocator interface explain what they mean.
+    );
+    table_header(42, "Name   —   What it is");
+    table_row(43, #string,oneline
+        \\`Context`   |   The record `context` denotes.
+    );
+    table_row(44, #string,oneline
+        \\`Allocator` `Allocator_Mode` `Allocator_Error`   |   The allocator
+        \\interface: the procedure-plus-data pair, the operation selector, and
+        \\the failure set.
+    );
+    table_row(45, #string,oneline
+        \\`Logger` `Logger_Level` `Print_Style` `Random_Generator`   |   The
+        \\remaining context field types.
+    );
+    table_row(46, #string,oneline
+        \\`String_Builder`   |   `struct { buf: [..]u8; allocator: Allocator;
+        \\}`. One struct serving two different APIs, one compile-time and one
+        \\run-time.
+    );
+    subheading(47, "Other enumerations");
+    table_header(48, "Name   —   Members and purpose");
+    table_row(49, #string,oneline
+        \\`Ordering`   |   `Less`, `Equal`, `Greater`, `Unordered`. Four-valued,
+        \\not three: `Unordered` is what `<=>` returns for a NaN comparison.
+    );
+    table_row(50, #string,oneline
+        \\`For_Flags`   |   An `enum_flags u32` handed to every `for_expansion`.
+        \\`REVERSE` is the flag a custom iterable must test to honour a reversed
+        \\loop.
+    );
+    subheading(51, "Protocol typeclasses");
+    paragraph(52, #string,oneline
+        \\Fifty-eight typeclasses come from the Prelude files themselves and
+        \\seven more from `Typeclass`, for sixty-five in scope with no import.
+        \\The protocol classes are listed here; the operator classes follow.
+    );
+    table_header(53, "Name   —   Protocol");
+    table_row(54, #string,oneline
+        \\`Show`   |   `show :: (value: T) -> string`. The protocol behind `%`,
+        \\`print`, `format` and `tprint`. Derivable. Prelude instances cover
+        \\`string`, `type`, `any`, integers, floats, `bool`, enums, pointers,
+        \\`label` and `string16`.
+    );
+    table_row(55, #string,oneline
+        \\`FromString`   |   `from_string :: (#empty: T, text: string) ->
+        \\Option(T)`. The strict parsing counterpart to `Show`: it consumes the
+        \\whole string or returns `None`. Deliberately has no derive macro.
+    );
+    table_row(56, #string,oneline
+        \\`PartialEq` `Eq`   |   `PartialEq` declares `==` and `!=` with
+        \\`#minimal('==' | '!=')`, so implementing either yields both. `Eq` is
+        \\a marker for real equality; floats carry an explicit negative instance
+        \\because of NaN.
+    );
+    table_row(57, #string,oneline
+        \\`PartialOrd`   |   `<=>` returning `Ordering` is the only required
+        \\method; `<`, `<=`, `>` and `>=` default on top of it.
+    );
+    table_row(58, #string,oneline
+        \\`Num`   |   `where Add && Sub && Mul && Neg`, with `#minimal()` and no
+        \\methods at all. It does not require `Div` or `Rem`.
+    );
+    table_row(59, #string,oneline
+        \\`Iterable`   |   `for_expansion :: (val, body: Code, flags: For_Flags)
+        \\#expand`. The single method every `for` loop resolves through.
+    );
+    table_row(60, #string,oneline
+        \\`Step`   |   `next` and `prev`. What makes a type rangeable; the
+        \\integer instance binds `int_next` and `int_prev`.
+    );
+    table_row(61, #string,oneline
+        \\`RangeOrigin`   |   `range_origin :: (#empty: T) -> T`. Supplies the
+        \\implicit lower bound of `..end` and `..=end`.
+    );
+    table_row(62, #string,oneline
+        \\`Indexable` `IndexSet`   |   `[]` and `[]=`. The Prelude ships roughly
+        \\sixty instances covering the four string types, views, dynamic arrays
+        \\and many-pointers, each against an integer key and each of the six
+        \\range keys.
+    );
+    table_row(63, #string,oneline
+        \\`Try`   |   `Output`, `Residual`, `from_output`, `from_residual`,
+        \\`branch`. The protocol `?` and `#try` resolve through.
+    );
+    table_row(64, #string,oneline
+        \\`Propagate`   |   `propagate`. Converts one residual into another,
+        \\which is how `?` widens an error type across a boundary.
+    );
+    table_row(65, #string,oneline
+        \\`Termination`   |   `#minimal(termination_status)`. What a type must
+        \\implement to be returned from `main`.
+    );
+    table_row(66, #string,oneline
+        \\`Error`   |   `#minimal(report_error)`. Derivable. Required by
+        \\`Result`'s `Termination` instance.
+    );
+    table_row(67, #string,oneline
+        \\`Functor` `Applicative` `Monad`   |   The higher-kinded trio, each
+        \\parameterised by `(type) -> type`. `Applicative` requires `Functor`
+        \\and `Monad` requires `Applicative`.
+    );
+    subheading(68, "Operator typeclasses");
+    paragraph(69, #string,oneline
+        \\Every operator in the language is a typeclass method, and all of the
+        \\classes are in scope. Implementing one of the six arithmetic classes
+        \\also supplies its compound assignment: each `XAssign` class has a
+        \\blanket instance `($L, $R) :: instance XAssign where X(L, R)`, so
+        \\`+=` follows from `Add` with nothing further to write.
+    );
+    table_header(70, "Group   —   Names");
+    table_row(71, #string,oneline
+        \\Arithmetic   |   `Add`, `Sub`, `Mul`, `Div`, `Rem`, `Neg`. Integer
+        \\instances bind the `int_*` intrinsics, float instances the `flt_*`
+        \\ones, `Is_String(T)` binds `+` to string concatenation, and twelve
+        \\pointer instances cover many-pointer arithmetic in every const and
+        \\volatile combination.
+    );
+    table_row(72, #string,oneline
+        \\Wrapping   |   `WrapAdd` for `+%`, `WrapSub` for `-%`, `WrapMul` for
+        \\`*%`, and `WrapNeg`. Integer instances only.
+    );
+    table_row(73, #string,oneline
+        \\Saturating   |   `SaturatingAdd` for `+|`, `SaturatingSub` for `-|`,
+        \\`SaturatingMul` for `*|`, `SaturatingShiftLeft` for `<<|`.
+    );
+    table_row(74, #string,oneline
+        \\Bitwise   |   `BitAnd`, `BitOr`, `BitXor`, `ShiftLeft`, `ShiftRight`,
+        \\`BitNot`.
+    );
+    table_row(75, #string,oneline
+        \\Logical   |   `LogicalAnd`, `LogicalOr`, `LogicalNot`. The `bool`
+        \\instances of `&&` and `||` take `#lazy` right operands and are the
+        \\only intrinsic-bound declarations allowed to.
+    );
+    table_row(76, #string,oneline
+        \\Assignment   |   Nineteen classes: `AddAssign`, `SubAssign`,
+        \\`MulAssign`, `DivAssign`, `RemAssign`, `WrapAddAssign`,
+        \\`WrapSubAssign`, `WrapMulAssign`, `SaturatingAddAssign`,
+        \\`SaturatingSubAssign`, `SaturatingMulAssign`, `ShiftLeftAssign`,
+        \\`SaturatingShiftLeftAssign`, `ShiftRightAssign`, `BitAndAssign`,
+        \\`BitOrAssign`, `BitXorAssign`, `LogicalAndAssign`, `LogicalOrAssign`.
+    );
+    table_row(77, #string,oneline
+        \\Ranges   |   `RangeExclusiveOp` and `RangeInclusiveOp` declare the
+        \\binary `..` and `..=` at precedence 2; `RangeFromOp` declares the
+        \\suffix `..`; `RangeToOp` and `RangeToInclusiveOp` declare the prefix
+        \\forms and additionally require `RangeOrigin`.
+    );
+    subheading(78, "Reflection procedures");
+    table_header(79, "Signature   —   Meaning");
+    table_row(80, #string,oneline
+        \\`type_of :: (value: $T) -> type`   |   The static type of an
+        \\expression. A `type` value cannot be printed; wrap it in `type_name`.
+    );
+    table_row(81, #string,oneline
+        \\`type_info :: (T: type) -> Type_Info`   |   The whole descriptor. The
+        \\primary reflection entry point, and the only route to a type's
+        \\alignment.
+    );
+    table_row(82, #string,oneline
+        \\`type_name :: (T: type) -> string`   |   The canonical source name.
+        \\Also the `Show` instance for `type`.
+    );
+    table_row(83, #string,oneline
+        \\`size_of :: (T: type) -> s64`   |   Size in bytes.
+    );
+    table_row(84, #string,oneline
+        \\`type_kind :: (T: type) -> Type_Info_Tag`   |   The kind tag alone,
+        \\without building a descriptor.
+    );
+    table_row(85, #string,oneline
+        \\`field_count` `field_name` `field_type`   |   `(T: type)` and
+        \\`(T: type, i: s64)`. Struct fields in declaration order, which is not
+        \\necessarily layout order.
+    );
+    table_row(86, #string,oneline
+        \\`enum_count` `enum_name` `enum_value`   |   Enum members. `enum_value`
+        \\returns the declared numeric value, not the index.
+    );
+    table_row(87, #string,oneline
+        \\`variant_count` `variant_name` `variant_type`   |   Union variants. A
+        \\payload-less variant reports `void`.
+    );
+    table_row(88, #string,oneline
+        \\`derive_type_info` `derive_type_section` `derive_type_apply`
+        \\`derive_type_fn` `type_uses_param` `type_is_param`
+        \\`type_occurs_covariantly`   |   The seven derive-reflection queries,
+        \\plus the ordinary helpers `derive_param_index`, `derive_focus_params`,
+        \\`derive_focus_param` and `derive_two_focus_params`.
+    );
+    paragraph(89, #string,oneline
+        \\All of these fold before lowering, which is why they may appear in
+        \\`#if`, in a `where` clause and in a constant initializer.
+    );
+    subheading(90, "Type predicates");
+    paragraph(91, #string,oneline
+        \\Sixteen predicates, each `(T: type) -> bool`. They are ordinary Glosso
+        \\procedures written on `type_info(T).tag`, not intrinsics, and they
+        \\fold because `type_info` folds.
+    );
+    table_header(92, "Name   —   True for");
+    table_row(93, #string,oneline
+        \\`Is_Integer` `Is_Float` `Is_Complex`   |   The three numeric kinds.
+    );
+    table_row(94, #string,oneline
+        \\`Is_Numeric`   |   `Is_Integer(T) or Is_Float(T)`. It does not include
+        \\complex types.
+    );
+    table_row(95, #string,oneline
+        \\`Is_Bool` `Is_String` `Is_Label`   |   The three remaining scalar
+        \\kinds.
+    );
+    table_row(96, #string,oneline
+        \\`Is_Pointer` `Is_Procedure`   |   Pointer kinds and procedure types.
+    );
+    table_row(97, #string,oneline
+        \\`Is_Addressable`   |   `Is_Pointer(T) or Is_Procedure(T)`. This is the
+        \\guard on the pointer-equality instance.
+    );
+    table_row(98, #string,oneline
+        \\`Is_Struct` `Is_Union` `Is_Enum` `Is_Array`   |   The aggregate kinds.
+        \\`Is_Array` is true for fixed arrays, views and dynamic arrays alike.
+    );
+    table_row(99, #string,oneline
+        \\`Is_Simd` `Is_Matrix`   |   The two vector kinds.
+    );
+    subheading(100, "Carrier and container helpers");
+    table_header(101, "Signature   —   Meaning");
+    table_row(102, #string,oneline
+        \\`option_none :: (T: type) -> Option(T)`   |   The type is explicit
+        \\because there is no value to infer it from.
+    );
+    table_row(103, #string,oneline
+        \\`option_some :: (value: $T) -> Option(T)`   |   The inferring
+        \\constructor.
+    );
+    table_row(104, #string,oneline
+        \\`option_is_some` `option_is_none` `option_unwrap_or`   |   Tests and a
+        \\total accessor.
+    );
+    table_row(105, #string,oneline
+        \\`result_ok :: (E: type, value: $T) -> Result(T, E)`   |   The witness
+        \\is the ERROR type. This is the surprising one.
+    );
+    table_row(106, #string,oneline
+        \\`result_err :: (T: type, error: $E) -> Result(T, E)`   |   And here
+        \\the witness is the OK type. The two constructors take opposite
+        \\witnesses.
+    );
+    table_row(107, #string,oneline
+        \\`result_is_ok` `result_is_err` `result_unwrap_or`   |   Tests and a
+        \\total accessor.
+    );
+    table_row(108, #string,oneline
+        \\`map_error` `ap_error` `bind_error`   |   Functor, applicative and
+        \\monad operations over the ERROR side of a `Result`, not the `Ok` side.
+    );
+    table_row(109, #string,oneline
+        \\`array_add`, alias `array_append`   |   Variadic append through a
+        \\`*[..]T`. May replace the backing allocation and invalidate existing
+        \\views; the descriptor itself stays at the same address.
+    );
+    table_row(110, #string,oneline
+        \\`array_reset`   |   Sets `count` to zero and RETAINS the backing
+        \\allocation. It is not a release, and it does not discharge the
+        \\release obligation.
+    );
+    table_row(111, #string,oneline
+        \\`array_free`, alias `array_deinit`   |   Releases the backing
+        \\allocation. This is the call that discharges `warning: resource must
+        \\be released by 'array_free' before leaving scope`.
+    );
+    table_row(112, #string,oneline
+        \\`array_view :: (a: [..]$T) -> []T`   |   Borrows a dynamic array as a
+        \\view; the temporal checker ties the view's lifetime to the array.
+    );
+    subheading(113, "Text, allocation and process helpers");
+    table_header(114, "Signature   —   Meaning");
+    table_row(115, #string,oneline
+        \\`format` `tprint`   |   `(#comptime fmt: string, args: ...Show) ->
+        \\string`. `format` allocates from the context allocator; `tprint`
+        \\allocates from temporary storage. The format string must be a
+        \\compile-time constant.
+    );
+    table_row(116, #string,oneline
+        \\`format_int` `format_int_with_allocator` `format_args`   |   Integer
+        \\formatting in an explicit base, and the lower-level argument
+        \\formatter.
+    );
+    table_row(117, #string,oneline
+        \\`sb_new` `sb_append` `sb_to_string` `sb_append_showable`   |   The
+        \\COMPILE-TIME string builder. These are in scope with no import and are
+        \\rejected by the native backend. Building a string at run time uses the
+        \\other API on the row below.
+    );
+    table_row(118, #string,oneline
+        \\`builder_make_len` `write_string` `builder_into_string`
+        \\`builder_free`   |   The run-time string builder over the same
+        \\`String_Builder` struct. Ordinary Glosso, no phase restriction.
+    );
+    table_row(119, #string,oneline
+        \\`str_cat` `str_repeat`   |   Concatenation and repetition without a
+        \\builder. `str_repeat` takes an `s32` count.
+    );
+    table_row(120, #string,oneline
+        \\`alloc :: (n: s64) -> *void` and `free :: (p: *void)`   |   Route
+        \\through `context.allocator`. Not available during compile-time
+        \\evaluation.
+    );
+    table_row(121, #string,oneline
+        \\`get_cmdline_args :: () -> []const string`   |   The process argument
+        \\vector at run time. Inside a top-level `#comptime` block it returns
+        \\only the compiler arguments written after the `--` separator.
+    );
+    table_row(122, #string,oneline
+        \\`exit :: (status: int) #noreturn`   |   Terminates the process. It
+        \\works in the compile-time VM as well, where it terminates the
+        \\compilation with that status.
+    );
+    table_row(123, #string,oneline
+        \\`target_endian :: () -> Target_Endian`   |   An ordinary procedure
+        \\written with `#if OUT.cpu`. Big for `Powerpc`, `Powerpc64`, `S390x`,
+        \\`Mips` and `Mips64`; little otherwise, including `Powerpc64le`.
+    );
+    subheading(124, "The compiler-injected constants");
+    paragraph(125, #string,oneline
+        \\`OUT` and `HOST` are not declared anywhere in `std/`. The checker
+        \\installs them as constants after the Prelude is loaded, which is why
+        \\grepping the standard library for them finds only their types. The
+        \\installation is conditional: the checker only injects them if
+        \\`Output_Target` and `Host_Target` resolve, which the Prelude
+        \\guarantees.
+    );
+    table_header(126, "Constant   —   Meaning");
+    table_row(127, #string,oneline
+        \\`OUT : Output_Target`   |   The target being compiled FOR. Has `os`,
+        \\`cpu` and `abi`. This is the one to test in `#if` for portability.
+    );
+    table_row(128, #string,oneline
+        \\`HOST : Host_Target`   |   The machine compiling. Has `os` and `cpu`
+        \\only. Reading `HOST.abi` is a missing-field error.
+    );
+    subheading(129, "What is not in the Prelude");
+    paragraph(130, #string,oneline
+        \\The boundary is worth stating, because several names that feel
+        \\primitive are not. Printing is the one every program meets first:
+        \\`print` lives in `Io` and needs an import, and the compiler's
+        \\suggestion points at the Prelude's `tprint`, which builds a string
+        \\rather than writing one.
+    );
+    code_block(131, "text", #string
+        \\error: unknown function print
+        \\  --> prelude.glo:6:5
+        \\  |
+        \\6 |     print("%\n", size_of(P));
+        \\  |     ^^^^^
+        \\help: did you mean 'tprint'?
+    );
+    table_header(132, "Name   —   Module that supplies it");
+    table_row(133, #string,oneline
+        \\`print` and the rest of console and file output   |   `Io`.
+    );
+    table_row(134, #string,oneline
+        \\`Serialize` `Deserialize`   |   `Serialization`. Naming either as a
+        \\typeclass without the import is `error: unknown typeclass
+        \\'Serialize'`, even though `Functor`, `Monad` and `Applicative` are in
+        \\scope.
+    );
+    table_row(135, #string,oneline
+        \\`Va_List` `C_File` and the vararg operations   |   `VarArg`.
+    );
+    table_row(136, #string,oneline
+        \\`Execution_Context` and the jump helpers   |   The jump module.
+    );
+    table_row(137, #string,oneline
+        \\`Workspace` `Build_Options` `Bindgen_Options`   |   `Compiler` and
+        \\`Bindgen`.
+    );
+    table_row(138, #string,oneline
+        \\Square roots, trigonometry, big integers   |   `Math`. None of it is
+        \\intrinsic and none of it is preloaded.
+    );
+    note(139, #string,oneline
+        \\`Simd(T, N)` and `Matrix(T, Row, Col)` are neither Prelude
+        \\declarations nor imports: they are built-in type constructors and are
+        \\spellable in any file. The intrinsics that operate on them are in
+        \\`Simd` and `Math`.
+    );
+    subheading(140, "A program with no imports");
+    paragraph(141, #string,oneline
+        \\This file has no `#import` line. It uses compile-time reflection, the
+        \\dynamic-array helpers, `for` over a dynamic array, temporary-storage
+        \\formatting, both carrier types and `exit`, and every name in it comes
+        \\from the Prelude or from a module the Prelude re-exports.
+    );
+    code_block(142, "glosso", #string
+        \\Point :: struct { x: s32; y: f64; }
+        \\
+        \\main :: () {
+        \\    fields :: #comptime field_count(Point);
+        \\    label  :: #comptime type_name(Point);
+        \\
+        \\    values: [..]s64;
+        \\    array_add(*values, 10, 20, 30);
+        \\    total := 0;
+        \\    for v: values total += v;
+        \\    array_free(*values);
+        \\
+        \\    text   := tprint("% has % fields, sum %", label, fields, total);
+        \\    ok     := result_ok(string, text);
+        \\    picked := option_unwrap_or(option_some(2), 0);
+        \\
+        \\    exit(cast(int) (text.count + fields + picked
+        \\        + cast(s64) result_is_ok(ok)));
+        \\}
+    );
+    paragraph(143, #string,oneline
+        \\It compiles with no diagnostics and exits with status 31: the
+        \\formatted string is `Point has 2 fields, sum 60`, twenty-six
+        \\characters, plus two fields, plus the unwrapped two, plus one for the
+        \\`Ok`. Because nothing is printed, the exit status is the only
+        \\observable result — which is itself the point: the Prelude gives a
+        \\program types, arithmetic, containers, reflection, formatting and
+        \\termination, but not a way to write to a console.
+    );
+    code_block(144, "text", #string
+        \\$ glosso prelude.glo
+        \\glosso: compile prelude.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link prelude.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ ./prelude.exe ; echo $?
+        \\31
+    );
+}

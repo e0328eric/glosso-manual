@@ -2,90 +2,171 @@
 
 render_section_18 :: () {
     paragraph(0, #string,oneline
-        \\The primitive type set includes fixed-width integers, floats, `bool`,
-        \\`string`, `cstring`, `string16`, `cstring16`, `type`, `void`, `any`,
-        \\`label`, and `Code`. `int` and `uint` are fixed 64-bit signed and
-        \\unsigned aliases on every target; they are not pointer-sized machine
-        \\words.
+        \\The primitive set is fixed by the compiler and cannot be extended.
+        \\Signed integers are `s8`, `s16`, `s32`, `s64`, and `s128`; unsigned
+        \\are `u8`, `u16`, `u32`, `u64`, and `u128`. Floats are `f16`, `f32`,
+        \\`f64`, `f80`, and `f128`; complex are `c32`, `c64`, `c128`, `c160`,
+        \\and `c256`. The rest are `bool`, `string`, `cstring`, `string16`,
+        \\`cstring16`, `type`, `void`, `any`, `label`, and `Code`. `int` and
+        \\`uint` are fixed 64-bit signed and unsigned spellings on every
+        \\target; they are not pointer-sized machine words.
     );
     code_block(1, "glosso", #string
-        \\signed: s64 = -1;
-        \\unsigned: u64 = 10;
-        \\truth: bool = true;
-        \\name: string = "glosso";
-        \\T: type = s32;
+        \\signed:   s64  = -1;
+        \\unsigned: u64  = 10;
+        \\wide:     s128 = 170_141_183_460_469_231_731_687_303_715_884_105_727;
+        \\truth:    bool = true;
+        \\name:     string = "glosso";
+        \\T:        type = s32;
     );
     paragraph(2, #string,oneline
         \\`void` is the no-value type used for procedures that return nothing
-        \\and payload-less union variants. `any` carries type-erased values.
-        \\`Code` represents syntax values at compile time.
+        \\and payload-less union variants. `any` carries type-erased values and
+        \\is 16 bytes: a type descriptor and a data pointer. `type` and `void`
+        \\both have `size_of` 0 because they carry no runtime storage. `label`
+        \\names a jump target and `Code` represents syntax values at compile
+        \\time.
     );
-    subheading(3, "Representation and width");
+    subheading(3, "Width and alignment");
     paragraph(4, #string,oneline
-        \\Primitive types define the compiler's fundamental value
-        \\representations. Width-specific names are the right choice for binary
-        \\layouts and foreign interfaces, while `int` and `uint` are fixed
-        \\64-bit convenience types rather than platform-sized aliases.
+        \\A primitive spelling is resolved during checking, not at parse time:
+        \\the parser records an identifier and the checker maps it to a
+        \\compiler-internal type. Width and alignment are then fixed for the
+        \\selected target and are observable through `size_of` and
+        \\`type_info(T).alignment`. There is no `align_of` builtin;
+        \\`align_of(T)` is `error: unknown function align_of`.
     );
-    bullet(5, #string,oneline
-        \\Use signed or unsigned integer widths deliberately; signedness affects
-        \\comparisons, shifts, overflow, and foreign ABI compatibility.
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    print("s128 % align %\n", size_of(s128), type_info(s128).alignment);
+        \\    print("f80  % f128 %\n", size_of(f80), size_of(f128));
+        \\    print("string % any % type % void %\n",
+        \\        size_of(string), size_of(any), size_of(type), size_of(void));
+        \\    print("__int128 names %\n", type_name(__int128));
+        \\    c: uint32_t = 7;
+        \\    print("uint32_t names % value %\n", type_name(type_of(c)), c);
+        \\}
     );
-    bullet(6, #string,oneline
-        \\Select floating and complex widths based on required precision and
-        \\interoperability, not only on the size of nearby integer data.
+    code_block(6, "text", #string
+        \\s128 16 align 16
+        \\f80  16 f128 16
+        \\string 24 any 16 type 0 void 0
+        \\__int128 names s128
+        \\uint32_t names u32 value 7
     );
     bullet(7, #string,oneline
-        \\`void`, `type`, `any`, `label`, and `Code` describe special semantic
-        \\roles and should not be treated as interchangeable storage types.
+        \\Signedness is part of the type, not a rendering choice: it selects the
+        \\comparison, the shift, the overflow check, and the foreign ABI class.
+        \\It also decides implicit conversion, because an unsigned value reaches
+        \\a signed target only when the target is strictly wider.
     );
     bullet(8, #string,oneline
-        \\At serialization and C boundaries, spell the exact primitive width so
-        \\the layout remains stable across targets.
+        \\No float conversion is ever implicit, not even the widening
+        \\`f32` to `f64`: `a: f32 = 1.5; b: f64 = a;` is `error: got f32,
+        \\expected f64`. Float width is therefore a decision made once, at the
+        \\declaration, and every change of width is written out.
     );
-    table_header(9, "Family   —   Built-in names   —   Meaning");
-    table_row(10, #string,oneline
-        \\Signed integers   |   `s8`, `s16`, `s32`, `s64`, `s128`, `int`   |
-        \\  Two's-complement integer widths; `int` is an alias for the fixed
-        \\64-bit signed domain.
+    bullet(9, #string,oneline
+        \\`void`, `type`, `any`, `label`, and `Code` are not storage types.
+        \\`size_of(void)` and `size_of(type)` are 0, so a struct field of either
+        \\adds nothing; `any` is a 16-byte descriptor pair, not the value it
+        \\refers to.
     );
-    table_row(11, #string,oneline
-        \\Unsigned integers   |   `u8`, `u16`, `u32`, `u64`, `u128`, `uint`   |
-        \\  Unsigned integer widths; `uint` is an alias for the fixed 64-bit
-        \\unsigned domain.
+    bullet(10, #string,oneline
+        \\The C spellings `int8_t` through `int64_t`, `uint8_t` through
+        \\`uint64_t`, and `__int128` are accepted primitive names. They
+        \\normalize onto the Glosso widths - `type_name(__int128)` is `s128` and
+        \\`type_name(uint32_t)` is `u32` - and are the right choice when a
+        \\header being mirrored spells them that way.
     );
+    table_header(11, "Family   —   Built-in names   —   Meaning");
     table_row(12, #string,oneline
-        \\Floating point   |   `f16`, `f32`, `f64`, `f80`, `f128`   |   Binary
-        \\floating formats supported by the selected backend and target.
+        \\Signed integers   |   `s8`, `s16`, `s32`, `s64`, `s128`, `int`   |
+        \\  Two's-complement widths of 1, 2, 4, 8, and 16 bytes; `int` and `s64`
+        \\  are two spellings of one type.
     );
     table_row(13, #string,oneline
-        \\Complex   |   `c32`, `c64`, `c128`, `c160`, `c256`   |   Two
-        \\components whose component widths are respectively 16, 32, 64, 80, and
-        \\128 bits.
+        \\Unsigned integers   |   `u8`, `u16`, `u32`, `u64`, `u128`, `uint`   |
+        \\  Unsigned widths of 1, 2, 4, 8, and 16 bytes; `uint` is a spelling of
+        \\  `u64` and narrows no more freely than `u64` does.
     );
     table_row(14, #string,oneline
-        \\Text descriptors   |   `string`, `cstring`, `string16`, `cstring16`
-        \\  |   Count/data/capacity descriptors; `c` forms maintain a trailing
-        \\zero code unit.
+        \\Floating point   |   `f16`, `f32`, `f64`, `f80`, `f128`   |   Binary
+        \\floating formats of 2, 4, 8, 16, and 16 bytes; `f80` occupies 16 bytes
+        \\because of alignment padding.
     );
     table_row(15, #string,oneline
+        \\Complex   |   `c32`, `c64`, `c128`, `c160`, `c256`   |   Two
+        \\components whose component widths are respectively 16, 32, 64, 80, and
+        \\128 bits; sizes are 4, 8, 16, 32, and 32 bytes.
+    );
+    table_row(16, #string,oneline
+        \\Text descriptors   |   `string`, `cstring`, `string16`, `cstring16`
+        \\  |   24-byte count/data/capacity descriptors; `c` forms maintain a
+        \\  trailing zero code unit outside `count`.
+    );
+    table_row(17, #string,oneline
         \\Compiler and control   |   `bool`, `type`, `void`, `any`, `label`,
         \\`Code`   |   Boolean, compile-time type value, no-value type, erased
         \\value, jump label, and syntax value.
     );
-    note(16, #string,oneline
-        \\Primitive availability in the parser does not guarantee that every
-        \\target ABI can pass every primitive by value. In particular, complex
-        \\primitives have no declared C ABI in Glosso; use scalar components or
-        \\pointed-to storage at foreign boundaries.
+    subheading(18, "`int` and `s64` name one unnamed type");
+    paragraph(19, #string,oneline
+        \\`int` and `s64` do not merely alias each other: both spellings resolve
+        \\to the same checker type, and that type has no name recorded on it. It
+        \\is also the type an untyped integer literal falls back to. Implicit
+        \\integer narrowing is refused only when the source expression's static
+        \\type is a *named* integer type, so a value typed `int`/`s64` converts
+        \\to any integer type silently, truncating and reinterpreting the sign.
+        \\`int64_t` is a separate named type and is not in that hole, which is
+        \\what makes the two lines below differ.
+    );
+    code_block(20, "glosso", #string
+        \\main :: () {
+        \\    a: s64 = 300;
+        \\    narrow: s8 = a;   // accepted: `s64` is the unnamed default
+        \\
+        \\    b: int64_t = 300;
+        \\    also: s8 = b;     // rejected
+        \\}
+    );
+    code_block(21, "text", #string
+        \\error: got int64_t, expected s8
+        \\  --> primitives.glo:6:16
+        \\  |
+        \\6 |     also: s8 = b;     // rejected
+        \\  |                ^
+    );
+    paragraph(22, #string,oneline
+        \\The full coercion rule, the `#enable(lossy_numerics)` gate that
+        \\reopens integer narrowing, and the diagnostics it produces are covered
+        \\in "Casts and Contextual Conversion" and "Strict Conversions and
+        \\Feature Gates". `s128` and `u128` are ordinary primitives here -
+        \\literals, arithmetic, limits, and their remaining rough edges are
+        \\covered in "128-Bit Integers".
+    );
+    note(23, #string,oneline
+        \\Availability in the parser does not guarantee that every target ABI
+        \\can pass every primitive by value. Complex primitives have no declared
+        \\C ABI in Glosso; use scalar components or pointed-to storage at
+        \\foreign boundaries. `cast(f64)` applied to an `s128` or `u128` is also
+        \\currently wrong for magnitudes at or above 2^63 -
+        \\`cast(f64)(cast(u128)1 << 100)` yields 9223372036854775809 - so route
+        \\wide-to-float conversion through a narrower integer.
     );
 }
 
 render_section_19 :: () {
     paragraph(0, #string,oneline
-        \\Types are compile-time values. A type may be named directly, qualified
-        \\through an import alias, stored in a constant, passed as a `type`
-        \\argument, or returned by compile-time code.
+        \\Most types are compile-time values. A `struct`, `union`, `enum`, or
+        \\primitive name may be used directly, qualified through an import
+        \\alias, stored in a constant, passed as a `type` argument, or returned
+        \\by compile-time code. The one exception is a name introduced by
+        \\`distinct`: it is resolvable only in type-annotation position, and
+        \\naming it in an expression is `error: unbound '<name>'`.
     );
     code_block(1, "glosso", #string
         \\Index :: s64;
@@ -126,7 +207,45 @@ render_section_19 :: () {
         \\An inline `struct`, `union`, `enum`, or `enum_flags` type in an
         \\aggregate field.
     );
-    paragraph(15, #string,oneline
+    bullet(15, #string,oneline
+        \\`Name :: distinct T;` for a nominal type with the representation of
+        \\`T` and an identity of its own.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\#import "Simd";
+        \\#import "Math/Matrix";
+        \\
+        \\Index  :: s64;
+        \\Meters :: distinct f64;
+        \\Box    :: struct { value: $T; }
+        \\
+        \\generic :: (value: $T) -> T { return value; }
+        \\plain   :: (value: s64) -> s64 { return value; }
+        \\
+        \\main :: () {
+        \\    i: Index = 1;
+        \\    m: Meters = 2.5;
+        \\    b: Box(s64);  b.value = 3;
+        \\    p: *s64 = *i;
+        \\    pp: **s64 = *p;
+        \\    fixed: [4]s64;
+        \\    many: [*]s64 = fixed.data;
+        \\    tup: (a: s64, b: string) = .(1, "a");
+        \\    fn: (s64) -> s64 = plain;
+        \\    lanes: Simd(u32, 4) = #simd .[1, 2, 3, 4];
+        \\    mat: Matrix(f64, 2, 2) = .[1.0, 2.0, 3.0, 4.0];
+        \\    ctx: #Context = context;
+        \\    print("% % % % % % %\n", i, cast(f64) m, b.value, pp.*.*,
+        \\        many[0], tup.1, generic(4));
+        \\    print("% % %\n", fn(5), lanes[0], mat[3]);
+        \\}
+    );
+    code_block(17, "text", #string
+        \\1 2.5 3 1 0 a 4
+        \\5 1 4
+    );
+    paragraph(18, #string,oneline
         \\`const` and `volatile` qualify the immediately written pointer layer:
         \\`*const T`, `*volatile T`, `[*]const T`, and combinations are
         \\accepted. For multiple single-pointer layers, qualify the layer
@@ -134,51 +253,114 @@ render_section_19 :: () {
         \\that pointer; `volatile` controls backend loads and stores and is not
         \\synchronization.
     );
-    paragraph(16, #string,oneline
-        \\Only an aggregate field may contain an inline aggregate declaration.
-        \\The compiler hoists it under a field-qualified nominal name.
+    code_block(19, "glosso", #string
+        \\value: s64 = 7;
+        \\mutable: *s64 = *value;
+        \\readonly: *const s64 = mutable;        // adding const is implicit
+        \\layered: *const *const s64 = *readonly;
+        \\device: *volatile u32;
     );
-    code_block(17, "glosso", #string
+    paragraph(20, #string,oneline
+        \\Only an aggregate field may contain an inline aggregate declaration.
+        \\The compiler hoists it under a field-qualified nominal name, so the
+        \\hoisted name is what later annotations must use.
+    );
+    code_block(21, "glosso", #string
         \\Message :: union {
         \\    Data: struct { bytes: []u8; };
         \\    Error: enum { Invalid; Closed; };
         \\}
         \\
         \\data: Message.Data;
+        \\failure: Message.Error = .Invalid;
+    );
+    subheading(22, "A `distinct` name is not a type value");
+    paragraph(23, #string,oneline
+        \\`distinct` records an identity tag on an otherwise ordinary type
+        \\rather than introducing a new declaration kind, and the declaration
+        \\registers nothing that the expression path can resolve. Annotation
+        \\position finds the name; every expression position fails. A `struct`
+        \\name, by contrast, is a first-class compile-time value.
+    );
+    code_block(24, "text", #string
+        \\Meters :: distinct f64;
+        \\Point  :: struct { x: s64; }
+        \\
+        \\size_of(Point)     // 8
+        \\size_of(Meters)    // error: unbound 'Meters'
+        \\t := Meters;       // error: unbound 'Meters'
+        \\takes(Meters)      // error: unbound 'Meters', for a (T: type) parameter
+    );
+    paragraph(25, #string,oneline
+        \\The supported spelling is `size_of(type_of(value))`, which reaches the
+        \\type through a value of it. Declaration placement, conversions,
+        \\inherited operators, and typeclass instances for distinct types are
+        \\covered in "`distinct` Nominal Types".
     );
 }
 
 render_section_20 :: () {
     paragraph(0, #string,oneline
         \\A tuple type is a parenthesized comma-separated type list. A single
-        \\parenthesized unnamed type is only grouping; it is not a one-element
-        \\tuple. The empty tuple type `()` is valid. Tuple fields are addressed
-        \\by zero-based numeric member syntax.
+        \\parenthesized unnamed type is only grouping; `(s64)` is `s64`, not a
+        \\one-element tuple. The empty tuple type `()` is valid and has
+        \\`size_of` 0. Tuple components are addressed by zero-based numeric
+        \\member syntax only. A tuple type may declare component names, but they
+        \\are documentation for the signature: `named.remainder` is
+        \\`error: tuple member must be a numeric field like .0`.
     );
     code_block(1, "glosso", #string
-        \\pair: (s64, string) = .(42, "answer");
-        \\number := pair.0;
-        \\text := pair.1;
+        \\#import "Io";
+        \\
+        \\nothing :: (u: ()) -> s64 { return 1; }
+        \\
+        \\main :: () {
+        \\    pair: (s64, string) = .(42, "answer");
+        \\    number := pair.0;
+        \\    text := pair.1;
+        \\    named: (quotient: s64, remainder: s64) = .(4, 7);
+        \\    grouped: (s64) = 5;          // grouping, not a tuple
+        \\    empty: ();
+        \\    print("% % % % %\n", number, text, named.1, grouped,
+        \\        nothing(empty));
+        \\
+        \\    // named.remainder
+        \\    // error: tuple member must be a numeric field like .0
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Tuple literals begin with a dot: `.(values...)`. They normally receive
-        \\their tuple type from a declaration, parameter, return type, or other
-        \\expected-type context. A function may return several expressions
+    code_block(2, "text", #string
+        \\42 answer 7 5 1
+    );
+    paragraph(3, #string,oneline
+        \\Tuple literals begin with a dot: `.(values...)`. They receive their
+        \\component types from the elements when the elements are typed, and
+        \\from a declaration, parameter, return type, or other expected-type
+        \\context otherwise. A procedure may return several expressions
         \\separated by commas; the expressions initialize the components of its
-        \\tuple result.
+        \\tuple result, and the call site may destructure them positionally.
     );
-    code_block(3, "glosso", #string
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\
         \\split :: (value: s64) -> (quotient: s64, remainder: s64) {
         \\    return value / 10, value % 10;
         \\}
+        \\
+        \\main :: () {
+        \\    q, r := split(47);
+        \\    print("% %\n", q, r);   // 4 7
+        \\}
     );
-    paragraph(4, #string,oneline
+    paragraph(5, #string,oneline
         \\A function type is `(parameter-types) -> result`. Parameter names are
-        \\optional in a function type and are descriptive; `noalias` is retained
-        \\as part of function-pointer compatibility. Named `#fn_ptr`
-        \\declarations additionally support `#c_call` and C ellipses.
+        \\optional in a function type and are descriptive. `noalias` is retained
+        \\as part of function-pointer compatibility, and inside a function type
+        \\it precedes the parameter *type* because there is no name to precede.
+        \\In a procedure declaration the same keyword precedes the parameter
+        \\*name*. Named `#fn_ptr` declarations additionally support `#c_call`
+        \\and C ellipses.
     );
-    code_block(5, "glosso", #string
+    code_block(6, "glosso", #string
         \\Transform :: #fn_ptr(value: s64, scale: f64) -> f64;
         \\
         \\apply_copy :: (
@@ -189,13 +371,27 @@ render_section_20 :: () {
         \\) {
         \\    operation(destination, source, count);
         \\}
+        \\
+        \\copier :: (noalias d: [*]u8, noalias s: [*]const u8, n: s64) {
+        \\    i := 0;
+        \\    while i < n { d[i] = s[i]; i += 1; }
+        \\}
+    );
+    note(7, #string,oneline
+        \\Writing the declaration form inside a function type, or the
+        \\function-type form inside a declaration, is a parse error rather than
+        \\a type error: `copier :: (d: noalias [*]u8, ...)` reports
+        \\`error: unexpected token 'noalias'` and the procedure is then unbound
+        \\at every call site.
     );
 }
 
 render_section_21 :: () {
     paragraph(0, #string,oneline
         \\Glosso uses dot-prefixed literal delimiters so aggregate construction
-        \\is distinct from blocks and indexing.
+        \\is distinct from blocks and indexing. The dot is what makes the form
+        \\unambiguous to the parser; there is no brace-initializer syntax
+        \\without it.
     );
     bullet(1, #string,oneline
         \\`Type.{ values... }` is a typed struct or union-payload literal.
@@ -212,21 +408,54 @@ render_section_21 :: () {
     bullet(5, "`.(values...)` is a contextual tuple literal.");
     bullet(6, "`#simd .[values...]` is a contextual SIMD literal.");
     code_block(7, "glosso", #string
-        \\Point :: struct { x: s64; y: s64; }
+        \\#import "Io";
         \\
-        \\named := Point.{ .x = 10, .y = 20 };
-        \\positional := Point.{ 10, 20 };
-        \\inferred: Point = .{ .y = 5 };
-        \\numbers: [4]s64 = .[1, 2, 3, 4];
-        \\pair: (s64, string) = .(7, "seven");
+        \\Point :: struct { x: s64 = 3; y: s64; }
+        \\
+        \\main :: () {
+        \\    named := Point.{ .x = 10, .y = 20 };
+        \\    positional := Point.{ 10, 20 };
+        \\    partial := Point.{ 10 };        // y takes the type default 0
+        \\    defaulted: Point = .{};         // x takes its declared default 3
+        \\    numbers: [4]s64 = .[1, 2, 3, 4];
+        \\    pair: (s64, string) = .(7, "seven");
+        \\    print("% % % % % %\n", named.x, positional.y, partial.y,
+        \\        defaulted.x, numbers[3], pair.1);
+        \\}
     );
-    paragraph(8, #string,oneline
-        \\Omitted struct fields use their declared defaults or the type's
-        \\default value. Array, tuple, inferred struct, matrix, and SIMD
-        \\literals require an expected type when their element or aggregate type
-        \\cannot be established otherwise. Trailing commas are accepted in
-        \\calls, tuple literals, and literal field lists; every declared struct,
-        \\union, and enum member itself ends with `;`.
+    code_block(8, "text", #string
+        \\10 20 0 3 4 seven
+    );
+    paragraph(9, #string,oneline
+        \\A field omitted from a struct literal takes its declared default when
+        \\the declaration supplies one and the type's zero value otherwise; a
+        \\positional list may stop early and the remaining fields are filled the
+        \\same way. Whether a literal needs an expected type depends on whether
+        \\its own elements determine the aggregate. `.[...]` synthesizes
+        \\`[N]T` from its elements, and `.(...)` synthesizes a tuple from
+        \\its elements, so both stand alone. `.{...}` and `#simd .[...]` carry
+        \\no such information and are rejected without a context.
+    );
+    code_block(10, "text", #string
+        \\x := .{ .a = 1 };
+        \\// error: struct literal needs a type
+        \\
+        \\s := #simd .[1, 2, 3, 4];
+        \\// error: #simd literal requires a Simd(T, N) context
+        \\
+        \\y := .[1, 2, 3];   // accepted; y has type [3]int
+        \\t := .(1, "a");    // accepted; t is a tuple
+    );
+    paragraph(11, #string,oneline
+        \\The same rule decides where a matrix literal is legal: `Matrix` shape
+        \\is not derivable from a flat element list, so a matrix literal is a
+        \\plain `.[...]` that must appear where a `Matrix(T, Rows, Columns)` is
+        \\expected, and its element count must equal `Rows * Columns`.
+    );
+    paragraph(12, #string,oneline
+        \\Trailing commas are accepted in calls, tuple literals, and literal
+        \\field lists. Members of a `struct`, `union`, or `enum` declaration are
+        \\separated differently: every declared member ends with `;`.
     );
 }
 
@@ -234,36 +463,105 @@ render_section_22 :: () {
     paragraph(0, #string,oneline
         \\`value.field` selects a struct or union field, an enum member, a
         \\qualified declaration, or a typeclass member according to the type of
-        \\its left side. `tuple.0` selects a tuple component. A contextual
-        \\`.Member` omits the type name when an enum or union type is already
-        \\expected.
+        \\its left side. `tuple.0` selects a tuple component; a tuple component
+        \\is reachable by position only, even when the tuple type declared a
+        \\name for it. A contextual `.Member` omits the type name when an enum
+        \\or union type is already expected.
     );
     paragraph(1, #string,oneline
         \\Calls use `callee(arguments...)`. Named call arguments begin with a
         \\dot and equal sign, such as `.timeout = 1000`; they bind by parameter
         \\name rather than position. The parser records named arguments only in
-        \\this dot form.
+        \\this dot form, so the bare `timeout = 1000` spelling is
+        \\`error: unexpected token '='`.
     );
     code_block(2, "glosso", #string
-        \\connect :: (host: string, port: s64, timeout: s64 = 1000) {}
-        \\connect(.host = "localhost", .port = 8080);
-    );
-    paragraph(3, #string,oneline
-        \\An ellipsis after a call argument expands an existing Glosso variadic
-        \\pack at that position. It is different from the bare C ellipsis in a
-        \\declaration.
-    );
-    code_block(4, "glosso", #string
-        \\forward :: (values: ...any) {
-        \\    print("% %\n", values...);
+        \\#import "Io";
+        \\
+        \\connect :: (host: string, port: s64, timeout: s64 = 1000) {
+        \\    print("% % %\n", host, port, timeout);
+        \\}
+        \\
+        \\main :: () {
+        \\    connect(.host = "localhost", .port = 8080);
         \\}
     );
-    paragraph(5, #string,oneline
+    code_block(3, "text", #string
+        \\localhost 8080 1000
+    );
+    paragraph(4, #string,oneline
+        \\An ellipsis after a call argument expands a sequence into the callee's
+        \\variadic pack at that position. It is different from the bare C
+        \\ellipsis in a declaration. The operand must be array-like - another
+        \\variadic pack, a fixed array, a view, or a dynamic array; a scalar is
+        \\`error: expanded variadic argument to `sum` must be an array`.
+    );
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\sum_all :: (values: ...s64) -> s64 {
+        \\    total := 0;
+        \\    for v: values total += v;
+        \\    return total;
+        \\}
+        \\
+        \\forward :: (values: ...s64) -> s64 {
+        \\    return sum_all(values...);
+        \\}
+        \\
+        \\show_all :: (values: ...any) {
+        \\    for v: values print("%\n", v);
+        \\}
+        \\
+        \\relay :: (values: ...any) {
+        \\    show_all(values...);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", forward(1, 2, 3));
+        \\    relay(7, "two");
+        \\}
+    );
+    code_block(6, "text", #string
+        \\6
+        \\7
+        \\two
+    );
+    note(7, #string,oneline
+        \\`print` is not an ordinary variadic consumer: the checker counts the
+        \\`%` placeholders in the format string against the argument list at
+        \\compile time, and an expanded pack contributes exactly one argument to
+        \\that count. `print("% %\n", values...)` is therefore
+        \\`error: print: format has 2 '%' placeholder(s) but 1 argument(s)
+        \\given`. Forward a pack to a procedure that iterates it, as `relay`
+        \\above does.
+    );
+    paragraph(8, #string,oneline
         \\Postfix operations bind before infix operators: calls `()`, indexing
         \\`[]`, members `.name`, tuple members `.0`, typed literal suffixes
         \\`.{}`, call-site `#memory`, pointer dereference `.*`, and declared
-        \\suffix operators. `proc,,label` forms a nonlocal label value
-        \\associated with a procedure for the low-level jump facilities.
+        \\suffix operators. Because they bind tighter, a postfix chain reads
+        \\left to right with no parentheses. `proc,,label` forms a nonlocal
+        \\label value associated with a procedure for the low-level jump
+        \\facilities.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct { x: s64; y: s64; }
+        \\Color :: enum { Red; Green; }
+        \\
+        \\main :: () {
+        \\    pts: [3]Point;
+        \\    pts[1] = .{ .x = 4, .y = 5 };
+        \\    p := *pts[1];
+        \\    pair: (s64, string) = .(1, "a");
+        \\    c: Color = .Green;                 // contextual member
+        \\    print("% % % %\n", pts[1].x, p.*.y, pair.0, c == Color.Green);
+        \\    print("%\n", Point.{ 9, 9 }.x);    // literal suffix, then member
+        \\}
+        \\// 4 5 1 1
+        \\// 9
     );
 }
 
@@ -273,27 +571,175 @@ render_section_23 :: () {
         \\postfix form is `expression.cast(Target)`. Explicit casts are accepted
         \\between numeric types (integers, floats, booleans, and enums), between
         \\pointer/null forms, and between compatible fixed arrays and SIMD
-        \\values with the same element/count shape.
+        \\values with the same element/count shape. A cast is resolved during
+        \\checking: it either names one of those families on both sides or it is
+        \\rejected outright, with no runtime fallback.
     );
     code_block(1, "glosso", #string
-        \\wide := cast(s64) small;
-        \\bytes := pointer.cast([*]u8);
-        \\lanes := array.cast(Simd(u32, 4));
+        \\#import "Io";
+        \\#import "Simd";
+        \\
+        \\main :: () {
+        \\    small: s16 = 300;
+        \\    wide := cast(s64) small;
+        \\    bytes := (*small).cast([*]u8);
+        \\    lanes := (#simd .[1, 2, 3, 4]).cast(Simd(u32, 4));
+        \\    print("% % %\n", wide, bytes[0], lanes[0]);
+        \\}
     );
-    paragraph(2, #string,oneline
+    code_block(2, "text", #string
+        \\300 44 1
+    );
+    paragraph(3, #string,oneline
         \\`acast expression` and `expression.acast` request the target type from
-        \\the surrounding context. Without an expected type, `acast` is an
-        \\error.
+        \\the surrounding context. Without an expected type, `acast` is
+        \\`error: acast needs a target type from context or an explicit cast
+        \\type`, reported at the enclosing expression.
     );
-    code_block(3, "glosso", #string
+    code_block(4, "glosso", #string
         \\ratio: f32 = acast numerator / acast denominator;
         \\screen_x := 20.0 + width.acast;
+        \\
+        \\x := acast 5;   // error: acast needs a target type from context
+        \\                //        or an explicit cast type
     );
-    paragraph(4, #string,oneline
-        \\Implicit coercion is a separate mechanism. Numeric and pointer
-        \\conversions that are not ordinary coercions still require `cast` or
-        \\`acast`; a struct's single `#as` field may supply an implicit
-        \\conversion when its field type is expected.
+    subheading(5, "What converts without a cast");
+    paragraph(6, #string,oneline
+        \\Implicit coercion is a separate mechanism from `cast`, and it is
+        \\deliberately narrow. For integers it succeeds only when the conversion
+        \\is lossless, judged by width and signedness: same signedness widens to
+        \\an equal or wider target, and an unsigned value reaches a signed
+        \\target only when the target is strictly wider. Every other integer
+        \\pair - narrowing, and any change of signedness at equal width -
+        \\is rejected in every value position: initializer, assignment,
+        \\`return`, call argument, struct-literal field, and array element.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: u8  = 7;
+        \\    b: u16 = a;       // same signedness, wider target
+        \\    c: s64 = a;       // unsigned into a strictly wider signed target
+        \\    small: u8 = 300;  // untyped literal: stores 44, no diagnostic
+        \\    d: f64 = 3;       // untyped literal adapts to a float target
+        \\    print("% % % % %\n", a, b, c, small, d);
+        \\}
+        \\// 7 7 7 44 3
+    );
+    code_block(8, "text", #string
+        \\a: u16 = 7; b: u8  = a;   // error: got u16, expected u8
+        \\a: u8  = 7; b: s8  = a;   // error: got u8, expected s8
+        \\a: s8  = 7; b: u64 = a;   // error: got s8, expected u64
+        \\a: uint = 300; y: u8 = a; // error: got u64, expected u8
+        \\a: f32 = 1.5; b: f64 = a; // error: got f32, expected f64
+        \\g :: (a: s64) -> f64 { return a; }
+        \\                          // error: got int, expected f64
+    );
+    paragraph(9, #string,oneline
+        \\Two rules in that list are worth separating out. No float conversion
+        \\is ever implicit, in either direction, including the widening
+        \\`f32` to `f64`; and no conversion between an integer and a float is
+        \\implicit for a value that already has a type. Only untyped literals
+        \\cross those boundaries, and they are not range-checked: `u8 = 300`
+        \\silently stores 44 and `s8 = 200` stores -56.
+    );
+    paragraph(10, #string,oneline
+        \\The rule bites only when the source expression's static type is a
+        \\*named* integer type. `int` and `s64` are two spellings of one
+        \\type that carries no name - the same type an untyped literal falls
+        \\back to - so a value of it narrows to anything, silently. This is the
+        \\one place where the checker still truncates without saying so, and it
+        \\covers `:=`-inferred integers, `::` constants, procedure results, and
+        \\the result of arithmetic on `s64`.
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\LIMIT :: 300;
+        \\give :: () -> s64 { return 300; }
+        \\
+        \\main :: () {
+        \\    x: s64 = 300;
+        \\    print("% % % %\n", cast(s8) x, cast(u8) x, x, give());
+        \\
+        \\    y: s8 = x;          // no diagnostic; y is 44
+        \\    q := 300;  qq: s8 = q;
+        \\    cc: s8 = LIMIT;
+        \\    rr: s8 = give();
+        \\    print("% % % %\n", y, qq, cc, rr);
+        \\
+        \\    named: int64_t = 300;
+        \\    // also: s8 = named;   // error: got int64_t, expected s8
+        \\}
+        \\// 44 44 300 300
+        \\// 44 44 44 44
+    );
+    subheading(12, "Pointer coercion");
+    paragraph(13, #string,oneline
+        \\Pointers must agree in flavour and in pointee. `*T` and `[*]T` do not
+        \\interconvert in either direction, and the pointee type is compared, so
+        \\`*A` does not reach `*B` and `*s64` does not reach `*u64`. Two escapes
+        \\remain: `*void` converts to and from any pointer, and adding `const`
+        \\is implicit. Dropping `const` never is.
+    );
+    code_block(14, "text", #string
+        \\p: *A = *a;  q: [*]A = p;   // error: got *A, expected [*]A
+        \\f :: (m: [*]A) { p: *A = m; }
+        \\                            // error: got [*]A, expected *A
+        \\p: *A = *a;  q: *B = p;     // error: got *A, expected *B
+        \\p: *s64 = *a; q: *u64 = p;  // error: got *int, expected *u64
+        \\p: *const A = *a; q: *A = p;
+        \\                            // error: got *const A, expected *A
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\A :: struct { x: s64; }
+        \\
+        \\main :: () {
+        \\    a: A = .{ .x = 7 };
+        \\    p: *A = *a;
+        \\    v: *void = p;          // any pointer reaches *void
+        \\    back: *A = v;          // and comes back
+        \\    c: *const A = p;       // adding const is implicit
+        \\    print("% %\n", back.*.x, c.*.x);
+        \\}
+        \\// 7 7
+    );
+    paragraph(16, #string,oneline
+        \\A struct's single `#as` field supplies one further implicit
+        \\conversion: wherever the field's type is expected, a value of the
+        \\struct is accepted and the field is read.
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Handle :: struct { #as raw: s64; version: s32; }
+        \\
+        \\takes :: (n: s64) -> s64 { return n * 2; }
+        \\
+        \\main :: () {
+        \\    h: Handle = .{ .raw = 21, .version = 1 };
+        \\    print("%\n", takes(h));   // 42
+        \\}
+    );
+    note(18, #string,oneline
+        \\Diagnostics render the checker's own type names, which differ from
+        \\some source spellings: `s64` prints as `int`, `uint` prints as `u64`,
+        \\and `*s64` prints as `*int`. The message form is always
+        \\`error: got <actual>, expected <expected>`, except in a struct literal
+        \\where it is prefixed with `field '<name>'`.
+    );
+    paragraph(19, #string,oneline
+        \\`#enable(lossy_numerics)` reopens implicit narrowing and sign
+        \\reinterpretation between integers for the declarations that follow it,
+        \\and `#enable(pointer_punning)` reopens pointee-unchecked pointer
+        \\conversion and `*T`/`[*]T` interchange. Neither gate touches floats,
+        \\and neither permits dropping `const`. The gates, their file-scope
+        \\rules, and their diagnostics are covered in "Strict Conversions and
+        \\Feature Gates"; a `distinct` type is outside all of this and is
+        \\covered in "`distinct` Nominal Types".
     );
 }
 
@@ -302,30 +748,62 @@ render_section_24 :: () {
         \\`Simd(T, N)` is a fixed-lane compiler type. `N` is an integer literal.
         \\A SIMD literal must be written `#simd .[...]` and must have a
         \\contextual SIMD type; an ordinary `.[...]` remains a fixed-array or
-        \\matrix literal.
+        \\matrix literal. Lanes are read with `[]` and the lane count is
+        \\available as `.count`.
     );
     code_block(1, "glosso", #string
+        \\#import "Io";
         \\#import "Simd";
         \\
-        \\a: Simd(u32, 4) = #simd .[1, 2, 3, 4];
-        \\b := simd_splat(Simd(u32, 4), 10);
-        \\sum := a + b;
+        \\main :: () {
+        \\    a: Simd(u32, 4) = #simd .[1, 2, 3, 4];
+        \\    b := simd_splat(Simd(u32, 4), cast(u32) 10);
+        \\    sum := a + b;
+        \\    print("% % %\n", sum[0], sum[3], a.count);
+        \\}
     );
-    paragraph(2, #string,oneline
+    code_block(2, "text", #string
+        \\11 14 4
+    );
+    note(3, #string,oneline
+        \\`simd_splat(V, value)` takes the lane value as an inferred `$T` and
+        \\does not adapt an untyped literal to the lane width. Passing a bare
+        \\`10` for a `Simd(u32, 4)` passes an `int` and the backend rejects the
+        \\result with `error: Invalid insertelement operands!`. Give the value
+        \\the lane type first, as `cast(u32) 10` does above.
+    );
+    paragraph(4, #string,oneline
         \\`Matrix(T, Rows, Columns)` is a statically shaped compiler type. Each
         \\dimension is an integer literal or named compile-time integer constant
         \\and must resolve to a valid positive shape. Matrix literals are flat,
         \\row-major `.[...]` literals whose element count must equal `Rows *
-        \\Columns`.
+        \\Columns`, and the flat index `row * Columns + column` also works
+        \\directly with `[]`.
     );
-    code_block(3, "glosso", #string
+    code_block(5, "glosso", #string
+        \\#import "Io";
         \\#import "Math/Matrix";
         \\
         \\Rows :: 2;
-        \\m: Matrix(f64, Rows, 3) = .[1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        \\value := matrix_get(m, 1, 2);
+        \\
+        \\main :: () {
+        \\    m: Matrix(f64, Rows, 3) = .[1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        \\    value, ok := matrix_get(m, 1, 2);
+        \\    print("% % %\n", value, ok, m[3]);
+        \\}
     );
-    paragraph(4, #string,oneline
+    code_block(6, "text", #string
+        \\6 1 4
+    );
+    note(7, #string,oneline
+        \\`matrix_get` returns `(T, bool)`, not `T`: the second component
+        \\reports whether the row and column were in range, and an out-of-range
+        \\request returns the element type's zero value with `false`. Binding
+        \\the call to a single name binds the whole tuple, which then has no
+        \\`Show` instance - `error: variadic arg type `tuple` does not implement
+        \\`Show` in call `print``. Destructure it as `value, ok := ...`.
+    );
+    paragraph(8, #string,oneline
         \\The operator implementations and helper APIs come from `Simd` and
         \\`Math/Matrix`; merely naming the compiler type does not import those
         \\declarations. Neither shaped type has a portable Glosso by-value C
@@ -335,161 +813,464 @@ render_section_24 :: () {
 
 render_section_25 :: () {
     paragraph(0, #string,oneline
-        \\Boolean values are `true` and `false`. The prelude defines `&&`, `||`,
-        \\and prefix `!`.
+        \\Boolean values are `true` and `false`, and `bool` occupies one byte.
+        \\The prelude defines prefix `!` through the `LogicalNot` typeclass and
+        \\the infix `&&` and `||` through `LogicalAnd` and `LogicalOr`. `bool`
+        \\prints as `0` or `1`.
     );
     code_block(1, "glosso", #string
-        \\ok := file_is_valid(file) && size > 0;
-        \\if !ok print("not ok\n");
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    size: s64 = 3;
+        \\    ok := size > 0 && size < 10;
+        \\    if !ok print("not ok\n");
+        \\    print("% %\n", ok, size_of(bool));
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\`&&` and `||` are ordinary prelude operators semantically tied to bool
-        \\operations.
+    code_block(2, "text", #string
+        \\1 1
     );
-    subheading(3, "Conditions and short-circuiting");
+    subheading(3, "`&&` and `||` are typeclass operators");
     paragraph(4, #string,oneline
-        \\Control-flow conditions are boolean values rather than implicit
-        \\truthiness conversions. The short-circuit operators also define
-        \\evaluation order, making them suitable for guards whose right side is
-        \\only valid after the left side succeeds.
+        \\`&&` and `||` are not built into the language and are not tied to
+        \\`bool`. They are the single methods of the `LogicalAnd` and
+        \\`LogicalOr` typeclasses in `std/Prelude/Primitive_Operators.glo`, and
+        \\`(bool, bool)` is one instance among any others a program declares.
+        \\What makes them short-circuit is the `#lazy` on the right operand in
+        \\the typeclass declaration, not the operand type.
     );
-    bullet(5, #string,oneline
-        \\Use `&&` when the second expression depends on the first, such as a
-        \\null check followed by dereference.
+    code_block(5, "glosso", #string
+        \\// std/Prelude/Primitive_Operators.glo
+        \\'&&' :: (left: L, #lazy right: R) -> Output #operator(left, 6);
+        \\'||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
+        \\
+        \\// instance (bool, bool)
+        \\'&&' :: (left: bool, #lazy right: bool) -> Output #magic "bool_and";
+        \\'||' :: (left: bool, #lazy right: bool) -> Output #magic "bool_or";
     );
-    bullet(6, #string,oneline
-        \\Use `||` for fallbacks whose later alternatives should run only after
-        \\earlier ones fail.
+    paragraph(6, #string,oneline
+        \\A `#lazy` parameter is not evaluated at the call. It is evaluated on
+        \\the first read inside the callee body, in the caller's environment,
+        \\and cached. So `false && rhs` never reads `right` and `rhs` never
+        \\runs. The property holds wherever the operator appears - as a plain
+        \\expression value, as an `if` or `while` condition, inside a chain, and
+        \\during compile-time evaluation, where it is what lets an unreachable
+        \\`1 / 0` survive.
     );
-    bullet(7, #string,oneline
-        \\Do not encode a boolean protocol with magic integers; compare
-        \\explicitly at an external boundary and keep internal conditions typed
-        \\as `bool`.
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\bump :: (counter: *s64, result: bool) -> bool {
+        \\    counter.* += 1;
+        \\    return result;
+        \\}
+        \\
+        \\A :: #comptime false && (1 / 0 == 0);
+        \\
+        \\main :: () {
+        \\    n: s64 = 0;
+        \\    a := false && bump(*n, true);
+        \\    print("a=% n=%\n", a, n);
+        \\    if false && bump(*n, true) print("unreachable\n");
+        \\    while false && bump(*n, true) { }
+        \\    print("n=% comptime=%\n", n, A);
+        \\}
     );
-    bullet(8, #string,oneline
-        \\Parenthesize mixed boolean expressions when domain meaning matters
-        \\more than relying on precedence alone.
+    code_block(8, "text", #string
+        \\a=0 n=0
+        \\n=0 comptime=0
+    );
+    paragraph(9, #string,oneline
+        \\Because the behaviour lives in a typeclass, any type may instance it,
+        \\and the instance body decides whether the right operand runs at all.
+        \\The instance method must reproduce the `#lazy` contract; dropping it
+        \\is `error: operator '&&' must match the #lazy parameter contract of
+        \\typeclass 'LogicalAnd'`.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Flag :: struct { value: bool; }
+        \\
+        \\(Flag, Flag) :: instance LogicalAnd {
+        \\    Output :: Flag;
+        \\    '&&' :: (left: Flag, #lazy right: Flag) -> Output {
+        \\        if !left.value return left;
+        \\        return right;
+        \\    }
+        \\}
+        \\
+        \\touch :: (count: *s64, value: bool) -> Flag {
+        \\    count.* += 1;
+        \\    return .{ .value = value };
+        \\}
+        \\
+        \\main :: () {
+        \\    count: s64 = 0;
+        \\    off: Flag = .{ .value = false };
+        \\    on:  Flag = .{ .value = true };
+        \\    r1 := off && touch(*count, true);
+        \\    print("r1=% count=%\n", r1.value, count);
+        \\    r2 := on && touch(*count, true);
+        \\    print("r2=% count=%\n", r2.value, count);
+        \\}
+    );
+    code_block(11, "text", #string
+        \\r1=0 count=0
+        \\r2=1 count=1
+    );
+    note(12, #string,oneline
+        \\Operand types are still resolved by instance lookup, so mixed operands
+        \\have to have an instance. `n: s64 = 3; n && true` is
+        \\`error: no operator '&&' for int, bool` even though both sides have a
+        \\truthiness rule for `if`.
+    );
+    subheading(13, "`&&=` and `||=` always evaluate the right side");
+    paragraph(14, #string,oneline
+        \\The compound forms are separate operator declarations, and they are
+        \\declared without `#lazy`. They therefore evaluate their right-hand
+        \\side unconditionally, including when the left side already decides the
+        \\result. Rewriting `flag &&= f();` as `flag = flag && f();` restores
+        \\the short circuit.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\noisy :: (tag: string, v: bool) -> bool {
+        \\    print("eval %\n", tag);
+        \\    return v;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := false;
+        \\    a &&= noisy("AND", true);
+        \\    print("a=%\n", a);
+        \\    b := true;
+        \\    b ||= noisy("OR", false);
+        \\    print("b=%\n", b);
+        \\}
+    );
+    code_block(16, "text", #string
+        \\eval AND
+        \\a=0
+        \\eval OR
+        \\b=1
+    );
+    subheading(17, "Conditions");
+    paragraph(18, #string,oneline
+        \\An `if`, `while`, or ternary condition is not restricted to `bool`.
+        \\The backend applies a per-kind truthiness rule when it lowers the
+        \\test: `bool` passes through; an integer or enum compares against zero;
+        \\a float compares against `0.0`; a pointer, many pointer, function
+        \\pointer, or label tests non-null; a `string` or array tests `count`
+        \\against zero. Anything else has no rule and fails during lowering, not
+        \\during checking - `error: values of type S have no native truthiness
+        \\rule while lowering 'main' at IR instruction 3` for a struct.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    n: s64 = 0;
+        \\    if n print("nonzero\n"); else print("zero\n");
+        \\    p: *s64 = null;
+        \\    if p print("ptr\n"); else print("null\n");
+        \\    s := "";
+        \\    if s print("text\n"); else print("empty\n");
+        \\}
+        \\// zero
+        \\// null
+        \\// empty
+    );
+    paragraph(20, #string,oneline
+        \\Because the truthiness rule is per kind rather than a conversion,
+        \\there is no `bool` value produced by it and nothing an operator can
+        \\overload. A type that should participate in conditions has to expose a
+        \\predicate procedure. `#lazy` in general - its caching rule, its
+        \\restrictions, and the diagnostics for violating them - is covered in
+        \\"Lazy Parameters and Short-Circuit Operators".
     );
 }
 
 render_section_26 :: () {
     paragraph(0, #string,oneline
         \\Integers and floats implement ordinary arithmetic through the prelude.
-        \\Integers also have wrapping and saturating operators.
+        \\Integers additionally have wrapping and saturating operators, spelled
+        \\with a `%` or `|` suffix on the base operator. There are no typed
+        \\literal suffixes: `255u8` is not a value, and `255u8 +% 1u8` is
+        \\`error: no operator '+%' for type, int`. Give the value a type in its
+        \\declaration instead.
     );
     code_block(1, "glosso", #string
-        \\a := 10 + 20;
-        \\b := 10 * 20;
-        \\c := 255u8 +% 1u8;  // wrapping add
-        \\d := 255u8 +| 1u8;  // saturating add
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := 10 + 20;
+        \\    b := 10 * 20;
+        \\    top: u8 = 255;
+        \\    c := top +% 1;    // wrapping add
+        \\    d := top +| 1;    // saturating add
+        \\    e := -%top;       // wrapping negate
+        \\    f := top <<| 4;   // saturating shift
+        \\    print("% % % % % %\n", a, b, c, d, e, f);
+        \\}
     );
-    paragraph(2, #string,oneline
+    code_block(2, "text", #string
+        \\30 200 0 255 1 255
+    );
+    paragraph(3, #string,oneline
         \\At `-O0` and `-O1`, ordinary integer `+`, `-`, `*`, and unary `-` trap
         \\at runtime instead of wrapping, and array indexing traps for negative
-        \\or out-of-range indices. These checks are omitted at `-O2` and `-O3`.
+        \\or out-of-range indices. These checks are omitted at `-O2` and `-O3`,
+        \\so the same program wraps there. The trap is a silent abort: the
+        \\process exits with status 134, no diagnostic is printed, and buffered
+        \\output from the same statement sequence can be lost.
+    );
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    n := cast(u8) get_cmdline_args().count;   // 1 at run time
+        \\    a: u8 = 255;
+        \\    print("wrap % sat %\n", a +% n, a +| n);
+        \\    print("about to trap\n");
+        \\    b := a + n;
+        \\    print("no trap: %\n", b);
+        \\}
+    );
+    code_block(5, "text", #string
+        \\$ glosso -O0 overflow.glo && ./overflow.exe
+        \\wrap 0 sat 255
+        \\about to trap
+        \\(exit status 134)
+        \\
+        \\$ glosso -O2 overflow.glo && ./overflow.exe
+        \\wrap 0 sat 255
+        \\about to trap
+        \\no trap: 0
+    );
+    paragraph(6, #string,oneline
         \\Use `+%`, `-%`, `*%`, and unary `-%` when wraparound is intentional at
-        \\every optimization level. Use `+|`, `-|`, `*|`, and `<<|` when
-        \\clamping is intentional.
+        \\every optimization level, and `+|`, `-|`, `*|`, and `<<|` when
+        \\clamping is. The choice is part of the domain, not a performance
+        \\setting: the three families produce different values for the same
+        \\inputs and only the checked family reports the overflow at all.
     );
-    subheading(3, "Conversions and overflow behavior");
-    paragraph(4, #string,oneline
-        \\Numeric operators use the selected operand types, so width,
-        \\signedness, and overflow mode are part of the operation. Conversions
-        \\should be visible where losing range or precision is possible.
+    subheading(7, "Operand types are not adjusted");
+    paragraph(8, #string,oneline
+        \\A binary operator resolves against the pair of operand types as
+        \\written. There is no usual-arithmetic-conversion step: mixed widths
+        \\do not promote, and mixed signedness does not either. `a: u8; b: u16;
+        \\a + b` is `error: no operator '+' for u8, u16`, and at 128-bit width
+        \\`s128 + u128` is `error: no operator '+' for s128, u128`. Only untyped
+        \\literals adapt, taking the type of the other operand.
     );
-    bullet(5, #string,oneline
-        \\Keep mixed-width arithmetic explicit at interface boundaries so sign
-        \\extension, truncation, and floating conversion are reviewable.
+    bullet(9, #string,oneline
+        \\Widen the narrow operand explicitly before the operation. Implicit
+        \\widening exists for assignment - `u8` reaches `u16`, `u32` reaches
+        \\`u128` - so a separate typed declaration is often enough; a `cast` is
+        \\needed only where the direction is lossy.
     );
-    bullet(6, #string,oneline
-        \\Choose checked, wrapping, or saturating behavior according to the
-        \\domain; each expresses a different invariant rather than a performance
-        \\hint.
+    bullet(10, #string,oneline
+        \\Accumulate in the wider type from the start. The intermediate result
+        \\of `+` on `u8` operands is `u8`, so a running total that fits in `u16`
+        \\still traps at `-O0` unless the accumulator is declared `u16` and the
+        \\addends are widened into it.
     );
-    bullet(7, #string,oneline
-        \\Shift counts and division operands need validation when they originate
-        \\outside the program.
+    bullet(11, #string,oneline
+        \\Shift counts are not range-checked and are not diagnosed. A count at
+        \\or beyond the operand width follows the target's masking behaviour -
+        \\at 128-bit width, `u << 128` was observed to behave as `u << 0` on
+        \\x86_64 - so validate counts that come from outside the program.
     );
-    bullet(8, #string,oneline
-        \\Use wider intermediates for accumulation when the final result fits
-        \\but individual operations could overflow the storage type.
+    bullet(12, #string,oneline
+        \\Division by zero aborts through a different path than the overflow
+        \\trap and is not suppressed by the optimization level: the process
+        \\exits with status 127 rather than the 134 an overflow trap produces.
+        \\Validate divisors that come from outside the program.
+    );
+    paragraph(13, #string,oneline
+        \\Conversion itself is an enforced rule, not a style preference: the
+        \\checker rejects an implicit narrowing between named integer types and
+        \\rejects every implicit float conversion. The one silent narrowing left
+        \\is from the unnamed default integer that `int` and `s64` both spell.
+        \\"Casts and Contextual Conversion" states the rule and its diagnostics;
+        \\"Strict Conversions and Feature Gates" covers the gate that reopens
+        \\integer narrowing.
+    );
+    subheading(14, "128-bit width");
+    paragraph(15, #string,oneline
+        \\Every rule above applies unchanged to `s128` and `u128`. Ordinary
+        \\`+`, `-`, `*`, and unary `-` trap at `-O0` and `-O1` and wrap at `-O2`
+        \\and `-O3` for both signed and unsigned 128-bit operands, and `+%`,
+        \\`-%`, `*%`, `+|`, `-|`, `*|`, and `<<|` all operate at full width.
+        \\Implicit widening reaches 128 bits by the same losslessness rule -
+        \\`u64` to `u128`, `u64` to `s128`, `u32` to `u128` - while `s128` to
+        \\`s64`, `u128` to `s128`, and `s32` to `u128` are rejected.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\#import "Math/Constants";
+        \\
+        \\main :: () {
+        \\    n := cast(s128) get_cmdline_args().count;   // 1 at run time
+        \\    s: s128 = S128_MAX;
+        \\    u: u128 = U128_MAX;
+        \\    print("wrap  %\n", s +% n);
+        \\    print("sat   %\n", s +| n);
+        \\    print("uwrap %\n", u +% cast(u128) n);
+        \\    print("usat  %\n", u +| cast(u128) n);
+        \\}
+    );
+    code_block(17, "text", #string
+        \\wrap  -170141183460469231731687303715884105728
+        \\sat   170141183460469231731687303715884105727
+        \\uwrap 0
+        \\usat  340282366920938463463374607431768211455
+    );
+    note(18, #string,oneline
+        \\The default-integer hole reaches 128-bit types too, and there it is
+        \\loudest: `a: s64 = -5; b: u128 = a;` compiles and yields
+        \\340282366920938463463374607431768211451, while the same assignment
+        \\from a named `s32` is `error: got s32, expected u128`. Full-width
+        \\literals, the `Math/Constants` limits, bit operations, and
+        \\compile-time evaluation at 128 bits are covered in "128-Bit Integers".
     );
 }
 
 render_section_27 :: () {
     paragraph(0, #string,oneline
         \\The four nominally distinct string types store `count`, `data`, and
-        \\`capacity` and can own growable storage. `string` and `cstring`
-        \\contain UTF-8 bytes; `string16` and `cstring16` contain UTF-16 code
-        \\units. The `cstring` forms keep an additional zero code unit at
-        \\`data[count]`; the terminator is not included in `count` or
-        \\`capacity`. UTF-8 counts and capacities are bytes, while UTF-16 counts
-        \\and capacities are `u16` code units.
+        \\`capacity` in a 24-byte descriptor and can own growable storage.
+        \\`string` and `cstring` contain UTF-8 bytes; `string16` and `cstring16`
+        \\contain UTF-16 code units. The `cstring` forms keep an additional zero
+        \\code unit at `data[count]`; the terminator is not included in `count`
+        \\or `capacity`. UTF-8 counts and capacities are bytes, while UTF-16
+        \\counts and capacities are `u16` code units.
     );
-    paragraph(1, #string,oneline
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    s: string  = "abc";
+        \\    c: cstring = "abc";
+        \\    print("% % %\n", s.count, c.count, c.data[3]);
+        \\}
+        \\// 3 3 0
+    );
+    paragraph(2, #string,oneline
         \\Indexing `string` or `cstring` returns `u8`. Indexing `string16` or
-        \\`cstring16` returns `u16`, not a Unicode scalar. Use `std/Unicode`
-        \\when iterating UTF-8 by rune.
+        \\`cstring16` returns `u16`, not a Unicode scalar. `count` is a count of
+        \\code units, so a multi-byte character occupies several indices and
+        \\a byte index is not a character index. Use `std/Unicode` when
+        \\iterating UTF-8 by rune.
     );
-    code_block(2, "glosso", #string
+    code_block(3, "glosso", #string
+        \\#import "Io";
         \\#import "Unicode";
         \\
-        \\s := "Cafe";
-        \\first_byte := s[0];
+        \\main :: () {
+        \\    s := "Caf\xe9";           // four characters, five bytes
+        \\    print("count % first %\n", s.count, s[0]);
         \\
-        \\i := 0;
-        \\while i < s.count {
-        \\    d := utf8_decode_at(s, i);
-        \\    if d.ok print("rune %\n", d.rune);
-        \\    i = d.next;
+        \\    i := 0;
+        \\    while i < s.count {
+        \\        if #pattern .Some(d) = utf8_decode_at(s, i) {
+        \\            print("rune % next %\n", d.rune, d.next);
+        \\            i = d.next;
+        \\        } else i += 1;
+        \\    }
         \\}
     );
-    paragraph(3, #string,oneline
-        \\Slicing a string uses range objects and returns an owned value of the
-        \\same built-in string type with independent storage.
+    code_block(4, "text", #string
+        \\count 5 first 67
+        \\rune 67 next 1
+        \\rune 97 next 2
+        \\rune 102 next 3
+        \\rune 233 next 5
     );
-    code_block(4, "glosso", #string
-        \\word := "abcdef";
-        \\mid := word[1..4];
-        \\rest := word[2..];
+    note(5, #string,oneline
+        \\`utf8_decode_at(text, index)` returns `Option(Unicode_Decode)`, not a
+        \\struct with an `ok` field: `.None` reports both the end of the string
+        \\and an ill-formed sequence, and the `Unicode_Decode` payload carries
+        \\`rune` and `next`. Matching the Option is what advances the loop
+        \\safely; reading `.ok` is `error: no union field ok`, and the `else`
+        \\arm above is what prevents an infinite loop on invalid input.
+    );
+    paragraph(6, #string,oneline
+        \\Slicing a string uses range objects and returns an owned value of the
+        \\same built-in string type with independent storage. This is the one
+        \\place where slicing does not borrow: an array slice is a view into the
+        \\original elements, while a string slice is a copy with its own `data`
+        \\pointer.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    word := "abcdef";
+        \\    mid := word[1..4];
+        \\    rest := word[2..];
+        \\    print("[%] [%] independent=%\n", mid, rest,
+        \\        cast(u64) mid.data != cast(u64) word.data + 1);
+        \\}
+        \\// [bcd] [cdef] independent=1
     );
 }
 
 render_section_28 :: () {
     paragraph(0, #string,oneline
         \\A fixed array has compile-time length in its type: `[N]T`. `N` is an
-        \\integer literal or named constant. Fixed arrays are value types.
+        \\integer literal or named constant. Fixed arrays are value types: the
+        \\elements live inline in the containing value and assignment copies
+        \\them.
     );
     code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
         \\Count :: 4;
-        \\values: [Count]int;
-        \\values[0] = 10;
+        \\
+        \\main :: () {
+        \\    values: [Count]int;
+        \\    values[0] = 10;
+        \\    copy := values;
+        \\    copy[0] = 99;
+        \\    print("% % % %\n", values[0], copy[0], values.count,
+        \\        size_of(type_of(values)));
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Use fixed arrays for small inline storage and ABI-shaped data. Use
-        \\dynamic arrays when the length changes at runtime.
+    code_block(2, "text", #string
+        \\10 99 4 32
     );
     subheading(3, "Layout and value semantics");
     paragraph(4, #string,oneline
-        \\A fixed array stores its elements inline and carries its length in the
-        \\type. It is therefore a value with predictable layout, not a resizable
-        \\container or an automatically bounds-independent pointer.
+        \\The length is part of the type, so `[4]int` and `[5]int` are unrelated
+        \\types and no coercion connects them. That is checked at every call:
+        \\passing a `[5]int` where a `[4]int` is declared is
+        \\`error: arg type [5]int != [4]int in call take4`. A fixed array is
+        \\also not a view: `[N]T` does not coerce to `[]T`, and
+        \\`sum(fixed)` for `sum :: (items: []int)` is
+        \\`error: arg type [4]int != []int in call sum`. Form the view with
+        \\`array_view(fixed)` or a slice expression.
     );
     bullet(5, #string,oneline
         \\Use fixed arrays for compile-time-known counts, embedded buffers, and
-        \\layouts where allocation is undesirable.
+        \\layouts where allocation is undesirable; `size_of` is exactly
+        \\`N * size_of(T)` with no header.
     );
     bullet(6, #string,oneline
-        \\Changing the length changes the type, so public APIs that accept
-        \\several lengths should usually take a view or a generic length.
+        \\A public API that must accept several lengths takes `[]T` or a generic
+        \\`[$N]T`, because a `[N]T` parameter fixes one length forever.
     );
     bullet(7, #string,oneline
-        \\Copying a fixed array copies its elements; take a pointer or view when
-        \\mutation must affect the original storage.
+        \\Copying a fixed array copies its elements, including as a call
+        \\argument and a return value; take a pointer or a view when mutation
+        \\must affect the original storage.
     );
     bullet(8, #string,oneline
-        \\Keep index validation in mind even when the array itself lives on the
-        \\stack or inside another aggregate.
+        \\`.data` yields a `[*]T` at the first element and is how a fixed array
+        \\reaches a many-pointer API; the count does not travel with it.
     );
     table_header(9, "Property   —   `[N]T` behavior");
     table_row(10, #string,oneline
@@ -509,53 +1290,73 @@ render_section_28 :: () {
         \\checks trap at `-O0` and `-O1` and are omitted at `-O2` and `-O3`.
     );
     table_row(14, #string,oneline
-        \\Conversion   |   A view may be formed when an `[]T` parameter or
-        \\operation needs borrowed contiguous storage.
+        \\Conversion   |   None is implicit. `array_view(a)` or `a[lo..hi]`
+        \\produces `[]T`; `a.data` produces `[*]T`.
     );
 }
 
 render_section_29 :: () {
     paragraph(0, #string,oneline
-        \\`[]T` is a view: it stores a count and pointer to elements but not
-        \\capacity. Views are useful for function parameters because they accept
-        \\data from fixed arrays, dynamic arrays, or slices when the compiler
-        \\can form the view.
+        \\`[]T` is a view: it stores a count and a pointer to elements but not a
+        \\capacity. Views are the right parameter type for borrowed sequences
+        \\because one procedure then serves fixed arrays, dynamic arrays, and
+        \\slices. The conversion is not implicit, though: the caller forms the
+        \\view with `array_view` or a slice expression.
     );
     code_block(1, "glosso", #string
-        \\sum :: (items: []int) -> int {
-        \\    total := 0;
-        \\    for item: items total += item;
-        \\    return total;
+        \\#import "Io";
+        \\
+        \\total :: (items: []int) -> int {
+        \\    sum := 0;
+        \\    for item: items sum += item;
+        \\    return sum;
+        \\}
+        \\
+        \\main :: () {
+        \\    fixed: [4]int;
+        \\    fixed[0] = 1; fixed[1] = 2; fixed[2] = 3; fixed[3] = 4;
+        \\    print("%\n", total(array_view(fixed)));   // 10
+        \\
+        \\    // total(fixed);
+        \\    // error: arg type [4]int != []int in call total
         \\}
     );
     paragraph(2, #string,oneline
         \\A view does not own storage. Do not free a view; free the owner when
-        \\appropriate.
+        \\appropriate. Copying the view copies the descriptor, not the elements,
+        \\and does not extend the lifetime of the backing storage.
     );
     subheading(3, "Borrowing and lifetime");
     paragraph(4, #string,oneline
-        \\An array view describes a contiguous region owned elsewhere. Copying
-        \\the view copies the descriptor, not the elements, and does not extend
-        \\the lifetime of the backing storage.
+        \\Writing through a view writes to the owner, because both refer to the
+        \\same elements. The descriptor is a snapshot, however: `count` and
+        \\`data` were copied when the view was formed and are never updated
+        \\afterwards, so any operation that reallocates the owner leaves the
+        \\view describing storage that may no longer be current.
     );
     bullet(5, #string,oneline
         \\The owner must outlive every view, iterator, and pointer derived from
-        \\that storage.
+        \\that storage; a view over a stack array is invalid the moment that
+        \\frame returns.
     );
     bullet(6, #string,oneline
-        \\A mutable view writes through to the owner; use a const-qualified view
-        \\when an API promises observation only.
+        \\A mutable view writes through to the owner; use `[]const T` when an
+        \\API promises observation only, and note that dropping `const` from the
+        \\element type is not implicit.
     );
     bullet(7, #string,oneline
-        \\Operations that reallocate or release a dynamic array invalidate its
-        \\existing views even if their old addresses still appear readable.
+        \\Append, reserve, resize, reset-to-new-storage, and free all invalidate
+        \\existing views of a dynamic array; re-form the view from the owner
+        \\after any of them.
     );
     bullet(8, #string,oneline
-        \\Pass views for borrowed variable-length input and dynamic arrays when
-        \\ownership transfer or resizing is required.
+        \\`for value, index: view` binds `index` as `u64`, while the `[]`
+        \\operator on a view takes an `int` index. Writing back through the loop
+        \\index needs `view[cast(int) index]`; without the cast the checker
+        \\reports `error: got u64, expected int`.
     );
     table_header(9, "View component   —   Meaning");
-    table_row(10, "`data`   |   Pointer to the first borrowed element");
+    table_row(10, "`data`   |   `[*]T` at the first borrowed element");
     table_row(11, #string,oneline
         \\`count`   |   Number of elements available through the view
     );
@@ -565,88 +1366,128 @@ render_section_29 :: () {
         \\elements
     );
     code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
         \\increment_all :: (values: []int) {
-        \\    for value, index: values values[index] = value + 1;
+        \\    for value, index: values values[cast(int) index] = value + 1;
         \\}
         \\
-        \\fixed: [4]int;
-        \\dynamic: [..]int;
-        \\array_add(*dynamic, 10, 20);
-        \\increment_all(fixed);
-        \\increment_all(array_view(dynamic));
+        \\main :: () {
+        \\    fixed: [4]int;
+        \\    increment_all(array_view(fixed));
+        \\    print("fixed %\n", fixed[0]);
+        \\
+        \\    dynamic: [..]int;
+        \\    array_add(*dynamic, 10, 20);
+        \\    view := array_view(dynamic);
+        \\    print("view %\n", view.count);
+        \\
+        \\    array_add(*dynamic, 30, 40, 50, 60, 70, 80, 90);
+        \\    print("stale view still says %\n", view.count);
+        \\    array_free(*dynamic);
+        \\}
     );
-    note(15, #string,oneline
-        \\A view over a dynamic array becomes invalid when an operation replaces
-        \\or frees that array's storage. The view's copied `count` and `data`
-        \\fields are not automatically updated after append, reserve, resize,
-        \\reset-to-new-storage, or free operations.
+    code_block(15, "text", #string
+        \\fixed 1
+        \\view 2
+        \\stale view still says 2
+    );
+    note(16, #string,oneline
+        \\Nothing in the type system marks the stale view. The compiler does not
+        \\track view invalidation, and the old `data` pointer often still points
+        \\at readable memory, so the failure is a silent read of freed or
+        \\superseded storage rather than a trap.
     );
 }
 
 render_section_30 :: () {
     paragraph(0, #string,oneline
-        \\`[..]T` stores count, data, and capacity. The prelude mutators take a
-        \\pointer to the dynamic array because growth must update the array
-        \\header in place.
+        \\`[..]T` stores count, data, and capacity, and owns the allocation the
+        \\data pointer refers to. The prelude mutators take a pointer to the
+        \\dynamic array because growth must update all three header fields in
+        \\place; passing a copy of the header, or the old data pointer, cannot
+        \\update the owner.
     );
     code_block(1, "glosso", #string
-        \\items: [..]string;
-        \\array_add(*items, "red");
-        \\array_add(*items, "green", "blue");
+        \\#import "Io";
         \\
-        \\for item, i: items print("%: %\n", i, item);
-        \\array_free(*items);
+        \\main :: () {
+        \\    items: [..]string;
+        \\    array_add(*items, "red");
+        \\    array_add(*items, "green", "blue");
+        \\    for item, i: items print("%: %\n", i, item);
+        \\    print("count % capacity %\n", items.count, items.capacity);
+        \\    array_reset(*items);
+        \\    print("after reset count % capacity %\n", items.count,
+        \\        items.capacity);
+        \\    array_free(*items);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\`array_reset` clears the count and keeps capacity for reuse.
-        \\`array_view` returns `[]T` over the live prefix. `array_free` releases
-        \\storage.
+    code_block(2, "text", #string
+        \\0: red
+        \\1: green
+        \\2: blue
+        \\count 3 capacity 8
+        \\after reset count 0 capacity 8
     );
-    subheading(3, "Ownership, capacity, and invalidation");
-    paragraph(4, #string,oneline
-        \\A dynamic array owns a resizable allocation described by data, count,
-        \\and capacity. Mutating operations may replace that allocation, so the
-        \\container's address and the lifetime of borrowed element references
-        \\matter.
+    paragraph(3, #string,oneline
+        \\Capacity grows geometrically and independently of count, which is why
+        \\`array_reset` leaves it alone: the reset is for reuse without a
+        \\reallocation. `array_view` returns `[]T` over the live prefix.
+        \\`array_free` releases the storage and is the only operation that
+        \\returns capacity to the allocator.
     );
-    bullet(5, #string,oneline
-        \\Call mutating helpers through the form required by the API so updated
-        \\data and capacity fields are written back to the owner.
+    subheading(4, "Ownership, capacity, and invalidation");
+    paragraph(5, #string,oneline
+        \\Declaring a `[..]T` creates a release obligation that the compiler
+        \\tracks. Leaving the scope without `array_free` is a warning, not an
+        \\error, and it names the declaration that created the obligation.
     );
-    bullet(6, #string,oneline
-        \\Assume append, reserve, resize, and similar growth can invalidate
-        \\element pointers and views unless capacity guarantees otherwise.
+    code_block(6, "text", #string
+        \\warning: resource must be released by 'array_free' before leaving scope
+        \\   --> arrays.glo:12:5
+        \\   |
+        \\12 |     dynamic: [..]int;
+        \\   |     ^^^
+        \\note: release obligation was created here
     );
     bullet(7, #string,oneline
-        \\Distinguish clearing elements from releasing capacity; choose the
-        \\operation that matches the intended reuse and ownership lifecycle.
+        \\Pass `*array` to every mutator. `array_add(items, 1)` is
+        \\`error: array_add expects a mutable *[..]T dynamic array pointer`, and
+        \\a helper that takes `[..]T` by value receives a copy of the header
+        \\whose growth is invisible to the caller.
     );
     bullet(8, #string,oneline
-        \\Release owned storage exactly once, and leave borrowed views
-        \\responsible for neither growth nor deallocation.
+        \\Assume append, reserve, and resize replace `data`. Element pointers
+        \\and views taken before such a call describe the old allocation, and
+        \\nothing updates or invalidates them.
     );
-    table_header(9, "Operation   —   Header/storage effect");
-    table_row(10, #string,oneline
+    bullet(9, #string,oneline
+        \\`array_reset` clears the count and keeps the allocation;
+        \\`array_free` releases it. Choosing between them is choosing whether
+        \\the next fill reuses the same memory.
+    );
+    bullet(10, #string,oneline
+        \\Release owned storage exactly once. A view is never the owner, so a
+        \\procedure that receives `[]T` must not free it even when it is the
+        \\last user.
+    );
+    table_header(11, "Operation   —   Header/storage effect");
+    table_row(12, #string,oneline
         \\`array_add(*array, values...)`   |   Appends values; may allocate and
         \\replace `data`, and updates `count`/`capacity` through the pointer.
     );
-    table_row(11, #string,oneline
+    table_row(13, #string,oneline
         \\`array_view(array)`   |   Returns a non-owning `[]T` over the live
         \\prefix without transferring allocation ownership.
     );
-    table_row(12, #string,oneline
+    table_row(14, #string,oneline
         \\`array_reset(*array)`   |   Sets the logical count to zero while
         \\retaining capacity for later reuse.
     );
-    table_row(13, #string,oneline
-        \\`array_free(*array)`   |   Releases the owned allocation and
-        \\invalidates views and element pointers.
-    );
-    paragraph(14, #string,oneline
-        \\Mutators receive `*[..]T` because a growth operation may change all
-        \\three header fields. Passing only the old data pointer or a copied
-        \\view cannot update the owner. After any operation that may grow the
-        \\array, reacquire element pointers and views from the updated header.
+    table_row(15, #string,oneline
+        \\`array_free(*array)`   |   Releases the owned allocation, satisfies
+        \\the release obligation, and invalidates views and element pointers.
     );
 }
 
@@ -655,215 +1496,335 @@ render_section_31 :: () {
         \\Ranges are ordinary values created by operators. `a..b` is half-open.
         \\`a..=b` includes the end. `a..` is from a start to the end of the
         \\indexed value. `..b` starts at the origin for the type. `..=b`
-        \\includes the end. Full range is represented internally by `RangeFull`.
+        \\includes the end. `..` alone selects everything and is represented
+        \\internally by `RangeFull`. The type of `1..4` is `Range_int`, so a
+        \\range can be stored, passed, and returned like any other value.
     );
     code_block(1, "glosso", #string
-        \\nums: [..]int;
-        \\array_add(*nums, 10, 20, 30, 40, 50);
+        \\#import "Io";
         \\
-        \\middle := nums[1..4];
-        \\through := nums[1..=3];
-        \\from_two := nums[2..];
-        \\to_three := nums[..3];
+        \\main :: () {
+        \\    nums: [..]int;
+        \\    array_add(*nums, 10, 20, 30, 40, 50);
+        \\
+        \\    middle := nums[1..4];
+        \\    through := nums[1..=3];
+        \\    from_two := nums[2..];
+        \\    to_three := nums[..3];
+        \\    everything := nums[..];
+        \\    print("% % % % %\n", middle.count, through.count,
+        \\        from_two.count, to_three.count, everything.count);
+        \\    array_free(*nums);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Ranges also implement `Iterable`, so they can drive `for` loops.
+    code_block(2, "text", #string
+        \\3 3 3 3 5
     );
-    code_block(3, "glosso", #string
-        \\for 0..10 print("% ", it);
-        \\for 0..=10 print("% ", it);
+    paragraph(3, #string,oneline
+        \\Ranges also implement `Iterable`, so the same objects drive `for`. An
+        \\open end has no meaning in that position, because there is no indexed
+        \\value to supply the missing bound; standalone iteration needs a range
+        \\whose bounds are both defined.
     );
-    subheading(4, "Bounds and endpoint forms");
-    paragraph(5, #string,oneline
-        \\Ranges describe bounds and direction, while slicing applies those
-        \\bounds to storage. Endpoint form is semantically important: an
-        \\inclusive bound names the last element, whereas a half-open bound
-        \\names the position after it.
+    code_block(4, "glosso", #string
+        \\for 0..3 print("% ", it);
+        \\print("\n");
+        \\for 0..=3 print("% ", it);
+        \\print("\n");
+        \\// 0 1 2
+        \\// 0 1 2 3
     );
-    bullet(6, #string,oneline
-        \\Prefer half-open ranges for counts and nested slices because adjacent
-        \\ranges compose without overlap.
+    subheading(5, "What a slice returns");
+    paragraph(6, #string,oneline
+        \\The result type belongs to the target's `[]` implementation, not to
+        \\the range. Slicing an array-like value produces a borrowed `[]T` that
+        \\writes through to the owner and follows every view lifetime rule.
+        \\Slicing a built-in string produces an owned value of the same string
+        \\type with its own storage. The two look identical in source and behave
+        \\differently under mutation.
     );
-    bullet(7, #string,oneline
-        \\Use inclusive ranges when the domain naturally names both endpoint
-        \\values, and handle the maximum representable endpoint carefully.
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    nums: [..]int;
+        \\    array_add(*nums, 10, 20, 30);
+        \\    view := nums[0..2];
+        \\    view[0] = 99;
+        \\    print("array slice writes through: %\n", nums[0]);
+        \\
+        \\    word := "abcdef";
+        \\    piece := word[1..4];
+        \\    print("string slice is independent: %\n",
+        \\        cast(u64) piece.data != cast(u64) word.data + 1);
+        \\    array_free(*nums);
+        \\}
     );
-    bullet(8, #string,oneline
-        \\Open bounds derive their missing endpoint from the sliced value; they
-        \\are meaningful only when that value supplies a limit.
+    code_block(8, "text", #string
+        \\array slice writes through: 99
+        \\string slice is independent: 1
     );
     bullet(9, #string,oneline
-        \\Array slicing returns borrowed storage and follows view lifetime
-        \\rules; slicing a built-in string instead returns an owned value of the
-        \\same string type with independent storage.
+        \\Half-open bounds compose without overlap: `a[0..k]` and `a[k..n]`
+        \\partition the elements exactly, and the length of `a[i..j]` is
+        \\`j - i` with no adjustment.
     );
-    table_header(10, "Range   —   Selected indices");
-    table_row(11, "`a..b`   |   `a` through `b - 1` (half-open)");
-    table_row(12, "`a..=b`   |   `a` through `b` (inclusive)");
-    table_row(13, "`a..`   |   `a` through the indexed value's end");
-    table_row(14, "`..b`   |   Origin through `b - 1`");
-    table_row(15, "`..=b`   |   Origin through `b`");
-    table_row(16, "Full range   |   Represented by `RangeFull` internally");
-    paragraph(17, #string,oneline
-        \\Ranges are ordinary prelude values and implement `Iterable`, so the
-        \\same objects drive slicing and `for`. The meaning of an open end is
-        \\supplied by the indexing implementation; standalone iteration requires
-        \\a range whose iteration bounds are defined. The result type belongs to
-        \\the target's `[]` implementation: array-like slices are views, while
-        \\built-in string slices are independent owned strings.
+    bullet(10, #string,oneline
+        \\Inclusive bounds name the last element, which makes `..=` the right
+        \\form for an enumerated domain and the wrong form near the maximum
+        \\representable value, where `end + 1` would overflow.
     );
+    bullet(11, #string,oneline
+        \\An open bound is resolved by the indexing implementation, so `a[2..]`
+        \\is meaningful only where the target supplies a limit. The same range
+        \\expression cannot then be reused to drive a `for`.
+    );
+    bullet(12, #string,oneline
+        \\Slice bounds are not checked, at any optimization level. `a[0..10]`
+        \\on a `[4]int` produces a view whose `count` is 10 and whose elements
+        \\past the fourth are whatever follows in memory. Only element indexing
+        \\is checked, and only at `-O0` and `-O1`, so the trap arrives later
+        \\than the mistake.
+    );
+    table_header(13, "Range   —   Selected indices");
+    table_row(14, "`a..b`   |   `a` through `b - 1` (half-open)");
+    table_row(15, "`a..=b`   |   `a` through `b` (inclusive)");
+    table_row(16, "`a..`   |   `a` through the indexed value's end");
+    table_row(17, "`..b`   |   Origin through `b - 1`");
+    table_row(18, "`..=b`   |   Origin through `b`");
+    table_row(19, "`..`   |   Everything; represented by `RangeFull`");
 }
 
 render_section_32 :: () {
     paragraph(0, #string,oneline
         \\`#aos` keeps the normal array-of-structs layout. `#soa` stores each
-        \\field as a separate array. `#soa` is intended for dynamic arrays/views
-        \\of struct element types and rejects fixed arrays.
+        \\field as a separate array. The directive precedes the array type in an
+        \\annotation, and it changes the shape of member access: an AoS
+        \\collection is indexed then projected, `items[i].field`, while an SoA
+        \\collection is projected then indexed, `items.field[i]`.
     );
     code_block(1, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
         \\Particle :: struct { x: f32; y: f32; mass: f32; }
-        \\particles: #soa [..]Particle;
-        \\array_add(*particles, .{ .x = 1, .y = 2, .mass = 3 });
-        \\particles.x[0] += 1;
+        \\
+        \\main :: () {
+        \\    aos: #aos [..]Particle;
+        \\    soa: #soa [..]Particle;
+        \\    array_add(*aos, .{ .x = 1, .y = 2, .mass = 3 });
+        \\    array_add(*soa, .{ .x = 1, .y = 2, .mass = 3 });
+        \\    soa.x[0] += 1;
+        \\    print("% % %\n", aos[0].x, soa.x[0], type_name(type_of(soa.x)));
+        \\    array_free(*aos);
+        \\    array_free(*soa);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\SoA layout is useful when code processes one field across many
-        \\elements. AoS layout is useful when code processes one full element at
-        \\a time.
+    code_block(2, "text", #string
+        \\1 2 []f32
     );
-    subheading(3, "Physical layout");
-    paragraph(4, #string,oneline
-        \\`#soa` and `#aos` choose how collections of aggregates are laid out.
-        \\Array-of-structs keeps each record together; structure-of-arrays keeps
-        \\each field together, which can improve field-wise traversal but
-        \\changes addressing and interoperability expectations.
+    paragraph(3, #string,oneline
+        \\A field projection out of an SoA collection is a view over that
+        \\field's column, not a dynamic array of its own: `soa.x` has type
+        \\`[]f32`. It is therefore borrowed, and it is invalidated by the same
+        \\operations that invalidate any other view of the collection.
     );
-    bullet(5, #string,oneline
-        \\Choose layout from the dominant access pattern: whole-record
-        \\processing favors AoS, while tight loops over a few fields often favor
-        \\SoA.
+    subheading(4, "Restrictions and interoperability");
+    paragraph(5, #string,oneline
+        \\`#soa` is intended for dynamic arrays and views of struct element
+        \\types. A fixed array has no header to split into per-field
+        \\allocations, so `#soa [N]Record` is rejected outright with
+        \\`error: #soa fixed arrays are not supported`. `#soa []Record` is
+        \\accepted and is how an SoA collection is passed to a procedure.
     );
-    bullet(6, #string,oneline
-        \\Do not assume a field projection from SoA has the same address
-        \\relationship as a field inside one ordinary struct value.
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Particle :: struct { x: f32; y: f32; }
+        \\
+        \\scale :: (items: #soa []Particle) {
+        \\    for i: 0..items.count items.x[i] *= 2.0;
+        \\}
+        \\
+        \\main :: () {
+        \\    particles: #soa [..]Particle;
+        \\    array_add(*particles, .{ .x = 1, .y = 2 });
+        \\    scale(array_view(particles));
+        \\    print("%\n", particles.x[0]);   // 2
+        \\    array_free(*particles);
+        \\}
     );
     bullet(7, #string,oneline
-        \\Use explicitly compatible AoS layouts at foreign interfaces unless the
-        \\external API was designed for separate field arrays.
+        \\Choose layout from the dominant access pattern. SoA pays off when a
+        \\loop touches one or two fields of many elements, because the untouched
+        \\fields never enter a cache line; AoS wins when whole records are
+        \\processed.
     );
     bullet(8, #string,oneline
-        \\Benchmark representative workloads; layout improves locality only when
-        \\it matches actual traversal.
+        \\Adjacency guarantees differ. In AoS, `items[i].x` and `items[i].y` are
+        \\a field offset apart; in SoA they live in unrelated allocations, so
+        \\pointer arithmetic that crosses fields is meaningless.
     );
-    table_header(9, "Form   —   Layout and restrictions");
-    table_row(10, #string,oneline
+    bullet(9, #string,oneline
+        \\SoA storage is not C-compatible with an array of the original struct.
+        \\Expose the individual field columns, or copy into an AoS buffer,
+        \\before handing data to an external API.
+    );
+    table_header(10, "Form   —   Layout and restrictions");
+    table_row(11, #string,oneline
         \\`#aos [..]Record`   |   Normal array of complete records; field data
         \\for one element is adjacent.
     );
-    table_row(11, #string,oneline
-        \\`#soa [..]Record`   |   One backing array per record field;
-        \\`items.field[index]` addresses that field's column.
-    );
     table_row(12, #string,oneline
-        \\`#soa []Record`   |   Borrowed structure-of-arrays view when supported
-        \\by the source layout.
+        \\`#soa [..]Record`   |   One backing array per record field;
+        \\`items.field` is a `[]T` column and `items.field[index]` an element.
     );
     table_row(13, #string,oneline
-        \\`#soa [N]Record`   |   Rejected: fixed arrays are not accepted for SoA
-        \\layout.
+        \\`#soa []Record`   |   Borrowed structure-of-arrays view; the parameter
+        \\form for SoA collections.
     );
-    paragraph(14, #string,oneline
+    table_row(14, #string,oneline
+        \\`#soa [N]Record`   |   Rejected: `error: #soa fixed arrays are not
+        \\supported`.
+    );
+    paragraph(15, #string,oneline
         \\Appending a record to an SoA collection distributes each field into
         \\its corresponding field array while preserving one shared logical
-        \\index. The resulting storage is not C-compatible with an array of the
-        \\original struct; convert or expose separate field pointers when
-        \\interoperating with an external API.
+        \\index, so the element literal at the call site is written exactly as
+        \\it would be for AoS. The split happens inside the mutator; it is not
+        \\visible in the construction syntax.
     );
 }
 
 render_section_33 :: () {
     paragraph(0, #string,oneline
         \\`*T` points to one value. Prefix `*` takes an address and postfix `.*`
-        \\dereferences.
+        \\dereferences. `.*` is built into the language as a postfix form and is
+        \\not part of the overloadable set: declaring it is
+        \\`error: reserved operator token '.*' (operator '.*' cannot be
+        \\overloaded)`.
     );
     code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
         \\bump :: (p: *int) {
         \\    p.* += 1;
         \\}
         \\
-        \\x := 41;
-        \\bump(*x);
+        \\main :: () {
+        \\    x := 41;
+        \\    bump(*x);
+        \\    print("%\n", x);   // 42
+        \\}
     );
     paragraph(2, #string,oneline
         \\Pointer qualification is written at the pointer level. `*const T`
-        \\means the pointed-to value cannot be written through that pointer.
-        \\`*volatile T` marks volatile memory access.
+        \\means the pointed-to value cannot be written through that pointer, and
+        \\an attempted write is `error: left side of assignment is not
+        \\assignable`. `*volatile T` marks volatile memory access.
     );
     subheading(3, "Addressing, qualifiers, and lifetime");
     paragraph(4, #string,oneline
         \\A single pointer names one typed storage location. Taking an address
         \\creates a non-owning capability to that location; dereferencing it is
         \\valid only while the pointee is alive, correctly aligned, and
-        \\permitted by its qualifiers.
+        \\permitted by its qualifiers. The compiler checks the qualifiers and
+        \\the type; it does not check the lifetime.
     );
-    bullet(5, #string,oneline
-        \\Use the prefix pointer operation to take an address and postfix `.*`
-        \\to access the pointee.
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\load_value  :: (source: *const s32) -> s32 { return source.*; }
+        \\store_value :: (destination: *s32, value: s32) {
+        \\    destination.* = value;
+        \\}
+        \\
+        \\main :: () {
+        \\    x: s32 = 10;
+        \\    p := *x;
+        \\    store_value(p, 42);
+        \\    c: *const s32 = p;          // adding const is implicit
+        \\    print("% %\n", load_value(p), c.*);
+        \\}
+        \\// 42 42
     );
-    bullet(6, #string,oneline
-        \\A `const` pointee prevents mutation through that pointer, while
-        \\`volatile` describes externally observable access rather than thread
-        \\synchronization.
+    subheading(6, "Pointer types do not interconvert");
+    paragraph(7, #string,oneline
+        \\Coercion requires the same pointer flavour and a compatible pointee.
+        \\`*T` and `[*]T` are different flavours and do not convert in either
+        \\direction; two different pointee types never match, not even when they
+        \\have the same width. The escapes are `*void`, which converts to and
+        \\from any pointer, and adding `const`. Dropping `const` is refused and
+        \\stays refused under `#enable(pointer_punning)`.
     );
-    bullet(7, #string,oneline
-        \\Pointers do not keep stack locals or allocation owners alive. Never
-        \\return or store one beyond the lifetime of its pointee.
+    code_block(8, "text", #string
+        \\p: *A = *a;  q: [*]A = p;    // error: got *A, expected [*]A
+        \\p: *A = *a;  q: *B = p;      // error: got *A, expected *B
+        \\p: *s64 = *a; q: *u64 = p;   // error: got *int, expected *u64
+        \\p: *const A = *a; q: *A = p; // error: got *const A, expected *A
     );
-    bullet(8, #string,oneline
-        \\Keep ownership separate from addressability: the code that holds a
-        \\pointer is not automatically responsible for freeing it.
+    paragraph(9, #string,oneline
+        \\Where a conversion is genuinely intended, `cast(*U) pointer` performs
+        \\it and alignment and validity become the caller's responsibility. The
+        \\`#enable(pointer_punning)` gate relaxes the pointee check and the
+        \\`*T`/`[*]T` split for a whole section of declarations; it is described
+        \\in "Strict Conversions and Feature Gates".
     );
-    table_header(9, "Form   —   Meaning");
-    table_row(10, "`*T`   |   Pointer to one mutable `T`");
-    table_row(11, #string,oneline
-        \\`*const T`   |   Pointer through which the `T` cannot be modified
+    bullet(10, #string,oneline
+        \\A `const` pointee prevents mutation through that pointer only. Another
+        \\pointer to the same storage without the qualifier may still write.
     );
-    table_row(12, #string,oneline
+    bullet(11, #string,oneline
+        \\`volatile` constrains the backend, not the machine: it prevents loads
+        \\and stores from being removed, reordered against other volatile
+        \\accesses, or merged. It is not an atomic operation, a lock, or a
+        \\cross-thread happens-before edge.
+    );
+    bullet(12, #string,oneline
+        \\Pointers do not keep stack locals or allocation owners alive. Nothing
+        \\diagnoses a returned pointer to a dead frame.
+    );
+    bullet(13, #string,oneline
+        \\Addressability is not ownership. The code holding a pointer is not
+        \\responsible for freeing it, and the release obligation stays with the
+        \\declaration that created the storage.
+    );
+    table_header(14, "Form   —   Meaning");
+    table_row(15, "`*T`   |   Pointer to one mutable `T`");
+    table_row(16, #string,oneline
+        \\`*const T`   |   Pointer through which the `T` cannot be modified;
+        \\`*T` converts to it implicitly, and not back
+    );
+    table_row(17, #string,oneline
         \\`*volatile T`   |   Pointer whose loads and stores are volatile
         \\backend operations
     );
-    table_row(13, "`*value`   |   Takes the address of an assignable value");
-    table_row(14, #string,oneline
+    table_row(18, "`*value`   |   Takes the address of an assignable value");
+    table_row(19, #string,oneline
         \\`pointer.*`   |   Dereferences a single pointer to produce its pointee
         \\location/value
     );
-    table_row(15, #string,oneline
-        \\`cast(*U)pointer`   |   Explicitly reinterprets/converts the pointer
+    table_row(20, #string,oneline
+        \\`cast(*U) pointer`   |   Explicitly reinterprets/converts the pointer
         \\type; alignment and validity remain the caller's responsibility
     );
-    code_block(16, "glosso", #string
-        \\read :: (source: *const s32) -> s32 { return source.*; }
-        \\write :: (destination: *s32, value: s32) { destination.* = value; }
-        \\
-        \\x: s32 = 10;
-        \\p := *x;
-        \\write(p, 42);
-        \\answer := read(p);
-    );
-    note(17, #string,oneline
-        \\`volatile` only controls whether individual memory accesses may be
-        \\removed or merged. It is not an atomic operation, a lock, or a
-        \\cross-thread happens-before guarantee. Use the synchronization
-        \\facilities required by the shared-memory protocol.
+    paragraph(21, #string,oneline
+        \\A `*T` may hold `null`, so the type says nothing about presence. When
+        \\absence is a real state, `Option(*T)` says so at no cost in size and
+        \\is described in "Optional Pointers and the Null Niche".
     );
 }
 
 render_section_34 :: () {
     paragraph(0, #string,oneline
         \\`[*]T` points to the first element of a sequence. The prelude defines
-        \\indexing and pointer arithmetic for many pointers.
+        \\indexing and pointer arithmetic for many pointers: `p[i]` computes an
+        \\address from the base and the element stride, and `p + n` advances by
+        \\`n` elements, not `n` bytes.
     );
     code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
         \\fill :: (data: [*]u8, count: s64, value: u8) {
         \\    i := 0;
         \\    while i < count {
@@ -871,108 +1832,1233 @@ render_section_34 :: () {
         \\        i += 1;
         \\    }
         \\}
+        \\
+        \\main :: () {
+        \\    buffer: [8]u8;
+        \\    base: [*]u8 = buffer.data;   // a fixed array exposes `.data`
+        \\    fill(base, 8, 7);
+        \\    tail := base + 4;
+        \\    print("% % %\n", buffer[0], tail[0],
+        \\        cast(u64) tail - cast(u64) base);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Many pointers do not carry length. Pair them with a count or convert
-        \\to a view when you need bounds information.
+    code_block(2, "text", #string
+        \\7 7 4
     );
-    subheading(3, "Unbounded pointer sequences");
-    paragraph(4, #string,oneline
-        \\A many pointer addresses the first element of an unspecified-length
-        \\sequence. It enables low-level traversal and C interoperability but
-        \\carries no count, capacity, or automatic bounds guarantee.
+    paragraph(3, #string,oneline
+        \\Many pointers do not carry length. There is no stored count for the
+        \\compiler to compare an index against, so no indexing check exists at
+        \\any optimization level - unlike a fixed array or a view, which trap on
+        \\a bad index at `-O0` and `-O1`. The separate count in a many-pointer
+        \\API is therefore part of its safety contract rather than a
+        \\convenience.
     );
-    bullet(5, #string,oneline
-        \\Carry a separate length or sentinel contract whenever the pointed-to
-        \\sequence is consumed.
+    subheading(4, "Obtaining and converting a many pointer");
+    paragraph(5, #string,oneline
+        \\`[*]T` is a distinct pointer flavour and does not interconvert with
+        \\`*T`: both directions are rejected, with `error: got *A, expected
+        \\[*]A` and `error: got [*]A, expected *A`. A many pointer is normally
+        \\obtained from `.data` on a fixed array, a view, or a dynamic array,
+        \\and produced from a single pointer only by an explicit
+        \\`cast([*]T)`.
     );
-    bullet(6, #string,oneline
-        \\Pointer arithmetic must remain within the allocation and preserve the
-        \\element type's alignment.
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    buffer: [4]s64;
+        \\    buffer[0] = 11; buffer[1] = 22;
+        \\    one: *s64 = *buffer[0];
+        \\    many := cast([*]s64) one;    // the conversion must be explicit
+        \\    print("% %\n", many[0], many[1]);
+        \\}
+        \\// 11 22
     );
-    bullet(7, #string,oneline
-        \\Prefer an array view for ordinary Glosso APIs because the view
-        \\transports the bounds needed for validation.
+    note(7, #string,oneline
+        \\`[*]T` is not accepted in a top-level type alias: `Many :: [*]s64;` is
+        \\`error: unexpected token '['`. Write the type at each use, or wrap it
+        \\in a struct field.
     );
     bullet(8, #string,oneline
-        \\Foreign APIs may retain a many pointer; confirm the capture and
-        \\release contract before passing temporary or movable storage.
+        \\Carry a separate length or a sentinel contract whenever the pointed-to
+        \\sequence is consumed; nothing in the type recovers it.
     );
-    table_header(9, "Type   —   Carries count?   —   Supported access");
-    table_row(10, "`*T`   |   No   |   One pointee through `.*`");
-    table_row(11, #string,oneline
-        \\`[*]T`   |   No   |   Indexed sequence and pointer arithmetic supplied
-        \\by prelude operations
+    bullet(9, #string,oneline
+        \\Pointer arithmetic must remain within the allocation and preserve the
+        \\element type's alignment. A pointer one past the end may be formed and
+        \\compared, but must not be dereferenced.
     );
-    table_row(12, #string,oneline
-        \\`[]T`   |   Yes   |   Indexed borrowed sequence with `count`
+    bullet(10, #string,oneline
+        \\Prefer `[]T` for ordinary Glosso APIs, because the view transports the
+        \\bounds that make validation possible; reserve `[*]T` for C interfaces
+        \\and for internal code that already owns the count.
     );
+    bullet(11, #string,oneline
+        \\Foreign APIs may retain a many pointer past the call. Confirm the
+        \\capture and release contract before passing temporary storage or the
+        \\`data` of a dynamic array that may be reallocated.
+    );
+    table_header(12, "Type   —   Carries count?   —   Conversion");
     table_row(13, #string,oneline
-        \\`[..]T`   |   Yes, plus capacity   |   Owned resizable sequence
+        \\`*T`   |   No   |   Reaches `[*]T` only through `cast([*]T)`;
+        \\implicitly reaches `*const T` and `*void`
     );
-    paragraph(14, #string,oneline
-        \\Indexing a many pointer computes an address from the base and element
-        \\stride; there is no stored length for the compiler to compare against.
-        \\The separate count in an API is therefore part of its safety contract.
-        \\A pointer one past the end may be useful for comparison, but it must
-        \\not be dereferenced.
+    table_row(14, #string,oneline
+        \\`[*]T`   |   No   |   Reaches `*T` only through `cast(*T)`; indexing
+        \\and arithmetic come from the prelude
+    );
+    table_row(15, #string,oneline
+        \\`[]T`   |   Yes   |   `.data` yields `[*]T`; formed from an array by
+        \\`array_view` or a slice expression
+    );
+    table_row(16, #string,oneline
+        \\`[..]T`   |   Yes, plus capacity   |   Owned; `array_view` yields
+        \\`[]T` and `.data` yields `[*]T`
+    );
+    paragraph(17, #string,oneline
+        \\`#enable(pointer_punning)` restores the `*T`/`[*]T` interchange and
+        \\pointee-unchecked conversion for the declarations that follow it,
+        \\which is the migration path for code written before the split. It does
+        \\not relax `const`. See "Strict Conversions and Feature Gates".
     );
 }
 
 render_section_35 :: () {
     paragraph(0, #string,oneline
         \\Pointers are nullable, including pointers used at C boundaries. A bare
-        \\`null` does not supply a pointee type, so declarations must provide
-        \\one.
+        \\`null` supplies no pointee type, so it needs one from context: an
+        \\annotation, a parameter, a return type, or a comparison. Without one,
+        \\`missing := null;` is `error: cannot infer a type for null; annotate
+        \\with a pointer type`.
     );
     code_block(1, "glosso", #string
-        \\Node :: struct { next: *Node; value: int; }
-        \\node: *Node = null;
+        \\#import "Io";
+        \\
+        \\Node :: struct { next: *Node; value: s64; }
+        \\
+        \\main :: () {
+        \\    head: *Node = null;   // the annotation supplies the pointee type
+        \\    if head != null print("%\n", head.*.value);
+        \\
+        \\    v: Node = .{ .next = null, .value = 7 };
+        \\    head = *v;
+        \\    if head != null print("%\n", head.*.value);
+        \\
+        \\    fresh: *Node;
+        \\    print("uninitialized is null: %\n", fresh == null);
+        \\
+        \\    // missing := null;
+        \\    // error: cannot infer a type for null; annotate with a pointer type
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\When wrapping C APIs, convert nullability into explicit Glosso-level
-        \\states when possible.
+    code_block(2, "text", #string
+        \\7
+        \\uninitialized is null: 1
     );
     subheading(3, "Nullability and validity");
     paragraph(4, #string,oneline
-        \\`null` represents the absence of a valid address and receives its
-        \\pointer type from context. A typed null value is still not
-        \\dereferenceable; validity must be established along every path that
-        \\reaches pointer access.
+        \\A typed null is still not dereferenceable, and the checker does not
+        \\track which paths have established validity. A `null` test is an
+        \\ordinary comparison whose result the compiler does not remember: the
+        \\dereference after it is unchecked, and so is the dereference on a path
+        \\that never tested. Validity has to be re-established at every entry
+        \\point that can reach a pointer access.
     );
     bullet(5, #string,oneline
-        \\Check a nullable pointer before dereference and use short-circuit
-        \\conditions when a later guard reads the pointee.
+        \\Check a nullable pointer before dereference, and use `&&` when the
+        \\right side reads the pointee - the right operand of `&&` is `#lazy`,
+        \\so it does not run when the left test fails.
     );
     bullet(6, #string,oneline
         \\Prefer a non-null pointer parameter when absence is not a meaningful
-        \\input, so callers and implementations share the invariant.
+        \\input, so callers and implementations share the invariant instead of
+        \\each testing for it.
     );
     bullet(7, #string,oneline
-        \\Do not use null to stand in for an empty view when a valid zero-length
-        \\descriptor expresses the state more accurately.
+        \\Do not use null to stand in for an empty view. A zero-length `[]T`
+        \\with a valid `data` is a distinct, well-formed state and every view
+        \\operation handles it.
     );
     bullet(8, #string,oneline
         \\At C boundaries, document whether null is allowed separately from
-        \\ownership, mutability, and lifetime.
+        \\ownership, mutability, and lifetime; a C signature encodes none of the
+        \\four.
     );
-    code_block(9, "glosso", #string
-        \\Node :: struct { next: *Node; value: s64; }
+    paragraph(9, #string,oneline
+        \\Nullability is not a separate pointer type in the current type system:
+        \\every `*T` representation can contain null, and a successful
+        \\comparison transfers no ownership and extends no lifetime. What has
+        \\changed is that this is no longer the only way to express absence.
+    );
+    subheading(10, "`Option(*T)` says it in the type");
+    paragraph(11, #string,oneline
+        \\`Option(*T)` is laid out with no tag word: `.None` is the null address
+        \\and `.Some(p)` is `p`, so `size_of(Option(*T))` equals `size_of(*T)`
+        \\and the guarantee survives inside a struct field. The niche needs
+        \\exactly one zero-sized variant, so it applies to `Option` of a pointer
+        \\and not to `Result`, and not to an `Option` whose payload has no spare
+        \\bit pattern: `Option(s64)` is 16 bytes.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
         \\
-        \\head: *Node = null;  // the annotation supplies the pointee type
-        \\if head != null {
-        \\    print("%\n", head.*.value);
+        \\Point :: struct { x: s64; y: s64; }
+        \\Node  :: struct { next: Option(*Node); value: s64; }
+        \\
+        \\find :: (hit: bool, p: *Point) -> Option(*Point) {
+        \\    if hit return Option.Some(p);
+        \\    return .None;
         \\}
         \\
-        \\// Invalid: a bare null declaration has no pointee type to infer.
-        \\// missing := null;
+        \\main :: () {
+        \\    maybe:  Option(*Point);
+        \\    raw:    *Point;
+        \\    tagged: Option(s64);
+        \\    chain:  Node;
+        \\    print("Option(*Point) % *Point % Option(s64) % Node %\n",
+        \\        size_of(type_of(maybe)), size_of(type_of(raw)),
+        \\        size_of(type_of(tagged)), size_of(type_of(chain)));
+        \\
+        \\    p: Point = .{ .x = 1, .y = 2 };
+        \\    if #pattern .Some(q) = find(true, *p) print("found %\n", q.*.y);
+        \\    if option_is_none(find(false, *p))    print("absent\n");
+        \\
+        \\    lost: *Point = null;
+        \\    if option_is_none(Option.Some(lost))
+        \\        print("Some(null) reads back as .None\n");
+        \\}
     );
-    paragraph(10, #string,oneline
-        \\Nullability is not a separate pointer type in the current type system:
-        \\every pointer representation can contain null. The checker uses the
-        \\surrounding annotation, parameter, return, or comparison context to
-        \\type the literal, but a successful comparison does not transfer
-        \\allocation ownership or extend the pointee lifetime.
+    code_block(13, "text", #string
+        \\Option(*Point) 8 *Point 8 Option(s64) 16 Node 16
+        \\found 2
+        \\absent
+        \\Some(null) reads back as .None
+    );
+    note(14, #string,oneline
+        \\That last line is the sharp edge of keeping both mechanisms. Because
+        \\`*T` is still nullable and the niche spends address 0 on `.None`,
+        \\wrapping a null pointer in `.Some` produces a value that reads back as
+        \\`.None`, with no diagnostic. Establish non-nullness before
+        \\constructing the `Option`.
+    );
+    paragraph(15, #string,oneline
+        \\`Option(*T)` and `*T` are unrelated types: neither converts to the
+        \\other, and `Option` has no `==` against `null`. The three attempts
+        \\report `error: got *Point, expected Option__Point`, `error: got
+        \\Option__Point, expected *Point`, and `error: no operator '==' for
+        \\Option__Point, null`. The C-boundary behaviour, the prelude helpers
+        \\that avoid an unwrap, and the exact layout rule are covered in
+        \\"Optional Pointers and the Null Niche".
+    );
+}
+
+render_section_90 :: () {
+    paragraph(0, #string,oneline
+        \\A `distinct` declaration creates a new named type with the
+        \\representation of an existing type and an identity of its own. It
+        \\exists so that two quantities that share a machine layout - metres
+        \\and feet, a user id and a row index, a byte count and a byte value -
+        \\cannot be substituted for one another by accident.
+    );
+    code_block(1, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Feet   :: distinct f64;
+        \\
+        \\advance :: (d: Meters) -> Meters { return d + 1.0; }
+        \\
+        \\main :: () {
+        \\    m: Meters = 3.5;
+        \\    f: Feet   = 3.5;
+        \\    print("%\n", cast(f64) advance(m));   // 4.5
+        \\
+        \\    // advance(f);     // error: arg type Feet != Meters in call advance
+        \\    // total := m + f; // error: no operator '+' for Meters, Feet
+        \\    // raw: f64 = m;   // error: got Meters, expected f64
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`Name :: distinct T;` registers a nominal type whose kind, size,
+        \\alignment, and ABI are exactly those of `T`. The only thing recorded
+        \\differently is an identity tag carrying the new name. That tag is
+        \\folded into the key the checker consults for coercion, typeclass
+        \\instance selection, and diagnostic rendering, so a distinct type
+        \\agrees with its underlying type on every bit of representation and
+        \\disagrees with it everywhere identity is consulted.
+    );
+    code_block(3, "glosso", #string
+        \\Meters :: distinct f64;   // 8 bytes, f64 representation
+        \\Count  :: distinct s64;   // 8 bytes, s64 representation
+        \\Byte   :: distinct u8;    // 1 byte,  u8 representation
+        \\Flag   :: distinct bool;  // 1 byte,  bool representation
+        \\
+        \\main :: () {
+        \\    m: Meters = 3.5;
+        \\    c: Count  = 7;
+        \\    b: Byte   = 200;
+        \\    t: Flag   = cast(Flag) true;
+        \\    print("% % % %\n", cast(f64) m, cast(s64) c,
+        \\        cast(u8) b, cast(bool) t);
+        \\    print("% % % %\n", size_of(type_of(m)), size_of(type_of(c)),
+        \\        size_of(type_of(b)), size_of(type_of(t)));
+        \\}
+        \\// 3.5 7 200 1
+        \\// 8 8 1 1
+    );
+    paragraph(4, #string,oneline
+        \\The declaration is accepted at file scope and as a nested declaration
+        \\inside a procedure body; a nested one is hoisted to file scope by the
+        \\parser, so procedures declared elsewhere in the file can name it.
+        \\`distinct` is not a type constructor and may not appear in an
+        \\annotation: `x: distinct f64;` is `error: unknown type 'distinct'`.
+    );
+    code_block(5, "glosso", #string
+        \\reveal :: (t: Ticks) -> s64 { return cast(s64) t; }
+        \\
+        \\main :: () {
+        \\    Ticks :: distinct s64;   // hoisted; `reveal` above already sees it
+        \\    n: Ticks = 42;
+        \\    print("%\n", reveal(n));   // 42
+        \\}
+    );
+    paragraph(6, #string,oneline
+        \\`distinct` is a contextual keyword. The lexer emits an ordinary
+        \\identifier for it, and the parser tests for the spelling only in the
+        \\single position immediately after `::` in a `Name :: ...`
+        \\declaration. Everywhere else it stays a usable name, so introducing
+        \\the feature changed the meaning of no existing program.
+    );
+    code_block(7, "glosso", #string
+        \\Row :: struct { distinct: s64; }
+        \\
+        \\distinct :: (n: s64) -> s64 { return n * 2; }
+        \\
+        \\main :: () {
+        \\    r: Row = .{ .distinct = 3 };
+        \\    doubled := distinct(r.distinct);
+        \\    distinct := 5;
+        \\    print("% % %\n", r.distinct, doubled, distinct);   // 3 6 5
+        \\}
+    );
+    subheading(8, "Conversions");
+    paragraph(9, #string,oneline
+        \\There is no implicit conversion between a distinct type and its
+        \\underlying type, in either direction. The coercion check compares
+        \\identity tags first and fails immediately when they differ, before
+        \\reaching the same-kind shortcut that would otherwise accept two `f64`
+        \\values. The rule applies in every value position - initializer,
+        \\assignment, `return`, call argument, struct-literal field, and array
+        \\element - and `#enable(lossy_numerics)` does not relax it, because
+        \\that gate only affects integer width and signedness.
+    );
+    code_block(10, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Feet   :: distinct f64;
+        \\Span   :: struct { d: Meters; }
+        \\
+        \\// Each line below is checked on its own: the checker reports the
+        \\// first mismatch in a body and then stops on that body.
+        \\
+        \\raise :: (r: f64) -> Meters { return r; }
+        \\                     // error: got f64, expected Meters
+        \\
+        \\raw: f64 = 1.0;   m: Meters = raw;
+        \\                     // error: got f64, expected Meters
+        \\m: Meters = 1.0;  back: f64 = m;
+        \\                     // error: got Meters, expected f64
+        \\m: Meters = 1.0;  f: Feet = m;
+        \\                     // error: got Meters, expected Feet
+        \\raw: f64 = 1.0;   s: Span = .{ .d = raw };
+        \\                     // error: field 'd' got f64, expected Meters
+        \\m: Meters = 1.0;  a: [2]f64 = .[m, 1.0];
+        \\                     // error: got Meters, expected f64
+    );
+    paragraph(11, #string,oneline
+        \\An untyped literal is the exception, and it is a deliberate one. A
+        \\numeric literal takes its type from the surrounding context before
+        \\coercion is consulted, so the identity guard is never reached and no
+        \\cast is needed to introduce a value of a distinct type.
+    );
+    code_block(12, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Count  :: distinct s64;
+        \\Byte   :: distinct u8;
+        \\
+        \\budget :: () -> Count { return 42; }
+        \\
+        \\main :: () {
+        \\    m: Meters = 3.5;
+        \\    c: Count  = 7;
+        \\    b: Byte   = 200;
+        \\    print("% % % %\n", cast(f64) m, cast(s64) c,
+        \\        cast(u8) b, cast(s64) budget());
+        \\}
+        \\// 3.5 7 200 42
+    );
+    note(13, #string,oneline
+        \\Only literals adapt. A named variable of the underlying type never
+        \\does: `raw: f64 = 3.5; m: Meters = raw;` is `error: got f64, expected
+        \\Meters`. `bool` and `enum` have no untyped literal form, so a
+        \\distinct over either still needs a cast - `t: Flag = true;` is
+        \\`error: got bool, expected Flag`.
+    );
+    paragraph(14, #string,oneline
+        \\`cast` and `acast` convert in both directions. A cast is permitted
+        \\when the source and target are both numeric - integer, float, `bool`,
+        \\or enum - or both pointer-like. A distinct type keeps the kind of its
+        \\underlying type, so a distinct scalar and a distinct pointer always
+        \\fall into one of those two families. The postfix `value.cast(T)`
+        \\spelling and the contextual `acast` form behave identically.
+    );
+    code_block(15, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Point  :: struct { x: s64; y: s64; }
+        \\Handle :: distinct *Point;
+        \\
+        \\main :: () {
+        \\    a := 3.5.cast(Meters);
+        \\    raw: f64 = 1.25;
+        \\    b: Meters = acast raw;
+        \\    back: f64 = acast b;
+        \\    print("% % %\n", cast(f64) a, cast(f64) b, back);   // 3.5 1.25 1.25
+        \\
+        \\    p: Point = .{ .x = 7, .y = 8 };
+        \\    h: Handle = cast(Handle) *p;
+        \\    q: *Point = cast(*Point) h;
+        \\    print("%\n", q.*.y);   // 8
+        \\}
+    );
+    note(16, #string,oneline
+        \\`distinct` over a `struct` or over `string` declares without
+        \\complaint but has no conversion path at all, because neither kind
+        \\belongs to a cast family: `cast(Pos) p` is `error: cannot cast Point
+        \\to Pos` and `cast(Name) "hi"` is `error: cannot cast string to Name`.
+        \\Such a type can still be built with a `.{ }` literal and read field by
+        \\field, but no value ever moves between it and its underlying type.
+    );
+    note(17, #string,oneline
+        \\`distinct` does not stack. `Deep :: distinct Meters;` compiles, but
+        \\the identity tag is a single field and is overwritten rather than
+        \\extended, so `Deep` is related neither to `Meters` nor to `f64`:
+        \\`m: Meters = d;` is `error: got Deep, expected Meters`.
+    );
+    subheading(18, "Inherited operators");
+    paragraph(19, #string,oneline
+        \\Built-in operators resolve on the underlying kind, so a distinct type
+        \\receives arithmetic, comparison, and compound assignment with no
+        \\instance declaration of any sort. This is the one place where a
+        \\distinct type behaves like an alias rather than a new type. The result
+        \\keeps the identity tag: `a + b` on two `Meters` has type `Meters`, and
+        \\storing it in an `f64` is rejected.
+    );
+    code_block(20, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Count  :: distinct s64;
+        \\
+        \\main :: () {
+        \\    a: Meters = 3.5;
+        \\    b: Meters = 1.5;
+        \\    sum: Meters = a + b;
+        \\    print("sum=% diff=%\n", cast(f64) sum, cast(f64)(a - b));
+        \\    print("gt=% eq=%\n", a > b, a == b);
+        \\
+        \\    i: Count = 7;
+        \\    j: Count = 3;
+        \\    print("% % % %\n", cast(s64)(i + j), cast(s64)(i * j),
+        \\        cast(s64)(i / j), cast(s64)(i % j));
+        \\
+        \\    print("neg=% lit=%\n", cast(f64)(-a), cast(f64)(a + 2.0));
+        \\
+        \\    m: Meters = 1.0;
+        \\    m += 2.0;
+        \\    print("compound=%\n", cast(f64) m);
+        \\}
+        \\// sum=5 diff=2
+        \\// gt=1 eq=0
+        \\// 10 21 2 1
+        \\// neg=-3.5 lit=5.5
+        \\// compound=3
+    );
+    paragraph(21, #string,oneline
+        \\In the table below `a` and `b` are `Meters`, `f` is `Feet`, and `r` is
+        \\an ordinary `f64` variable.
+    );
+    table_header(22, "Expression   —   Outcome");
+    table_row(23, "`a + b`   |   Accepted; the result has type `Meters`");
+    table_row(24, #string,oneline
+        \\`a + 2.0`   |   Accepted; the untyped literal adapts, result `Meters`
+    );
+    table_row(25, "`a + r`   |   Rejected: `error: got f64, expected Meters`");
+    table_row(26, #string,oneline
+        \\`a + f`   |   Rejected: `error: no operator '+' for Meters, Feet`
+    );
+    table_row(27, #string,oneline
+        \\`wide: f64 = a + b;`   |   Rejected: `error: got Meters, expected f64`
+    );
+    table_row(28, "`a > b`, `a == b`   |   Accepted; the result has type `bool`");
+    table_row(29, "`a += 2.0`   |   Accepted; the untyped literal adapts");
+    table_row(30, #string,oneline
+        \\`a += r`   |   Rejected: `error: no operator '+=' for Meters, Meters`
+    );
+    note(31, #string,oneline
+        \\The compound-assignment diagnostic names the wrong operand. `a += r`
+        \\with `r: f64` reports `no operator '+=' for Meters, Meters`, printing
+        \\the target type on both sides even though it is the right-hand `f64`
+        \\that does not fit.
+    );
+    subheading(32, "A distinct name is not a type value");
+    paragraph(33, #string,oneline
+        \\Identity is a field on an ordinary type rather than a new declaration
+        \\kind, so a `distinct` declaration binds a name that only
+        \\type-annotation resolution can see. Expression positions never find
+        \\it. This is where a distinct type differs visibly from a `struct`,
+        \\whose name is a first-class compile-time type value.
+    );
+    code_block(34, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Point  :: struct { x: s64; }
+        \\
+        \\main :: () {
+        \\    m: Meters = 1.0;
+        \\    print("%\n", size_of(type_of(m)));  // 8, the supported spelling
+        \\    print("%\n", size_of(Point));       // 8, a struct name is a value
+        \\
+        \\    // size_of(Meters)   // error: unbound 'Meters'
+        \\    // t := Meters;      // error: unbound 'Meters'
+        \\    // takes(Meters)     // error: unbound 'Meters', for a
+        \\    //                   // `(T: type)` parameter
+        \\}
+    );
+    note(35, #string,oneline
+        \\The same restriction hides the variants of a distinct over an enum:
+        \\`t: Tint = Tint.Red;` is `error: unbound 'Tint'`, followed by an
+        \\unhelpful `help: did you mean 'bind'?`. Name the variant through the
+        \\underlying enum and cast - `t: Tint = cast(Tint) Color.Green;`.
+    );
+    subheading(36, "Generic, container, and field positions");
+    paragraph(37, #string,oneline
+        \\Because the identity tag rides on an ordinary type rather than
+        \\wrapping one, every type constructor and every generic-inference path
+        \\accepts a distinct type unchanged. `$T` binds to the distinct type,
+        \\not to its representation.
+    );
+    code_block(38, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Point  :: struct { x: s64; y: s64; }
+        \\Pos    :: distinct Point;
+        \\
+        \\Box :: struct { v: $T; }
+        \\Rec :: struct { len: Meters; tag: s64; }
+        \\
+        \\ident :: (x: $T) -> T { return x; }
+        \\
+        \\main :: () {
+        \\    b: Box(Meters);
+        \\    b.v = 2.5;
+        \\
+        \\    o: Option(Meters);
+        \\    o = Option.Some(cast(Meters) 1.5);
+        \\
+        \\    arr: [4]Meters;
+        \\    arr[0] = 9.5;
+        \\    p: *Meters = *arr[0];
+        \\
+        \\    r: Rec = .{ .len = 1.25, .tag = 3 };
+        \\    q: Pos = .{ .x = 3, .y = 4 };
+        \\
+        \\    print("% % % % %\n", cast(f64) b.v, cast(f64) arr[0],
+        \\        cast(f64) p.*, cast(f64) r.len, q.x);
+        \\    if #pattern .Some(v) = o print("opt %\n", cast(f64) v);
+        \\    m: Meters = 2.0;
+        \\    print("generic %\n", cast(f64) ident(m));
+        \\}
+        \\// 2.5 9.5 9.5 1.25 3
+        \\// opt 1.5
+        \\// generic 2
+    );
+    paragraph(39, #string,oneline
+        \\`Pos` above shows a distinct over a `struct` participating fully:
+        \\`.{ }` initialization and field reads work on it directly. Only the
+        \\conversions to and from the underlying struct are unreachable, so such
+        \\a type is best introduced as the sole spelling for that record rather
+        \\than laid over a struct that other code already uses.
+    );
+    subheading(40, "Typeclass instances");
+    paragraph(41, #string,oneline
+        \\Instance selection keys on type identity, so every distinct type
+        \\carries its own instances and an instance declared on the underlying
+        \\type does not cover it. This is the intended way to give two
+        \\representationally identical types different behavior.
+    );
+    code_block(42, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Feet   :: distinct f64;
+        \\
+        \\Unit :: typeclass (T: type) {
+        \\    suffix :: (x: T) -> string;
+        \\}
+        \\
+        \\Meters :: instance Unit {
+        \\    suffix :: (x: Meters) -> string { return "m"; }
+        \\}
+        \\Feet :: instance Unit {
+        \\    suffix :: (x: Feet) -> string { return "ft"; }
+        \\}
+        \\
+        \\label_of :: (x: $T) -> string where Unit(T) { return suffix(x); }
+        \\
+        \\main :: () {
+        \\    m: Meters = 1.0;
+        \\    f: Feet   = 1.0;
+        \\    print("% %\n", label_of(m), label_of(f));   // m ft
+        \\}
+        \\
+        \\// An instance declared on `f64` does not satisfy `Unit(Meters)`:
+        \\//   error: constraint failed for label_of
+    );
+    paragraph(43, #string,oneline
+        \\Operator methods declared through a typeclass apply to distinct types
+        \\as well, which is the way to define the mixed-type operator that the
+        \\inherited built-in operators refuse.
+    );
+    code_block(44, "glosso", #string
+        \\Meters :: distinct f64;
+        \\Feet   :: distinct f64;
+        \\
+        \\Combine :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '<>' :: (a: L, b: R) -> Output #precedence(left, 18);
+        \\}
+        \\
+        \\(Meters, Feet) :: instance Combine {
+        \\    Output :: Meters;
+        \\    '<>' :: (a: Meters, b: Feet) -> Output {
+        \\        return a + cast(Meters)(cast(f64) b * 0.3048);
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    m: Meters = 1.0;
+        \\    f: Feet   = 10.0;
+        \\    print("%\n", cast(f64)(m <> f));   // 4.048
+        \\}
+    );
+    note(45, #string,oneline
+        \\Glosso has no free-function overloading: declaring
+        \\`emit :: (x: Meters)` alongside `emit :: (x: f64)` is `error: function
+        \\'emit' is already declared`. Dispatch that depends on which distinct
+        \\type a value has must go through a typeclass.
+    );
+}
+
+
+render_section_91 :: () {
+    paragraph(0, #string,oneline
+        \\Coercion is the conversion the checker performs on its own when a
+        \\value of one type reaches a position that expects another: an
+        \\initializer, an assignment, a `return`, a call argument, a
+        \\struct-literal field, or an array element. Glosso admits a coercion
+        \\only when it cannot change the value. Everything else needs `cast` or
+        \\`acast`, or a feature gate that says the loss is intended. The
+        \\rejection is always spelled `error: got <actual>, expected
+        \\<expected>`.
+    );
+    subheading(1, "Integer widening");
+    paragraph(2, #string,oneline
+        \\An integer coercion is accepted when the target can hold every value
+        \\of the source. Within one signedness the target must be at least as
+        \\wide. An unsigned source reaching a signed target needs a strictly
+        \\wider target, because the top bit of the source has to survive. There
+        \\is no direction in which a signed source reaches an unsigned target.
+    );
+    code_block(3, "glosso", #string
+        \\main :: () {
+        \\    a: u8  = 7;
+        \\    b: u16 = a;
+        \\    c: u32 = b;
+        \\    d: u64 = c;
+        \\
+        \\    e: s8  = -3;
+        \\    f: s16 = e;
+        \\    g: s32 = f;
+        \\    h: s64 = g;
+        \\
+        \\    small: u8  = 200;
+        \\    wider: s16 = small;   // u8 fits s16: strictly wider
+        \\    print("% % % % % % % % %\n", a, b, c, d, e, f, g, h, wider);
+        \\}
+        \\// 7 7 7 7 -3 -3 -3 -3 200
+    );
+    paragraph(4, #string,oneline
+        \\Every other integer pairing is an error, including one that only
+        \\reinterprets the sign at equal width. The named integer types this
+        \\covers are `s8`, `s16`, `s32`, `s128`, `u8`, `u16`, `u32`, `u64`,
+        \\`u128`, `uint`, and the C spellings `int8_t` through `int64_t`,
+        \\`uint8_t` through `uint64_t`, `__int128`, and `unsigned __int128`.
+    );
+    code_block(5, "glosso", #string
+        \\Cell :: struct { b: u8; }
+        \\
+        \\// Each line is checked on its own: the checker reports the first
+        \\// mismatch in a body and then stops on that body.
+        \\
+        \\a: u16  = 7;    n1: u8  = a;   // error: got u16, expected u8
+        \\b: s16  = 7;    n2: s8  = b;   // error: got s16, expected s8
+        \\c: s8   = 7;    n3: u8  = c;   // error: got s8, expected u8
+        \\d: u8   = 7;    n4: s8  = d;   // error: got u8, expected s8
+        \\e: u64  = 7;    n5: s64 = e;   // error: got u64, expected int
+        \\f: uint = 300;  n6: u8  = f;   // error: got u64, expected u8
+        \\g: s128 = 300;  n7: s64 = g;   // error: got s128, expected int
+        \\
+        \\w: u16 = 5;  cell: Cell  = .{ .b = w };
+        \\                   // error: field 'b' got u16, expected u8
+        \\w: u16 = 5;  arr:  [2]u8 = .[w, 1];
+        \\                   // error: got u16, expected u8
+    );
+    note(6, #string,oneline
+        \\Diagnostics do not always print the spelling that appears in the
+        \\source. `s64` renders as `int` and `uint` renders as `u64`, because
+        \\each pair is one type in the checker. Compound assignment is worse:
+        \\`b: u8 = 1; w: u16 = 5; b += w;` reports `error: no operator '+=' for
+        \\u8, u8`, naming the target type on both sides.
+    );
+    subheading(7, "The default integer type is a hole");
+    paragraph(8, #string,oneline
+        \\The strict rule bites only when the source expression's static type is
+        \\a NAMED integer type. `int` and `s64` are the same unnamed type in the
+        \\checker - the same type an untyped integer literal falls back to when
+        \\nothing in the context names one - and the widening test returns true
+        \\unconditionally for a source with no name. A value typed `int` or
+        \\`s64` therefore converts implicitly to any integer type, truncating
+        \\and reinterpreting the sign with no diagnostic.
+    );
+    code_block(9, "glosso", #string
+        \\LIMIT :: 300;
+        \\give :: () -> s64 { return 300; }
+        \\take :: (n: s8) -> s8 { return n; }
+        \\
+        \\main :: () {
+        \\    x: s64 = 300;
+        \\    y: s8  = x;        // compiles; y is 44
+        \\    z: u8  = x;        // compiles; z is 44
+        \\    q := 300;          // inferred s64
+        \\    qq: s8 = q;        // compiles; qq is 44
+        \\    cc: s8 = LIMIT;    // a `::` constant is in the hole too
+        \\    rr: s8 = give();   // so is an s64-returning call
+        \\    print("% % % % % % %\n", x, y, z, qq, cc, rr, take(x));
+        \\}
+        \\// 300 44 44 44 44 44 44
+    );
+    note(10, #string,oneline
+        \\`int64_t` is a separate NAMED type with the identical representation,
+        \\and it is not in the hole: `a: int64_t = 300; y: s8 = a;` is `error:
+        \\got int64_t, expected s8`, while the byte-identical `a: s64 = 300;
+        \\y: s8 = a;` compiles and yields 44. Code that must be checked at every
+        \\integer boundary should avoid `int`/`s64` in favor of an explicitly
+        \\named width.
+    );
+    subheading(11, "Floats and untyped literals");
+    paragraph(12, #string,oneline
+        \\No float conversion is ever implicit, in either direction. Widening
+        \\`f32` to `f64` is rejected along with narrowing, and no conversion
+        \\between an integer and a float is implicit for a value that already
+        \\has a type. The coercion check has no float branch at all, so
+        \\`#enable(lossy_numerics)` does not help here despite what the gate's
+        \\name suggests; the gate is integer-only.
+    );
+    code_block(13, "glosso", #string
+        \\#enable(lossy_numerics);
+        \\
+        \\widen   :: (a: f32) -> f64 { return a; }  // error: got f32, expected f64
+        \\narrow  :: (a: f64) -> f32 { return a; }  // error: got f64, expected f32
+        \\tofloat :: (a: s64) -> f64 { return a; }  // error: got int, expected f64
+        \\toint   :: (a: f64) -> s64 { return a; }  // error: got f64, expected int
+        \\
+        \\main :: () {}
+    );
+    paragraph(14, #string,oneline
+        \\An untyped literal is not a value of any type until the context gives
+        \\it one, so it adapts to whatever the position asks for, including a
+        \\float target for an integer literal. It is not range-checked: an
+        \\out-of-range literal is folded and truncated at compile time with no
+        \\diagnostic at all.
+    );
+    code_block(15, "glosso", #string
+        \\main :: () {
+        \\    fits:     u8  = 255;
+        \\    over:     u8  = 300;   // silently 44
+        \\    wrap:     s8  = 200;   // silently -56
+        \\    from_int: f64 = 3;     // integer literal in a float position
+        \\    print("% % % %\n", fits, over, wrap, from_int);
+        \\}
+        \\// 255 44 -56 3
+    );
+    note(16, #string,oneline
+        \\`a: u8 = -1;` is not a literal at all: it is unary negation applied to
+        \\an unsigned value. It compiles, and at the default optimization level
+        \\it aborts at run time with exit status 134 and no message, because
+        \\unsigned negation traps. Write `cast(u8) -1` or `255` instead.
+    );
+    subheading(17, "Pointer conversions");
+    paragraph(18, #string,oneline
+        \\Two pointer types coerce only when they agree on flavor and on
+        \\pointee. `*T` and `[*]T` are different flavors and no longer convert
+        \\to one another in either direction, and the pointee is compared, so
+        \\`*A` does not reach `*B` and `*s64` does not reach `*u64`. Two escapes
+        \\remain: `*void` converts to and from any pointer, and adding `const`
+        \\is implicit. Dropping `const` is not.
+    );
+    code_block(19, "glosso", #string
+        \\A :: struct { x: s64; }
+        \\B :: struct { y: s64; }
+        \\
+        \\main :: () {
+        \\    a: A = .{ .x = 7 };
+        \\    p: *A = *a;
+        \\
+        \\    erased: *void    = p;        // any pointer converts to *void
+        \\    back:   *A       = erased;   // and back again
+        \\    ro:     *const A = p;        // adding const is implicit
+        \\    print("% %\n", back.*.x, ro.*.x);   // 7 7
+        \\
+        \\    // q: [*]A = p;   // error: got *A, expected [*]A
+        \\    // s: *A   = m;   // error: got [*]A, expected *A, for m: [*]A
+        \\    // r: *B   = p;   // error: got *A, expected *B
+        \\    // w: *A   = ro;  // error: got *const A, expected *A
+        \\    // n: s64 = 1; u: *u64 = *n;   // error: got *int, expected *u64
+        \\}
+    );
+    table_header(20, "Conversion   —   Default   —   With `pointer_punning`");
+    table_row(21, "`*A` to `*B`   |   Rejected   |   Accepted");
+    table_row(22, "`*A` to `[*]A`   |   Rejected   |   Accepted");
+    table_row(23, "`[*]A` to `*A`   |   Rejected   |   Accepted");
+    table_row(24, "`*s64` to `*u64`   |   Rejected   |   Accepted");
+    table_row(25, "`*A` to `*void`, `*void` to `*A`   |   Accepted   |   Accepted");
+    table_row(26, "`*A` to `*const A`   |   Accepted   |   Accepted");
+    table_row(27, #string,oneline
+        \\`*const A` to `*A`   |   Rejected   |   Rejected: the const guard sits
+        \\outside the punning branch
+    );
+    subheading(28, "Feature gates");
+    paragraph(29, #string,oneline
+        \\`#enable(NAME);` and `#disable(NAME);` turn a named relaxation on and
+        \\off. They appear at file scope only; inside a procedure body the
+        \\parser reports `error: unexpected directive 'enable'`. The trailing
+        \\semicolon is optional. The complete set of names the compiler accepts
+        \\is five, and anything else is `error: unknown feature '<name>'`. The
+        \\`,siblings` modifier is accepted only on the two `private_section`
+        \\spellings, so `#enable(lossy_numerics,siblings);` is `error: unknown
+        \\feature 'lossy_numerics,siblings'`.
+    );
+    table_header(30, "Gate   —   Default   —   What it relaxes");
+    table_row(31, #string,oneline
+        \\`lossy_numerics`   |   Off   |   Implicit narrowing and sign
+        \\reinterpretation between named integer types. Integers only; floats
+        \\and distinct types are unaffected.
+    );
+    table_row(32, #string,oneline
+        \\`pointer_punning`   |   Off   |   Pointee-unchecked pointer conversion
+        \\and `*T`/`[*]T` interchange. Does not permit dropping `const`.
+    );
+    table_row(33, #string,oneline
+        \\`union_unwrap`   |   On   |   Direct tagged-union payload access
+        \\outside a proven match, compiled as a checked unwrap. `#disable` is
+        \\the strict direction here.
+    );
+    table_row(34, #string,oneline
+        \\`private_section`   |   Off   |   Declarations that follow are module
+        \\private. See the Visibility and Private Sections chapter.
+    );
+    table_row(35, #string,oneline
+        \\`private_sections`   |   Off   |   Accepted plural spelling of
+        \\`private_section`; both take the `,siblings` modifier.
+    );
+    paragraph(36, #string,oneline
+        \\The scoping rule is textual, not lexical. The directive flips a flag
+        \\in the parser, and every following top-level declaration is stamped
+        \\with the flag as it is parsed; the stamp then governs that
+        \\declaration's whole body, including nested blocks. Braces do not
+        \\delimit a gate. It runs from the directive to the matching opposite
+        \\directive or to the end of the file, exactly like `#private_section`.
+        \\It does not cross a file boundary: a `#load`ed or imported file starts
+        \\again at the defaults.
+    );
+    code_block(37, "glosso", #string
+        \\#enable(lossy_numerics);
+        \\loose :: (a: u64) -> s8 { return a; }
+        \\#disable(lossy_numerics);
+        \\
+        \\strict :: (a: u64) -> s8 { return cast(s8) a; }
+        \\// without the cast, `strict` is: error: got u64, expected s8
+        \\
+        \\main :: () { print("% %\n", loose(300), strict(300)); }
+        \\// 44 44
+    );
+    note(38, #string,oneline
+        \\The gate reaches into the bodies of the declarations it stamps, so
+        \\`#enable(lossy_numerics);` written above `main` relaxes narrowing for
+        \\every statement inside `main`. It does not reach a `#load`ed file:
+        \\enabling it around `Helper :: #load "helper.glo";` still gives
+        \\`error: got u64, expected s8` for a narrowing inside `helper.glo`.
+    );
+    code_block(39, "glosso", #string
+        \\A :: struct { x: s64; }
+        \\B :: struct { y: s64; }
+        \\
+        \\#enable(pointer_punning);
+        \\reinterpret :: (p: *A) -> *B   { return p; }
+        \\as_many     :: (p: *A) -> [*]A { return p; }
+        \\#disable(pointer_punning);
+        \\
+        \\main :: () {
+        \\    a: A = .{ .x = 9 };
+        \\    print("% %\n", reinterpret(*a).*.y, as_many(*a)[0].x);
+        \\}
+        \\// 9 9
+    );
+    note(40, #string,oneline
+        \\`pointer_punning` does not remove the `const` guard, which is checked
+        \\before the punning branch is consulted: with the gate on,
+        \\`drop_const :: (p: *const A) -> *A { return p; }` is still `error: got
+        \\*const A, expected *A`.
+    );
+    paragraph(41, #string,oneline
+        \\`union_unwrap` is the only gate that is on by default, so `#disable`
+        \\is the tightening direction rather than the loosening one. With it
+        \\disabled, any direct payload access the checker cannot prove - a read
+        \\OR a write - becomes a compile error, and a union can then only be
+        \\built with `.Variant(payload)` constructor syntax and only be read
+        \\through capture arms. The Union Payload Access and Checked Unwrap
+        \\chapter covers the behavior in full.
+    );
+    code_block(42, "glosso", #string
+        \\Token :: union { Name: string; Code: s64; Eof: void; }
+        \\
+        \\#disable(union_unwrap);
+        \\describe :: (t: Token) -> string {
+        \\    if t == {
+        \\    case .Name(text); return text;
+        \\    case .Code(v);    return "code";
+        \\    case .Eof;        return "eof";
+        \\    }
+        \\}
+        \\#enable(union_unwrap);
+        \\
+        \\main :: () { print("%\n", describe(Token.Code(1))); }
+        \\// code
+        \\
+        \\// Inside the disabled region, `return t.Code;` would instead be:
+        \\//   error: union value is not known to hold '.Code' here
+        \\//   note: match on it first, or enable #enable(union_unwrap) for a
+        \\//         checked unwrap
+    );
+    paragraph(43, #string,oneline
+        \\None of the gates affect `distinct` types: identity is compared before
+        \\any numeric or pointer branch is reached, so `#enable(lossy_numerics)`
+        \\leaves `r: f64 = m;` for `m: Meters` as `error: got Meters, expected
+        \\f64`. The explicit conversion forms and their own rules are in the
+        \\Casts and Contextual Conversion chapter.
+    );
+}
+
+
+render_section_92 :: () {
+    paragraph(0, #string,oneline
+        \\`Option(*T)` is the supported way to say that a pointer may be
+        \\absent, and it costs nothing to say it. The compiler stores the empty
+        \\case in the null address instead of in a separate tag word, so an
+        \\`Option(*T)` is exactly the size of a `*T` and carries the same bits.
+        \\The choice between present and absent is made by pattern matching
+        \\rather than by comparing against `null`.
+    );
+    code_block(1, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\find :: (hit: bool, p: *Point) -> Option(*Point) {
+        \\    if hit return Option.Some(p);
+        \\    return .None;
+        \\}
+        \\
+        \\main :: () {
+        \\    maybe:  Option(*Point);
+        \\    raw:    *Point;
+        \\    tagged: Option(s64);
+        \\    print("Option(*Point)=% *Point=%\n",
+        \\        size_of(type_of(maybe)), size_of(type_of(raw)));
+        \\    print("Option(s64)=% s64=%\n",
+        \\        size_of(type_of(tagged)), size_of(s64));
+        \\
+        \\    p: Point = .{ .x = 1, .y = 2 };
+        \\    if #pattern .Some(q) = find(true, *p)  print("found %\n", q.*.y);
+        \\    if #pattern .None    = find(false, *p) print("absent\n");
+        \\}
+        \\// Option(*Point)=8 *Point=8
+        \\// Option(s64)=16 s64=8
+        \\// found 2
+        \\// absent
+    );
+    paragraph(2, #string,oneline
+        \\The layout rule is narrow and mechanical. When a `#magic "option"` or
+        \\`#magic "result"` union has exactly two variants, exactly one of which
+        \\is zero-sized, and the other of which is pointer-like, the layout pass
+        \\emits no tag word: the value IS the payload, and the empty variant is
+        \\represented by address 0. The discriminant test the backend generates
+        \\for such a union is therefore a null test, not a tag load. The
+        \\guarantee is exact rather than best-effort: `.None` is bit-for-bit the
+        \\null address and `.Some(p)` is bit-for-bit `p`.
+    );
+    code_block(3, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\#enable(pointer_punning);
+        \\bits :: (o: *Option(*Point)) -> u64 { return (cast(*u64) o).*; }
+        \\#disable(pointer_punning);
+        \\
+        \\main :: () {
+        \\    v: Point = .{ .x = 3, .y = 4 };
+        \\    none: Option(*Point) = .None;
+        \\    some := Option.Some(*v);
+        \\    print("None bits = %\n", bits(*none));
+        \\    print("Some bits == address of v: %\n", bits(*some) == cast(u64) *v);
+        \\}
+        \\// None bits = 0
+        \\// Some bits == address of v: 1
+    );
+    paragraph(4, #string,oneline
+        \\The niche survives into struct fields, so a linked structure that
+        \\terminates with `.None` is the same size as one that terminates with
+        \\`null`. An `Option` whose payload has no spare bit pattern gets no
+        \\niche and keeps a tag word, which is why `Option(s64)` is twice the
+        \\size of an `s64`.
+    );
+    code_block(5, "glosso", #string
+        \\Node :: struct { next: Option(*Node); value: s64; }
+        \\Raw  :: struct { next: *Node;         value: s64; }
+        \\
+        \\main :: () {
+        \\    n: Node;  r: Raw;
+        \\    b: Option(bool);
+        \\    s: Option(string);
+        \\    print("% % % % %\n", size_of(type_of(n)), size_of(type_of(r)),
+        \\        size_of(type_of(b)), size_of(type_of(s)), size_of(string));
+        \\}
+        \\// 16 16 16 32 24
+    );
+    table_header(6, "Type   —   Size on x86_64   —   Layout");
+    table_row(7, "`*Point`   |   8   |   Plain pointer");
+    table_row(8, #string,oneline
+        \\`Option(*Point)`   |   8   |   Niche; `.None` is address 0, `.Some(p)`
+        \\is `p`
+    );
+    table_row(9, "`Option(s64)`   |   16   |   Tag word plus an 8-byte payload");
+    table_row(10, #string,oneline
+        \\`Option(bool)`   |   16   |   Tag word plus a 1-byte payload, padded
+    );
+    table_row(11, #string,oneline
+        \\`Option(string)`   |   32   |   Tag word plus the 24-byte string
+        \\descriptor
+    );
+    table_row(12, #string,oneline
+        \\`Result(*Point, s64)`   |   16   |   No niche: both variants carry
+        \\data
+    );
+    table_row(13, #string,oneline
+        \\`struct { next: Option(*Node); value: s64; }`   |   16   |   A field
+        \\keeps the niche
+    );
+    note(14, #string,oneline
+        \\`Result` never gets the niche as things stand, because the rule
+        \\requires exactly one zero-sized variant and both of `Result`'s
+        \\variants carry a payload. `Result(*T, E)` is therefore always larger
+        \\than `*T`.
+    );
+    subheading(15, "Crossing a C boundary");
+    paragraph(16, #string,oneline
+        \\Because the representation is the pointer itself, an `Option(*T)`
+        \\passes through a `#foreign` or `#c_call` signature as an ordinary
+        \\pointer with no marshalling in either direction. A C function that
+        \\returns `NULL` produces a value that matches `case .None;`, and a
+        \\non-null return matches `case .Some;`. This is the intended way to
+        \\model a C API whose pointer arguments or results are documented as
+        \\nullable.
+    );
+    code_block(17, "glosso", #string
+        \\libc :: #library "c";
+        \\
+        \\c_strlen :: (s: Option(*const s8)) -> u64 #foreign libc "strlen";
+        \\c_getenv :: (name: *const s8) -> Option(*const s8) #foreign libc "getenv"
+        \\    #memory(returns_static);
+        \\
+        \\main :: () {
+        \\    text: *const s8 = "glosso";
+        \\    print("strlen = %\n", c_strlen(Option.Some(text)));
+        \\
+        \\    missing := c_getenv("GLOSSO_DEFINITELY_NOT_SET_12345");
+        \\    if missing == {
+        \\    case .Some; print("set\n");
+        \\    case .None; print("C NULL arrived as .None\n");
+        \\    }
+        \\}
+        \\// strlen = 6
+        \\// C NULL arrived as .None
+    );
+    note(18, #string,oneline
+        \\The `#memory(returns_static)` contract on `c_getenv` is what silences
+        \\`warning: lifetime of memory returned by opaque foreign call
+        \\'c_getenv' is unknown`. An opaque foreign call that returns a pointer
+        \\needs one of `returns_fresh`, `returns_borrow(...)`, `returns_static`,
+        \\or `unknown`; the niche does not change that requirement.
+    );
+    subheading(19, "`null` still exists");
+    paragraph(20, #string,oneline
+        \\Introducing the niche did not remove `null` and did not make `*T`
+        \\non-nullable. `null` remains a value of every pointer type, a pointer
+        \\declared without an initializer is null, and `cast(u64)` of a null
+        \\pointer is 0. `Option(*T)` is an addition to the type system, not a
+        \\replacement for the nullable pointer; nothing forces a pointer through
+        \\it.
+    );
+    code_block(21, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\main :: () {
+        \\    p: *Point = null;
+        \\    print("p == null: %\n", p == null);
+        \\    v: Point = .{ .x = 7, .y = 9 };
+        \\    p = *v;
+        \\    print("p != null: % deref %\n", p != null, p.*.x);
+        \\    uninit: *Point;
+        \\    print("uninitialized is null: %\n", uninit == null);
+        \\}
+        \\// p == null: 1
+        \\// p != null: 1 deref 7
+        \\// uninitialized is null: 1
+    );
+    note(22, #string,oneline
+        \\`null` carries no pointee type of its own, so it needs one from the
+        \\context. A bare `missing := null;` is `error: cannot infer a type for
+        \\null; annotate with a pointer type`.
+    );
+    subheading(23, "The sharp edge: `.Some(null)` collapses to `.None`");
+    paragraph(24, #string,oneline
+        \\The two facts above collide. `*T` is still nullable, and `.None` is
+        \\literally address 0, so wrapping a null pointer in `.Some` produces a
+        \\value that reads back as `.None`. There is no compile diagnostic and
+        \\no run-time check: the constructor stores the address it was given,
+        \\and the address it was given is the one reserved for the empty case.
+    );
+    code_block(25, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\main :: () {
+        \\    p: *Point = null;
+        \\    o := Option.Some(p);
+        \\    if o == {
+        \\    case .Some; print("reads back as .Some\n");
+        \\    case .None; print("reads back as .None\n");
+        \\    }
+        \\}
+        \\// reads back as .None
+    );
+    note(26, #string,oneline
+        \\Treat the boundary where a raw pointer becomes an `Option(*T)` as the
+        \\place to test for null. A pointer that arrives from C, from an
+        \\allocator, or from any `*T` parameter should be compared against
+        \\`null` and turned into `.None` explicitly rather than handed to
+        \\`Option.Some` unchecked, because after construction the two cases are
+        \\indistinguishable.
+    );
+    subheading(27, "An `Option(*T)` is not a pointer");
+    paragraph(28, #string,oneline
+        \\Identical representation is not interchangeability. `Option(*T)` and
+        \\`*T` are separate types with no implicit conversion in either
+        \\direction, and `Option` has no equality against `null`. Diagnostics
+        \\print the monomorphized name, so `Option(*Point)` appears as
+        \\`Option__Point` and `Option(s64)` as `Option_int`.
+    );
+    code_block(29, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\// Each line is checked on its own: the checker reports the first
+        \\// mismatch in a body and then stops on that body.
+        \\o: Option(*Point) = .None;  b := o == null;
+        \\              // error: no operator '==' for Option__Point, null
+        \\v: Point;  o: Option(*Point) = *v;
+        \\              // error: got *Point, expected Option__Point
+        \\o: Option(*Point) = .None;  p: *Point = o;
+        \\              // error: got Option__Point, expected *Point
+    );
+    subheading(30, "Reading an Option without an unwrap");
+    paragraph(31, #string,oneline
+        \\Naming the payload directly, as `value.Some`, is a checked unwrap
+        \\rather than a match. It compiles, and on a tag mismatch the process
+        \\aborts with exit status 134. The niche form is checked the same way;
+        \\there the tag test is a null test.
+    );
+    code_block(32, "glosso", #string
+        \\main :: () {
+        \\    none: Option(s64) = .None;
+        \\    print("about to read .Some of a .None\n");
+        \\    print("%\n", none.Some);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\about to read .Some of a .None
+        \\<file>:<line>:<col>: union access: expected .Some, but the value holds one of .None | .Some
+    );
+    paragraph(34, #string,oneline
+        \\The Prelude declares helpers that match internally so a caller never
+        \\writes a payload access at all: `option_some(v)`, `option_none(T)`,
+        \\`option_is_some(o)`, `option_is_none(o)`, and `option_unwrap_or(o,
+        \\fallback)`. `Option` also has a `LogicalNot` instance, so `!o` is
+        \\`option_is_none(o)`.
+    );
+    code_block(35, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\main :: () {
+        \\    v: Point = .{ .x = 1, .y = 2 };
+        \\    some := Option.Some(*v);
+        \\    none: Option(*Point) = .None;
+        \\    print("% % %\n", option_is_some(some), option_is_none(none), !none);
+        \\
+        \\    missing: Option(s64) = .None;
+        \\    print("% %\n", option_unwrap_or(missing, 99),
+        \\        option_unwrap_or(option_some(7), 99));
+        \\}
+        \\// 1 1 1
+        \\// 99 7
+    );
+    paragraph(36, #string,oneline
+        \\`Option` also implements `Try`, so `?` propagates the empty case out
+        \\of a procedure whose return type is another `Option`. This is the
+        \\shortest way to chain lookups that may fail. The Try Expressions and
+        \\Propagation chapter describes the mechanism.
+    );
+    code_block(37, "glosso", #string
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\first_y :: (p: Option(*Point)) -> Option(s64) {
+        \\    q := p?;                    // returns .None from first_y if p is .None
+        \\    return Option.Some(q.*.y);
+        \\}
+        \\
+        \\main :: () {
+        \\    v: Point = .{ .x = 1, .y = 2 };
+        \\    print("% %\n", option_unwrap_or(first_y(Option.Some(*v)), -1),
+        \\        option_unwrap_or(first_y(.None), -1));
+        \\}
+        \\// 2 -1
+    );
+    note(38, #string,oneline
+        \\Two restrictions surface immediately in practice. `Option(T)` is
+        \\accepted only in type-annotation positions - a variable annotation, a
+        \\parameter, a return type, or a struct field - so
+        \\`Maybe_Point :: Option(*Point);` and `size_of(Option(*Point))` are
+        \\both `error: unknown function Option`; annotate a local and use
+        \\`size_of(type_of(local))`. And a file-scope global of any tagged-union
+        \\type fails at the link step with `error: LLVM backend cannot emit
+        \\aggregate constant Option__Point`. Unions are fine as locals and as
+        \\struct fields.
     );
 }
 

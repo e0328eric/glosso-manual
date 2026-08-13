@@ -2,10 +2,12 @@
 
 render_section_36 :: () {
     paragraph(0, #string,oneline
-        \\A struct is a nominal record. Field order is source order. Fields can
-        \\have defaults. Generic parameters are inferred from `$T` in field
-        \\types. Every field declaration ends with `;`; commas do not separate
-        \\aggregate members.
+        \\A struct is a nominal record. Every field declaration ends with `;`;
+        \\commas do not separate aggregate members. A field may carry a default
+        \\expression, and a field type containing `$T` introduces an inferred
+        \\generic parameter that later fields spell as plain `T`. Source order
+        \\fixes field identity and the meaning of a positional literal. It does
+        \\not fix memory layout.
     );
     code_block(1, "glosso", #string
         \\Pair :: struct {
@@ -19,82 +21,136 @@ render_section_36 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\Struct, union, and enum types may be declared inline as aggregate
-        \\field types. The compiler gives each inline declaration a
-        \\field-qualified nominal name.
+        \\A literal either names its type (`Point.{ ... }`) or infers it from an
+        \\expected type (`.{ ... }`). Omitted fields take their declared
+        \\default, and a declaration with no initializer at all default
+        \\initializes every field, so `d: Config;` still holds `retries == 3`.
+        \\A generic instantiation cannot prefix a literal: `Pair(int)` is a type
+        \\expression rather than a literal head, so annotate the variable and
+        \\use the inferred form.
     );
     code_block(3, "glosso", #string
-        \\Command :: union {
-        \\    Yandere: struct {
-        \\        url: string;
-        \\        filename_prefix: string;
-        \\    };
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\b := Point.{ .x = 1, .y = 2 };   // named fields
+        \\c := Point.{ 3, 4 };             // positional, in declaration order
+        \\a: Pair(int) = .{ .first = 1, .second = 2 };
+        \\d: Config;                       // retries == 3, verbose == false
+        \\
+        \\// p := Pair(int).{ .first = 1, .second = 2 };
+    );
+    code_block(4, "text", "error: struct literal needs a type");
+    subheading(5, "Memory layout");
+    paragraph(6, #string,oneline
+        \\Layout runs after checking, once every field type is concrete. An
+        \\undecorated struct is reordered: fields are sorted by descending
+        \\alignment, then descending size, with declaration order as the
+        \\tiebreak, and natural padding is inserted between them and at the
+        \\tail. `struct #c_call` keeps declaration order and applies the target
+        \\C ABI's alignment and padding. `struct #packed` keeps declaration
+        \\order, inserts no padding anywhere, and gives the record alignment 1.
+    );
+    code_block(7, "glosso", #string
+        \\Plain  :: struct         { a: u8; b: u64; c: u8; }
+        \\C_Aln  :: struct #c_call { a: u8; b: u64; c: u8; }
+        \\Packed :: struct #packed { a: u8; b: u64; c: u8; }
+        \\
+        \\offset :: (base: *$T, field: *$U) -> u64 {
+        \\    return cast(u64)field - cast(u64)base;
+        \\}
+        \\
+        \\main :: () {
+        \\    q: Plain; r: C_Aln; p: Packed;
+        \\    print("Plain  size=% align=% a=% b=% c=%\n", size_of(Plain),
+        \\        type_info(Plain).alignment,
+        \\        offset(*q, *q.a), offset(*q, *q.b), offset(*q, *q.c));
+        \\    print("C_Aln  size=% align=% a=% b=% c=%\n", size_of(C_Aln),
+        \\        type_info(C_Aln).alignment,
+        \\        offset(*r, *r.a), offset(*r, *r.b), offset(*r, *r.c));
+        \\    print("Packed size=% align=% a=% b=% c=%\n", size_of(Packed),
+        \\        type_info(Packed).alignment,
+        \\        offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
         \\}
     );
-    paragraph(4, "Create values with typed or inferred literals.");
-    code_block(5, "glosso", #string
-        \\p := Pair(int).{ .first = 1, .second = 2 };
-        \\c: Config = .{ .verbose = true };
+    code_block(8, "text", #string
+        \\Plain  size=16 align=8 a=8 b=0 c=9
+        \\C_Aln  size=24 align=8 a=0 b=8 c=16
+        \\Packed size=10 align=1 a=0 b=1 c=9
     );
-    subheading(6, "Construction and layout");
-    paragraph(7, #string,oneline
-        \\A struct groups named fields into one value and establishes their
-        \\declared types, defaults, and layout-related directives. Construction
-        \\should make invariants visible while leaving truly conventional values
-        \\to field defaults.
+    paragraph(9, #string,oneline
+        \\`Plain` places `b` at offset 0 although it is declared second, and
+        \\costs six bytes of padding. Any record whose byte image crosses a
+        \\binary or foreign boundary must therefore carry `#c_call` or
+        \\`#packed`. There is no `offset_of` builtin, so offsets are computed
+        \\with the pointer subtraction above, and `Type_Info` exposes only
+        \\`tag`, `name`, `size`, `alignment`, and `shower` — `alignment == 1` is
+        \\the only reflected signal that a record is packed. The chapter
+        \\"Packed Records" covers packing in full.
     );
-    bullet(8, #string,oneline
-        \\Use named field initializers so source remains stable when
-        \\declarations are reordered or extended.
+    subheading(10, "Inline aggregate field types");
+    paragraph(11, #string,oneline
+        \\A struct, union, or enum declared directly as a field type is not an
+        \\anonymous structural type. The compiler gives it a field-qualified
+        \\nominal name, which is what `type_info` reports and what appears in
+        \\diagnostics.
     );
-    bullet(9, #string,oneline
-        \\Keep representation-sensitive structs explicit and review every change
-        \\when they cross a binary or foreign boundary.
+    code_block(12, "glosso", #string
+        \\Command :: union {
+        \\    Yandere: struct { url: string; filename_prefix: string; };
+        \\    Quit: void;
+        \\}
+        \\
+        \\main :: () {
+        \\    cmd: Command = .Yandere(.{ .url = "u", .filename_prefix = "p" });
+        \\    if cmd == {
+        \\    case .Yandere(inner);
+        \\        print("% [%]\n", inner.url,
+        \\            type_info(type_of(inner)).name);
+        \\    case .Quit;
+        \\        print("quit\n");
+        \\    }
+        \\}
     );
-    bullet(10, #string,oneline
-        \\Put validation in constructors or helper functions when not every
-        \\mechanically constructible field combination is valid.
+    code_block(13, "text", "u [Command.Yandere]");
+    table_header(14, "Struct part   —   Compiler behavior");
+    table_row(15, #string,oneline
+        \\`field: Type;`   |   Stored field; type-default initialized when the
+        \\literal omits it
     );
-    bullet(11, #string,oneline
-        \\Use `#derive` for supported mechanical behavior and handwritten
-        \\operations for semantics that require domain choices.
-    );
-    table_header(12, "Struct part   —   Compiler behavior");
-    table_row(13, #string,oneline
-        \\`field: Type;`   |   Required stored field with type-default
-        \\initialization when omitted from a literal
-    );
-    table_row(14, #string,oneline
+    table_row(16, #string,oneline
         \\`field: Type = expression;`   |   Stored field whose omitted
         \\initializer uses the declared default expression
     );
-    table_row(15, #string,oneline
-        \\A field type containing `$T`   |   Introduces/infer a generic type
-        \\parameter; later uses may write `T` without `$`
-    );
-    table_row(16, #string,oneline
-        \\`#c_call`   |   Marks the representation for C-ABI validation and
-        \\target aggregate passing rules
-    );
     table_row(17, #string,oneline
-        \\`#derive(Name, ...)`   |   Requests the named derive expansion for the
-        \\completed type
+        \\A field type containing `$T`   |   Introduces a generic type
+        \\parameter; later fields write `T` without `$`
     );
     table_row(18, #string,oneline
-        \\`#modify`   |   Runs the declared modification hook over the
-        \\declaration during compilation
+        \\`#c_call`   |   Declaration order plus the target C ABI's alignment
+        \\and padding; also enables C-ABI validation of the field types
     );
     table_row(19, #string,oneline
-        \\`#magic "name"`   |   Associates compiler-provided behavior; reserved
-        \\for known compiler/standard-library integration
+        \\`#packed`   |   Declaration order, no inter-field or tail padding,
+        \\record alignment 1; `struct #c_call #packed` is byte-identical to
+        \\`struct #packed`
     );
-    paragraph(20, #string,oneline
-        \\Field order is source order and every field ends with `;`. A typed
-        \\literal uses `Type.{ .field = value }`; an inferred `.{ ... }`
-        \\requires an expected struct type. Omitted fields are default
-        \\initialized. Inline struct, union, and enum field types receive
-        \\field-qualified nominal identities rather than becoming anonymous
-        \\structural types.
+    table_row(20, #string,oneline
+        \\`#derive(Name, ...)`   |   Runs the named typeclass derive macro over
+        \\the completed type
+    );
+    table_row(21, #string,oneline
+        \\`#modify`   |   Runs the declaration-modification hook during
+        \\checking, before generic field types are finalized
+    );
+    table_row(22, #string,oneline
+        \\`#magic "name"`   |   Binds compiler-provided behavior; reserved for
+        \\compiler and standard-library integration
+    );
+    paragraph(23, #string,oneline
+        \\Struct directives are order-free and may be combined. A packed struct
+        \\nested inside an undecorated struct does not make the outer struct
+        \\ordered: the outer record still reorders its own fields, and only its
+        \\alignment inherits the inner 1.
     );
 }
 
@@ -102,8 +158,8 @@ render_section_37 :: () {
     paragraph(0, #string,oneline
         \\A `using` marker is accepted before a struct field, but the current
         \\checker stores that field as an ordinary named field. Member promotion
-        \\through the containing value is not implemented: access the nested
-        \\field explicitly.
+        \\through the containing value is not implemented, so the nested field
+        \\must be named explicitly.
     );
     code_block(1, "glosso", #string
         \\Position :: struct { x: f32; y: f32; }
@@ -113,60 +169,53 @@ render_section_37 :: () {
         \\}
         \\
         \\e: Entity;
-        \\e.pos.x = 10; // required by the current checker
+        \\e.pos.x = 10;   // required by the current checker
+        \\// print("%\n", e.x);
     );
     paragraph(2, #string,oneline
-        \\Consequently `e.x` is currently rejected with `no field 'x' in
-        \\'Entity'`. The `using value;` statement is a separate, partially
-        \\implemented feature. It allows fields of a struct-typed local to be
-        \\read as unqualified identifiers for the remainder of the current
-        \\checked body. Assignment to such an unqualified field is currently
-        \\rejected as an unbound assignment target; qualify writes.
+        \\The rejection happens in member lookup, which searches only the
+        \\declared field names of `Entity` and then offers the usual
+        \\did-you-mean suggestion from that same list.
     );
-    code_block(3, "glosso", #string
+    code_block(3, "text", #string
+        \\error: no field 'x' in 'Entity'
+        \\help: did you mean 'id'?
+    );
+    paragraph(4, #string,oneline
+        \\The `using value;` statement is a separate, partially implemented
+        \\feature. It makes the fields of a struct-typed local readable as
+        \\unqualified identifiers for the remainder of the current checked body.
+        \\Only reads are wired up; a bare promoted name is not an assignment
+        \\target, and the assignment checker reports it as unbound.
+    );
+    code_block(5, "glosso", #string
         \\position := e.pos;
         \\using position;
         \\copy := x;       // reads position.x
         \\position.x = 20; // writes must remain qualified
+        \\// x = 20;
     );
-    subheading(4, "Current lookup behavior");
-    paragraph(5, #string,oneline
-        \\The parser accepts `using field: Type;` inside a struct, but the
-        \\current checker records it as an ordinary field. It does not promote
-        \\nested members through the containing value: `entity.x` is rejected
-        \\when only `entity.pos.x` exists.
-    );
-    bullet(6, #string,oneline
-        \\Access a marked field through its declared name, exactly like an
-        \\unmarked field.
-    );
-    bullet(7, #string,oneline
-        \\`using local;` is a different statement feature: a struct local's
-        \\fields can then be read as bare identifiers.
-    );
+    code_block(6, "text", "error: unbound 'x'");
+    subheading(7, "Current lookup behavior");
     bullet(8, #string,oneline
-        \\The current assignment checker does not accept a bare promoted field
-        \\as a write target; qualify writes as `local.field = value`.
+        \\A `using` field is accessed through its declared name, exactly like an
+        \\unmarked field: `entity.pos.x`, never `entity.x`.
     );
     bullet(9, #string,oneline
-        \\The marker changes neither layout, initialization, ownership, nor
-        \\lifetime in the current implementation.
+        \\`using local;` affects name resolution inside one checked body. It
+        \\does not escape into called functions and does not survive the body.
     );
-    code_block(10, "glosso", #string
-        \\Position :: struct { x: f32; y: f32; }
-        \\Entity :: struct { using pos: Position; id: u64; }
-        \\
-        \\e: Entity;
-        \\e.pos.x = 10; // implemented
-        \\// e.x = 10;  // error: no field 'x' in 'Entity'
-        \\
-        \\position := e.pos;
-        \\using position;
-        \\copy := x;       // read lookup through `position`
-        \\position.x = 20; // qualify a write
+    bullet(10, #string,oneline
+        \\A promoted name resolves in read position only; qualify every write as
+        \\`local.field = value`.
     );
-    note(11, #string,oneline
-        \\This section documents the current compiler, not the intended
+    bullet(11, #string,oneline
+        \\The marker changes neither layout, size, initialization, ownership,
+        \\nor lifetime. A `using` field in a `#packed` record is stored as an
+        \\ordinary packed field.
+    );
+    note(12, #string,oneline
+        \\This chapter documents the current compiler, not the intended
         \\promotion design. If member promotion is implemented later, this page
         \\and its compiler-backed examples should be updated together.
     );
@@ -174,10 +223,13 @@ render_section_37 :: () {
 
 render_section_38 :: () {
     paragraph(0, #string,oneline
-        \\`#empty` stores type information without runtime storage. `#as` marks
-        \\an implicit conversion field.
+        \\`#empty` records a type without allocating runtime storage. `#as`
+        \\marks the field the compiler uses when the containing struct is
+        \\coerced to that field's type.
     );
     code_block(1, "glosso", #string
+        \\Socket :: struct { }
+        \\
         \\Handle :: struct {
         \\    #empty: $Owner;
         \\    raw: u64;
@@ -186,322 +238,626 @@ render_section_38 :: () {
         \\Buffer :: struct {
         \\    #as data: []u8;
         \\}
+        \\
+        \\take_slice :: (s: []u8) -> s64 { return s.count; }
+        \\
+        \\main :: () {
+        \\    h: Handle(Socket);
+        \\    h.raw = 7;
+        \\    storage: [4]u8;
+        \\    b: Buffer = .{ .data = storage[..] };
+        \\    print("size=% raw=% as=%\n",
+        \\        size_of(type_of(h)), h.raw, take_slice(b));
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Use `#empty` to keep type-level distinctions with zero runtime cost.
+    code_block(2, "text", "size=8 raw=7 as=4");
+    paragraph(3, #string,oneline
+        \\`Handle(Socket)` is eight bytes: the `#empty` marker contributes the
+        \\type parameter `Owner` to the nominal identity and nothing to the
+        \\layout. `take_slice(b)` compiles because `Buffer` declares an `#as`
+        \\field of exactly the expected type; the conversion is a field
+        \\projection, not a call.
     );
-    subheading(3, "Type evidence and conversion lookup");
-    paragraph(4, #string,oneline
-        \\`#empty` records compile-time type relationships without adding
-        \\ordinary runtime payload, while `#as` marks a field as an intentional
-        \\conversion view of its containing value. Both features shape type
-        \\behavior and should communicate a real abstraction relationship.
+    subheading(4, "Type evidence and conversion lookup");
+    paragraph(5, #string,oneline
+        \\An `#as` conversion is consulted only when the containing struct is
+        \\being coerced to the marked field's type. It is not a general cast
+        \\hook, it never runs user code, and it is not applied transitively.
+        \\The compiler stores one effective conversion field per struct, and a
+        \\second `#as` silently replaces the first.
     );
-    bullet(5, #string,oneline
-        \\Use `#empty` for type-level evidence or association, not as hidden
-        \\runtime state.
+    code_block(6, "glosso", #string
+        \\Two :: struct {
+        \\    #as a: s64;
+        \\    #as b: f64;
+        \\}
+        \\
+        \\take :: (v: s64) -> s64 { return v; }
+        \\
+        \\main :: () {
+        \\    t: Two = .{ .a = 1, .b = 2.0 };
+        \\    print("%\n", take(t));
+        \\}
     );
-    bullet(6, #string,oneline
-        \\Use `#as` only when conversion is unambiguous and preserves the
-        \\invariant expected by callers.
+    code_block(7, "text", "error: arg type Two != int in call take");
+    paragraph(8, #string,oneline
+        \\The last `#as` field wins, so `Two` converts to `f64` and no longer
+        \\converts to `s64`. There is no diagnostic at the declaration; the
+        \\error appears at whichever call site expected the shadowed type.
+        \\Declare exactly one conversion field.
     );
-    bullet(7, #string,oneline
-        \\Add `using` only when the converted or embedded interface should also
-        \\participate in member lookup.
+    bullet(9, #string,oneline
+        \\Use `#empty` for type-level evidence — phantom ownership, units, state
+        \\tags — not as hidden runtime state; it has none.
     );
-    bullet(8, #string,oneline
-        \\Prefer an explicitly named conversion function when the operation
-        \\allocates, can fail, or loses information.
+    bullet(10, #string,oneline
+        \\Use `#as` only when the projection preserves the invariant callers
+        \\expect, because the conversion is implicit and invisible at the call.
     );
-    table_header(9, "Field form   —   Stored?   —   Lookup/conversion effect");
-    table_row(10, #string,oneline
-        \\`#empty: T;`   |   No ordinary runtime field   |   Records `T` as
-        \\type-level evidence and can introduce/retain generic type information
+    bullet(11, #string,oneline
+        \\Prefer a named conversion function when the operation allocates, can
+        \\fail, or loses information; `#as` cannot report failure.
     );
-    table_row(11, #string,oneline
-        \\`#empty: T, U;`   |   No ordinary runtime fields   |   Adds several
-        \\empty type markers in one declaration
-    );
-    table_row(12, #string,oneline
-        \\`#as field: T;`   |   Yes   |   Makes `field` the struct's implicit
-        \\conversion field when a `T` is expected
-    );
+    table_header(12, "Field form   —   Stored?   —   Lookup/conversion effect");
     table_row(13, #string,oneline
-        \\`#as using field: T;`   |   Yes   |   Parses the same conversion field
-        \\plus the current `using` marker; embedded member promotion remains
-        \\subject to the limitation documented in the preceding chapter
+        \\`#empty: T;`   |   No runtime storage   |   Records `T` as type-level
+        \\evidence and can introduce or retain a generic parameter
     );
-    paragraph(14, #string,oneline
-        \\An implicit `#as` conversion is selected only when the containing
-        \\struct is being coerced to the marked field's type. It is not a
-        \\general cast hook and does not run arbitrary code. The compiler stores
-        \\one effective `as_field` name for the struct, so a type should declare
-        \\one unambiguous conversion field.
+    table_row(14, #string,oneline
+        \\`#empty: T, U;`   |   No runtime storage   |   Declares several empty
+        \\type markers at once; `Handle(A, B)` then takes two arguments
+    );
+    table_row(15, #string,oneline
+        \\`#as field: T;`   |   Yes   |   Makes `field` the struct's implicit
+        \\conversion field wherever a `T` is expected
+    );
+    table_row(16, #string,oneline
+        \\`#as using field: T;`   |   Yes   |   Same conversion field plus the
+        \\`using` marker, whose promotion limits are described in the preceding
+        \\chapter
     );
 }
 
 render_section_39 :: () {
     paragraph(0, #string,oneline
-        \\Assigning a variant activates it. Payload-less variants use `void` and
-        \\are activated by naming the variant.
+        \\A tagged union stores one active variant plus a tag identifying it.
+        \\Construction selects the active variant. Three spellings activate one:
+        \\a qualified constructor call, a contextual constructor where the union
+        \\type is expected, and a write through the variant field. A `void`
+        \\variant is activated by naming it.
     );
     code_block(1, "glosso", #string
-        \\Option :: union { some: $T; none: void; }
+        \\Maybe :: union { Some: $T; None: void; }
         \\
-        \\x: Option(int);
-        \\x.some = 123;
+        \\main :: () {
+        \\    x: Maybe(int);
+        \\    x.Some = 123;        // field write activates .Some
+        \\    print("some = %\n", x.Some);
         \\
-        \\empty: Option(int);
-        \\empty.none;
+        \\    empty: Maybe(int);
+        \\    empty.None;          // naming a void variant activates it
+        \\
+        \\    z: Maybe(int) = .None;             // contextual constructor
+        \\    if z == {
+        \\    case .Some(v); print("some %\n", v);
+        \\    case .None;    print("none\n");
+        \\    }
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Reading a payload is meaningful when that variant is active. Switch
-        \\before accessing uncertain data.
+    code_block(2, "text", #string
+        \\some = 123
+        \\none
     );
-    subheading(3, "Active variants and payloads");
-    paragraph(4, #string,oneline
-        \\A tagged union stores one active variant together with the information
-        \\needed to identify it. Constructing a variant selects that active
-        \\case, and payload syntax must agree with whether the declared variant
-        \\carries data.
+    note(3, #string,oneline
+        \\The union here is named `Maybe` on purpose. `Option` is the Prelude's
+        \\own `union #magic "option" { None: void; Some: $T; }`, with
+        \\capitalised variants, and redeclaring the name shadows it.
     );
-    bullet(5, #string,oneline
-        \\Name the variant at construction so the active state is obvious at the
-        \\point where data enters the union.
+    subheading(4, "Reading a payload is a checked unwrap");
+    paragraph(5, #string,oneline
+        \\Reading `value.Variant` outside a proven match is not undefined
+        \\behavior and it is not a compile error. The checker marks the access
+        \\`checked_unwrap` and lowering emits a tag load, a comparison against
+        \\the wanted variant index, and a call to the `assert_failed` intrinsic
+        \\on mismatch. A correct read succeeds silently; a wrong read aborts the
+        \\process with exit status 134.
     );
-    bullet(6, #string,oneline
-        \\Payload-free variants express states such as absence or completion
-        \\without inventing sentinel data.
+    code_block(6, "glosso", #string
+        \\Token :: union {
+        \\    Name: string;
+        \\    Code: s64;
+        \\    Eof:  void;
+        \\}
+        \\
+        \\main :: () {
+        \\    t: Token = .Name("hi");
+        \\    print("about to read the wrong variant\n");
+        \\    n := t.Code;
+        \\    print("read %\n", n);
+        \\}
     );
-    bullet(7, #string,oneline
-        \\Never read a payload until control flow has established the
-        \\corresponding active variant.
+    code_block(7, "text", #string
+        \\about to read the wrong variant
+        \\unwrap.glo:10:12: union access: expected .Code, but the value holds one of .Name | .Code | .Eof
+        \\(process exit status 134; the final print never runs)
     );
-    bullet(8, #string,oneline
-        \\Use a struct payload when a variant needs several named values; it
-        \\keeps pattern matching and evolution readable.
+    paragraph(8, #string,oneline
+        \\The message enumerates every declared variant, including the expected
+        \\one, and does not name the variant actually held. A payload *write* is
+        \\never checked: assigning through a different variant field simply
+        \\retags the value. Naming a variant that does not exist is a plain
+        \\`error: no union field Nope`, with no suggestion — unlike struct
+        \\fields, unions get no did-you-mean help. The chapter "Union Payload
+        \\Access and Checked Unwrap" covers the runtime cost and the ways to
+        \\avoid it.
     );
-    table_header(9, "Variant declaration   —   Activation");
-    table_row(10, #string,oneline
-        \\`Some: T;`   |   Assign the payload through the variant field, such as
-        \\`value.Some = payload`, or construct contextually as `.Some(payload)`
-        \\where supported
+    subheading(9, "The `union_unwrap` feature gate");
+    paragraph(10, #string,oneline
+        \\`#enable(union_unwrap)` and `#disable(union_unwrap)` control whether
+        \\that permissive access is allowed. The gate defaults to enabled. It is
+        \\recorded per following top-level declaration at parse time, exactly
+        \\like `#enable(private_section)`, so disabling it applies to the
+        \\declarations after the directive in one file and never reaches another
+        \\file or the standard library.
     );
-    table_row(11, #string,oneline
-        \\`None: void;`   |   Select the payload-free variant by naming it, such
-        \\as `value.None`, or use contextual `.None` construction
+    code_block(11, "glosso", #string
+        \\Token :: union { Name: string; Code: s64; Eof: void; }
+        \\
+        \\#disable(union_unwrap);
+        \\peek :: (t: Token) -> s64 { return t.Code; }
+        \\#enable(union_unwrap);
     );
-    table_row(12, #string,oneline
-        \\Inline aggregate payload   |   Construct/match the inline nominal
-        \\payload under that variant
+    code_block(12, "text", #string
+        \\error: union value is not known to hold '.Code' here
+        \\note: match on it first, or enable #enable(union_unwrap) for a checked unwrap
     );
-    note(13, #string,oneline
-        \\The active tag changes when a variant is activated. A field access
-        \\alone is not proof that a payload-bearing variant is active; switch or
-        \\pattern-match before reading uncertain payload storage.
+    paragraph(13, #string,oneline
+        \\Two consequences make the strict mode narrower than it looks. The gate
+        \\also blocks payload *writes*, so `t.Code = 5;` fails with the same
+        \\error and a union can only be built with constructor syntax. And arm
+        \\refinement records nothing, so even `case .Code; ... t.Code` inside the
+        \\arm that just proved the tag is rejected. Capture arms are the only
+        \\form that compiles under the gate.
+    );
+    code_block(14, "glosso", #string
+        \\#disable(union_unwrap);
+        \\dump :: (t: Token) {
+        \\    if t == {
+        \\    case .Name(s); print("name %\n", s);
+        \\    case .Code(v); print("code %\n", v);
+        \\    case .Eof;     print("eof\n");
+        \\    }
+        \\}
+        \\build :: () -> Token { return .Code(5); }
+        \\#enable(union_unwrap);
+        \\
+        \\main :: () { dump(build()); dump(.Name("x")); }
+    );
+    code_block(15, "text", #string
+        \\code 5
+        \\name x
+    );
+    subheading(16, "`#from` variants");
+    paragraph(17, #string,oneline
+        \\A variant declared `#from name: Payload;` is an ordinary variant in
+        \\every respect — it is constructed, activated, read, and matched like
+        \\any other. The prefix additionally makes the checker generate a
+        \\`Propagate` instance from `Payload` to the union, which is what
+        \\postfix `?` uses to lift a residual of one error type into a wider
+        \\error union with no manual conversion.
+    );
+    code_block(18, "glosso", #string
+        \\Foo_Error :: struct { code: s64; }
+        \\Bar_Error :: struct { code: s64; }
+        \\
+        \\Combined :: union {
+        \\    #from foo: Foo_Error;
+        \\    #from bar: Bar_Error;
+        \\    plain: s64;
+        \\}
+        \\
+        \\foo :: (ok: bool) -> Result(s64, Foo_Error) {
+        \\    if !ok return Result.Err(.{ .code = 11 });
+        \\    return Result.Ok(20);
+        \\}
+        \\bar :: (ok: bool) -> Result(s64, Bar_Error) {
+        \\    if !ok return Result.Err(.{ .code = 22 });
+        \\    return Result.Ok(22);
+        \\}
+        \\
+        \\combined :: (a: bool, b: bool) -> Result(s64, Combined) {
+        \\    x := foo(a)?;   // Foo_Error residual lifted into Combined
+        \\    y := bar(b)?;   // Bar_Error residual lifted into Combined
+        \\    return x + y;
+        \\}
+        \\
+        \\main :: () {
+        \\    good := combined(true, true);
+        \\    bad := combined(false, true);
+        \\    print("% %\n", good.Ok, bad.Err.foo.code);
+        \\
+        \\    made := Combined.bar(.{ .code = 4 });
+        \\    if made == {
+        \\    case .foo(e);   print("foo %\n", e.code);
+        \\    case .bar(e);   print("bar %\n", e.code);
+        \\    case .plain(n); print("plain %\n", n);
+        \\    }
+        \\}
+    );
+    code_block(19, "text", #string
+        \\42 11
+        \\bar 4
+    );
+    paragraph(20, #string,oneline
+        \\The generated instance is the ordinary two-type `Propagate` instance a
+        \\reader could have written by hand, so `#from` is a shorthand and not a
+        \\separate mechanism. All four rejections are reported at the union
+        \\declaration rather than at the offending field.
+    );
+    code_block(21, "text", #string
+        \\error: #from is not defined for #raw union
+        \\error: #from does not yet support generic unions
+        \\error: #from variant 'e' must have a payload
+        \\error: #from variant 'b' duplicates the source type E
+    );
+    paragraph(22, #string,oneline
+        \\The first fires because a `#raw` union has no tag to set, the second
+        \\because instance generation runs before specialization, the third
+        \\because `void` carries nothing to propagate, and the fourth because
+        \\two variants with the same payload type would make the instance
+        \\ambiguous. `#from` is a union-field prefix only: inside a struct body
+        \\it is `error: unexpected token 'from'`.
+    );
+    subheading(23, "Placement restrictions");
+    bullet(24, #string,oneline
+        \\A generic union type is accepted only in type-annotation positions —
+        \\variable annotation, parameter, return type, struct field. Writing
+        \\`Maybe(int).Some(7)` or `size_of(Maybe(int))` in expression position
+        \\gives `error: unknown function Maybe`. Annotate a local and use
+        \\`size_of(type_of(local))`. The same holds for the Prelude's `Option`
+        \\and `Result`.
+    );
+    bullet(25, #string,oneline
+        \\A file-scope global of any tagged-union type fails at the link step
+        \\with `error: LLVM backend cannot emit aggregate constant Token`, after
+        \\the compile step has already reported success. Unions are fine as
+        \\locals and as struct fields.
+    );
+    bullet(26, #string,oneline
+        \\Use a struct payload when a variant needs several named values; the
+        \\inline form gets a field-qualified nominal name and can be captured
+        \\whole in one arm.
+    );
+    bullet(27, #string,oneline
+        \\`Option(*T)` of a pointer is laid out with no tag word at all — see
+        \\"Optional Pointers and the Null Niche" for the niche rule and the
+        \\sharp edge it creates.
     );
 }
 
 render_section_40 :: () {
     paragraph(0, #string,oneline
-        \\The switch form `if value == { ... }` dispatches over the active tag.
-        \\A dot-prefixed case such as `case .some;` uses the same contextual
-        \\spelling as an enum case. The older bare spelling, `case some;`,
-        \\remains accepted.
+        \\`if value == { ... }` dispatches over the active tag. A case is
+        \\written `case .Variant;` with the contextual dot, or `case Variant;`
+        \\in the older bare spelling; both remain accepted. Appending a
+        \\parenthesised name captures the payload for that arm.
     );
     code_block(1, "glosso", #string
-        \\show :: (x: Option(int)) {
-        \\    if x == {
-        \\        case .some; print("some %\n", x.some);
-        \\        case .none; print("none\n");
-        \\    }
-        \\}
-    );
-    paragraph(2, #string,oneline
-        \\`#falling` falls through to the next case body when explicitly
-        \\requested.
-    );
-    subheading(3, "Narrowing and exhaustiveness");
-    paragraph(4, #string,oneline
-        \\Switching on a tagged union narrows each case to one active variant
-        \\and makes its payload available under that case's rules. Exhaustive
-        \\handling is the safest default because adding a variant then reveals
-        \\every decision point that needs review.
-    );
-    bullet(5, #string,oneline
-        \\Handle every variant or add an explicit `else` when several states
-        \\intentionally share behavior.
-    );
-    bullet(6, #string,oneline
-        \\Use `#partial` only when ignoring unmatched variants is part of the
-        \\operation's contract, not to silence an incomplete implementation.
-    );
-    bullet(7, #string,oneline
-        \\Keep payload-dependent work inside the matched case so the active-tag
-        \\proof remains local.
-    );
-    bullet(8, #string,oneline
-        \\Prefer pattern switches when nested payload structure needs to be
-        \\destructured at the same time.
-    );
-    paragraph(9, #string,oneline
-        \\`if union_value == { ... }` is the tagged-union switch form. `case
-        \\.Variant;` is the contextual spelling and `case Variant;` remains
-        \\accepted for compatibility. Within a payload case, access through the
-        \\subject (`union_value.Variant`) or use a pattern case to bind the
-        \\payload directly.
-    );
-    code_block(10, "glosso", #string
-        \\show :: (value: Option(string)) {
-        \\    if value == {
-        \\        case .Some; print("%\n", value.Some);
-        \\        case .None; print("none\n");
+        \\Shape :: union { Circle: f64; Rect: f64; Empty: void; }
+        \\
+        \\describe :: (s: Shape) {
+        \\    if s == {
+        \\    case .Circle(r); print("circle r=%\n", r);
+        \\    case .Rect(w);   print("rect w=%\n", w);
+        \\    case .Empty;     print("empty\n");
         \\    }
         \\}
         \\
-        \\// Destructuring alternative
-        \\if #pattern value == {
-        \\case .Some(text); print("%\n", text);
-        \\case .None; print("none\n");
+        \\main :: () {
+        \\    describe(.Rect(3.5));
+        \\    describe(.Empty);
         \\}
+    );
+    code_block(2, "text", #string
+        \\rect w=3.5
+        \\empty
+    );
+    paragraph(3, #string,oneline
+        \\The capture is a mutable copy of the payload, scoped to its own arm.
+        \\Assigning to it does not write back into the union, and the name is
+        \\visible neither in sibling arms nor after the switch. `_` is accepted
+        \\and discards.
+    );
+    code_block(4, "glosso", #string
+        \\s: Shape = .Circle(2.0);
+        \\if s == {
+        \\case .Circle(r); r = 99.0; print("local r=%\n", r);
+        \\case .Rect(w);   print("rect w=%\n", w);
+        \\case .Empty;     print("empty\n");
+        \\}
+        \\if s == {
+        \\case .Circle(r); print("after r=%\n", r);
+        \\case .Rect;      print("rect\n");
+        \\case .Empty;     print("empty\n");
+        \\}
+    );
+    code_block(5, "text", #string
+        \\local r=99
+        \\after r=2
+    );
+    paragraph(6, #string,oneline
+        \\Reading the payload through the subject inside an arm
+        \\(`case .Circle; ... s.Circle`) still works and is the pre-capture
+        \\spelling, but it is not equivalent. Emitted IR for a capture arm
+        \\contains no unwrap check; the same arm written with a subject access
+        \\emits a tag comparison and its panic string, because arm refinement is
+        \\not implemented. Prefer capture arms.
+    );
+    subheading(7, "Exhaustiveness");
+    paragraph(8, #string,oneline
+        \\Only a tagged-union subject is coverage checked, and the check is name
+        \\counting rather than a structural analysis: the switch is accepted
+        \\when the number of distinct variant names mentioned equals the number
+        \\of declared variants, or when an `else` arm is present, or when the
+        \\switch carries `#partial`. Enum, integer and bool subjects are not
+        \\coverage checked at all — such a switch that matches nothing simply
+        \\falls through with no diagnostic and no arm executed.
+    );
+    code_block(9, "glosso", #string
+        \\s: Shape = .Circle(2.0);
+        \\if s == {
+        \\case .Circle; print("circle\n");
+        \\case .Rect;   print("rect\n");
+        \\}
+    );
+    code_block(10, "text", #string
+        \\error: switch is exhaustive by default; add else or #partial
+        \\  --> switch.glo:2:1
+        \\  |
+        \\2 | if s == {
+        \\  | ^^
+    );
+    paragraph(11, #string,oneline
+        \\The plain switch names no missing variant, which makes it unhelpful on
+        \\a large union. The `#pattern` switch runs a real usefulness analysis
+        \\and reports witnesses instead: `error: non-exhaustive #pattern
+        \\switch`, one `note: missing case: <witness>` per gap (at most six, then
+        \\`note: ...and N more`), and a closing `note: cover them, or add 'else'
+        \\or '#partial'`. Use it when the union is wide or the payloads
+        \\themselves need destructuring; see "Pattern Vocabulary and Case
+        \\Guards".
+    );
+    code_block(12, "text", #string
+        \\error: non-exhaustive #pattern switch
+        \\note: missing case: Shape.Rect(_)
+        \\note: missing case: Shape.Empty
+        \\note: cover them, or add 'else' or '#partial'
+    );
+    subheading(13, "`#falling` and capture arms");
+    paragraph(14, #string,oneline
+        \\In the plain switch `#falling` is an unconditional jump into the next
+        \\case's body, bypassing that case's tag test. Payload extraction is
+        \\emitted at the top of every body, so falling into a capturing arm
+        \\reinterprets the active variant's bits as the next variant's payload
+        \\type. The compiler accepts this with no diagnostic.
+    );
+    code_block(15, "glosso", #string
+        \\Shape :: union { Circle: f64; Rect: s64; Empty: void; }
+        \\
+        \\main :: () {
+        \\    s: Shape = .Circle(2.5);
+        \\    if s == {
+        \\    case .Circle(r); print("circle r=%\n", r); #falling;
+        \\    case .Rect(w);   print("rect w=%\n", w);
+        \\    case .Empty;     print("empty\n");
+        \\    }
+        \\}
+    );
+    code_block(16, "text", #string
+        \\circle r=2.5
+        \\rect w=4612811918334230528
+    );
+    paragraph(17, #string,oneline
+        \\4612811918334230528 is the `f64` bit pattern of 2.5 read as `s64`.
+        \\With a `string` payload the same construction dereferences a garbage
+        \\pointer and the program dies with a segmentation fault. Never put
+        \\`#falling` on an arm that captures, and never fall into one. In a
+        \\`#pattern` switch `#falling` means something else entirely: it jumps to
+        \\the next case's *condition*, re-tests it, and exits the switch if it
+        \\does not match — which is safe.
+    );
+    subheading(18, "Case rejections");
+    bullet(19, #string,oneline
+        \\`case .Empty(e);` on a `void` variant is `error: variant 'Empty' has
+        \\no payload to capture`.
+    );
+    bullet(20, #string,oneline
+        \\`case .Circle(a, b);` is `error: a union switch case captures at most
+        \\one payload`.
+    );
+    bullet(21, #string,oneline
+        \\`case .Circle(1.0);` is `error: a union switch case payload capture
+        \\must be a name`. The plain switch takes a bare identifier, never a
+        \\nested pattern; nested patterns require `#pattern`.
+    );
+    bullet(22, #string,oneline
+        \\`case .Square;` on a union without that variant is `error: 'Square' is
+        \\not a variant of union Shape`.
+    );
+    bullet(23, #string,oneline
+        \\Repeating one variant with two different capture names silently
+        \\overwrites the per-variant capture slot, and the first arm's name is
+        \\then reported as `error: unbound r`. Match each variant once.
+    );
+    bullet(24, #string,oneline
+        \\`if #pattern #partial s == { ... }` is `error: unexpected directive
+        \\'partial'`; `#partial` goes before `#pattern`.
+    );
+    paragraph(25, #string,oneline
+        \\Use `#partial` when ignoring the remaining variants is part of the
+        \\operation's contract, and `else` when several states deliberately share
+        \\behavior. Neither suppresses the checked unwrap: an arm that reads a
+        \\payload through the subject still pays its tag test.
     );
 }
 
 render_section_41 :: () {
     paragraph(0, #string,oneline
-        \\A raw union has no tag and overlays storage. Use it for low-level
-        \\representation work and C interop. The compiler cannot know which
-        \\field is active.
+        \\`union #raw` overlays its fields in one aligned block large enough for
+        \\the largest member and emits no tag. The compiler therefore cannot
+        \\know which field is active, and nothing tracks it at run time.
     );
-    code_block(1, "glosso", "Bits :: union #raw { i: u32; f: f32; }");
+    code_block(1, "glosso", "Bits :: union #raw { floating: f64; bits: u64; }");
     paragraph(2, #string,oneline
-        \\Because no tag exists, raw unions cannot participate in tagged union
-        \\switching.
+        \\Because there is no tag, a raw union cannot be switched on. Both switch
+        \\forms reject it, and in the pattern-coverage analysis a raw union
+        \\additionally degrades to an unbounded constructor set, so nothing short
+        \\of a wildcard could cover it.
     );
-    subheading(3, "Untagged storage");
-    paragraph(4, #string,oneline
-        \\A raw union overlays its fields without recording which one is active.
-        \\This is a representation tool for foreign layouts and tightly
-        \\controlled low-level code, not a substitute for an ordinary sum type.
+    code_block(3, "text",
+        "error: cannot switch on a raw union (it has no tag)");
+    subheading(4, "Exemption from the unwrap rule");
+    paragraph(5, #string,oneline
+        \\A member read of a tagged union is a checked unwrap and is governed by
+        \\the `union_unwrap` feature gate. A `#raw` union is tested for rawness
+        \\before the gate is consulted, so its member reads emit no check and
+        \\remain legal even inside a `#disable(union_unwrap)` region. This is the
+        \\only aggregate that reinterprets storage without a diagnostic.
     );
-    bullet(5, #string,oneline
+    code_block(6, "glosso", #string
+        \\Bits :: union #raw { floating: f64; bits: u64; }
+        \\
+        \\#disable(union_unwrap);
+        \\punned :: () -> u64 {
+        \\    b: Bits;
+        \\    b.floating = 1.0;
+        \\    return b.bits;
+        \\}
+        \\#enable(union_unwrap);
+        \\
+        \\main :: () { print("%\n", punned()); }
+    );
+    code_block(7, "text", "4607182418800017408");
+    paragraph(8, #string,oneline
+        \\4607182418800017408 is the IEEE-754 encoding of 1.0. The validity of
+        \\such a read comes from the external format or the low-level algorithm,
+        \\never from the type checker.
+    );
+    bullet(9, #string,oneline
         \\Track the active interpretation in surrounding state and update that
-        \\state together with every union write.
+        \\state with every write; the union itself stores nothing about it.
     );
-    bullet(6, #string,oneline
-        \\Reading a field different from the one established by the
-        \\representation contract can produce invalid values.
+    bullet(10, #string,oneline
+        \\Verify size, alignment, and field types against the external ABI when a
+        \\raw union mirrors foreign data. Combine with `#packed` on the members
+        \\when the format has no padding.
     );
-    bullet(7, #string,oneline
-        \\Prefer tagged unions whenever the program itself owns the data model
-        \\and can afford an explicit tag.
-    );
-    bullet(8, #string,oneline
-        \\Verify size, alignment, and field types against the external ABI when
-        \\a raw union mirrors foreign data.
-    );
-    paragraph(9, #string,oneline
-        \\`Name :: union #raw { ... }` allocates enough aligned storage for its
-        \\largest member and emits no active-variant tag. Consequently the
-        \\tagged switch and coverage rules do not apply. Writing one field and
-        \\reading another is a representation reinterpretation whose validity
-        \\comes from the external format or low-level algorithm, not from the
-        \\type checker.
+    bullet(11, #string,oneline
+        \\Prefer a tagged union whenever the program owns the data model and can
+        \\afford one tag word; the checked unwrap then catches the mistake this
+        \\chapter cannot.
     );
 }
 
 render_section_42 :: () {
     paragraph(0, #string,oneline
-        \\An enum is a nominal set of named integer-like values. Explicit values
-        \\use `::`.
+        \\An enum is a nominal set of named integer-like values. A member with no
+        \\explicit value continues the sequence from the previous member; an
+        \\explicit value uses `::`, never `=`, because a member is a constant
+        \\declaration rather than an assignment.
     );
     code_block(1, "glosso", #string
         \\Mode :: enum { Read; Write :: 4; Append; }
-        \\mode := Mode.Read;
+        \\
+        \\main :: () {
+        \\    m := Mode.Read;
+        \\    print("Read=% Write=% Append=%\n",
+        \\        cast(s64)Mode.Read, cast(s64)Mode.Write, cast(s64)Mode.Append);
+        \\    print("eq=% lt=%\n", m == Mode.Read, m < Mode.Write);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Enums support equality and ordering through prelude instances.
+    code_block(2, "text", #string
+        \\Read=0 Write=4 Append=5
+        \\eq=1 lt=1
     );
-    subheading(3, "Members and backing values");
-    paragraph(4, #string,oneline
-        \\An enum gives symbolic names to a closed set of values. The enum type
-        \\is a domain boundary: callers should reason in member names, while the
-        \\backing representation matters mainly for layout, serialization, or
-        \\foreign interoperability.
+    paragraph(3, #string,oneline
+        \\`Append` is 5, not 1: implicit numbering resumes from the last explicit
+        \\value plus one. Equality and ordering come from Prelude instances over
+        \\the backing integer, so `<` compares numeric values and not declaration
+        \\positions — for `Mode` those happen to agree, but they do not have to.
     );
-    bullet(5, #string,oneline
-        \\Use enum members in APIs instead of unrelated integers so invalid
-        \\states are harder to express.
+    subheading(4, "Backing type");
+    paragraph(5, #string,oneline
+        \\`Name :: enum IntegerType { ... }` fixes the representation; omitting
+        \\the type uses the compiler's default. The backing type determines
+        \\`size_of`, the value range that survives, and how the enum is passed
+        \\across a foreign boundary.
     );
-    bullet(6, #string,oneline
-        \\Choose and document an explicit backing type when values cross a
-        \\binary boundary.
+    table_header(6, "Syntax   —   Assigned value");
+    table_row(7, #string,oneline
+        \\`First;`   |   0 when no earlier member changed the sequence
     );
-    bullet(7, #string,oneline
-        \\Handle members exhaustively when each value has distinct behavior;
-        \\newly added members will then expose stale logic.
+    table_row(8, #string,oneline
+        \\`Named :: 4;`   |   Exactly 4; member values use `::`, not `=`
     );
-    bullet(8, #string,oneline
-        \\Keep stable explicit numeric values for persistent formats rather than
-        \\depending on declaration order.
+    table_row(9, #string,oneline
+        \\The member after `Named :: 4;`   |   5; implicit numbering resumes from
+        \\the explicit value plus one
     );
-    table_header(9, "Syntax   —   Assigned value");
     table_row(10, #string,oneline
-        \\`First;`   |   0 when no earlier member changes the sequence
+        \\`Name :: enum u8 { ... }`   |   Explicit backing type; `size_of` is 1
+        \\and an out-of-range member is silently truncated
     );
-    table_row(11, #string,oneline
-        \\`Named :: 4;`   |   Exactly 4; enum member values use `::`, not `=`
+    note(11, #string,oneline
+        \\A member value that does not fit the backing type is not diagnosed. It
+        \\is truncated during checking and the truncated value is what every
+        \\later read sees. `enum s128` and `enum u128` truncate to 64 bits no
+        \\matter how wide the declared backing type is, even though `size_of`
+        \\correctly reports 16. See "128-Bit Integers".
     );
-    table_row(12, #string,oneline
-        \\The member after `Named :: 4;`   |   5; implicit numbering resumes
-        \\from the explicit value plus one
+    code_block(12, "glosso", #string
+        \\Small :: enum u8   { A :: 300; B :: 1; }
+        \\Wide  :: enum u128 { Low :: 5; High :: 16#1_0000_0000_0000_0005; }
+        \\
+        \\main :: () {
+        \\    print("Small size=% A=% B=%\n",
+        \\        size_of(Small), cast(s64)Small.A, cast(s64)Small.B);
+        \\    print("Wide  size=% Low=% High=%\n",
+        \\        size_of(Wide), cast(u128)Wide.Low, cast(u128)Wide.High);
+        \\}
     );
-    table_row(13, #string,oneline
-        \\`Name :: enum u8 { ... }`   |   Uses the explicit backing type; omit
-        \\it for the compiler's default enum representation
+    code_block(13, "text", #string
+        \\Small size=1 A=44 B=1
+        \\Wide  size=16 Low=5 High=5
+    );
+    paragraph(14, #string,oneline
+        \\`A` was declared 300 and reads back as 44; `High` was declared
+        \\2^64 + 5 and reads back as 5. Neither the declaration nor the read
+        \\produces a diagnostic, so every explicit member value must be checked
+        \\against the backing type by hand.
+    );
+    bullet(15, #string,oneline
+        \\Use enum members in APIs instead of bare integers; an out-of-range
+        \\integer cannot be passed without an explicit `cast`.
+    );
+    bullet(16, #string,oneline
+        \\Give persistent formats explicit numeric values so inserting a member
+        \\later cannot renumber the rest of the sequence.
+    );
+    bullet(17, #string,oneline
+        \\A plain switch over an enum subject is not coverage checked — only
+        \\tagged-union subjects are. Use a `#pattern` switch when adding a member
+        \\must break every stale decision point.
     );
 }
 
 render_section_43 :: () {
     paragraph(0, #string,oneline
-        \\`enum_flags T` defines a bit-mask enum with backing type `T`. Use
-        \\bitwise operators to combine and test flags.
+        \\`enum_flags T` defines a bit-mask enum. Unlike an ordinary enum the
+        \\backing type is mandatory: `enum_flags { ... }` is
+        \\`error: unexpected token '{'`.
     );
     code_block(1, "glosso", #string
-        \\Open_Flags :: enum_flags u32 { Read :: 1; Write :: 2; Create :: 4; }
-        \\flags := Open_Flags.Read | Open_Flags.Create;
-    );
-    subheading(2, "Bit-set representation");
-    paragraph(3, #string,oneline
-        \\A flag enum models a set of independently combinable options in an
-        \\integer backing value. Individual flags should occupy distinct bits;
-        \\combined values then represent membership rather than a single
-        \\alternative.
-    );
-    bullet(4, #string,oneline
-        \\Assign powers of two to independent flags and reserve zero for the
-        \\empty set when that state is useful.
-    );
-    bullet(5, #string,oneline
-        \\Use bitwise set, clear, and test operations rather than equality when
-        \\several flags may be present.
-    );
-    bullet(6, #string,oneline
-        \\Mask unknown bits when decoding untrusted or versioned data according
-        \\to the format's compatibility policy.
-    );
-    bullet(7, #string,oneline
-        \\Use an ordinary enum when exactly one member may be active; flag enums
-        \\intentionally permit combinations.
-    );
-    paragraph(8, #string,oneline
-        \\The syntax is `Name :: enum_flags IntegerType { Member :: value; ...
-        \\}`; unlike an ordinary enum, the backing type is mandatory. The
-        \\compiler does not invent power-of-two values for omitted members—the
-        \\same sequential enum numbering rule applies—so independently
-        \\combinable flags should be assigned explicit bit values.
-    );
-    code_block(9, "glosso", #string
         \\Permissions :: enum_flags u32 {
         \\    None    :: 0;
         \\    Read    :: 1;
@@ -509,16 +865,61 @@ render_section_43 :: () {
         \\    Execute :: 4;
         \\}
         \\
-        \\permissions := Permissions.Read | Permissions.Write;
-        \\can_write := (permissions & Permissions.Write) != cast(Permissions)0;
+        \\main :: () {
+        \\    permissions := Permissions.Read | Permissions.Write;
+        \\    can_write := (permissions & Permissions.Write) != cast(Permissions)0;
+        \\    cleared := permissions & ~Permissions.Read;
+        \\    print("mask=% can_write=% cleared=%\n",
+        \\        cast(u32)permissions, can_write, cast(u32)cleared);
+        \\}
+    );
+    code_block(2, "text", "mask=3 can_write=1 cleared=2");
+    paragraph(3, #string,oneline
+        \\`|`, `&`, and `~` operate on the backing integer and return the flag
+        \\type, so a test needs a comparison against a cast zero rather than a
+        \\direct truth value. Membership is tested with `&`, never with `==`,
+        \\because a combined value equals no single member.
+    );
+    subheading(4, "Values are sequential, not powers of two");
+    paragraph(5, #string,oneline
+        \\The same numbering rule as an ordinary enum applies. The compiler does
+        \\not invent bit positions for members without explicit values, so
+        \\omitting them produces overlapping and zero-valued flags.
+    );
+    code_block(6, "glosso", #string
+        \\Seq :: enum_flags u8 { A; B; C; }
+        \\
+        \\main :: () {
+        \\    print("A=% B=% C=%\n", cast(u8)Seq.A, cast(u8)Seq.B, cast(u8)Seq.C);
+        \\}
+    );
+    code_block(7, "text", "A=0 B=1 C=2");
+    paragraph(8, #string,oneline
+        \\`A` is 0, so it can never be present in any mask, and `B` and `C`
+        \\overlap on the low two bits. Every independently combinable flag needs
+        \\an explicit power of two, and 0 should be reserved for the empty set.
+    );
+    note(9, #string,oneline
+        \\`enum_flags u128` has the same silent truncation as `enum u128`: a
+        \\member declared `Top :: 16#1_0000_0000_0000_0000;` reads back as 0.
+        \\Flag positions must stay below bit 64. See "128-Bit Integers".
+    );
+    bullet(10, #string,oneline
+        \\Mask unknown bits when decoding untrusted or versioned data; nothing in
+        \\the type rejects a value with bits no member declares.
+    );
+    bullet(11, #string,oneline
+        \\Use an ordinary enum when exactly one member may be active. A flag enum
+        \\intentionally permits combinations and its ordering comparisons compare
+        \\masks, not ranks.
     );
 }
 
 render_section_44 :: () {
     paragraph(0, #string,oneline
-        \\A function declaration has a name, parameter list, optional return
-        \\type, directives, constraints, and a body. Omitting `-> T` means the
-        \\function returns `void`.
+        \\A function declaration has a name, a parameter list, an optional return
+        \\type, directives, `where` clauses, and a body, in that order. Omitting
+        \\`-> T` means the function returns `void`.
     );
     code_block(1, "glosso", #string
         \\area :: (w: int, h: int) -> int {
@@ -529,13 +930,12 @@ render_section_44 :: () {
         \\    print("done\n");
         \\}
     );
-    subheading(2, "Named Results");
+    subheading(2, "Named results");
     paragraph(3, #string,oneline
         \\Naming every component of a tuple return type declares mutable result
-        \\variables in the function body. Each starts with the same type-default
-        \\value as an ordinary declaration without an explicit initializer. A
-        \\naked `return;` returns their current values, and reaching the end of
-        \\the function does the same.
+        \\variables in the body. Each starts at the same type-default value as a
+        \\declaration without an initializer. A naked `return;` returns their
+        \\current values, and so does falling off the end of the body.
     );
     code_block(4, "glosso", #string
         \\divide :: (
@@ -548,134 +948,195 @@ render_section_44 :: () {
         \\    }
         \\    quotient = numerator / denominator;
         \\}
+        \\
+        \\main :: () {
+        \\    e, q := divide(10, 2);
+        \\    print("[%] %\n", e, q);
+        \\    e2, q2 := divide(10, 0);
+        \\    print("[%] %\n", e2, q2);
+        \\}
     );
-    paragraph(5, #string,oneline
-        \\An explicit multi-value return remains valid and does not have to use
-        \\the named result variables: `return "", numerator / denominator;`.
+    code_block(5, "text", #string
+        \\[] 5
+        \\[division by zero] 0
+    );
+    paragraph(6, #string,oneline
+        \\Both calls return two values. In the success case `err` was never
+        \\assigned and still holds the empty string; in the failure case
+        \\`quotient` was never assigned and still holds 0. Named results
+        \\therefore never leave an unwritten component undefined, but they also
+        \\never signal that a component is meaningless — that is what a
+        \\`Result(T, E)` return expresses instead.
+    );
+    paragraph(7, #string,oneline
+        \\An explicit multi-value return remains valid and need not use the named
+        \\variables: `return "", numerator / denominator;`. The names are part of
+        \\the declaration's documentation, not of its calling convention;
+        \\callers bind positionally.
     );
 }
 
 render_section_45 :: () {
     paragraph(0, #string,oneline
-        \\An ordinary parameter is `[using] [noalias] name: Type` with an
-        \\optional `= default`. The accepted parameter families are:
+        \\An ordinary parameter is `[using] [noalias] [#comptime] [#lazy]
+        \\name: Type` with an optional `= default`. The qualifier keywords come
+        \\first and the directives second; the reverse order is a parse error.
+        \\The accepted parameter families are:
     );
     bullet(1, "`name: Type` for a runtime parameter.");
     bullet(2, "`name: Type = expression` for a typed default.");
     bullet(3, "`name := expression` for an inferred default parameter.");
-    bullet(4, "`#comptime name: Type` for an erased compile-time parameter.");
-    bullet(5, "`#empty: Type, ...` for unnamed erased type evidence.");
-    bullet(6, #string,oneline
+    bullet(4, #string,oneline
+        \\`#comptime name: Type` for an erased compile-time parameter, whose
+        \\argument must be a compile-time constant.
+    );
+    bullet(5, #string,oneline
+        \\`#lazy name: Type` for a call-by-need parameter; it may also carry a
+        \\default, as `#lazy name: Type = expression`.
+    );
+    bullet(6, "`#empty: Type, ...` for unnamed erased type evidence.");
+    bullet(7, #string,oneline
         \\`name: ...Type`, `name: ...$T`, `name: ...any`, or a constrained
         \\variadic pack.
     );
-    bullet(7, #string,oneline
+    bullet(8, #string,oneline
         \\A final bare `...` for C varargs on `#foreign` or `#c_call`
         \\declarations.
     );
-    paragraph(8, #string,oneline
-        \\Two names may share an annotation as `left, right: Type`. A variadic
-        \\parameter has exactly one name. Parameters after a Glosso variadic
-        \\pack must have defaults; a C ellipsis is always last. `using` and
-        \\`noalias` may appear in either order, but neither may qualify
-        \\`#comptime` or `#empty`.
-    );
     paragraph(9, #string,oneline
-        \\`using parameter: Struct` behaves as if `using parameter;` were
-        \\inserted at the start of the function body. It currently has the same
-        \\limitations as the `using` statement: unqualified reads work, while
-        \\writes should remain qualified.
+        \\Two or more names may share one annotation as `left, right: Type`. A
+        \\variadic parameter takes exactly one name, cannot carry a default, and
+        \\every parameter after it must have one. `using parameter: Struct`
+        \\behaves as if `using parameter;` opened the body, and inherits the read
+        \\only limitation described in the `using` chapter.
     );
-    paragraph(10, #string,oneline
-        \\Call sites can use named arguments to make intent explicit. Named
-        \\arguments are written `.parameter = expression`, including the leading
-        \\dot.
+    subheading(10, "Qualifier and directive ordering");
+    paragraph(11, #string,oneline
+        \\`using` and `noalias` are parsed before `#comptime` and `#lazy`.
+        \\Writing a directive first stops the parameter parser at the keyword,
+        \\and the remaining combinations are rejected by the checker for reasons
+        \\specific to each directive.
     );
-    code_block(11, "glosso", #string
-        \\connect_with_timeout :: (
-        \\    host: string,
-        \\    port: string,
-        \\    timeout_ms: int = 1000,
-        \\) {
-        \\    _ := host; _ := port; _ := timeout_ms;
+    code_block(12, "text", #string
+        \\(noalias #lazy p: *s64)   // accepted
+        \\(#lazy noalias p: *s64)   error: unexpected token 'noalias'
+        \\(using #lazy value: S)    error: using object has no runtime storage
+        \\(#lazy #empty: s64)       error: #lazy cannot qualify a #empty parameter
+        \\(#lazy values: ...s64)    error: #lazy cannot qualify a variadic parameter
+        \\(#lazy #lazy value: s64)  error: duplicate #lazy parameter directive
+    );
+    paragraph(13, #string,oneline
+        \\`using #lazy` fails for a structural reason rather than a syntactic
+        \\one: a lazy parameter has no storage until it is forced, and `using`
+        \\needs an object to promote members out of.
+    );
+    subheading(14, "Call-by-need parameters");
+    paragraph(15, #string,oneline
+        \\A `#lazy` argument is not evaluated at the call. It is evaluated on the
+        \\first dynamic read of the parameter inside the body, in the caller's
+        \\environment, and the result is cached for the rest of that call. If no
+        \\read happens, the argument never runs.
+    );
+    code_block(16, "glosso", #string
+        \\noisy :: (tag: string) -> s64 {
+        \\    print("eval %\n", tag);
+        \\    return 7;
         \\}
         \\
-        \\connect_with_timeout(
-        \\    .host = "example.com",
-        \\    .port = "80",
-        \\    .timeout_ms = 2500,
-        \\);
+        \\select :: (condition: bool, #lazy value: s64, fallback: s64) -> s64 {
+        \\    if condition return value;
+        \\    return fallback;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("c = %\n", select(false, noisy("C"), 41));
+        \\    print("d = %\n", select(true, noisy("D"), 41));
+        \\}
     );
-    paragraph(12, #string,oneline
-        \\Default expressions are attached to the declaration and used for
-        \\omitted arguments. A named call cannot invent a parameter spelling,
-        \\supply one parameter twice, or leave a required parameter unbound.
-        \\Overload candidate selection includes named/default binding before
-        \\type and `where` checks.
+    code_block(17, "text", #string
+        \\c = 41
+        \\eval D
+        \\d = 7
     );
-    subheading(13, "Argument binding");
-    paragraph(14, #string,oneline
-        \\Default parameters make an argument optional at a call site, while
-        \\named arguments make the selected parameter explicit. Together they
-        \\work best for stable, unsurprising configuration rather than for
-        \\inputs whose omission changes the operation's fundamental meaning.
+    paragraph(18, #string,oneline
+        \\`noisy("C")` never printed because the first call never read `value`.
+        \\The chapter "Lazy Parameters and Short-Circuit Operators" covers the
+        \\caching rules, the compile-time variant, and the full rejection list;
+        \\it is also where the Prelude's `&&` and `||` get their short-circuiting.
     );
-    bullet(15, #string,oneline
-        \\Place required parameters before optional ones and choose defaults
-        \\that are safe for the common case.
+    subheading(19, "Named arguments and defaults");
+    paragraph(20, #string,oneline
+        \\A named argument is written `.parameter = expression`, including the
+        \\leading dot. Call matching first assigns named arguments to their
+        \\slots, then fills the remaining positional slots in declaration order,
+        \\then applies defaults. Naming an unknown parameter, binding one
+        \\parameter twice, leaving a required parameter unbound, or supplying too
+        \\many non-variadic arguments makes that declaration inapplicable rather
+        \\than producing a targeted error.
     );
-    bullet(16, #string,oneline
-        \\Use named arguments when skipping earlier defaults or when several
-        \\adjacent values have the same type.
+    code_block(21, "glosso", #string
+        \\connect :: (host: string, port: string = "443", retries := 3) {
+        \\    print("% % %\n", host, port, retries);
+        \\}
+        \\
+        \\main :: () {
+        \\    connect("example.com");
+        \\    connect(.host = "example.com", .retries = 5);
+        \\    connect("example.com", .retries = 1);
+        \\}
     );
-    bullet(17, #string,oneline
-        \\Treat parameter names used by external callers as part of the
-        \\source-level API.
+    code_block(22, "text", #string
+        \\example.com 443 3
+        \\example.com 443 5
+        \\example.com 443 1
     );
-    bullet(18, #string,oneline
-        \\Prefer an options struct when optional settings become numerous,
-        \\evolve independently, or need reuse across calls.
+    paragraph(23, #string,oneline
+        \\Because binding failure only removes a candidate, a mistake surfaces as
+        \\an overload-resolution error listing the surviving candidates. The
+        \\call below binds `host` positionally and again by name.
     );
-    table_header(19, "Parameter form   —   Call-site behavior");
-    table_row(20, "`name: Type`   |   Required runtime argument");
-    table_row(21, #string,oneline
+    code_block(24, "text", #string
+        \\error: no overload 'connect' accepts these arguments
+        \\note: possible candidates for 'connect':
+        \\candidate: connect :: (host: string, port: string = ..., retries: int = ...)
+    );
+    paragraph(25, #string,oneline
+        \\Parameter names are therefore part of the source-level calling
+        \\interface: renaming one breaks every named call, and default binding is
+        \\resolved before type and `where` checks run.
+    );
+    table_header(26, "Parameter form   —   Call-site behavior");
+    table_row(27, "`name: Type`   |   Required runtime argument");
+    table_row(28, #string,oneline
         \\`name: Type = expression`   |   Optional argument with an explicit
         \\parameter type
     );
-    table_row(22, #string,oneline
+    table_row(29, #string,oneline
         \\`name := expression`   |   Optional argument whose parameter type is
         \\inferred from its default
     );
-    table_row(23, #string,oneline
+    table_row(30, #string,oneline
+        \\`#comptime name: Type`   |   Argument must be compile-time known;
+        \\erased from the runtime signature and part of specialization identity
+    );
+    table_row(31, #string,oneline
+        \\`#lazy name: Type`   |   Argument evaluated on first read inside the
+        \\body, cached for that call, never evaluated if unread
+    );
+    table_row(32, #string,oneline
         \\`a, b: Type`   |   Several parameters sharing one type annotation
     );
-    table_row(24, #string,oneline
+    table_row(33, #string,oneline
         \\`.name = expression` at a call   |   Binds that parameter by name
         \\instead of by position
-    );
-    paragraph(25, #string,oneline
-        \\Call matching first assigns named arguments to their parameter slots
-        \\and then fills remaining positional slots in order. Supplying the same
-        \\parameter twice, naming an unknown parameter, omitting a required
-        \\argument, or providing too many non-variadic arguments makes that
-        \\declaration inapplicable. Parameter names are therefore part of the
-        \\source-level calling interface.
-    );
-    code_block(26, "glosso", #string
-        \\connect :: (host: string, port: string = "443", retries := 3) {}
-        \\
-        \\connect("example.com");
-        \\connect(.host = "example.com", .retries = 5);
-        \\connect("example.com", .retries = 1);
     );
 }
 
 render_section_46 :: () {
     paragraph(0, #string,oneline
-        \\`noalias` is a promise on a pointer parameter, equivalent in purpose
-        \\to C `restrict` and Zig `noalias`. It is accepted on `*T` and `[*]T`,
-        \\including `const`/`volatile` forms and aliases that resolve to those
-        \\pointer types.
+        \\`noalias` is a promise on a pointer parameter, equivalent in purpose to
+        \\C `restrict`. It is accepted on `*T` and `[*]T`, including their
+        \\`const` and `volatile` forms and aliases that resolve to them.
     );
     code_block(1, "glosso", #string
         \\copy_nonoverlapping :: (
@@ -685,27 +1146,70 @@ render_section_46 :: () {
         \\) {
         \\    for index: 0..count destination[index] = source[index];
         \\}
+        \\
+        \\main :: () {
+        \\    src: [3]s64;
+        \\    dst: [3]s64;
+        \\    for i: 0..3 src[i] = i + 1;
+        \\    copy_nonoverlapping(cast([*]s64)*dst[0],
+        \\        cast([*]const s64)*src[0], 3);
+        \\    print("% % %\n", dst[0], dst[1], dst[2]);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\For one execution of the call, if a location accessed through a
-        \\`noalias` parameter is modified, every access to that location must
-        \\use that parameter or a pointer derived from it; pure read/read
-        \\aliasing is permitted. The compiler does not prove or dynamically
-        \\check this promise. Violating it is undefined behavior in native code,
-        \\and optimized builds may exploit it; the VM treats `noalias` as
-        \\metadata. `noalias` is rejected on slices, variadic arguments, and
-        \\non-pointer values. It does not qualify the pointer value type, but it
-        \\is part of function-pointer compatibility: plain and `noalias`
-        \\callbacks cannot be implicitly converted to one another. Named/inline
-        \\function-pointer types and indirect calls retain the contract so LLVM
-        \\can attach the corresponding argument attribute.
+    code_block(2, "text", "1 2 3");
+    paragraph(3, #string,oneline
+        \\The contract covers one execution of the call: if a location reached
+        \\through a `noalias` parameter is modified, every access to that location
+        \\during the call must go through that parameter or a pointer derived
+        \\from it. Read-only aliasing is permitted. The compiler neither proves
+        \\nor dynamically checks the promise. In native code it becomes an LLVM
+        \\argument attribute and optimized builds may exploit it, so violating it
+        \\is undefined behavior; the compile-time VM treats it as inert metadata.
+    );
+    subheading(4, "Where it is rejected and where it is retained");
+    paragraph(5, #string,oneline
+        \\`noalias` is a property of a pointer parameter, not of a pointer type.
+        \\It cannot qualify a value, a slice, or a variadic argument, and it does
+        \\not appear inside the pointee type.
+    );
+    code_block(6, "text", #string
+        \\error: noalias parameter 'v' must have a pointer type, got int
+        \\error: noalias parameter 's' must have a pointer type, got []int
+    );
+    paragraph(7, #string,oneline
+        \\A slice is rejected because it is a two-word descriptor rather than a
+        \\pointer; qualify a `[*]T` and pass the count separately, as above.
+        \\Although `noalias` is invisible in the pointee type, it is part of
+        \\function-pointer identity, so a plain callback and a `noalias` callback
+        \\are not interchangeable in either direction.
+    );
+    code_block(8, "glosso", #string
+        \\Plain    :: #fn_ptr(p: *s64);
+        \\No_Alias :: #fn_ptr(noalias p: *s64);
+        \\
+        \\target :: (noalias p: *s64) { p.* = 1; }
+        \\
+        \\main :: () {
+        \\    a: No_Alias = target;   // accepted
+        \\    b: Plain = target;      // rejected
+        \\    _ := a; _ := b;
+        \\}
+    );
+    code_block(9, "text", #string
+        \\error: cannot implicitly convert fnptr to fnptr because their noalias parameter contracts differ
+    );
+    paragraph(10, #string,oneline
+        \\Named and inline function-pointer types keep the contract through
+        \\indirect calls, which is what lets the backend attach the attribute at
+        \\the call site as well as at the definition.
     );
 }
 
 render_section_47 :: () {
     paragraph(0, #string,oneline
-        \\A Glosso variadic parameter is `name: ...T` or `name: ...`. It is
-        \\represented as an iterable rest sequence in the body.
+        \\A Glosso variadic parameter is `name: ...T` or `name: ...`. The body
+        \\observes an ordinary iterable rest value, not a C `va_list`, so it
+        \\supports `for`, indexing, and `count`.
     );
     code_block(1, "glosso", #string
         \\all_true :: (values: ...bool) -> bool {
@@ -714,198 +1218,243 @@ render_section_47 :: () {
         \\    }
         \\    return true;
         \\}
-    );
-    paragraph(2, "Use spread syntax to pass an existing rest argument onward.");
-    code_block(3, "glosso", #string
-        \\log_all :: (items: ...any) {
-        \\    print("items: %\n", items...);
+        \\
+        \\sum :: (values: ...$T) -> T {
+        \\    total: T;
+        \\    for values total += it;
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("% %\n", all_true(true, true), all_true(true, false));
+        \\    print("sum=%\n", sum(1, 2, 3));
+        \\    xs: [3]s64;
+        \\    for i: 0..3 xs[i] = i;
+        \\    print("spread=%\n", sum(xs...));
         \\}
     );
-    subheading(4, "Glosso packs and C ellipses");
+    code_block(2, "text", #string
+        \\1 0
+        \\sum=6
+        \\spread=3
+    );
+    paragraph(3, #string,oneline
+        \\`sum(xs...)` spreads an existing array into the pack instead of adding
+        \\it as one element; `xs` holds 0, 1, 2, so the total is 3. The spread
+        \\syntax is a call-site postfix `...` and works for any compatible array
+        \\or rest value.
+    );
+    subheading(4, "Declaration rules");
     paragraph(5, #string,oneline
-        \\A variadic parameter collects a call site's remaining arguments. Typed
-        \\variadics preserve one element contract, while foreign C varargs
-        \\follow separate promotion and ABI rules and should not be treated as
-        \\an ordinary Glosso collection.
+        \\The variadic pack is a real parameter, so the checker enforces that
+        \\exactly one call site argument list can be split unambiguously across
+        \\it. Each of the following is a hard error at the declaration.
     );
-    bullet(6, #string,oneline
-        \\Use a typed variadic when every supplied argument has the same
-        \\semantic role and element type.
+    code_block(6, "text", #string
+        \\(a, b: ...s64)             error: variadic parameter must have one name
+        \\(values: ...s64 = 1)       error: variadic parameter cannot have a default value
+        \\(values: ...s64, t: s64)   error: parameters after a variadic parameter must have default values
+        \\(a: ...s64, b: ...s64)     error: parameters after a variadic parameter must have default values
     );
-    bullet(7, #string,oneline
-        \\Keep the variadic parameter last so fixed arguments and defaults
-        \\remain unambiguous.
+    paragraph(7, #string,oneline
+        \\The last two share a message because a second pack is simply a
+        \\parameter after the first one. A trailing parameter with a default is
+        \\accepted, and it can only ever be bound by name or by exhausting the
+        \\pack, so `f :: (values: ...s64, tail: s64 = 9)` called as `f(1, 2)`
+        \\puts 1 and 2 in the pack and leaves `tail` at 9.
     );
-    bullet(8, #string,oneline
-        \\Forward variadic values only through syntax or helpers that preserve
-        \\their intended expansion.
-    );
-    bullet(9, #string,oneline
-        \\Use the `VarArg` facilities for C varargs; the caller is responsible
-        \\for the external function's expected promoted types.
-    );
-    table_header(10, "Form   —   Accepted argument pack");
-    table_row(11, #string,oneline
+    table_header(8, "Form   —   Accepted argument pack");
+    table_row(9, #string,oneline
         \\`items: ...T`   |   Homogeneous values coercible to concrete `T`; the
-        \\body observes array-like `items`
+        \\body observes an array-like `items`
     );
-    table_row(12, #string,oneline
+    table_row(10, #string,oneline
         \\`items: ...$T`   |   Homogeneous generic pack whose element type is
-        \\inferred for specialization
+        \\inferred once and drives specialization
     );
-    table_row(13, "`items: ...any`   |   Heterogeneous erased-value pack");
-    table_row(14, #string,oneline
-        \\`items: ...(ClassA && ClassB)`   |   Heterogeneous pack where each
+    table_row(11, "`items: ...any`   |   Heterogeneous erased-value pack");
+    table_row(12, #string,oneline
+        \\`items: ...(ClassA && ClassB)`   |   Heterogeneous pack where every
         \\value satisfies all listed unary typeclasses
     );
-    table_row(15, #string,oneline
-        \\`items: ...`   |   Unconstrained rest form represented through the
+    table_row(13, #string,oneline
+        \\`items: ...`   |   Unconstrained rest form represented through the same
         \\variadic array machinery
     );
-    table_row(16, #string,oneline
+    table_row(14, #string,oneline
         \\Bare `...` with no parameter name   |   C ellipsis; a distinct feature
         \\covered in the C Varargs chapter
     );
+    bullet(15, #string,oneline
+        \\`print` takes a `...any` pack, so `print("items: %\n", items...)`
+        \\forwards a pack but still consumes one `%` per element.
+    );
+    bullet(16, #string,oneline
+        \\A `...any` element carries its type at run time; a `...$T` element does
+        \\not, because the pack is monomorphized.
+    );
     bullet(17, #string,oneline
-        \\A named Glosso variadic parameter cannot have a default and must use
-        \\one parameter name.
-    );
-    bullet(18, #string,oneline
-        \\Parameters following a Glosso variadic parameter are allowed only when
-        \\all of them have defaults.
-    );
-    bullet(19, #string,oneline
-        \\At a call, `array_or_pack...` spreads an existing compatible
-        \\array/rest value instead of adding it as one element.
-    );
-    bullet(20, #string,oneline
-        \\The body iterates the packed value with ordinary array/iterable
-        \\operations; it is not a C `va_list`.
+        \\Use the `VarArg` facilities for C varargs. The caller is responsible for
+        \\the external function's expected promoted types; the Glosso pack rules
+        \\do not apply there.
     );
 }
 
 render_section_48 :: () {
     paragraph(0, #string,oneline
-        \\`#fn_ptr` declares a function pointer type. `#c_call` selects the C
-        \\ABI. The parser also accepts `#no_context` after a named
-        \\function-pointer declaration, but the current function-pointer type
-        \\representation does not retain that marker; do not rely on it to
-        \\distinguish callback types. `#no_context` is implemented on function
-        \\definitions, where it removes implicit context access.
+        \\`#fn_ptr` declares a function pointer type. Parameters need names and
+        \\types — `#fn_ptr(int) -> int` is `error: unexpected token ')'`. Omitting
+        \\`->` means `void`. `#c_call` after the signature selects the C ABI.
     );
     code_block(1, "glosso", #string
         \\Comparator :: #fn_ptr(a: int, b: int) -> int #no_context;
         \\Thread_Proc :: #fn_ptr(data: *void) -> *void #c_call;
+        \\
+        \\ascending :: (a: int, b: int) -> int { return a - b; }
+        \\
+        \\Table :: struct { compare: Comparator; }
+        \\
+        \\main :: () {
+        \\    c: Comparator = ascending;
+        \\    t: Table = .{ .compare = ascending };
+        \\    lam: Comparator = |a, b| { return b - a; };
+        \\    print("direct=% stored=% lambda=% size=%\n",
+        \\        c(7, 4), t.compare(1, 9), lam(1, 9), size_of(Comparator));
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Function pointers are values and can be stored in structs, passed to
-        \\C, or called from Glosso when their ABI matches the use site.
+    code_block(2, "text", "direct=3 stored=-8 lambda=8 size=8");
+    paragraph(3, #string,oneline
+        \\A function pointer is one machine word. It carries no environment, so a
+        \\lambda may initialize a non-variadic pointer type only because lambdas
+        \\are noncapturing. Values can be stored in structs, passed to C, and
+        \\called indirectly once their signature matches exactly.
     );
-    subheading(3, "Signature and calling convention");
-    paragraph(4, #string,oneline
-        \\A function pointer is a callable value with a precise parameter,
-        \\return, and calling-convention contract. Matching source-level types
-        \\are not sufficient when the target function uses a different ABI or
-        \\implicit-context rule.
+    subheading(4, "Type identity is the calling convention too");
+    paragraph(5, #string,oneline
+        \\Matching parameter and return types are not sufficient. The ABI marker
+        \\is part of the pointer type, and conversion between the two forms is
+        \\rejected in both directions. The diagnostic prints both sides as
+        \\`fnptr`, so the mismatch has to be read off the declarations.
     );
-    bullet(5, #string,oneline
-        \\Match parameter order, widths, return representation, and calling
-        \\convention exactly.
+    code_block(6, "glosso", #string
+        \\F :: #fn_ptr(a: int) -> int;
+        \\G :: #fn_ptr(a: int) -> int #c_call;
+        \\
+        \\f :: (a: int) -> int { return a; }
+        \\
+        \\main :: () { g: G = f; _ := g; }
     );
-    bullet(6, #string,oneline
-        \\Account for `#c_call` and `#no_context`; functions with different
-        \\implicit calling requirements are not interchangeable callbacks.
+    code_block(7, "text", "error: got fnptr, expected fnptr");
+    paragraph(8, #string,oneline
+        \\`noalias` is part of the same identity and produces a much clearer
+        \\message; see the preceding chapter. A C-variadic pointer additionally
+        \\requires at least one fixed parameter, because the C ABI needs a known
+        \\argument to start the variadic area from.
     );
-    bullet(7, #string,oneline
-        \\Keep any captured state separate because a plain function pointer does
-        \\not carry a lambda environment.
+    code_block(9, "text", #string
+        \\V :: #fn_ptr(...) -> s64 #c_call;
+        \\error: C vararg marker '...' requires at least one fixed parameter
     );
-    bullet(8, #string,oneline
-        \\Check nullable callbacks before invocation when an external API uses
-        \\null to mean that no callback was installed.
-    );
-    table_header(9, "Declaration   —   Type identity");
-    table_row(10, #string,oneline
-        \\`F :: #fn_ptr(a: T) -> U;`   |   Ordinary Glosso function pointer with
-        \\the declared parameter/result types
-    );
+    table_header(10, "Declaration   —   Type identity");
     table_row(11, #string,oneline
-        \\`F :: #fn_ptr(a: T) -> U #c_call;`   |   C-ABI function pointer; not
-        \\implicitly interchangeable with the ordinary form
+        \\`F :: #fn_ptr(a: T) -> U;`   |   Ordinary Glosso function pointer with
+        \\implicit context passing
     );
     table_row(12, #string,oneline
-        \\`F :: #fn_ptr(noalias p: *T);`   |   The `noalias` promise is retained
-        \\in callback compatibility
+        \\`F :: #fn_ptr(a: T) -> U #c_call;`   |   C-ABI pointer; not implicitly
+        \\interchangeable with the ordinary form
     );
     table_row(13, #string,oneline
-        \\`F :: #fn_ptr(first: T, ...) -> U #c_call;`   |   C-variadic function
-        \\pointer; requires at least one fixed parameter
+        \\`F :: #fn_ptr(noalias p: *T);`   |   The `noalias` promise is retained
+        \\and enforced in callback compatibility
     );
-    paragraph(14, #string,oneline
-        \\Named function-pointer parameters require names and types. Omitting
-        \\`->` means `void`. Function values can be stored, passed, and invoked
-        \\indirectly after exact signature matching. Lambdas can initialize
-        \\non-variadic pointer types when their parameter/return types match,
-        \\but lambdas are noncapturing and cannot initialize a C-variadic
-        \\pointer.
+    table_row(14, #string,oneline
+        \\`F :: #fn_ptr(first: T, ...) -> U #c_call;`   |   C-variadic pointer;
+        \\a lambda cannot initialize it
     );
     note(15, #string,oneline
         \\Current limitation: the named `#fn_ptr` parser accepts `#no_context`
-        \\but does not retain a separate no-context bit in the resulting pointer
-        \\type. `#no_context` is effective on function definitions; do not use
-        \\the pointer marker as an enforced compatibility distinction until the
-        \\compiler representation supports it.
+        \\but the resulting pointer type keeps no no-context bit. A function that
+        \\reads `context` can be assigned to a `#no_context` pointer type and
+        \\called through it with no diagnostic. `#no_context` is effective on
+        \\function definitions, where it removes implicit context passing and
+        \\rejects `context` access; do not use the pointer marker as an enforced
+        \\compatibility distinction.
     );
 }
 
 render_section_49 :: () {
     paragraph(0, #string,oneline
-        \\A lambda is a noncapturing function value. The expected
-        \\function-pointer type usually supplies its parameter and return types:
+        \\A lambda is a noncapturing function value written `|params| body`. The
+        \\expected function-pointer type normally supplies the parameter and
+        \\return types, so the parameters can stay bare.
     );
     code_block(1, "glosso", #string
         \\apply :: (callback: (int, int) -> int) -> int {
         \\    return callback(20, 22);
         \\}
         \\
-        \\answer := apply(|a, b| { return a + b; });
+        \\main :: () {
+        \\    print("%\n", apply(|a, b| { return a + b; }));
+        \\    sum3 := |a: int, b: int, c: int| -> int { return a + b + c; };
+        \\    print("%\n", sum3(1, 2, 3));
+        \\    inc := |value: int| value + 1;
+        \\    print("%\n", inc(41));
+        \\    five := || -> int { return 5; };
+        \\    print("%\n", five());
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Write `-> Type` when the return type should be explicit, including
-        \\when it binds a generic callback result:
+    code_block(2, "text", #string
+        \\42
+        \\6
+        \\42
+        \\5
     );
-    code_block(3, "glosso", #string
-        \\sum3 := |a: int, b: int, c: int| -> int {
-        \\    return a + b + c;
-        \\};
-        \\
-        \\answer := apply3(
-        \\    |a, b, c| -> int { return a + b + c; },
-        \\    10, 20, 12,
-        \\);
+    paragraph(3, #string,oneline
+        \\`||` introduces a zero-parameter lambda. A lambda without an explicit
+        \\return annotation may use a single-expression body, as `inc` does; with
+        \\`-> Type` the body must be a block. A lambda stored in a local, rather
+        \\than passed to a parameter, has no context to infer from and must
+        \\annotate every parameter and its result.
     );
-    paragraph(4, #string,oneline
-        \\An untyped lambda needs a function-pointer context. A standalone
-        \\lambda must annotate every parameter and its return type. `||`
-        \\introduces a zero-parameter lambda, and a lambda without an explicit
-        \\return annotation may use a single expression body, such as `|value|
-        \\value + 1`.
+    code_block(4, "text", #string
+        \\f := |a, b| { return a + b; };
+        \\error: lambda parameter 'a' needs a type from its context or an explicit ': Type'
     );
-    paragraph(5, #string,oneline
-        \\Lambdas currently use the ordinary raw function-pointer
-        \\representation. They may refer to globals and compile-time constants,
-        \\but capturing a runtime local is rejected. Pass such state explicitly
-        \\through a context argument.
+    subheading(5, "No captures");
+    paragraph(6, #string,oneline
+        \\Lambdas use the ordinary raw function-pointer representation — one
+        \\machine word, no environment block. They may refer to globals and
+        \\compile-time constants, which are addressable without a closure, but a
+        \\reference to an enclosing runtime local is rejected at checking time
+        \\rather than silently copied.
+    );
+    code_block(7, "glosso", #string
+        \\main :: () {
+        \\    n := 5;
+        \\    f := |a: int| -> int { return a + n; };
+        \\    print("%\n", f(1));
+        \\}
+    );
+    code_block(8, "text", #string
+        \\error: lambda captures local 'n', but captured closures are not supported
+    );
+    paragraph(9, #string,oneline
+        \\Pass such state explicitly: add a parameter, or thread it through a
+        \\context argument the callback signature already carries. A C-variadic
+        \\target is refused outright — `f: V = |a| { return a; };` for
+        \\`V :: #fn_ptr(first: s64, ...) -> s64 #c_call;` is `error: a lambda
+        \\cannot initialize a variadic function pointer`.
     );
 }
 
 render_section_50 :: () {
     paragraph(0, #string,oneline
-        \\`$T` introduces an inferred compile-time type parameter. It is
-        \\syntactic sugar for a `#comptime T: type` parameter, so `T` is both
-        \\available in annotations and usable as a compile-time type value in
-        \\the specialized body. The body is checked for each instantiated type
-        \\that passes constraints.
+        \\`$T` introduces an inferred compile-time type parameter. It is sugar
+        \\for `#comptime T: type`, so `T` is available in later annotations and
+        \\usable as a compile-time type value in the body. The body is checked
+        \\once per instantiated type that passes the constraints, and each
+        \\instantiation is a separate emitted function.
     );
     code_block(1, "glosso", #string
         \\swap :: (a: *$T, b: *T) {
@@ -915,11 +1464,12 @@ render_section_50 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\Generics can use type parameters explicitly. Any parameter type may be
-        \\marked `#comptime`; its argument must be evaluable during compilation,
-        \\participates in specialization identity, and is erased from the
-        \\runtime calling convention. Passing a runtime value, such as a
-        \\command-line argument, is a compile error.
+        \\`$T` binds the name only on its first occurrence; a second `$T` in the
+        \\same signature is `error: polymorph $T is already bound; use plain T
+        \\after the first $T`. Any parameter may instead be marked `#comptime`:
+        \\its argument must be evaluable during compilation, it participates in
+        \\specialization identity, and it is erased from the runtime calling
+        \\convention. Passing a runtime value is rejected.
     );
     code_block(3, "glosso", #string
         \\zero :: (#comptime T: type) -> T {
@@ -930,69 +1480,183 @@ render_section_50 :: () {
         \\emit_tag :: (#comptime tag: string) {
         \\    print("%\n", tag);
         \\}
+        \\
+        \\main :: () {
+        \\    n: s64 = 3;
+        \\    emit_tag2 :: (#comptime v: s64) { print("%\n", v); }
+        \\    emit_tag2(n);
+        \\}
     );
-    paragraph(4, #string,oneline
-        \\An explicit `T: type` parameter used by later annotations is promoted
-        \\to a compile-time type parameter. Required type parameters must
-        \\precede runtime parameters unless they have defaults. `$T` binds a
-        \\generic name only on first use; later occurrences use plain `T`.
-        \\Return-only generic variables are inferred and inserted as erased type
-        \\parameters when the signature permits it.
+    code_block(4, "text", #string
+        \\error: argument for #comptime parameter 'v' must be known at compile time
+        \\note: unknown const n
+    );
+    subheading(5, "Explicit type arguments at a call site");
+    paragraph(6, #string,oneline
+        \\Several type parameters may share one annotation, as
+        \\`A, B, C, D: type`. Inference runs first at every call; the generics it
+        \\could not resolve form an ordered unresolved list, and a call may
+        \\supply types explicitly in three spellings.
+    );
+    bullet(7, #string,oneline
+        \\Full positional: every type parameter, in declaration order, before the
+        \\runtime arguments.
+    );
+    bullet(8, #string,oneline
+        \\Compact positional: only the unresolved generics, in declaration order,
+        \\before the runtime arguments. The count must match the unresolved list
+        \\exactly.
+    );
+    bullet(9, #string,oneline
+        \\Named: `.Name = Type` after the runtime arguments, using the type
+        \\parameter's own name. Any subset may be named.
+    );
+    code_block(10, "glosso", #string
+        \\Foo :: struct { value: s64; }
+        \\
+        \\explicit :: (T, U, V: type, x: T, y: *U) -> *V { return null; }
+        \\
+        \\ordered :: (A, B, C, D: type, x: A, b: *B, y: C, d: *D) -> s64 {
+        \\    _ := x; _ := y;
+        \\    return size_of(B) + size_of(D);
+        \\}
+        \\
+        \\main :: () {
+        \\    x: s32 = 3;
+        \\    b: *Foo = explicit(u16, x, null);          // compact positional
+        \\    named: *Foo = explicit(x, null, .U = u16); // named
+        \\
+        \\    left: s32 = 10;
+        \\    right: f32 = 20.0;
+        \\    compact := ordered(u16, f64, left, null, right, null);
+        \\    by_name := ordered(left, null, right, null, .B = u16, .D = f64);
+        \\    full := ordered(s32, u16, f32, f64, left, null, right, null);
+        \\    print("% % | % % %\n", b == null, named == null,
+        \\        compact, by_name, full);
+        \\}
+    );
+    code_block(11, "text", "1 1 | 10 10 10");
+    paragraph(12, #string,oneline
+        \\In `ordered`, `A` and `C` are inferred from `x` and `y`, while `B` and
+        \\`D` cannot be inferred because both arguments are `null`. The unresolved
+        \\order is therefore `(B, D)`, which is exactly what the compact form
+        \\supplies and what the diagnostics name.
+    );
+    code_block(13, "text", #string
+        \\ordered(u16, left, null, right, null)
+        \\error: call ordered supplies 1 compact generic type(s), but unresolved order is (B, D)
+        \\
+        \\ordered(u16, left, null, right, null, .D = f64)
+        \\error: call ordered cannot mix positional and named generic arguments
+        \\
+        \\ordered(left, null, right, null, .B = 3, .D = f64)
+        \\error: generic type argument must be a type
+    );
+    paragraph(14, #string,oneline
+        \\All three spellings work for `$T` sugar, for `T: type` parameters, and
+        \\for `#comptime T: type` parameters alike. Required type parameters must
+        \\precede runtime parameters unless they have defaults, and a generic
+        \\variable used only in the return type is inferred and inserted as an
+        \\erased type parameter when the signature permits it — which is what
+        \\makes `*$V` above resolvable from the annotation on the receiving
+        \\variable.
     );
 }
 
 render_section_51 :: () {
     paragraph(0, #string,oneline
         \\Function directives follow the optional return type and must appear
-        \\before any `where` clauses. A normal function then has a block. A
-        \\`#magic` or `#foreign` declaration is bodyless; a typeclass
-        \\requirement may end in `;`.
+        \\before any `where` clause. A normal function then has a block; a
+        \\`#magic` or `#foreign` declaration is bodyless; a typeclass requirement
+        \\may end in `;`.
     );
     bullet(1, #string,oneline
-        \\`#inline`, `#inline,always`, and `#inline,never` set the backend
-        \\inline mode.
+        \\`#inline`, `#inline,always`, and `#inline,never` set the backend inline
+        \\mode. They compose with everything else, including `#lazy` parameters.
     );
-    bullet(2, "`#must` rejects silently discarded call results.");
+    bullet(2, #string,oneline
+        \\`#must` rejects a discarded call result:
+        \\`error: discarded return value of #must function 'compute'`. Bind it, or
+        \\discard it explicitly with `_ := compute();`.
+    );
     bullet(3, #string,oneline
-        \\`#noreturn` requires every path to terminate without a normal return.
+        \\`#noreturn` requires every path to terminate. A body that can fall off
+        \\the end is `error: #noreturn function 'die' can return normally`.
     );
     bullet(4, #string,oneline
         \\`#returns_twice` marks low-level control-transfer functions that can
-        \\resume a call site more than once.
+        \\resume a call site more than once, so the backend keeps live values in
+        \\memory rather than registers across the call.
     );
     bullet(5, #string,oneline
-        \\`#no_context` removes implicit context passing and rejects `context`
-        \\access.
+        \\`#no_context` removes implicit context passing:
+        \\`error: cannot access 'context' in a #c_call / #no_context procedure`.
     );
     bullet(6, #string,oneline
-        \\`#c_call` selects the C ABI and also removes normal Glosso context
-        \\passing.
+        \\`#c_call` selects the C ABI and implies the same context removal, which
+        \\is why it produces that identical message.
     );
     bullet(7, #string,oneline
-        \\`#dump` prints the lowered typed function representation during
-        \\compilation.
+        \\`#dump` prints the lowered typed representation of the function during
+        \\compilation; it changes no semantics.
     );
     bullet(8, #string,oneline
         \\`#magic "name"` binds a declaration to a compiler-implemented
-        \\intrinsic; users cannot define new magic names in source.
+        \\intrinsic. A name the backend does not know is accepted at the
+        \\declaration and fails only when a call is lowered:
+        \\`error: native LLVM lowering has no classification for #magic
+        \\'my_intrinsic' while lowering 'main' at IR instruction 2`. New magic
+        \\names cannot be defined in source.
     );
     bullet(9, #string,oneline
-        \\`#modify expression` or `#modify { ... }` runs compile-time
-        \\declaration modification.
+        \\`#modify expression` or `#modify { ... }` runs compile-time declaration
+        \\modification.
     );
-    bullet(10, "`#memory ...` attaches temporal memory effects.");
+    bullet(10, #string,oneline
+        \\`#memory ...` attaches temporal memory effects, such as
+        \\`#memory returns_static` on a foreign call whose result the compiler
+        \\would otherwise warn about.
+    );
     bullet(11, #string,oneline
         \\`#operator(...)`, `#precedence(...)`, `#expand`, and `#foreign` are
         \\described in their dedicated chapters.
     );
-    paragraph(12, #string,oneline
-        \\`#modify` runs with signature type variables available as mutable
-        \\compile-time bindings. It may replace inferred types and must return
-        \\`true` for the candidate to remain applicable. Returning false or
-        \\failing the modification removes that specialization. Struct
-        \\modification runs before its generic field types are finalized.
+    subheading(12, "Parameter directives are separate");
+    paragraph(13, #string,oneline
+        \\`#comptime`, `#empty`, and `#lazy` attach to a parameter, not to the
+        \\declaration, and are written inside the parameter list. `#lazy` is
+        \\additionally incompatible with several declaration-level directives,
+        \\and each combination has its own message.
     );
-    code_block(13, "glosso", #string
+    code_block(14, "text", #string
+        \\(#lazy value: s64) -> s64 #c_call
+        \\error: #lazy parameters on 'f' are not part of a foreign ABI
+        \\
+        \\(#lazy value: s64) -> s64 #foreign "c";
+        \\error: #lazy parameters on 'ext' are not part of a foreign ABI
+        \\
+        \\(#lazy value: s64) -> s64 #expand
+        \\error: #lazy parameters are not supported on macro 'm'
+        \\
+        \\'+++' :: (left: s64, #lazy right: s64) -> s64 #magic "int_add" ...
+        \\error: #lazy parameters on #magic function '+++' require compiler-defined lazy semantics
+    );
+    paragraph(15, #string,oneline
+        \\`#lazy` composes with `#inline` and `#inline,always`. The `#magic`
+        \\restriction exists because the only compiler-defined lazy intrinsics are
+        \\the Prelude's `&&` and `||`; see "Lazy Parameters and Short-Circuit
+        \\Operators".
+    );
+    subheading(16, "Declaration modification");
+    paragraph(17, #string,oneline
+        \\`#modify` runs during checking with the signature's type variables
+        \\available as mutable compile-time bindings. It may replace inferred
+        \\types and must return `true` for the candidate to remain applicable;
+        \\returning false removes that specialization instead of producing a body
+        \\error. Struct modification runs before the generic field types are
+        \\finalized, so it can overwrite a type argument the caller supplied.
+    );
+    code_block(18, "glosso", #string
         \\widen :: (value: $T) -> $R
         \\#modify {
         \\    R = T;
@@ -1010,21 +1674,52 @@ render_section_51 :: () {
         \\} {
         \\    value: $T;
         \\}
+        \\
+        \\main :: () {
+        \\    small: u8 = 5;
+        \\    w := widen(small);
+        \\    b: Box(u8);
+        \\    print("w=% size=% box_field_size=%\n",
+        \\        w, size_of(type_of(w)), size_of(type_of(b.value)));
+        \\}
     );
-    paragraph(14, #string,oneline
-        \\Struct directives appear between `struct` and its body: `#c_call`,
-        \\`#derive(...)`, `#magic "name"`, and `#modify`. Union directives are
-        \\`#raw`, `#derive(...)`, and `#magic "name"`. Directives not accepted
-        \\at that declaration site are parse errors rather than ignored
-        \\annotations.
+    code_block(19, "text", "w=5 size=4 box_field_size=8");
+    paragraph(20, #string,oneline
+        \\`widen` widened `u8` to `u32`, so the result occupies four bytes.
+        \\`Box(u8)` still requires a type argument — `#modify` does not make the
+        \\struct non-generic, and `b: Box;` is
+        \\`error: generic struct Box needs type arguments` — but the hook then
+        \\overwrites `T` with `s64`, which is why the field is eight bytes wide.
+    );
+    subheading(21, "Aggregate directives");
+    paragraph(22, #string,oneline
+        \\Struct directives sit between `struct` and the body, in any order and
+        \\repeatable: `#c_call`, `#packed`, `#derive(...)`, `#modify`, and
+        \\`#magic "name"`. Union directives are `#raw`, `#derive(...)`, and
+        \\`#magic "name"`. Enums take none. A directive written at a site that
+        \\does not accept it is a parse error rather than an ignored annotation,
+        \\and the wording depends on how far the parser got.
+    );
+    code_block(23, "text", #string
+        \\U :: union #packed { ... }        error: unexpected token 'packed'
+        \\Mode :: enum #packed { ... }      error: unexpected token 'packed'
+        \\F :: #fn_ptr(a: s64) -> s64 #packed;  error: bad decl name 'packed'
+        \\S :: struct #packed(2) { ... }    error: unexpected token '('
+        \\U :: union #modify { ... } { ... }    error: unexpected token 'modify'
+    );
+    paragraph(24, #string,oneline
+        \\`#packed` takes no argument, which is why `#packed(2)` stops at the
+        \\parenthesis rather than reporting an unsupported alignment. Its layout
+        \\effect is described in the struct chapter and in "Packed Records".
     );
 }
 
 render_section_52 :: () {
     paragraph(0, #string,oneline
-        \\`where` keeps generic declarations honest. Constraints can call
-        \\ordinary compile-time predicates from `std/Meta` or user-defined
-        \\predicates.
+        \\`where` states the type domain in which a generic declaration is valid.
+        \\Constraints call ordinary compile-time predicates — `std/Meta`
+        \\predicates, user-defined `(T: type) -> bool` procedures, or typeclass
+        \\membership.
     );
     code_block(1, "glosso", #string
         \\square :: (x: $T) -> T where Is_Numeric(T) {
@@ -1032,40 +1727,36 @@ render_section_52 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\A failed constraint removes that instance or generic declaration from
-        \\consideration instead of producing a deep body error.
+        \\Constraints are evaluated during specialization, before the body is
+        \\checked. A false result removes that instance or overload from
+        \\consideration, so the caller sees a resolution failure at the call site
+        \\instead of a cascade of errors from inside a body that was never
+        \\intended for that type.
     );
-    subheading(3, "Specialization constraints");
-    paragraph(4, #string,oneline
-        \\A `where` constraint defines the type domain in which a generic
-        \\declaration is valid. It is checked during specialization, before the
-        \\body becomes an implementation candidate for a concrete call.
+    code_block(3, "glosso", #string
+        \\Vec :: struct { x: s64; }
+        \\
+        \\main :: () {
+        \\    v: Vec;
+        \\    print("%\n", square(v));
+        \\}
     );
-    bullet(5, #string,oneline
-        \\State the weakest constraint that guarantees every operation used by
-        \\the body.
+    code_block(4, "text", #string
+        \\error: constraint failed for square
+        \\  --> where.glo:5:18
+        \\  |
+        \\5 |     print("%\n", square(v));
+        \\  |                  ^^^^^^
     );
-    bullet(6, #string,oneline
-        \\Keep constraints semantically disjoint when several overloads share a
-        \\name; Glosso does not rank overlapping candidates by cleverness.
+    subheading(5, "Several clauses, and structural constraints");
+    paragraph(6, #string,oneline
+        \\A declaration may carry several `where expression` clauses; all are
+        \\evaluated with the inferred type and compile-time value bindings, and
+        \\all must hold. Function directives come before the first `where`.
+        \\Clauses can mix a named predicate with a `#meaningful` probe when the
+        \\requirement is structural rather than nominal.
     );
-    bullet(7, #string,oneline
-        \\Move repeated capability checks into a typeclass or named compile-time
-        \\predicate so diagnostics and intent remain consistent.
-    );
-    bullet(8, #string,oneline
-        \\Test both accepted and deliberately rejected types to keep the
-        \\boundary from widening accidentally.
-    );
-    paragraph(9, #string,oneline
-        \\Function directives must appear before `where` clauses. A declaration
-        \\may contain several `where expression` clauses; all are evaluated with
-        \\the inferred type and compile-time value bindings. A false result
-        \\removes an overload/instance candidate. If no candidate remains, the
-        \\call diagnostic reports that the constraint failed instead of checking
-        \\an invalid specialized body.
-    );
-    code_block(10, "glosso", #string
+    code_block(7, "glosso", #string
         \\clamp_zero :: (value: $T) -> T
         \\    where Is_Numeric(T)
         \\    where #meaningful { value < cast(T)0 }
@@ -1073,77 +1764,1441 @@ render_section_52 :: () {
         \\    if value < cast(T)0 return cast(T)0;
         \\    return value;
         \\}
+        \\
+        \\main :: () { print("% %\n", square(5), clamp_zero(-3)); }
     );
-    note(11, #string,oneline
-        \\Constraints affect applicability, not runtime branching. Every
-        \\expression they use must be evaluable in the specialization
-        \\environment. Use static `#if` inside the body when the declaration
-        \\should remain applicable but emit different code for different
-        \\compile-time cases.
+    code_block(8, "text", "25 0");
+    bullet(9, #string,oneline
+        \\State the weakest constraint that covers every operation the body uses;
+        \\a constraint stronger than the body needs rejects callers for no reason,
+        \\and one weaker turns into a body error the caller cannot read.
+    );
+    bullet(10, #string,oneline
+        \\Keep the domains of same-named overloads disjoint. Glosso does not rank
+        \\overlapping candidates by specificity; two applicable candidates are an
+        \\ambiguity, not a preference.
+    );
+    bullet(11, #string,oneline
+        \\Move a repeated capability check into a named predicate or a typeclass
+        \\so the failure message names the capability instead of an inline
+        \\expression.
+    );
+    note(12, #string,oneline
+        \\Constraints decide applicability, not runtime behavior. Every expression
+        \\in a clause must be evaluable in the specialization environment. When a
+        \\declaration should stay applicable but emit different code for different
+        \\compile-time cases, use `#if` inside the body instead.
     );
 }
 
 render_section_53 :: () {
     paragraph(0, #string,oneline
-        \\`#meaningful` asks whether a snippet typechecks. This is the main tool
-        \\for structural constraints.
+        \\`#meaningful` asks whether a snippet typechecks for the concrete
+        \\compile-time bindings currently in scope. It is the main tool for
+        \\structural constraints — capabilities a type has, rather than names it
+        \\declares.
     );
     code_block(1, "glosso", #string
+        \\Box :: struct { count: s64; }
+        \\
         \\HasLen :: (T: type) -> bool {
         \\    return #meaningful {
         \\        x: T;
         \\        x.count;
         \\    };
         \\}
+        \\
+        \\main :: () {
+        \\    b: Box;
+        \\    print("Box=% s64=%\n", HasLen(Box), HasLen(s64));
+        \\    print("member=% missing=%\n",
+        \\        #meaningful b.count, #meaningful b.missing);
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\Use it sparingly; a named predicate is clearer than repeating the same
-        \\probe.
+    code_block(2, "text", #string
+        \\Box=1 s64=0
+        \\member=1 missing=0
     );
-    subheading(3, "Compile-time expression probing");
+    subheading(3, "The two surface forms");
     paragraph(4, #string,oneline
-        \\`#meaningful` asks whether an expression is valid for the concrete
-        \\compile-time types currently being considered. It is a structural
-        \\capability probe and is most useful for selecting optional generic
-        \\behavior without executing the probed operation.
+        \\The block form deep-clones the block, strips cached types, and rechecks
+        \\it in a clone of the current environment; the verdict is `true` only if
+        \\every statement checks. Locals declared inside the probe are visible to
+        \\later probe statements, and the probe may reference runtime locals of
+        \\the enclosing scope without evaluating them. The braceless form is
+        \\parsed with the unary-expression parser, so it consumes exactly one
+        \\unary expression.
     );
-    bullet(5, #string,oneline
-        \\Probe the exact expression the implementation will later use,
-        \\including qualifiers and argument order.
+    table_header(5, "Probe form   —   Result");
+    table_row(6, #string,oneline
+        \\`#meaningful unary-expression`   |   `true` when that single unary
+        \\expression can be typed here; member access and calls are included,
+        \\binary operators are not
     );
-    bullet(6, #string,oneline
-        \\Use the result in compile-time selection so an invalid alternative is
-        \\not emitted for that specialization.
+    table_row(7, #string,oneline
+        \\`#meaningful { statements }`   |   Checks the whole snippet, including
+        \\declarations, member lookup, calls, and the final expression
     );
-    bullet(7, #string,oneline
-        \\Prefer a named typeclass when the capability is a public abstraction
-        \\rather than a local implementation fallback.
+    table_row(8, #string,oneline
+        \\A probe that fails name, type, or constraint checking   |   `false`;
+        \\the inner error is stored for a surrounding `#assert` to print
     );
-    bullet(8, #string,oneline
-        \\Do not use capability probing to create overlapping overload domains
-        \\that violate coherence.
+    paragraph(9, #string,oneline
+        \\The braceless form's precedence is a trap. `#meaningful 1 + 1` parses as
+        \\`(#meaningful 1) + 1`, which then fails on the addition rather than
+        \\answering the intended question. Parenthesise, or use the block form,
+        \\for anything containing an operator.
     );
-    table_header(9, "Probe form   —   Result");
+    code_block(10, "text", #string
+        \\b := #meaningful 1 + 1;
+        \\error: no operator '+' for bool, int
+        \\
+        \\b := #meaningful (1 + 1);   // true
+    );
+    subheading(11, "Reporting a failed probe with `#assert`");
+    paragraph(12, #string,oneline
+        \\A bare `false` is a poor diagnostic. `#assert condition, "message";`
+        \\turns a failed probe into a real error: when the failing condition
+        \\contained a failed `#meaningful` probe, the compiler appends a fixed
+        \\`note: constraint is not meaningful for these types` followed by the
+        \\checker's own inner error — the actual reason the snippet did not
+        \\typecheck. The probe slot is cleared before each assertion, so an
+        \\unrelated earlier failure cannot leak a stale note.
+    );
+    code_block(13, "glosso", #string
+        \\Vec :: struct { x: s64; y: s64; }
+        \\
+        \\supported :: (T: type) -> bool {
+        \\    return #meaningful { p, q: T; p + q; };
+        \\}
+        \\
+        \\main :: () {
+        \\    #assert supported(Vec), "Vec must support +";
+        \\}
+    );
+    code_block(14, "text", #string
+        \\error: assertion failed: Vec must support +
+        \\  --> probe.glo:8:5
+        \\  |
+        \\8 |     #assert supported(Vec), "Vec must support +";
+        \\  |     ^^^^^^^
+        \\note: constraint is not meaningful for these types
+        \\note: no operator '+' for Vec, Vec
+        \\  --> probe.glo:4:37
+        \\  |
+        \\4 |     return #meaningful { p, q: T; p + q; };
+        \\  |                                     ^
+    );
+    paragraph(15, #string,oneline
+        \\The second note carries a source location only when the probe lives
+        \\inside a named predicate procedure. Writing the probe inline —
+        \\`#assert #meaningful { p, q: Vec; p + q; }, "...";` — produces the same
+        \\two notes but the second is bare text with no location block. If the
+        \\condition merely evaluates to false without any probe failing, no notes
+        \\are printed at all. See "Assertions with `#assert`".
+    );
+    subheading(16, "What a probe does and does not commit");
+    paragraph(17, #string,oneline
+        \\The compiler typechecks the cloned probe with the currently inferred
+        \\generic bindings and never emits or executes the probed runtime
+        \\operation. It also does not commit generic instantiations discovered
+        \\underneath: while a probe is active the checker raises a probe depth and
+        \\records instances speculatively.
+    );
+    code_block(18, "glosso", #string
+        \\sortish :: (items: []$T) { for items { } }
+        \\
+        \\Sortable :: (T: type) -> bool {
+        \\    return #meaningful { items: []T; sortish(items); };
+        \\}
+        \\
+        \\Heavy :: struct { blob: [4096]u8; }
+        \\
+        \\main :: () {
+        \\    #if Sortable(Heavy) { print("Heavy could be sorted\n"); }
+        \\}
+    );
+    paragraph(19, #string,oneline
+        \\Compiled with `--backend llvm-ir`, that module contains no `sortish`
+        \\symbol at all. Adding a real call — `xs: [2]Heavy; sortish(xs[..]);` —
+        \\makes `define void @glo_sortish____Heavy` appear, so the probe asked the
+        \\question without paying for the instance.
+    );
+    paragraph(20, #string,oneline
+        \\The verdict is computed once by the checker, cached on the node, and
+        \\reused by both constant evaluation and lowering, so a probe in
+        \\runtime-expression position lowers to a plain constant boolean that
+        \\always agrees with the verdict `#if` saw. Rollback is not total,
+        \\however: constant evaluations forced during a probe are not undone.
+    );
+    bullet(21, #string,oneline
+        \\Probe the exact expression the implementation will later use, including
+        \\pointer qualifiers and argument order — overload selection and result
+        \\coercion are part of the answer.
+    );
+    bullet(22, #string,oneline
+        \\Consume the verdict in `#if` or in a `where` clause so the invalid
+        \\alternative is never emitted for that specialization.
+    );
+    bullet(23, #string,oneline
+        \\Prefer a named typeclass when the capability is a public abstraction; a
+        \\probe reports what compiles today, and it will silently change verdict
+        \\when an unrelated overload is added.
+    );
+}
+
+render_section_93 :: () {
+    paragraph(0, #string,oneline
+        \\`#packed` is a struct attribute that fixes the record's memory layout
+        \\to declaration order with no padding at all. It is written between the
+        \\`struct` keyword and the body: `Name :: struct #packed { ... }`. Every
+        \\field starts at the byte immediately after its predecessor, there is no
+        \\tail padding, `size_of` is the plain sum of the field sizes, and the
+        \\record alignment is 1. It exists for the two cases where the byte
+        \\positions are not the compiler's to choose: memory-mapped hardware
+        \\tables and on-the-wire or on-disk formats.
+    );
+    code_block(1, "glosso", #string
+        \\Sensor_Frame :: struct #packed {
+        \\    id:       u8;
+        \\    reading:  u32;
+        \\    checksum: u16;
+        \\}
+        \\
+        \\decode :: (bytes: [*]u8) -> Sensor_Frame {
+        \\    frame: Sensor_Frame;
+        \\    destination := cast([*]u8)cast(*void)*frame;
+        \\    for i: 0..size_of(Sensor_Frame)  destination[i] = bytes[i];
+        \\    return frame;
+        \\}
+        \\
+        \\main :: () {
+        \\    wire: [7]u8 = .[ 16#2A, 16#D2, 16#04, 16#00, 16#00, 16#39, 16#05 ];
+        \\    frame := decode(cast([*]u8)*wire[0]);
+        \\    print("id=% reading=% checksum=%\n",
+        \\        frame.id, frame.reading, frame.checksum);
+        \\    print("size=% align=%\n",
+        \\        size_of(Sensor_Frame), type_info(Sensor_Frame).alignment);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\id=42 reading=1234 checksum=1337
+        \\size=7 align=1
+    );
+    paragraph(3, #string,oneline
+        \\A struct passes through the layout pass after checking and before code
+        \\generation, and that pass has three regimes. An undecorated struct is
+        \\reordered: fields are sorted by descending alignment, then descending
+        \\size, with declaration order as the tiebreak, and natural padding is
+        \\inserted. A `struct #c_call` keeps declaration order but still applies
+        \\the target C ABI's natural alignment, inter-field padding, and tail
+        \\padding. A `struct #packed` keeps declaration order and inserts
+        \\nothing. The same three declarations measured side by side make the
+        \\difference concrete.
+    );
+    code_block(4, "glosso", #string
+        \\Packed :: struct #packed { a: u8; b: u64; c: u8; }
+        \\Plain  :: struct         { a: u8; b: u64; c: u8; }
+        \\C_Aln  :: struct #c_call { a: u8; b: u64; c: u8; }
+        \\C_Pkd  :: struct #c_call #packed { a: u8; b: u64; c: u8; }
+        \\
+        \\offset :: (base: *$T, field: *$U) -> u64 {
+        \\    return cast(u64)field - cast(u64)base;
+        \\}
+        \\
+        \\main :: () {
+        \\    p: Packed; q: Plain; r: C_Aln; s: C_Pkd;
+        \\    print("Packed size=% align=% offs=%,%,%\n",
+        \\        size_of(Packed), type_info(Packed).alignment,
+        \\        offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
+        \\    print("Plain  size=% align=% offs=%,%,%\n",
+        \\        size_of(Plain), type_info(Plain).alignment,
+        \\        offset(*q, *q.a), offset(*q, *q.b), offset(*q, *q.c));
+        \\    print("C_Aln  size=% align=% offs=%,%,%\n",
+        \\        size_of(C_Aln), type_info(C_Aln).alignment,
+        \\        offset(*r, *r.a), offset(*r, *r.b), offset(*r, *r.c));
+        \\    print("C_Pkd  size=% align=% offs=%,%,%\n",
+        \\        size_of(C_Pkd), type_info(C_Pkd).alignment,
+        \\        offset(*s, *s.a), offset(*s, *s.b), offset(*s, *s.c));
+        \\}
+    );
+    code_block(5, "text", #string
+        \\Packed size=10 align=1 offs=0,1,9
+        \\Plain  size=16 align=8 offs=8,0,9
+        \\C_Aln  size=24 align=8 offs=0,8,16
+        \\C_Pkd  size=10 align=1 offs=0,1,9
+    );
+    paragraph(6, #string,oneline
+        \\`Plain` proves that source order is not layout order: `b` was declared
+        \\second and lives at offset 0, while `a` was declared first and lives at
+        \\offset 8. `C_Aln` keeps the declared order but pays 7 bytes of padding
+        \\after `a` and 7 bytes of tail padding, reaching 24. `Packed` is 10
+        \\bytes, which is exactly `1 + 8 + 1`, and its alignment is 1 rather than
+        \\8. `C_Pkd` is byte-for-byte identical to `Packed`.
+    );
+    table_header(7, "Struct form   —   Layout the compiler produces");
+    table_row(8, #string,oneline
+        \\`struct { ... }`   |   Fields reordered by descending alignment, then
+        \\descending size, then declaration order; natural padding and tail
+        \\padding inserted
+    );
+    table_row(9, #string,oneline
+        \\`struct #c_call { ... }`   |   Declaration order preserved; the target
+        \\C ABI's natural alignment, inter-field padding, and tail padding
+        \\applied
+    );
     table_row(10, #string,oneline
-        \\`#meaningful expression`   |   `true` when the expression can be typed
-        \\in the current compile-time environment
+        \\`struct #packed { ... }`   |   Declaration order preserved; no
+        \\inter-field padding, no tail padding, record alignment 1, `size_of`
+        \\equal to the sum of the field sizes
     );
-    table_row(11, #string,oneline
-        \\`#meaningful { statements/expression }`   |   Checks the complete
-        \\snippet, including declarations, member lookup, calls, and result
-        \\expression
+    note(11, #string,oneline
+        \\There is no `offset_of` builtin: `offset_of(S, "b")` fails with
+        \\`error: unknown function offset_of`. Reflection does not expose packing
+        \\either — `Type_Info` carries only `tag`, `name`, `size`, `alignment`
+        \\and `shower`, so an alignment of 1 is the only observable signal. Field
+        \\offsets must be measured with the pointer-difference idiom above, and
+        \\that idiom is valid only at run time.
     );
-    table_row(12, #string,oneline
-        \\A probe that fails name/type/constraint checking   |   `false`; the
-        \\probe records the internal failure for a surrounding constraint
-        \\diagnostic
+    code_block(12, "glosso", #string
+        \\S :: struct #packed { a: u8; b: u32; }
+        \\
+        \\offset_b :: () -> u64 {
+        \\    s: S;
+        \\    return cast(u64)*s.b - cast(u64)*s.a;
+        \\}
+        \\
+        \\COMPTIME_OFFSET :: #comptime offset_b();
+        \\
+        \\main :: () {
+        \\    print("runtime=% comptime=%\n", offset_b(), COMPTIME_OFFSET);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\runtime=1 comptime=0
+    );
+    paragraph(14, #string,oneline
+        \\The compile-time VM has no addresses to hand out, so a
+        \\pointer-to-integer cast under `#comptime` silently yields the pointee
+        \\rather than an address. No diagnostic is issued. Measure offsets at run
+        \\time, or assert on `size_of` and `type_info(T).alignment`, which are
+        \\both correct at compile time.
+    );
+    subheading(15, "`#c_call` is not a packing switch");
+    paragraph(16, #string,oneline
+        \\`#packed` is the only switch that removes padding. Struct-level
+        \\`#c_call` selects a layout policy — declaration order plus the target C
+        \\ABI's natural alignment — and never packs. Adding it to a packed struct
+        \\changes nothing, and the two directives may appear in either order and
+        \\alongside `#derive(...)`, `#modify` and `#magic "name"`.
+    );
+    code_block(17, "glosso", #string
+        \\A :: struct #packed #c_call { a: u8; b: u64; c: u8; }
+        \\B :: struct #c_call #packed { a: u8; b: u64; c: u8; }
+        \\
+        \\main :: () {
+        \\    print("% % % %\n", size_of(A), type_info(A).alignment,
+        \\                       size_of(B), type_info(B).alignment);
+        \\}
+    );
+    code_block(18, "text", #string
+        \\10 1 10 1
+    );
+    paragraph(19, #string,oneline
+        \\The `#c_call` that matters for an ABI boundary is the one on the
+        \\function or function-pointer type, because that is what selects the
+        \\calling convention. A struct that is only `#packed` and carries no
+        \\struct-level `#c_call` already receives the target C aggregate-passing
+        \\rules when it is used by value in such a signature. `#packed` also
+        \\changes the emitted LLVM record from an ordinary named struct to a
+        \\packed one.
+    );
+    code_block(20, "glosso", #string
+        \\Packed8 :: struct #packed { a: u8; b: u32; c: u16; d: u8; }
+        \\Plain8  :: struct         { a: u8; b: u32; c: u16; d: u8; }
+        \\
+        \\take_packed :: (v: Packed8) -> u32 #c_call { return v.b; }
+        \\take_plain  :: (v: Plain8)  -> u32 #c_call { return v.b; }
+    );
+    code_block(21, "text", #string
+        \\; glosso --no-main --backend llvm-ir probe.glo
+        \\%Packed8 = type <{ i8, i32, i16, i8 }>
+        \\%Plain8 = type { i32, i16, i8, i8 }
+        \\define i32 @glo_take_packed(i64 %0)
+        \\define i32 @glo_take_plain(%Plain8 %0)
+    );
+    note(22, #string,oneline
+        \\On Microsoft x64 the 8-byte packed record travels in a single integer
+        \\register, which is why `take_packed` takes an `i64`. The UEFI targets
+        \\apply the Microsoft C record rules even though `OUT.os` stays
+        \\`Target_OS.Freestanding`. A packed struct crossing an ABI boundary is
+        \\still recursion-checked for by-value representations the ABI cannot
+        \\carry, exactly like a `#c_call` struct.
+    );
+    subheading(23, "Generics, nesting, and compile time");
+    paragraph(24, #string,oneline
+        \\Monomorphization copies the `packed` attribute onto every
+        \\specialization, so a generic packed record is packed at every
+        \\instantiation. A packed struct nested inside another packed struct
+        \\contributes its packed size with no padding around it.
+    );
+    code_block(25, "glosso", #string
+        \\// `offset` is the helper declared in the first comparison above.
+        \\G_Packed     :: struct #packed { tag: u8; value: $T; }
+        \\Packed_Pair  :: struct #packed { x: u16; y: u32; }
+        \\Nested_Packed:: struct #packed { head: u8; inner: Packed_Pair; tail: u8; }
+        \\Outer_Plain  :: struct         { head: u8; inner: Packed_Pair; tail: u8; }
+        \\
+        \\main :: () {
+        \\    g64: G_Packed(u64);
+        \\    n: Nested_Packed;
+        \\    o: Outer_Plain;
+        \\    print("G_Packed(u64) size=% align=% offs=%,%\n",
+        \\        size_of(type_of(g64)), type_info(type_of(g64)).alignment,
+        \\        offset(*g64, *g64.tag), offset(*g64, *g64.value));
+        \\    print("Nested_Packed size=% align=% offs=%,%,%\n",
+        \\        size_of(Nested_Packed), type_info(Nested_Packed).alignment,
+        \\        offset(*n, *n.head), offset(*n, *n.inner), offset(*n, *n.tail));
+        \\    print("Outer_Plain size=% align=% offs=%,%,%\n",
+        \\        size_of(Outer_Plain), type_info(Outer_Plain).alignment,
+        \\        offset(*o, *o.head), offset(*o, *o.inner), offset(*o, *o.tail));
+        \\}
+    );
+    code_block(26, "text", #string
+        \\G_Packed(u64) size=9 align=1 offs=0,1
+        \\Nested_Packed size=8 align=1 offs=0,1,7
+        \\Outer_Plain size=8 align=1 offs=6,0,7
+    );
+    note(27, #string,oneline
+        \\`Outer_Plain` is the trap. Its only aggregate field is packed, so its
+        \\own alignment collapses to 1 and its size matches the packed nesting —
+        \\but it is still an undecorated struct, so its fields are still
+        \\reordered: `inner` lands at 0, `head` at 6, `tail` at 7. Containing a
+        \\packed struct does not make the container ordered. Every level that
+        \\must keep declaration order needs its own `#packed`.
+    );
+    paragraph(28, #string,oneline
+        \\The compile-time VM skips field alignment for packed records, so a
+        \\value built and read under `#comptime` agrees byte for byte with the
+        \\runtime image. Arrays of packed structs have a stride equal to the
+        \\element size because there is no element padding, and both `size_of`
+        \\and `type_info(T).alignment` are usable inside `#if`.
+    );
+    code_block(29, "glosso", #string
+        \\Header :: struct #packed { magic: u32; version: u8; length: u16; }
+        \\
+        \\comptime_layout :: () -> bool {
+        \\    h := Header.{ 16#DEADBEEF, 3, 1024 };
+        \\    return size_of(Header) == 7 && type_info(Header).alignment == 1 &&
+        \\           h.magic == 16#DEADBEEF && h.version == 3 && h.length == 1024;
+        \\}
+        \\
+        \\LAYOUT_OK :: #comptime comptime_layout();
+        \\
+        \\main :: () {
+        \\    h := Header.{ 16#DEADBEEF, 3, 1024 };
+        \\    bytes := cast([*]u8)cast(*void)*h;
+        \\    print("LAYOUT_OK=%\n", LAYOUT_OK);
+        \\    for i: 0..size_of(Header)  print("%,", bytes[i]);
+        \\    print("\n");
+        \\    table: [3]Header;
+        \\    stride := cast(u64)*table[1] - cast(u64)*table[0];
+        \\    print("array size=% stride=%\n", size_of(type_of(table)), stride);
+        \\}
+    );
+    code_block(30, "text", #string
+        \\LAYOUT_OK=1
+        \\239,190,173,222,3,0,4,
+        \\array size=21 stride=7
+    );
+    paragraph(31, #string,oneline
+        \\Packed layout is also target-independent, which is what makes it usable
+        \\for a format that has to be read back by another machine. The same
+        \\assertions hold on the host, on `x86_64-freestanding` and on
+        \\`x86_64-freestanding-uefi`, even though those two targets use different
+        \\object formats and different C ABIs.
+    );
+    code_block(32, "glosso", #string
+        \\Wire :: struct #packed { a: u8; b: u64; c: u32; }
+        \\
+        \\check :: () {
+        \\    #if size_of(Wire) != 13   #compile_error "size differs";
+        \\    #if type_info(Wire).alignment != 1  #compile_error "align differs";
+        \\}
+        \\
+        \\firmware :: () #c_call { check(); }
+    );
+    code_block(33, "text", #string
+        \\glosso --no-main --target x86_64-freestanding      --backend object ...
+        \\glosso --no-main --target x86_64-freestanding-uefi --backend object ...
+        \\
+        \\Both compile with no diagnostic: size 13, alignment 1 on each target.
+    );
+    subheading(34, "Accepted members and rejected sites");
+    paragraph(35, #string,oneline
+        \\`#packed` constrains layout only; it does not restrict what a struct
+        \\may contain. Field defaults, `using` fields, `#derive(...)`, an inline
+        \\`struct #packed { ... }` used as a field type, fixed arrays, and
+        \\builtin descriptor types such as `string` all work and are all laid out
+        \\with no padding. An empty packed struct has size 0.
+    );
+    code_block(36, "glosso", #string
+        \\Empty   :: struct #packed { }
+        \\Deriv   :: struct #packed #derive(PartialEq) { a: u8; b: u32; }
+        \\Default :: struct #packed { a: u8 = 7; b: u32 = 9; }
+        \\Nest    :: struct #packed { head: u8; using pos: Default; }
+        \\Str     :: struct #packed { s: string; n: u8; }
+        \\Arr     :: struct #packed { a: u8; xs: [3]u16; }
+        \\Inline  :: struct #packed {
+        \\    head: struct #packed { lo: u8; hi: u16; };
+        \\    tail: u8;
+        \\}
+        \\
+        \\main :: () {
+        \\    d1 := Deriv.{ 1, 2 };
+        \\    d2 := Deriv.{ 1, 2 };
+        \\    df: Default;
+        \\    print("Empty=% Deriv=% eq=% Default=%,%,% Nest=% Str=% Arr=% Inl=%\n",
+        \\        size_of(Empty), size_of(Deriv), d1 == d2,
+        \\        size_of(Default), df.a, df.b,
+        \\        size_of(Nest), size_of(Str), size_of(Arr), size_of(Inline));
+        \\}
+    );
+    code_block(37, "text", #string
+        \\Empty=0 Deriv=5 eq=1 Default=5,7,9 Nest=6 Str=25 Arr=7 Inl=4
+    );
+    paragraph(38, #string,oneline
+        \\`#packed` is a struct directive and nothing else. The parser accepts it
+        \\only between `struct` and its body, it takes no arguments, and there is
+        \\no `#pragma pack(N)` equivalent — the only packing granularity is
+        \\"none". Unions, enums, procedures and `#fn_ptr` types reject it at
+        \\parse time.
+    );
+    code_block(39, "text", #string
+        \\U :: union #packed { a: u8; b: u64; }
+        \\error: unexpected token 'packed'
+        \\
+        \\E :: enum #packed { A; B; }
+        \\error: unexpected token 'packed'
+        \\
+        \\S :: struct #packed(2) { a: u8; b: u64; }
+        \\error: unexpected token '('
+        \\
+        \\F :: #fn_ptr(a: s32) -> s32 #packed;
+        \\error: bad decl name 'packed'
+    );
+    note(40, #string,oneline
+        \\Because packing removes padding, a field can start at an address that
+        \\is not a multiple of its own natural alignment. Taking `*record.field`
+        \\at such an offset is accepted and reads and writes correctly; the
+        \\backend lowers it as an unaligned access. Packing fixes byte positions
+        \\and nothing else: it does not normalise integer endianness, so a format
+        \\shared with a different-endian machine still needs explicit byte-order
+        \\conversion.
+    );
+}
+
+render_section_94 :: () {
+    paragraph(0, #string,oneline
+        \\Naming a variant on a tagged union in read position — `value.Variant` —
+        \\is a checked unwrap, not a reinterpretation and not a compile error. It
+        \\compiles under the default feature gates, and if the value does not
+        \\hold that variant when the read executes, the process aborts.
+    );
+    code_block(1, "glosso", #string
+        \\Token :: union {
+        \\    Name: string;
+        \\    Code: s64;
+        \\    Eof:  void;
+        \\}
+        \\
+        \\main :: () {
+        \\    t: Token = .Name("hi");
+        \\    print("about to read the wrong variant\n");
+        \\    n := t.Code;
+        \\    print("read %\n", n);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\about to read the wrong variant
+        \\probe.glo:12:12: union access: expected .Code, but the value holds one of .Name | .Code | .Eof
+        \\
+        \\(process exit status 134; the final print never runs)
+    );
+    paragraph(3, #string,oneline
+        \\The mechanism is fixed at check time and paid at run time. When the
+        \\checker sees a payload read it cannot prove, it marks the node as a
+        \\checked unwrap rather than rejecting it; lowering then emits a tag
+        \\load, a comparison against the wanted variant index, and a call to the
+        \\assertion-failure path on mismatch, with a message built from the
+        \\source path, line and column of the access. Reading the variant that is
+        \\actually live succeeds silently and costs one comparison and one
+        \\branch.
+    );
+    note(4, #string,oneline
+        \\The message format is
+        \\`<path>:<line>:<col>: union access: expected .<Variant>, but the value
+        \\holds one of .<A> | .<B> | .<C>`. The list enumerates every declared
+        \\variant, including the expected one, and does not name the variant
+        \\actually held — it is a description of the union's shape, not a report
+        \\of the runtime tag. The compiler prints an absolute path; the excerpt
+        \\above is abbreviated.
+    );
+    paragraph(5, #string,oneline
+        \\`Option` and `Result` are ordinary tagged unions declared in the
+        \\Prelude, so nothing about them is special here. `.Ok`, `.Err` and
+        \\`.Some` are payload reads with exactly the same checked-unwrap
+        \\behavior, including for a niche-laid-out `Option(*T)`, where the tag
+        \\test becomes a null test.
+    );
+    code_block(6, "glosso", #string
+        \\parse :: (ok: bool) -> Result(s64, string) {
+        \\    if ok return .Ok(7);
+        \\    return .Err("bad input");
+        \\}
+        \\
+        \\main :: () {
+        \\    good := parse(true);
+        \\    print("good.Ok = %\n", good.Ok);
+        \\    bad := parse(false);
+        \\    print("bad.Err = %\n", bad.Err);
+        \\    print("about to read .Ok of an .Err\n");
+        \\    print("bad.Ok = %\n", bad.Ok);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\good.Ok = 7
+        \\bad.Err = bad input
+        \\about to read .Ok of an .Err
+        \\probe.glo:12:31: union access: expected .Ok, but the value holds one of .Ok | .Err
+    );
+    subheading(8, "Writes activate, reads are checked");
+    paragraph(9, #string,oneline
+        \\The asymmetry is the part that surprises readers. A payload write is
+        \\not a checked operation: assigning through a variant field sets the tag
+        \\to that variant and stores the payload, whatever was live before. No
+        \\check is emitted and no panic can occur. Naming a `void` variant as a
+        \\statement activates it the same way.
+    );
+    code_block(10, "glosso", #string
+        \\Token :: union { Name: string; Code: s64; Eof: void; }
+        \\
+        \\main :: () {
+        \\    t: Token = .Name("hi");
+        \\    t.Code = 5;                    // activates .Code, no check
+        \\    print("after write: %\n", t.Code);
+        \\    if t == {
+        \\    case .Name; print("tag says Name\n");
+        \\    case .Code; print("tag says Code\n");
+        \\    case .Eof;  print("tag says Eof\n");
+        \\    }
+        \\    t.Eof;                         // activates the void variant
+        \\    if t == {
+        \\    case .Name; print("tag says Name\n");
+        \\    case .Code; print("tag says Code\n");
+        \\    case .Eof;  print("tag says Eof\n");
+        \\    }
+        \\}
+    );
+    code_block(11, "text", #string
+        \\after write: 5
+        \\tag says Code
+        \\tag says Eof
+    );
+    table_header(12, "Payload operation   —   What the compiler emits");
+    table_row(13, #string,oneline
+        \\`u.Variant` in read position   |   Tag load, comparison, abort on
+        \\mismatch
+    );
+    table_row(14, #string,oneline
+        \\`u.Variant` inside `case .Variant;` for the same subject   |   The same
+        \\runtime check; arm refinement is not implemented
+    );
+    table_row(15, #string,oneline
+        \\`case .Variant(binding);` capture arm   |   Nothing extra; the payload
+        \\is bound during dispatch
+    );
+    table_row(16, #string,oneline
+        \\`u.Variant = payload`   |   Tag store plus payload store; never checked
+    );
+    table_row(17, #string,oneline
+        \\`u.VoidVariant;` as a statement   |   Tag store; never checked
+    );
+    table_row(18, #string,oneline
+        \\Member read on a `union #raw`   |   Nothing; a raw union carries no tag
+        \\and is exempt from the rule
+    );
+    subheading(19, "The `union_unwrap` section gate");
+    paragraph(20, #string,oneline
+        \\`#enable(union_unwrap)` and `#disable(union_unwrap)` select between the
+        \\checked unwrap and a static rejection. The gate is ENABLED by default,
+        \\which is why the examples above compile. It is a section gate in the
+        \\same family as `#enable(private_section)`: it is recorded per top-level
+        \\declaration at parse time and applies to every declaration that follows
+        \\until the matching directive. Under `#disable(union_unwrap)` a direct
+        \\payload access the checker cannot prove is a compile error.
+    );
+    code_block(21, "glosso", #string
+        \\Token :: union { Name: string; Code: s64; Eof: void; }
+        \\
+        \\#disable(union_unwrap);
+        \\peek :: (t: Token) -> s64 { return t.Code; }
+        \\#enable(union_unwrap);
+    );
+    code_block(22, "text", #string
+        \\error: union value is not known to hold '.Code' here
+        \\  --> probe.glo:4:38
+        \\  |
+        \\4 | peek :: (t: Token) -> s64 { return t.Code; }
+        \\  |                                      ^^^^
+        \\note: match on it first, or enable #enable(union_unwrap) for a checked unwrap
+    );
+    paragraph(23, #string,oneline
+        \\The gate does not distinguish reads from writes, so it also blocks
+        \\variant activation by field assignment. That makes the strict mode much
+        \\narrower than it first appears: inside a disabled region a union can
+        \\only be built with constructor syntax.
+    );
+    code_block(24, "glosso", #string
+        \\#disable(union_unwrap);
+        \\make :: () -> Token {
+        \\    t: Token;
+        \\    t.Code = 5;
+        \\    return t;
+        \\}
+        \\#enable(union_unwrap);
+    );
+    code_block(25, "text", #string
+        \\error: union value is not known to hold '.Code' here
+        \\  --> probe.glo:6:7
+        \\  |
+        \\6 |     t.Code = 5;
+        \\  |       ^^^^
+        \\note: match on it first, or enable #enable(union_unwrap) for a checked unwrap
+    );
+    paragraph(26, #string,oneline
+        \\The refinement table records nothing for switch arms, so proving the
+        \\tag with a `case` does not license a subject read inside that arm. The
+        \\arm below is rejected even though the case label just established which
+        \\variant is live.
+    );
+    code_block(27, "glosso", #string
+        \\#disable(union_unwrap);
+        \\dump :: (t: Token) {
+        \\    if t == {
+        \\    case .Name; print("name %\n", t.Name);
+        \\    case .Code; print("code %\n", t.Code);
+        \\    case .Eof;  print("eof\n");
+        \\    }
+        \\}
+        \\#enable(union_unwrap);
+    );
+    code_block(28, "text", #string
+        \\error: union value is not known to hold '.Name' here
+        \\  --> probe.glo:6:37
+        \\  |
+        \\6 |     case .Name; print("name %\n", t.Name);
+        \\  |                                     ^^^^
+        \\note: match on it first, or enable #enable(union_unwrap) for a checked unwrap
+    );
+    note(29, #string,oneline
+        \\The gate governs the declaration being checked, and a generic function
+        \\is checked once per specialization at the site that requests it. A call
+        \\into a generic helper from a disabled region therefore re-checks the
+        \\callee under the caller's gate, and the error can land in a file the
+        \\author never edited — including the standard library, whose
+        \\`option_unwrap_or` reads `value.Some` directly. Non-generic callees are
+        \\unaffected: they were already checked under the gate in force at their
+        \\own declaration.
+    );
+    code_block(30, "glosso", #string
+        \\peek_generic :: (t: $U) -> s64 { return t.Code; }
+        \\
+        \\#disable(union_unwrap);
+        \\caller :: (t: Token) -> s64 { return peek_generic(t); }
+        \\#enable(union_unwrap);
+    );
+    code_block(31, "text", #string
+        \\error: union value is not known to hold '.Code' here
+        \\  --> probe.glo:3:43
+        \\  |
+        \\3 | peek_generic :: (t: $U) -> s64 { return t.Code; }
+        \\  |                                           ^^^^
+        \\
+        \\// and, for `option_unwrap_or(o, -1)` called from a disabled region:
+        \\error: union value is not known to hold '.Some' here
+        \\  --> std\Prelude\Option.glo:38:34
+    );
+    subheading(32, "Capture arms are the form that costs nothing");
+    paragraph(33, #string,oneline
+        \\A capture arm binds the payload during dispatch, while the tag is
+        \\already in hand. It is the only spelling that both avoids the runtime
+        \\check and compiles under `#disable(union_unwrap)`. The three capture
+        \\forms are `case .Variant(binding);` inside `if subject == { ... }`, the
+        \\same inside `if #pattern subject == { ... }`, and the single-test form
+        \\`if #pattern .Variant(binding) = expression`.
+    );
+    code_block(34, "glosso", #string
+        \\#disable(union_unwrap);
+        \\describe :: (t: Token) -> string {
+        \\    if t == {
+        \\    case .Name(text); return text;
+        \\    case .Code(v);    _ := v; return "code";
+        \\    case .Eof;        return "eof";
+        \\    }
+        \\}
+        \\build :: () -> Token {
+        \\    a: Token = .Code(5);           // constructor forms are unaffected
+        \\    b := Token.Name("x");
+        \\    c: Token = .Eof;
+        \\    if false return a;
+        \\    if false return c;
+        \\    return b;
+        \\}
+        \\#enable(union_unwrap);
+        \\
+        \\main :: () {
+        \\    print("%\n", describe(build()));
+        \\    print("%\n", describe(.Code(1)));
+        \\    print("%\n", describe(.Eof));
+        \\}
+    );
+    code_block(35, "text", #string
+        \\x
+        \\code
+        \\eof
+    );
+    paragraph(36, #string,oneline
+        \\The cost difference is visible in the emitted code. Compiling two
+        \\otherwise identical functions with `--backend llvm-ir -O0`, the capture
+        \\form contributes no panic string at all while the subject-access form
+        \\contributes one, which means the tag is tested a second time inside an
+        \\arm that already proved it.
+    );
+    code_block(37, "text", #string
+        \\arm_capture:  case .Code(v); return v;        -> 0 `union access` strings
+        \\arm_access:   case .Code;    return t.Code;   -> 1 `union access` string
+        \\
+        \\probe.glo:11:26: union access: expected .Code, but the value holds one of .Name | .Code | .Eof
+    );
+    paragraph(38, #string,oneline
+        \\Contextual and qualified variant constructors — `a: Token = .Code(5)`,
+        \\`Token.Name("x")`, `c: Token = .Eof` — are untouched by the gate,
+        \\because they write a complete value rather than a member. Together with
+        \\capture arms and the Prelude helpers that match internally
+        \\(`option_is_some`, `option_is_none`, `option_unwrap_or`, and the prefix
+        \\`!` instance), they are the whole vocabulary a strict section needs.
+    );
+    note(39, #string,oneline
+        \\A `union #raw` is exempt from all of this. It carries no tag, so
+        \\refinement has nothing to consult and the checker tests for `raw`
+        \\before it consults the gate. Member reads on a raw union emit no check
+        \\even inside a `#disable(union_unwrap)` region, and reading a member
+        \\other than the one written is an unchecked reinterpretation.
+    );
+    code_block(40, "glosso", #string
+        \\Bits :: union #raw { floating: f64; bits: u64; }
+        \\
+        \\#disable(union_unwrap);
+        \\punned :: () -> u64 {
+        \\    b: Bits;
+        \\    b.floating = 1.0;
+        \\    return b.bits;
+        \\}
+        \\#enable(union_unwrap);
+        \\
+        \\main :: () { print("%\n", punned()); }
+    );
+    code_block(41, "text", #string
+        \\4607182418800017408
+    );
+    paragraph(42, #string,oneline
+        \\Two diagnostics are worth recognising by sight. A member access naming
+        \\a variant that does not exist is a plain error with no "did you mean"
+        \\note, unlike a struct field. And the gate accepts exactly four feature
+        \\names — `lossy_numerics`, `pointer_punning`, `union_unwrap` and
+        \\`private_section` (with `private_sections` also accepted); anything
+        \\else is rejected outright.
+    );
+    code_block(43, "text", #string
+        \\t.Nope
+        \\error: no union field Nope
+        \\
+        \\#enable(allow_union_unwrap);
+        \\error: unknown feature 'allow_union_unwrap'
+    );
+    paragraph(44, #string,oneline
+        \\Tagged Union Switching covers the dispatch forms themselves, and the
+        \\pattern chapters cover capture patterns, or-patterns and exhaustiveness.
+        \\The rule to carry away from this chapter is narrower: a payload read
+        \\outside a capture binding is a run-time assertion by default and a
+        \\compile error under `#disable(union_unwrap)`, and neither is free.
+    );
+}
+
+render_section_95 :: () {
+    paragraph(0, #string,oneline
+        \\`#lazy` turns a named runtime parameter into a call-by-need parameter.
+        \\The directive sits immediately before the parameter name, after `using`
+        \\or `noalias` if either is present: `f :: (#lazy value: s64)`. The
+        \\argument expression is not evaluated at the call. It is evaluated on the
+        \\first dynamic read of the parameter inside the callee, cached, and never
+        \\evaluated again for that call — and if control flow never reaches a
+        \\read, it is never evaluated at all.
+    );
+    code_block(1, "glosso", #string
+        \\noisy :: (tag: string) -> s64 {
+        \\    print("eval %\n", tag);
+        \\    return 7;
+        \\}
+        \\
+        \\skip :: (#lazy value: s64) -> s64 {
+        \\    print("skip body\n");
+        \\    return 1;
+        \\}
+        \\
+        \\once :: (#lazy value: s64) -> s64 {
+        \\    print("once body\n");
+        \\    return value + value + value;
+        \\}
+        \\
+        \\select :: (condition: bool, #lazy value: s64, fallback: s64) -> s64 {
+        \\    if condition return value;
+        \\    return fallback;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("a = %\n", skip(noisy("A")));
+        \\    print("b = %\n", once(noisy("B")));
+        \\    print("c = %\n", select(false, noisy("C"), 41));
+        \\    print("d = %\n", select(true, noisy("D"), 41));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\skip body
+        \\a = 1
+        \\once body
+        \\eval B
+        \\b = 21
+        \\c = 41
+        \\eval D
+        \\d = 7
+    );
+    paragraph(3, #string,oneline
+        \\Read the interleaving, not just the totals. `eval A` and `eval C` never
+        \\appear, because those parameters are never read. `once body` prints
+        \\BEFORE `eval B`, which proves the argument runs at the read point inside
+        \\the callee rather than at the call. And `eval B` appears once although
+        \\`once` reads `value` three times: the reads share one cached result.
+        \\The argument is still name-resolved and type-checked at the call site
+        \\whether or not it is ever read.
+    );
+    note(4, #string,oneline
+        \\`#lazy` is call-by-need, not a deferred copy of the value as it stood at
+        \\the call. The deferred expression is re-anchored to the caller's
+        \\bindings but executed at force time, so if the callee mutates
+        \\caller-visible state first, the argument observes the mutation.
+    );
+    code_block(5, "glosso", #string
+        \\observe :: (slot: *s64, #lazy value: s64) -> s64 {
+        \\    slot.* = 100;          // mutate before forcing
+        \\    return value;
+        \\}
+        \\
+        \\main :: () {
+        \\    x: s64 = 1;
+        \\    print("observe=%\n", observe(*x, x + 0));
+        \\}
+    );
+    code_block(6, "text", #string
+        \\observe=100
+    );
+    paragraph(7, #string,oneline
+        \\The cache is per call, not per declaration. Reading the parameter three
+        \\times inside a loop forces once for the whole call; two separate calls
+        \\each force their own argument once. A lazy parameter may also be handed
+        \\on as another function's lazy argument, and the chain stays unforced
+        \\until the innermost read, still forcing at most once overall.
+    );
+    code_block(8, "glosso", #string
+        \\loop_read :: (#lazy value: s64) -> s64 {
+        \\    total: s64 = 0;
+        \\    i: s64 = 0;
+        \\    while i < 3 {
+        \\        total += value;
+        \\        i += 1;
+        \\    }
+        \\    return total;
+        \\}
+        \\
+        \\bump    :: (counter: *s64) -> s64 { counter.* += 1; return counter.*; }
+        \\counted :: (#lazy value: s64) -> s64 { return value + value; }
+        \\forward :: (#lazy value: s64) -> s64 { return loop_read(value); }
+        \\
+        \\main :: () {
+        \\    print("E %\n", loop_read(noisy("E", 10)));
+        \\    n: s64 = 0;
+        \\    print("c1=%\n", counted(bump(*n)));
+        \\    print("c2=%\n", counted(bump(*n)));
+        \\    print("n=%\n", n);
+        \\    print("F %\n", forward(noisy("F", 100)));
+        \\}
+    );
+    code_block(9, "text", #string
+        \\eval E
+        \\E 30
+        \\c1=2
+        \\c2=4
+        \\n=2
+        \\eval F
+        \\F 300
+    );
+    note(10, #string,oneline
+        \\Assigning to a lazy parameter marks its slot forced and stores the new
+        \\value WITHOUT evaluating the argument, so the argument's side effects
+        \\are silently dropped. Compound assignment reads before it writes and
+        \\therefore does force. This is the one place where `value = 5;` and
+        \\`value += 5;` differ in more than arithmetic.
+    );
+    code_block(11, "glosso", #string
+        \\overwrite :: (#lazy value: s64) -> s64 { value = 5;  return value; }
+        \\addto     :: (#lazy value: s64) -> s64 { value += 5; return value; }
+        \\
+        \\main :: () {
+        \\    print("o=%\n", overwrite(noisy("O")));   // noisy returns 1
+        \\    print("a=%\n", addto(noisy("A")));
+        \\}
+    );
+    code_block(12, "text", #string
+        \\o=5
+        \\eval A
+        \\a=6
     );
     paragraph(13, #string,oneline
-        \\The compiler typechecks a cloned probe with the currently inferred
-        \\generic bindings. It does not emit or execute the probed runtime
-        \\operation. Because the check uses the complete expression, pointer
-        \\qualifiers, overload selection, argument order, and result coercions
-        \\are part of the answer.
+        \\Shadowing follows the ordinary scope rules and does not force anything.
+        \\An inner declaration with the same name hides the lazy parameter, and
+        \\reads of the inner binding never touch the outer slot.
+    );
+    code_block(14, "glosso", #string
+        \\shadowed :: (#lazy value: s64) -> s64 {
+        \\    {
+        \\        value: s64 = 5;   // ordinary local shadows the lazy parameter
+        \\        print("inner=%\n", value);
+        \\    }
+        \\    return 8;             // outer lazy parameter never read
+        \\}
+        \\
+        \\main :: () { print("s=%\n", shadowed(noisy("S"))); }
+    );
+    code_block(15, "text", #string
+        \\inner=5
+        \\s=8
+    );
+    subheading(16, "Defaults, named arguments, and compile-time laziness");
+    paragraph(17, #string,oneline
+        \\A lazy parameter may carry a default, and that default expression is
+        \\itself lazy: it runs only if the parameter is read. Named
+        \\`.parameter = expression` arguments bind to lazy parameters normally and
+        \\keep call-by-need. The consequence for argument evaluation order is that
+        \\a call site no longer runs its arguments left to right — the eager ones
+        \\run at the call, the lazy one runs at its read, which may be later or
+        \\never.
+    );
+    code_block(18, "glosso", #string
+        \\withdef :: (take: bool, #lazy value: s64 = noisy("DEFAULT")) -> s64 {
+        \\    if take return value;
+        \\    return -1;
+        \\}
+        \\
+        \\named :: (#lazy a: s64, b: s64) -> s64 {
+        \\    if b == 0 return 0;
+        \\    return a;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("1 -> %\n", withdef(false));
+        \\    print("2 -> %\n", withdef(true));
+        \\    print("3 -> %\n", withdef(true, noisy("EXPLICIT")));
+        \\    print("4 -> %\n", named(.b = 0, .a = noisy("NAMED-SKIP")));
+        \\    print("5 -> %\n", named(.b = 1, .a = noisy("NAMED-USED")));
+        \\}
+    );
+    code_block(19, "text", #string
+        \\1 -> -1
+        \\eval DEFAULT
+        \\2 -> 5
+        \\eval EXPLICIT
+        \\3 -> 5
+        \\4 -> 0
+        \\eval NAMED-USED
+        \\5 -> 5
+    );
+    paragraph(20, #string,oneline
+        \\`#comptime #lazy` and `#lazy #comptime` are the same declaration: the
+        \\two directives commute, and either spelling means a compile-time
+        \\parameter whose argument is constant-evaluated on demand. An unread
+        \\argument is never constant-evaluated, so an expression that would be a
+        \\compile-time error is accepted as long as nothing reads it. The call
+        \\itself may appear at run time as long as the argument is a compile-time
+        \\constant.
+    );
+    code_block(21, "glosso", #string
+        \\first  :: (#comptime #lazy value: s64) -> s64 { return value; }
+        \\second :: (#lazy #comptime value: s64) -> s64 { return value; }
+        \\ignore :: (#lazy #comptime value: s64) -> s64 { return 7; }
+        \\tick   :: (#comptime n: s64) -> s64 { return n * 2; }
+        \\used   :: (#lazy #comptime value: s64) -> s64 { return value + value; }
+        \\
+        \\FIRST  :: #comptime first(20);
+        \\SECOND :: #comptime second(22);
+        \\UNUSED :: #comptime ignore(1 / 0);      // accepted: never read
+        \\USED   :: #comptime used(tick(3));
+        \\
+        \\main :: () {
+        \\    print("% % % %\n", FIRST, SECOND, UNUSED, USED);
+        \\    print("runtime call = %\n", first(41));
+        \\}
+    );
+    code_block(22, "text", #string
+        \\20 22 7 12
+        \\runtime call = 41
+    );
+    paragraph(23, #string,oneline
+        \\Laziness skips constant evaluation, not name resolution, and it does not
+        \\relax the compile-time requirement on the argument itself. Both of these
+        \\still fail.
+    );
+    code_block(24, "text", #string
+        \\V :: #comptime ignore(some_undeclared_name);
+        \\error: unbound 'some_undeclared_name'
+        \\
+        \\x: s64 = 3;  _ := first(x);
+        \\error: argument for #comptime parameter 'value' must be known at compile time
+        \\note: unknown const x
+    );
+    paragraph(25, #string,oneline
+        \\`#lazy` is part of the parameter interface and survives generic
+        \\specialization in both the explicit `#comptime T: type` form and the
+        \\inferred `$T` form. It composes with `defer` (defers run on every exit
+        \\path, including paths that never forced), with an implicit `Try`-carrier
+        \\return (returning a plain value from a `Result`-returning function
+        \\forces and wraps), with `#inline` and `#inline,always`, and with
+        \\`noalias` on a pointer parameter.
+    );
+    code_block(26, "glosso", #string
+        \\pick :: (#comptime T: type, take: bool,
+        \\         #lazy value: T, fallback: T) -> T {
+        \\    if take return value;
+        \\    return fallback;
+        \\}
+        \\pick2 :: (take: bool, #lazy value: $T, fallback: T) -> T {
+        \\    if take return value;
+        \\    return fallback;
+        \\}
+        \\
+        \\wrap :: (#lazy value: s64) -> Result(s64, string) { return value; }
+        \\
+        \\with_defer :: (take: bool, #lazy value: s64) -> s64 {
+        \\    defer print("defer ran\n");
+        \\    if take return value;
+        \\    return -1;
+        \\}
+        \\
+        \\inlined :: (#lazy value: s64) -> s64 #inline,always { return value; }
+        \\aliased :: (noalias #lazy value: *s64) -> s64 { return value.*; }
+    );
+    code_block(27, "text", #string
+        \\pick(s64, false, noisy("A", 1), 41)  ->  A 41          (no eval)
+        \\pick2(true, noisy("D", 4), 41)       ->  eval D / D 4
+        \\wrap(noisy("W", 99)).Ok              ->  eval W / w=99
+        \\with_defer(false, noisy("D1", 1))    ->  defer ran / d1=-1
+        \\with_defer(true,  noisy("D2", 2))    ->  eval D2 / defer ran / d2=2
+        \\inlined(noisy("I", 42))              ->  eval I / i=42
+    );
+    subheading(28, "Where `#lazy` is rejected");
+    paragraph(29, #string,oneline
+        \\A lazy parameter is implemented as a hidden thunk plus a cache slot in
+        \\the callee's frame, so it cannot exist anywhere the callee's frame is
+        \\not the compiler's to shape: foreign ABIs have no thunk, macros have no
+        \\frame, `#magic` bodies are compiler-defined, and a function pointer
+        \\would erase the contract at the call site. Each of these is a specific
+        \\diagnostic rather than a general one.
+    );
+    table_header(30, "Rejected form   —   Diagnostic");
+    table_row(31, #string,oneline
+        \\`f :: (#lazy value: s64) -> s64 #c_call { ... }`   |   `error: #lazy
+        \\parameters on 'f' are not part of a foreign ABI`
+    );
+    table_row(32, #string,oneline
+        \\`ext :: (#lazy value: s64) -> s64 #foreign "c";`   |   `error: #lazy
+        \\parameters on 'ext' are not part of a foreign ABI`
+    );
+    table_row(33, #string,oneline
+        \\`m :: (#lazy value: s64) -> s64 #expand { ... }`   |   `error: #lazy
+        \\parameters are not supported on macro 'm'`
+    );
+    table_row(34, #string,oneline
+        \\A `#magic` declaration other than the Prelude's `&&` / `||`   |
+        \\  `error: #lazy parameters on #magic function '+++' require
+        \\compiler-defined lazy semantics`
+    );
+    table_row(35, #string,oneline
+        \\`f :: (#lazy values: ...s64)`   |   `error: #lazy cannot qualify a
+        \\variadic parameter`
+    );
+    table_row(36, #string,oneline
+        \\`f :: (#lazy #empty: s64)`   |   `error: #lazy cannot qualify a #empty
+        \\parameter`
+    );
+    table_row(37, #string,oneline
+        \\`f :: (using #lazy value: S)`   |   `error: using object has no runtime
+        \\storage`
+    );
+    table_row(38, #string,oneline
+        \\`f :: (#lazy #lazy value: s64)`   |   `error: duplicate #lazy parameter
+        \\directive`
+    );
+    table_row(39, #string,oneline
+        \\`F :: #fn_ptr(#lazy value: s64) -> s64;`   |   `error: unexpected token
+        \\'lazy'`
+    );
+    table_row(40, #string,oneline
+        \\`f := (#lazy value: s64) -> s64 { ... };` (lambda)   |   `error:
+        \\unexpected directive 'lazy'`
+    );
+    table_row(41, #string,oneline
+        \\`callback := lazy_value;`   |   `error: lazy function 'lazy_value'
+        \\cannot be used as an ordinary function pointer`
+    );
+    table_row(42, #string,oneline
+        \\Direct or mutual recursion through a runtime lazy function   |
+        \\  `error: recursive call to lazy function 'lazy_count' is not
+        \\supported`
+    );
+    table_row(43, #string,oneline
+        \\`p := *value;` inside the body   |   `error: cannot take pointer to
+        \\value`
+    );
+    note(44, #string,oneline
+        \\Ordering is fixed: `using` and `noalias` come BEFORE the `#comptime` and
+        \\`#lazy` directives. `noalias #lazy value: *s64` compiles, while
+        \\`#lazy noalias value: *s64` is `error: unexpected token 'noalias'`. A
+        \\lazy parameter has no addressable storage of its own, which is why both
+        \\`using` and address-of are refused.
+    );
+    subheading(45, "Short-circuiting is a consequence of `#lazy`");
+    paragraph(46, #string,oneline
+        \\`&&` and `||` are not hard-coded control flow for `bool`. They are the
+        \\single methods of the `LogicalAnd` and `LogicalOr` typeclasses, declared
+        \\in the Prelude with a `#lazy` right operand — and that one qualifier is
+        \\the entire source of short-circuiting. `(bool, bool)` is just the
+        \\Prelude's own instance.
+    );
+    code_block(47, "glosso", #string
+        \\// std/Prelude/Primitive_Operators.glo
+        \\LogicalAnd :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '&&' :: (left: L, #lazy right: R) -> Output #operator(left, 6);
+        \\}
+        \\
+        \\LogicalOr :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
+        \\}
+        \\
+        \\(bool, bool) :: instance LogicalAnd {
+        \\    Output :: bool;
+        \\    '&&' :: (left: bool, #lazy right: bool) -> Output #magic "bool_and";
+        \\}
+    );
+    paragraph(48, #string,oneline
+        \\Because the right operand is a lazy parameter, `false && rhs` yields
+        \\`false` and `true || rhs` yields `true` without ever forcing `rhs`. That
+        \\holds in every position: as a plain expression value, directly as an
+        \\`if` or `while` condition, in a chain such as `a && b && c`, and during
+        \\compile-time evaluation — which is why the two constants below compile
+        \\despite containing a division by zero.
+    );
+    code_block(49, "glosso", #string
+        \\bump :: (counter: *s64, result: bool) -> bool {
+        \\    counter.* += 1;
+        \\    return result;
+        \\}
+        \\
+        \\A :: #comptime false && (1 / 0 == 0);
+        \\B :: #comptime true  || (1 / 0 == 0);
+        \\
+        \\main :: () {
+        \\    n: s64 = 0;
+        \\    a := false && bump(*n, true);   print("a=% n=%\n", a, n);
+        \\    b := true  || bump(*n, true);   print("b=% n=%\n", b, n);
+        \\    c := true  && bump(*n, true);   print("c=% n=%\n", c, n);
+        \\    d := false || bump(*n, false);  print("d=% n=%\n", d, n);
+        \\
+        \\    if false && bump(*n, true) print("unreachable\n");
+        \\    while false && bump(*n, true) { }
+        \\    if false && bump(*n, true) && bump(*n, true) print("nope\n");
+        \\    print("chain n=%\n", n);
+        \\    print("comptime % %\n", A, B);
+        \\}
+    );
+    code_block(50, "text", #string
+        \\a=0 n=0
+        \\b=1 n=0
+        \\c=1 n=1
+        \\d=0 n=2
+        \\chain n=2
+        \\comptime 0 1
+    );
+    note(51, #string,oneline
+        \\`&&=` and `||=` are declared WITHOUT `#lazy` — `'&&=' :: (left: L,
+        \\right: R) -> Output #operator(assign, 0)` — and therefore ALWAYS
+        \\evaluate their right-hand side. `a &&= f();` calls `f()` even when `a`
+        \\is already `false`. This asymmetry with `&&` and `||` is invisible at
+        \\the call site; rewrite as `if a a = f();` when the right side has side
+        \\effects or is expensive.
+    );
+    code_block(52, "glosso", #string
+        \\noisy :: (tag: string, v: bool) -> bool {
+        \\    print("eval %\n", tag);
+        \\    return v;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := false;
+        \\    a &&= noisy("AND", true);
+        \\    print("a=%\n", a);
+        \\    b := true;
+        \\    b ||= noisy("OR", false);
+        \\    print("b=%\n", b);
+        \\}
+    );
+    code_block(53, "text", #string
+        \\eval AND
+        \\a=0
+        \\eval OR
+        \\b=1
+    );
+    paragraph(54, #string,oneline
+        \\Any type may instance `LogicalAnd` or `LogicalOr` and get real
+        \\short-circuiting, because whether the right operand runs is decided by
+        \\the instance body reading or not reading its parameter. There is no
+        \\eager call the compiler makes on the author's behalf.
+    );
+    code_block(55, "glosso", #string
+        \\Flag :: struct { value: bool; }
+        \\
+        \\(Flag, Flag) :: instance LogicalAnd {
+        \\    Output :: Flag;
+        \\    '&&' :: (left: Flag, #lazy right: Flag) -> Output {
+        \\        if !left.value return left;
+        \\        return right;
+        \\    }
+        \\}
+        \\
+        \\(Flag, Flag) :: instance LogicalOr {
+        \\    Output :: Flag;
+        \\    '||' :: (left: Flag, #lazy right: Flag) -> Output {
+        \\        if left.value return left;
+        \\        return right;
+        \\    }
+        \\}
+        \\
+        \\touch :: (count: *s64, value: bool) -> Flag {
+        \\    count.* += 1;
+        \\    return .{ .value = value };
+        \\}
+        \\
+        \\main :: () {
+        \\    count: s64 = 0;
+        \\    off: Flag = .{ .value = false };
+        \\    on:  Flag = .{ .value = true };
+        \\    r1 := off && touch(*count, true);
+        \\    print("r1=% count=%\n", r1.value, count);
+        \\    r2 := on  && touch(*count, true);
+        \\    print("r2=% count=%\n", r2.value, count);
+        \\    r3 := on  || touch(*count, true);
+        \\    print("r3=% count=%\n", r3.value, count);
+        \\    r4 := off || touch(*count, true);
+        \\    print("r4=% count=%\n", r4.value, count);
+        \\}
+    );
+    code_block(56, "text", #string
+        \\r1=0 count=0
+        \\r2=1 count=1
+        \\r3=1 count=1
+        \\r4=1 count=2
+    );
+    paragraph(57, #string,oneline
+        \\An instance method must reproduce its typeclass's `#lazy` contract
+        \\exactly. Dropping the qualifier is rejected, because the caller's
+        \\lowering depends on the parameter being lazy. The same rule applies to
+        \\ordinary typeclass methods, where a bodyless requirement may declare
+        \\`#lazy` parameters and every instance must match it.
+    );
+    code_block(58, "text", #string
+        \\'&&' :: (left: Flag, right: Flag) -> Output { ... }
+        \\error: operator '&&' must match the #lazy parameter contract of typeclass 'LogicalAnd'
+        \\
+        \\check :: (value: Box, fallback: s64) -> s64 { ... }
+        \\error: function 'check' must match the #lazy parameter contract of typeclass 'Guard'
+    );
+    code_block(59, "glosso", #string
+        \\Guard :: typeclass (T: type) {
+        \\    check :: (value: T, #lazy fallback: s64) -> s64;
+        \\}
+        \\
+        \\Box :: struct { ok: bool; }
+        \\
+        \\Box :: instance Guard {
+        \\    check :: (value: Box, #lazy fallback: s64) -> s64 {
+        \\        if value.ok return 1;
+        \\        return fallback;
+        \\    }
+        \\}
+        \\
+        \\expensive :: () -> s64 { print("computed fallback\n"); return 42; }
+        \\
+        \\main :: () {
+        \\    good: Box = .{ .ok = true };
+        \\    bad:  Box = .{ .ok = false };
+        \\    print("g=%\n", check(good, expensive()));
+        \\    print("b=%\n", check(bad, expensive()));
+        \\}
+    );
+    code_block(60, "text", #string
+        \\g=1
+        \\computed fallback
+        \\b=42
+    );
+    paragraph(61, #string,oneline
+        \\The everyday use is a guard around work that is only sometimes needed —
+        \\a disabled log line, an expensive fallback, a diagnostic message. `#lazy`
+        \\moves that decision from the call site into the callee, so the caller
+        \\writes the argument once and the callee decides whether it runs.
+    );
+    code_block(62, "glosso", #string
+        \\VERBOSE := false;
+        \\
+        \\log :: (enabled: bool, #lazy message: string) {
+        \\    if !enabled return;
+        \\    print("%\n", message);
+        \\}
+        \\
+        \\render :: (item: s64) -> string {
+        \\    print("[rendering %]\n", item);
+        \\    return "expensive text";
+        \\}
+        \\
+        \\main :: () {
+        \\    log(VERBOSE, render(1));
+        \\    VERBOSE = true;
+        \\    log(VERBOSE, render(2));
+        \\}
+    );
+    code_block(63, "text", #string
+        \\[rendering 2]
+        \\expensive text
     );
 }
 
