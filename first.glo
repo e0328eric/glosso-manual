@@ -8,13 +8,17 @@
 #load "scripts/tree_sitter.glo";
 
 append_reference_text :: (path: string, text: string) -> bool {
-    opened := append_file(path);
-    if result_is_err(opened) return false;
-    file := opened.Ok;
+    file: File;
+    if append_file(path) == {
+        case .Ok(opened); file = opened;
+        case .Err; return false;
+    }
     wrote := write(file, text);
     closed := close(*file);
-    return result_is_ok(wrote) && wrote.Ok == text.count &&
-        result_is_ok(closed);
+    if #pattern .Ok(written) = wrote {
+        return written == text.count && result_is_ok(closed);
+    }
+    return false;
 }
 
 append_generated_part :: (output_path: string, part_path: string) -> bool {
@@ -23,8 +27,8 @@ append_generated_part :: (output_path: string, part_path: string) -> bool {
         case .Err;
             print("could not read generated reference part %\n", part_path);
             return false;
-        case .Ok;
-            return append_reference_text(output_path, loaded.Ok);
+        case .Ok(text);
+            return append_reference_text(output_path, text);
     }
 }
 
@@ -87,9 +91,9 @@ run_reference_generator :: (std_directory: string) -> bool {
     set_borrow_check(*source_options, Compiler_Borrow_Check.Off);
     set_temp_allocator_size(*source_options, 1024 * 1024 * 1024);
     source_built := compile("scripts/generate-reference-source.glo", source_generator, source_options);
-    if result_is_err(source_built) {
+    if #pattern .Err(failure) = source_built {
         print("reference source extractor build failed:\n");
-        report_error(source_built.Err);
+        report_error(failure);
         return false;
     }
 
@@ -98,11 +102,13 @@ run_reference_generator :: (std_directory: string) -> bool {
     command_add_argument(*source_command, "build/reference-source.json");
     extracted := command_run(source_command);
     command_destroy(*source_command);
-    if result_is_err(extracted) {
-        print("could not run the Glosso reference source extractor\n");
-        return false;
+    if extracted == {
+        case .Ok(finished);
+            if !finished.status.exited || finished.status.code != 0 return false;
+        case .Err;
+            print("could not run the Glosso reference source extractor\n");
+            return false;
     }
-    if !extracted.Ok.status.exited || extracted.Ok.status.code != 0 return false;
 
     generator := "build/generate-reference";
     #if OUT.os == Target_OS.Windows
@@ -113,9 +119,9 @@ run_reference_generator :: (std_directory: string) -> bool {
     set_borrow_check(*options, Compiler_Borrow_Check.Warning);
     set_temp_allocator_size(*options, 256 * 1024 * 1024);
     built := compile("scripts/generate-reference.glo", generator, options);
-    if result_is_err(built) {
+    if #pattern .Err(failure) = built {
         print("reference generator build failed:\n");
-        report_error(built.Err);
+        report_error(failure);
         return false;
     }
 
@@ -123,11 +129,13 @@ run_reference_generator :: (std_directory: string) -> bool {
     command_add_argument(*command, "build/reference-source.json");
     generated := command_run(command);
     command_destroy(*command);
-    if result_is_err(generated) {
-        print("could not run the reference generator\n");
-        return false;
+    if generated == {
+        case .Ok(finished);
+            if !finished.status.exited || finished.status.code != 0 return false;
+        case .Err;
+            print("could not run the reference generator\n");
+            return false;
     }
-    if !generated.Ok.status.exited || generated.Ok.status.code != 0 return false;
     return assemble_reference_parts();
 }
 
@@ -145,7 +153,7 @@ build_manual :: () {
     cache_arg_result := #try { str_cat("--cache-dir=", absolute("build/cache")?) };
     cache_arg: string;
     if cache_arg_result == {
-    case .Ok; cache_arg = cache_arg_result.Ok;
+    case .Ok(argument); cache_arg = argument;
     case .Err;
         print("cannot get the absolute path \"build/cache\"\n");
         return;
@@ -170,9 +178,9 @@ build_manual :: () {
     add_linker_arg(*options, "--initial-memory=134217728");
     add_linker_arg(*options, "--max-memory=268435456");
     built := compile("main.glo", "dist/manual.wasm", options);
-    if result_is_err(built) {
+    if #pattern .Err(failure) = built {
         print("manual build failed:\n");
-        report_error(built.Err);
+        report_error(failure);
         return;
     }
 

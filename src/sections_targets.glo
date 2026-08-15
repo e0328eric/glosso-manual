@@ -1,0 +1,946 @@
+// Sections 138-141: targets and build.
+
+render_section_138 :: () {
+    paragraph(0, #string,oneline
+        \\One compiler binary emits code for every target it supports, and
+        \\`--target` selects the target for a build. With no `--target` the
+        \\build is for the host, the machine the compiler process is running on.
+        \\The choice is settled before checking begins, because the constant
+        \\`OUT` describes the target and gated code reads it while types are
+        \\being resolved.
+    );
+    paragraph(1, #string,oneline
+        \\A target is three named fields: `os`, `cpu` and `abi`. The LLVM triple
+        \\handed to the backend is derived from those fields and is never
+        \\written directly. The derivation loses information:
+        \\`x86_64-freestanding-uefi` and `x86_64-windows-msvc` both produce the
+        \\triple `x86_64-pc-windows-msvc`, and only the `abi` field separates
+        \\the two builds.
+    );
+    code_block(2, "text", #string
+        \\$ glosso --target x86_64-linux-musl -o hello hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-musl)
+        \\glosso: link hello (target=x86_64-pc-linux-musl, -O1)
+        \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-musl, -O1)
+    );
+    paragraph(3, #string,oneline
+        \\Every progress line names the resolved triple, so the first line of a
+        \\build is the confirmation that the spelling was understood. That
+        \\Linux executable was produced on a Windows host with nothing else
+        \\installed: the musl runtime for the target is bundled with the
+        \\compiler, and the result is a static ELF carrying no dynamic
+        \\interpreter.
+    );
+    subheading(4, "Spelling a target");
+    paragraph(5, #string,oneline
+        \\`--target` accepts both `os-cpu-abi` and `cpu-os-abi`. The parser
+        \\decides which order was written by testing whether the first field is
+        \\a known CPU name and the second a known operating-system name; there
+        \\is no table of complete triples to match against. Any field left out
+        \\is inherited from the host target.
+    );
+    bullet(6, #string,oneline
+        \\A spec whose first field names a wasm CPU is read wasm first: `os`
+        \\becomes `wasm`, `cpu` is the wasm word, and `abi` is the following
+        \\field, defaulting to `freestanding`.
+    );
+    bullet(7, #string,oneline
+        \\`<cpu>-freestanding` sets `os` and `abi` both to `freestanding`, so
+        \\the CPU name in the first field is not mistaken for an operating
+        \\system.
+    );
+    bullet(8, #string,oneline
+        \\`wasi-wasm32` is accepted for compatibility and normalizes to `os`
+        \\`wasm` with `abi` `wasi`; WASI is never exposed as an operating
+        \\system. `host` and `native` name the compiler's own target. An empty
+        \\spec is tolerated, and so is a trailing hyphen, so `wasm32-` resolves
+        \\to `wasm32-unknown-unknown`.
+    );
+    paragraph(9, #string,oneline
+        \\Field names are rewritten to a canonical spelling before the triple is
+        \\formed. For the CPU field, `amd64` becomes `x86_64`, `arm64` becomes
+        \\`aarch64`, `i686` becomes `i386`, and `ppc` and `ppc32` become
+        \\`powerpc`. For the operating-system field, `darwin` and `osx` become
+        \\`macos`, `win32` becomes `windows`, and `webassembly` and `wasi`
+        \\become `wasm`. Three further rewrites happen only in the emitted
+        \\triple: `x86` is spelled `i686`, `armv5` is spelled `armv5te`, and
+        \\`ppc64le` is spelled `powerpc64le`.
+    );
+    note(10, #string,oneline
+        \\A spec with a single field fills the operating-system slot, not the
+        \\CPU slot. `--target aarch64` therefore resolves to
+        \\`x86_64-unknown-aarch64-msvc` and dies at the link step with
+        \\`error: unsupported executable target` naming that triple. For the
+        \\same reason `--target x86_64-windows` leaves `abi` empty, which
+        \\triples as `x86_64-w64-windows-gnu` rather than the MSVC ABI of a
+        \\Windows host. Write the full three-field spelling.
+    );
+    subheading(11, "The supported set");
+    paragraph(12, #string,oneline
+        \\`--print-targets` prints each supported target with the triple it
+        \\expands to and the artifact it produces, then a second list headed
+        \\`Available LLVM codegen targets:`. That second list is the set of
+        \\architectures the linked LLVM was built with; it is not the set of
+        \\Glosso targets, and naming one of its entries does not make a target.
+    );
+    table_header(13, "Target   —   LLVM triple   —   Artifact");
+    table_row(14, "`host`, `native`   |   the compiler's own triple   |   whatever that target produces");
+    table_row(15, "`x86_64-windows-msvc`   |   `x86_64-pc-windows-msvc`   |   PE/COFF executable");
+    table_row(16, "`x86_64-windows-gnu`   |   `x86_64-w64-windows-gnu`   |   PE/COFF executable");
+    table_row(17, "`linux-x86_64-gnu`   |   `x86_64-pc-linux-gnu`   |   ELF executable");
+    table_row(18, "`aarch64-linux-gnu`   |   `aarch64-unknown-linux-gnu`   |   ELF executable");
+    table_row(19, "`x86_64-macos`, `aarch64-macos`   |   `x86_64-apple-darwin`, `aarch64-apple-darwin`   |   Mach-O executable");
+    table_row(20, "`x86_64-freebsd`, `aarch64-freebsd`   |   `x86_64-unknown-freebsd`, `aarch64-unknown-freebsd`   |   ELF executable");
+    table_row(21, "`wasm32-wasi`, `wasm64-wasi`   |   `wasm32-unknown-wasi`, `wasm64-unknown-wasi`   |   WebAssembly module");
+    table_row(22, "`wasm32-freestanding`   |   `wasm32-unknown-unknown`   |   WebAssembly module");
+    table_row(23, "`x86_64-freestanding`   |   `x86_64-unknown-none-elf`   |   bare-metal ELF executable");
+    table_row(24, "`x86_64-freestanding-uefi`   |   `x86_64-pc-windows-msvc`   |   UEFI PE/COFF object");
+    paragraph(25, #string,oneline
+        \\Fourteen further targets share the shape `<cpu>-linux-musl` and link
+        \\against the bundled static musl runtime: `x86`, `x86_64`, `aarch64`,
+        \\`armv5`, `armv7`, `loongarch64`, `mips`, `mipsel`, `mips64`,
+        \\`mips64el`, `powerpc`, `ppc64le`, `riscv64` and `s390x`. Each expands
+        \\to `<cpu>-unknown-linux-musl` with five exceptions:
+        \\`linux-x86_64-musl` is `x86_64-pc-linux-musl`, `x86-linux-musl` is
+        \\`i686-unknown-linux-musl`, `ppc64le-linux-musl` is
+        \\`powerpc64le-unknown-linux-musl`, `armv5-linux-musl` is
+        \\`armv5te-unknown-linux-musleabi`, and `armv7-linux-musl` is
+        \\`armv7-unknown-linux-musleabihf`.
+    );
+    subheading(26, "Entry points");
+    paragraph(27, #string,oneline
+        \\A Glosso `main` is lowered under the symbol `glo_main`. What calls it
+        \\depends on the target family: a hosted target gets a synthesized C
+        \\entry point that forwards to `glo_main`, and a target with no host
+        \\runtime has `glo_main` named as the entry or exported directly.
+    );
+    table_header(28, "Target family   —   Emitted entry   —   Relation to `glo_main`");
+    table_row(29, "hosted Windows   |   `wmain(i32, ptr)`   |   wrapper that calls it");
+    table_row(30, "hosted ELF and Mach-O   |   `main(i32, ptr)`   |   wrapper that calls it");
+    table_row(31, "`wasm32-wasi`, `wasm64-wasi`   |   `_start()`   |   wrapper that calls it, linked with `--export=_start`");
+    table_row(32, "`wasm32-freestanding`   |   none   |   linked with `--export=glo_main`");
+    table_row(33, "`<cpu>-freestanding`   |   none   |   linked with `-e glo_main`, no argv");
+    paragraph(34, #string,oneline
+        \\`--no-main` and the `static-lib` and `shared-lib` backends suppress
+        \\the wrapper entirely, along with the `argc` and `argv` globals, and
+        \\root reachability at every defined `#c_call` function instead. Being
+        \\Called from C describes that rooting, and Backends, Artifacts, and
+        \\Optimization Levels describes the backends.
+    );
+    subheading(35, "What links from a given host");
+    paragraph(36, #string,oneline
+        \\Emitting an object succeeds for every supported target, because that
+        \\step needs only LLVM. Linking needs the target's runtime inputs. The
+        \\compiler bundles the musl runtime, the mingw-w64 import libraries and
+        \\the wasm builtins, so those targets link from any host; Apple and
+        \\FreeBSD system libraries are not bundled and must come from an SDK.
+    );
+    bullet(37, #string,oneline
+        \\Measured on an `x86_64-pc-windows-msvc` host, these link with no
+        \\further setup: both Windows targets, `linux-x86_64-gnu`, all fourteen
+        \\musl targets, both WASI targets, `wasm32-freestanding` and
+        \\`x86_64-freestanding`.
+    );
+    bullet(38, #string,oneline
+        \\These reach the linker and fail there: `x86_64-macos` and
+        \\`aarch64-macos` on `ld64.lld: error: undefined symbol: _abort`, the
+        \\two FreeBSD targets on `ld.lld: error: undefined symbol: abort`, and
+        \\`aarch64-linux-gnu` on `ld.lld: error: undefined symbol: write`.
+    );
+    code_block(39, "text", #string
+        \\$ glosso --target aarch64-macos -o hello hello.glo
+        \\glosso: compile hello.glo (target=aarch64-apple-darwin)
+        \\glosso: link hello (target=aarch64-apple-darwin, -O1)
+        \\error: ld64.lld: error: undefined symbol: _abort
+        \\>>> referenced by C:\Users\…\Temp\glosso-35100-hello.o:(symbol _glo_write_string+0x248)
+        \\
+        \\$ glosso --backend object --target aarch64-macos -o hello.o hello.glo
+        \\glosso: compile hello.glo (target=aarch64-apple-darwin)
+        \\glosso: wrote hello.o  (backend=object, target=aarch64-apple-darwin, -O1)
+    );
+    paragraph(40, #string,oneline
+        \\`--backend object` is therefore the portable smoke test: it proves
+        \\that a program checks and lowers for a target without requiring that
+        \\target's linker inputs. `x86_64-freestanding-uefi` produces an object
+        \\by design, and Freestanding, Bare Metal, UEFI, and WebAssembly covers
+        \\the link step it needs.
+    );
+    subheading(41, "The OUT and HOST descriptors");
+    paragraph(42, #string,oneline
+        \\The checker installs two constants into every compilation. `OUT` is an
+        \\`Output_Target` with the fields `os`, `cpu` and `abi`, describing the
+        \\target being compiled for. `HOST` is a `Host_Target` with `os` and
+        \\`cpu`, describing the machine running the compiler. Their field types
+        \\come from the Prelude and are always in scope, so reading them needs
+        \\no import.
+    );
+    table_header(43, "Type   —   Members");
+    table_row(44, "`Target_OS`   |   `Unknown`, `Linux`, `Macos`, `Windows`, `Freebsd`, `Wasm`, `Freestanding`");
+    table_row(45, "`Target_CPU`   |   `Unknown`, `X86_64`, `Aarch64`, `Arm`, `Thumb`, `I386`, `Powerpc`, `Powerpc64`, `Powerpc64le`, `Riscv64`, `Wasm32`, `Wasm64`, `Armv7`, `Loongarch64`, `S390x`, `X86`, `Armv5`, `Mips`, `Mipsel`, `Mips64`, `Mips64el`");
+    table_row(46, "`Target_ABI`   |   `None`, `Unknown`, `Gnu`, `Musl`, `Msvc`, `Mingw`, `Wasi`, `Freestanding`, `Emscripten`, `Uefi`");
+    table_row(47, "`Target_Endian`   |   `Little`, `Big`, returned by `target_endian()`");
+    code_block(48, "glosso", #string
+        \\#import "Io";
+        \\
+        \\os_name :: () -> string {
+        \\    #if OUT.os == {
+        \\    case .Windows;      return "windows";
+        \\    case .Linux;        return "linux";
+        \\    case .Macos;        return "macos";
+        \\    case .Freebsd;      return "freebsd";
+        \\    case .Wasm;         return "wasm";
+        \\    case .Freestanding; return "freestanding";
+        \\    else;               return "unknown";
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("building for %\n", os_name());
+        \\    print("OUT.abi is Msvc: %\n", OUT.abi == Target_ABI.Msvc);
+        \\    print("host is the target: %\n", OUT.os == HOST.os && OUT.cpu == HOST.cpu);
+        \\}
+    );
+    code_block(49, "text", #string
+        \\building for windows
+        \\OUT.abi is Msvc: 1
+        \\host is the target: 1
+    );
+    paragraph(50, #string,oneline
+        \\`%` prints an enum member as its integer value, which is why the
+        \\example maps the tag to a string rather than printing `OUT.os`
+        \\directly. Both the bare `OUT.os == .Windows` and the qualified
+        \\`OUT.os == Target_OS.Windows` are accepted.
+    );
+    paragraph(51, #string,oneline
+        \\`#if` over `OUT` selects target-specific code, and `#compile_error`
+        \\rejects a target the program does not support. Static Branching with
+        \\`#if` covers the construct itself. Both directives are statements, so
+        \\a gate lives inside a declaration rather than at file scope.
+    );
+    code_block(52, "glosso", #string
+        \\path_separator :: () -> string {
+        \\    #if OUT.cpu != Target_CPU.X86_64 && OUT.cpu != Target_CPU.Aarch64
+        \\        #compile_error "this program supports x86_64 and aarch64 only";
+        \\    #if OUT.os == {
+        \\    case .Windows;  return "\\";
+        \\    else;           return "/";
+        \\    }
+        \\}
+    );
+    code_block(53, "text", #string
+        \\$ glosso --target riscv64-linux-musl gating.glo
+        \\glosso: compile gating.glo (target=riscv64-unknown-linux-musl)
+        \\error: this program supports x86_64 and aarch64 only
+        \\  --> …\gating.glo:5:9
+        \\  |
+        \\5 |         #compile_error "this program supports x86_64 and aarch64 only";
+        \\  |         ^^^^^^^^^^^^^^
+    );
+    note(54, #string,oneline
+        \\The LLVM triple is not a unique target key. `x86_64-freestanding-uefi`
+        \\and `x86_64-windows-msvc` share `x86_64-pc-windows-msvc`, so code that
+        \\must tell them apart tests `OUT.abi`. The artifact cache keys on the
+        \\`OUT` fields for exactly this reason; The Build Cache and Generated
+        \\Sources shows the two builds keeping separate entries.
+    );
+    paragraph(55, #string,oneline
+        \\`--run` builds and then executes the result, and is refused for
+        \\anything but the host: `glosso: --run can only execute the host target
+        \\(got x86_64-pc-linux-musl)`, exit status 1. Using the Compiler covers
+        \\the remaining driver options.
+    );
+}
+
+render_section_139 :: () {
+    paragraph(0, #string,oneline
+        \\Three targets run with no hosted operating system underneath them:
+        \\`x86_64-freestanding`, `x86_64-freestanding-uefi` and
+        \\`wasm32-freestanding`. What they share is that the backend emits no
+        \\host entry wrapper and no command-line globals, and that nothing links
+        \\a C runtime in behind the program's back. The WASI targets are the
+        \\hosted wasm option and are covered here for contrast.
+    );
+    paragraph(1, #string,oneline
+        \\The predicate the backend uses for bare metal is `os == "freestanding"`.
+        \\That is true for `x86_64-freestanding` and for the UEFI target, and
+        \\false for the wasm targets, whose `os` is `wasm`. The families
+        \\therefore differ in the details below even though they share the same
+        \\absence of a host.
+    );
+    subheading(2, "Bare-metal ELF");
+    paragraph(3, #string,oneline
+        \\`x86_64-freestanding` expands to `x86_64-unknown-none-elf` and sets
+        \\both `OUT.os` and `OUT.abi` to `Freestanding`. The image is linked with
+        \\`ld.lld -e glo_main`, so the Glosso `main` is the entry point and there
+        \\is no `argc`/`argv` pair to receive. When the program has no `main` at
+        \\all, reachability is rooted at every defined `#c_call` function, the
+        \\same rule `--no-main` installs.
+    );
+    code_block(4, "glosso", #string
+        \\kernel_add :: (a: s32, b: s32) -> s32 #c_call { return a + b; }
+        \\
+        \\_start :: () #c_call {
+        \\    x := kernel_add(2, 3);
+        \\    while true {}
+        \\}
+    );
+    code_block(5, "text", #string
+        \\$ glosso -O2 --target x86_64-freestanding -o bare.elf bare.glo
+        \\glosso: compile bare.glo (target=x86_64-unknown-none-elf)
+        \\glosso: link bare.elf (target=x86_64-unknown-none-elf, -O2)
+        \\glosso: done bare.elf  (backend=llvm, target=x86_64-unknown-none-elf, -O2)
+    );
+    paragraph(6, #string,oneline
+        \\The `-O2` is not decoration. At `-O0` and `-O1` the backend emits
+        \\runtime safety checks, and a failing check terminates through `abort`,
+        \\which no freestanding image provides. The default level is `-O1`, so
+        \\the same command without an explicit level fails at the link step.
+    );
+    code_block(7, "text", #string
+        \\$ glosso --target x86_64-freestanding -o bare.elf bare.glo
+        \\glosso: compile bare.glo (target=x86_64-unknown-none-elf)
+        \\glosso: link bare.elf (target=x86_64-unknown-none-elf, -O1)
+        \\error: ld.lld: error: undefined symbol: abort
+        \\>>> referenced by bare
+        \\>>>               C:\Users\…\Temp\glosso-33852-bare.o:(glo_kernel_add)
+    );
+    note(8, #string,oneline
+        \\The rule that governs this is that runtime checks are emitted when the
+        \\optimization level is 1 or less. The three size modes raise the
+        \\internal level to 2 or 3, so `-Os`, `-Oz` and `-Ozz` also produce a
+        \\linkable bare-metal image, and `-Ozz` is the usual choice. Overflow,
+        \\Traps, and the `-O` Level covers the checks themselves.
+    );
+    bullet(9, #string,oneline
+        \\No host entry is emitted: the module defines `glo_main` and no `main`
+        \\or `wmain` wrapper, and the `__glo_argc` and `__glo_argv` globals are
+        \\absent.
+    );
+    bullet(10, #string,oneline
+        \\The default temporary-arena size drops from 4 MiB to 64 KiB on a
+        \\freestanding target, because the arena is a zero-initialized global in
+        \\the image. `--temp-allocator-size` overrides it in either direction.
+    );
+    bullet(11, #string,oneline
+        \\Sanitizers are rejected by the backend before the link is attempted:
+        \\`error: LLVM memory sanitizer is not supported for target
+        \\'x86_64-unknown-none-elf'`.
+    );
+    subheading(12, "UEFI");
+    paragraph(13, #string,oneline
+        \\`x86_64-freestanding-uefi` keeps `OUT.os` at `Freestanding`, so no
+        \\hosted runtime is injected, but maps to the LLVM triple
+        \\`x86_64-pc-windows-msvc`, which selects PE/COFF and the Microsoft x64
+        \\C ABI. `OUT.abi` is `Uefi`, and that field is the only way a program
+        \\can tell a UEFI build from an ordinary Windows one.
+        \\`x86_64-freestanding-msvc` is the legacy spelling and behaves
+        \\identically.
+    );
+    paragraph(14, #string,oneline
+        \\The executable backend cannot finish this target, because the COFF
+        \\executable plan asks for the Microsoft C startup object and its
+        \\`wmain`, which a firmware image does not have. The workflow is to emit
+        \\an object and link it as an EFI application separately.
+    );
+    code_block(15, "text", #string
+        \\$ glosso -O2 --no-main --target x86_64-freestanding-uefi -o efi.exe efi.glo
+        \\glosso: compile efi.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link efi.exe (target=x86_64-pc-windows-msvc, -O2)
+        \\error: rust-lld: error: undefined symbol: wmain
+    );
+    code_block(16, "glosso", #string
+        \\efi_main :: (image: *void, system_table: *void) -> u64 #c_call {
+        \\    #if OUT.abi != Target_ABI.Uefi
+        \\        #compile_error "efi.glo builds only for the UEFI ABI";
+        \\    return 0;
+        \\}
+    );
+    code_block(17, "text", #string
+        \\$ glosso -O2 --no-main --backend object \
+        \\      --target x86_64-freestanding-uefi -o efi.obj efi.glo
+        \\glosso: compile efi.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: wrote efi.obj  (backend=object, target=x86_64-pc-windows-msvc, -O2)
+        \\
+        \\$ lld-link /nologo /machine:x64 /subsystem:efi_application \
+        \\      /entry:glo_efi_main /nodefaultlib /opt:ref /out:efi.efi efi.obj
+    );
+    paragraph(18, #string,oneline
+        \\The entry is spelled `glo_efi_main` because a `#c_call` definition is
+        \\exported under `glo_` followed by its Glosso name; Being Called from C
+        \\gives the full symbol rule. `/nodefaultlib` keeps the Microsoft CRT
+        \\out, and `--no-main` on the Glosso side keeps the `main` wrapper out
+        \\and roots reachability at the `#c_call` definitions.
+    );
+    paragraph(19, #string,oneline
+        \\Driving both steps from a build script is the usual arrangement, since
+        \\the second step is an external command. The compile-time options
+        \\mirror the flags: backend `Object`, target `os = .Freestanding`,
+        \\`cpu = .X86_64`, `abi = .Uefi`, and `no_main = true`. Build Scripts
+        \\covers the API.
+    );
+    subheading(20, "WebAssembly");
+    table_header(21, "Target   —   Triple   —   Link");
+    table_row(22, "`wasm32-wasi`   |   `wasm32-unknown-wasi`   |   `wasm-ld --no-entry --export=_start`");
+    table_row(23, "`wasm64-wasi`   |   `wasm64-unknown-wasi`   |   as above, plus `-mwasm64`");
+    table_row(24, "`wasm32-freestanding`   |   `wasm32-unknown-unknown`   |   `wasm-ld --no-entry --export=glo_main`");
+    paragraph(25, #string,oneline
+        \\A WASI build synthesizes a `_start` wrapper around `main` and reaches
+        \\the outside world through the `wasi_snapshot_preview1` import
+        \\namespace. The module built from a program that prints one line
+        \\exports `memory` and `_start` and imports `fd_write`.
+    );
+    paragraph(26, #string,oneline
+        \\`wasm32-freestanding` is the other shape entirely. There is no WASI,
+        \\no C library and no import namespace: the module built from the
+        \\program below has no import section at all, and its export section
+        \\holds exactly `memory` and `glo_main`. Everything the program needs is
+        \\in the module, which is what makes the result loadable by a browser
+        \\with a bare `WebAssembly.instantiate`.
+    );
+    code_block(27, "glosso", #string
+        \\add :: (a: s32, b: s32) -> s32 #c_call { return a + b; }
+        \\
+        \\main :: (seed: s32) -> s32 #c_call {
+        \\    if seed < 0 return add(1, 2);
+        \\    return seed;
+        \\}
+    );
+    code_block(28, "text", #string
+        \\$ glosso -O2 --target wasm32-freestanding -o wexp.wasm wexp.glo
+        \\glosso: compile wexp.glo (target=wasm32-unknown-unknown)
+        \\glosso: link wexp.wasm (target=wasm32-unknown-unknown, -O2)
+        \\glosso: done wexp.wasm  (backend=llvm, target=wasm32-unknown-unknown, -O2)
+        \\# module exports: memory, glo_main
+    );
+    paragraph(29, #string,oneline
+        \\`main` takes a parameter and returns a value there, which no other
+        \\target allows. On `wasm32-freestanding` a `#c_call main` is exempt from
+        \\the rule that `main` takes no parameters, because nothing wraps it: the
+        \\host calls the export directly and passes whatever the signature says.
+        \\Elsewhere the same declaration is `error: main must not take
+        \\parameters; use get_cmdline_args() for command-line arguments`.
+    );
+    paragraph(30, #string,oneline
+        \\Anything beyond `glo_main` has to be exported explicitly, and has to be
+        \\reachable. Reachability is computed before lowering, so an unreferenced
+        \\`#c_call` function is pruned and the export then names a symbol that
+        \\does not exist.
+    );
+    code_block(31, "text", #string
+        \\$ glosso -O2 --no-main --target wasm32-freestanding \
+        \\      --linker-arg "--export=glo_add" -o wexp3.wasm wexp.glo
+        \\glosso: compile wexp.glo (target=wasm32-unknown-unknown)
+        \\glosso: link wexp3.wasm (target=wasm32-unknown-unknown, -O2)
+        \\glosso: done wexp3.wasm  (backend=llvm, target=wasm32-unknown-unknown, -O2)
+        \\# module exports: memory, glo_add, glo_main
+    );
+    note(32, #string,oneline
+        \\`--export=glo_main` is passed unconditionally for this target, so
+        \\`--no-main` on a program that has no `main` breaks the link with
+        \\`wasm-ld: error: symbol exported via --export not found: glo_main`. A
+        \\`wasm32-freestanding` program keeps a `main`, `#c_call` or otherwise.
+    );
+    bullet(33, #string,oneline
+        \\Sanitizers are rejected for wasm: `LLVM memory sanitizer is not
+        \\supported for target 'wasm32-unknown-wasi'`.
+    );
+    bullet(34, #string,oneline
+        \\`#library,dyn` is rejected during lowering, with the message
+        \\`#library,dyn is not supported for target 'wasm32-unknown-unknown'`
+        \\followed by the instruction it was lowering. There is no dynamic
+        \\loader to call.
+    );
+    bullet(35, #string,oneline
+        \\A `#foreign` call names a library file, and the wasm linker resolves
+        \\that to `-l<name>`, so a host-provided function cannot be declared with
+        \\`#foreign`. Imports come from undefined symbols admitted by
+        \\`--linker-arg "--allow-undefined"`.
+    );
+    subheading(36, "How this manual is built");
+    paragraph(37, #string,oneline
+        \\The manual being read is a `wasm32-freestanding` module. A build script
+        \\compiles the manual's entry file for that target, builds the Clay
+        \\layout library from C sources for the same target, generates bindings
+        \\for it, and links the result to a single `.wasm` file that the browser
+        \\host loads.
+    );
+    code_block(38, "glosso", #string
+        \\wasm_target := Output_Target.{
+        \\    .os = Target_OS.Wasm,
+        \\    .cpu = Target_CPU.Wasm32,
+        \\    .abi = Target_ABI.Freestanding,
+        \\};
+        \\
+        \\options: Compile_Options;
+        \\set_target(*options, wasm_target);
+        \\set_optimization_level(*options, .Optimized_Tiny);
+        \\set_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\set_temp_allocator_size(*options, 1024 * 1024);
+        \\add_linker_arg(*options, "--export=glo_manual_set_view");
+        \\add_linker_arg(*options, "--export=glo_manual_select_section");
+        \\add_linker_arg(*options, "--allow-undefined");
+        \\add_linker_arg(*options, "--initial-memory=134217728");
+        \\built := compile("main.glo", "dist/manual.wasm", options);
+    );
+    paragraph(39, #string,oneline
+        \\Every element of that configuration is forced by the target.
+        \\`Optimized_Tiny` is `-Ozz`, chosen because the module is downloaded: a
+        \\one-line program built for `wasm32-wasi` measures 84443 bytes at `-O1`
+        \\and 23961 bytes at `-Ozz`. The explicit `--export=` arguments exist because only
+        \\`glo_main` is exported by default. `--allow-undefined` admits the
+        \\symbols the browser host supplies. And the manual's `main` is a
+        \\`#c_call` procedure taking the viewport size and pointer state, which
+        \\only this target permits.
+    );
+    paragraph(40, #string,oneline
+        \\The C dependency is built through the same target descriptor. The
+        \\binding generator checks `OUT.os`, `OUT.cpu` and `OUT.abi` and returns
+        \\a `#compile_error` string when they are not the wasm32 freestanding
+        \\triple, so an accidental host build fails during checking instead of
+        \\producing a module that cannot run. Generating Bindings with Bindgen
+        \\and Build Scripts cover the two halves.
+    );
+}
+
+render_section_140 :: () {
+    paragraph(0, #string,oneline
+        \\Every source-level diagnostic is written to stderr in one layout,
+        \\whatever phase produced it. The layout is a headline naming the level
+        \\and the message, a location line, a framed excerpt of the offending
+        \\source with a caret run under the span, and then zero or more notes.
+    );
+    code_block(1, "glosso", #string
+        \\main :: () {
+        \\    print("hello from glosso\n");
+        \\}
+    );
+    code_block(2, "text", #string
+        \\error: unknown function print
+        \\  --> …\diag1.glo:2:5
+        \\  |
+        \\2 |     print("hello from glosso\n");
+        \\  |     ^^^^^
+        \\help: did you mean 'tprint'?
+    );
+    table_header(3, "Line   —   Content");
+    table_row(4, "headline   |   the level, a colon, and the message");
+    table_row(5, "location   |   ` --> ` then the file path, line and column");
+    table_row(6, "blank gutter   |   a bare `|` aligned with the line-number column");
+    table_row(7, "source   |   the line number, ` | `, and the source line verbatim");
+    table_row(8, "caret   |   a run of `^` under the span, one per character");
+    table_row(9, "notes   |   a label, the note text, and optionally a frame of its own");
+    paragraph(10, #string,oneline
+        \\The gutter width is the width of the line number, so a diagnostic on
+        \\line 4 indents the frame by one column less than one on line 16. The
+        \\caret run is the span's length clamped to what remains on the line, and
+        \\a span with no length still produces one caret. If the source line is
+        \\empty or the line number is out of range the frame is omitted and only
+        \\the headline is printed.
+    );
+    paragraph(11, #string,oneline
+        \\Two note labels are produced: `help` for a suggested replacement, and
+        \\`note` for everything else. A note may carry its own location frame,
+        \\which is how a diagnostic points at a second place in the program.
+    );
+    code_block(12, "text", #string
+        \\warning: resource must be released by 'array_free' before leaving scope
+        \\  --> …\diag2.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: release obligation was created here
+        \\  --> …\diag2.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+    );
+    paragraph(13, #string,oneline
+        \\A note with no span prints as a bare label and message, with no frame
+        \\under it. That form carries advice rather than a second location.
+    );
+    code_block(14, "text", #string
+        \\error: tagged-union payload '.Ok' may only be bound by a pattern match
+        \\  --> …\diag3.glo:7:20
+        \\  |
+        \\7 |     print("%\n", r.Ok);
+        \\  |                    ^^
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+    );
+    subheading(15, "Warnings and errors");
+    paragraph(16, #string,oneline
+        \\Warnings and errors use the identical layout and differ in the headline
+        \\word and its colour. An error ends the build and the compiler exits 1;
+        \\a warning is printed and the build continues to completion with exit 0.
+        \\Multiple diagnostics are separated by a blank line.
+    );
+    paragraph(17, #string,oneline
+        \\When more than one error is rendered, a final summary line closes the
+        \\group. Warnings never get a summary, however many there are.
+    );
+    code_block(18, "text", #string
+        \\error: got f32, expected s32
+        \\  --> …\diag8.glo:3:12
+        \\  |
+        \\3 |     return x;
+        \\  |            ^
+        \\
+        \\error: got f64, expected s32
+        \\  --> …\diag8.glo:8:12
+        \\  |
+        \\8 |     return y;
+        \\  |            ^
+        \\
+        \\error: aborting due to 2 previous errors
+    );
+    paragraph(19, #string,oneline
+        \\One family of warnings is configurable. `--borrow-check` takes `off`,
+        \\`warning` or `error`, defaults to `warning`, and governs the temporal
+        \\memory analysis: leaks, double releases, stale references and escaping
+        \\pointers. `--borrow-check error` reprints exactly the same diagnostics
+        \\with `error:` in the headline and stops the build. The `--borrow-check`
+        \\Flag covers the analysis it controls.
+    );
+    note(20, #string,oneline
+        \\`--borrow-check error` does not promote everything that looks like a
+        \\warning. Checker lints, such as an unreachable pattern arm, are merged
+        \\into the output after the promotion decision and stay warnings at every
+        \\setting. `--borrow-check off` likewise silences the analysis but never
+        \\a malformed `#memory` contract, which is always a hard error.
+    );
+    code_block(21, "text", #string
+        \\$ glosso --borrow-check error --backend llvm-ir -o d6.ll diag6.glo
+        \\glosso: compile diag6.glo (target=x86_64-pc-windows-msvc)
+        \\warning: unreachable pattern - already covered by an earlier case
+        \\  --> …\diag6.glo:7:10
+        \\  |
+        \\7 |     case 1;   return "one again";
+        \\  |          ^
+        \\glosso: wrote d6.ll  (backend=llvm-ir, target=x86_64-pc-windows-msvc, -O1)
+    );
+    paragraph(22, #string,oneline
+        \\Driver messages are a separate category and are not diagnostics. They
+        \\are prefixed `glosso: `, carry no frame and no colour, and report
+        \\command-line and toolchain problems rather than problems in the source.
+        \\A bad option value exits 2; a build failure exits 1.
+    );
+    code_block(23, "text", #string
+        \\$ glosso --color rainbow diag1.glo
+        \\glosso: --color must be auto, always, or never
+        \\$ echo $?
+        \\2
+    );
+    subheading(24, "Colour");
+    paragraph(25, #string,oneline
+        \\`--color` takes `auto`, `always` or `never` and defaults to `auto`.
+        \\Under `auto`, colour is enabled only when stderr is a terminal and
+        \\either the host is Windows or `TERM` is set to something other than
+        \\`dumb`. Redirecting stderr to a file or a pipe therefore turns colour
+        \\off without any flag.
+    );
+    table_header(26, "Setting   —   Effect");
+    table_row(27, "`--color auto`   |   on when stderr is a terminal and the terminal is known to be capable");
+    table_row(28, "`--color always`   |   on unconditionally");
+    table_row(29, "`--color never`   |   off unconditionally");
+    table_row(30, "`NO_COLOR` set to any value   |   off, and it beats `--color always`");
+    code_block(31, "text", #string
+        \\$ glosso --color always diag1.glo
+        \\^[[1;31merror^[[0m^[[1m: ^[[0m^[[1munknown function print^[[0m
+        \\ ^[[1;34m --> ^[[0m…\diag1.glo:2:5
+        \\
+        \\$ NO_COLOR=1 glosso --color always diag1.glo
+        \\error: unknown function print
+        \\  --> …\diag1.glo:2:5
+    );
+    paragraph(32, #string,oneline
+        \\The escape byte is written `^[` in that transcript. Five escapes are
+        \\used and nothing else: bold red for `error`, bold yellow for
+        \\`warning`, bold blue for the arrow and the gutter, bold cyan for a
+        \\note label and its frame, and plain bold for the message text. Because
+        \\`NO_COLOR` is checked before the mode, a script can strip colour from
+        \\a build it does not control.
+    );
+    subheading(33, "Diagnostics in generated source");
+    paragraph(34, #string,oneline
+        \\A string-valued `#insert` splices text produced at compile time into
+        \\the program, and that text has no file of its own in the project. The
+        \\renderer solves this by retargeting the diagnostic: the primary span is
+        \\moved to the outermost `#insert` expression, which is a real place in a
+        \\real file, and the position inside the generated text becomes a note.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#insert emit_helper();
+        \\
+        \\emit_helper :: () -> string {
+        \\    return "helper :: () -> s64 { return no_such_name; }\n";
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", helper());
+        \\}
+    );
+    code_block(36, "text", #string
+        \\error: unbound 'no_such_name'
+        \\  --> …\gen_bad.glo:3:1
+        \\  |
+        \\3 | #insert emit_helper();
+        \\  | ^^^^^^^
+        \\note: generated source failed here
+        \\  --> …\cache\generated\insert\v1\82949d39….glo:1:30
+        \\  |
+        \\1 | helper :: () -> s64 { return no_such_name; }
+        \\  |                              ^^^^^^^^^^^^
+    );
+    paragraph(37, #string,oneline
+        \\Read that from the bottom up. The note names the line that is actually
+        \\wrong and quotes it, and the path it names is a real file: the cache
+        \\entry the generated text was written to, which can be opened in an
+        \\editor. The headline names the `#insert` that produced it, which is the
+        \\line to change.
+    );
+    paragraph(38, #string,oneline
+        \\When one generated source inserts another, every link in the chain gets
+        \\its own note labelled `generated by this #insert`, ordered from the
+        \\failure outwards, and the headline lands on the `#insert` written by
+        \\hand.
+    );
+    code_block(39, "text", #string
+        \\error: unbound 'no_such_name'
+        \\  --> …\gen_nest.glo:3:1
+        \\  |
+        \\3 | #insert outer();
+        \\  | ^^^^^^^
+        \\note: generated source failed here
+        \\  --> …\insert\v1\82949d39….glo:1:30
+        \\  |
+        \\1 | helper :: () -> s64 { return no_such_name; }
+        \\  |                              ^^^^^^^^^^^^
+        \\note: generated by this #insert
+        \\  --> …\insert\v1\e387a996….glo:1:1
+        \\  |
+        \\1 | #insert inner();
+        \\  | ^^^^^^^
+    );
+    paragraph(40, #string,oneline
+        \\If the cache directory is unavailable the generated text is still
+        \\rendered, but the note names the virtual path
+        \\`<generated:#insert/<sha256>.glo>` instead, which cannot be opened.
+        \\The Build Cache and Generated Sources covers where those files live and
+        \\how to list them.
+    );
+}
+
+render_section_141 :: () {
+    paragraph(0, #string,oneline
+        \\The compiler keeps one per-user cache root holding everything it can
+        \\reuse between builds: materialized generated sources, finished
+        \\artifacts, and static archives built from C sources for a target.
+        \\`--print-cache-dir` resolves the root, prints it, and exits 0 without
+        \\compiling anything.
+    );
+    code_block(1, "text", #string
+        \\$ glosso --print-cache-dir
+        \\C:\Users\almag\AppData\Local\glosso\cache
+    );
+    paragraph(2, #string,oneline
+        \\The root is resolved once per process, from the first source in this
+        \\list that yields an absolute path.
+    );
+    table_header(3, "Source   —   Value");
+    table_row(4, "`--cache-dir <dir>`   |   the given directory, which must be absolute");
+    table_row(5, "`GLOSSO_CACHE_DIR`   |   the given directory, which must be absolute");
+    table_row(6, "Windows default   |   the known LocalAppData folder, then `glosso/cache`");
+    table_row(7, "macOS default   |   `$HOME/Library/Caches/glosso`");
+    table_row(8, "other POSIX default   |   `$XDG_CACHE_HOME/glosso`, else `$HOME/.cache/glosso`");
+    paragraph(9, #string,oneline
+        \\A relative path is rejected rather than resolved against the working
+        \\directory, and the two spellings fail differently because one is a
+        \\command-line error and the other is an environment error. `--cache-dir`
+        \\prints `glosso: --cache-dir: cache directory override must be an
+        \\absolute path` and exits 2; `GLOSSO_CACHE_DIR` prints `glosso: cache
+        \\directory unavailable: GLOSSO_CACHE_DIR must contain an absolute path`
+        \\and exits 1.
+    );
+    code_block(10, "text", #string
+        \\$ glosso --cache-dir "C:/temp/glosso-cache-probe" --print-cache-dir
+        \\C:\temp\glosso-cache-probe
+        \\$ GLOSSO_CACHE_DIR=C:/temp/env-cache glosso --print-cache-dir
+        \\C:\temp\env-cache
+        \\$ GLOSSO_CACHE_DIR=C:/temp/env-cache glosso --cache-dir C:/temp/flag-cache --print-cache-dir
+        \\C:\temp\flag-cache
+    );
+    subheading(11, "The subtrees");
+    table_header(12, "Path under the root   —   Contents");
+    table_row(13, "`generated/insert/v1/<sha256>.glo`   |   materialized string-valued `#insert` sources");
+    table_row(14, "`native/artifacts/v1/<key>.artifact` and `.manifest`   |   the final-artifact cache");
+    table_row(15, "`native/v6/<name>/<target>/<key>/`   |   static archives built from C sources for a target");
+    paragraph(16, #string,oneline
+        \\The `v1` and `v6` components are format versions: a compiler that
+        \\changes an entry's meaning changes the version and stops reading the
+        \\old tree rather than misinterpreting it. `GLOSSO_NATIVE_CACHE_DIR`
+        \\relocates the `native/v6` subtree alone, leaving the other two under
+        \\the resolved root, so the C archives can be kept apart from the rest.
+    );
+    subheading(17, "The artifact cache");
+    paragraph(18, #string,oneline
+        \\The artifact cache stores the finished output of a build and restores
+        \\it byte for byte when the same build is asked for again. A hit skips
+        \\every phase, including checking, so it is reported by a single line and
+        \\the build takes milliseconds.
+    );
+    code_block(19, "text", #string
+        \\$ glosso --run hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link hello.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done hello.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\hello from 3
+        \\
+        \\$ glosso --run hello.glo
+        \\glosso: restored hello.exe from the native artifact cache
+        \\hello from 3
+    );
+    paragraph(20, #string,oneline
+        \\Only three backends participate: `llvm`, `object` and `static-lib`.
+        \\`shared-lib` and `llvm-ir` builds are never stored and never restored,
+        \\and `--show-generated` disables the cache for the run it appears on.
+        \\`GLOSSO_DISABLE_ARTIFACT_CACHE` set to any value disables it entirely.
+    );
+    paragraph(21, #string,oneline
+        \\A cache entry is keyed by an identity string covering everything that
+        \\could change the output.
+    );
+    bullet(22, #string,oneline
+        \\The canonical path of the source file and the standard-library
+        \\directory in use.
+    );
+    bullet(23, #string,oneline
+        \\The LLVM triple, and separately every field of `OUT`, because the
+        \\triple collapses distinct targets.
+    );
+    bullet(24, #string,oneline
+        \\The backend name, the optimization level, the size mode, the sanitizer,
+        \\the borrow-check mode, the temporary-allocator size, and the `--no-main`
+        \\flag.
+    );
+    bullet(25, #string,oneline
+        \\Every `--linker-arg` in command-line order, and every compile-time
+        \\argument written after `--`.
+    );
+    paragraph(26, #string,oneline
+        \\The `OUT` fields in that list are load-bearing. Compiling the same
+        \\source for `x86_64-windows-msvc` and for `x86_64-freestanding-uefi`
+        \\produces the same triple in the progress line, and the two builds still
+        \\keep separate entries.
+    );
+    code_block(27, "text", #string
+        \\$ glosso -O2 --no-main --backend object --target x86_64-windows-msvc -o b.obj lib2.glo
+        \\glosso: compile lib2.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: wrote b.obj  (backend=object, target=x86_64-pc-windows-msvc, -O2)
+        \\$ glosso -O2 --no-main --backend object --target x86_64-windows-msvc -o b.obj lib2.glo
+        \\glosso: restored b.obj from the native artifact cache
+        \\$ glosso -O2 --no-main --backend object --target x86_64-freestanding-uefi -o b.obj lib2.glo
+        \\glosso: compile lib2.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: wrote b.obj  (backend=object, target=x86_64-pc-windows-msvc, -O2)
+        \\$ glosso -O2 --no-main --backend object --target x86_64-freestanding-uefi -o b.obj lib2.glo
+        \\glosso: restored b.obj from the native artifact cache
+    );
+    paragraph(28, #string,oneline
+        \\Identity decides which entry is consulted; a manifest decides whether
+        \\that entry is still valid. The manifest records the length and
+        \\modification time of every source file the build read, of the compiler
+        \\executable itself, and of any `--linker-arg` value that names an
+        \\existing file. Touching any one of them turns the next build back into
+        \\a full compile.
+    );
+    note(29, #string,oneline
+        \\A program with a top-level `#comptime` is never stored. Compile-time
+        \\execution can write files, run commands or print, and restoring an
+        \\artifact would skip all of it. Build scripts therefore always run,
+        \\which is the behaviour a build script needs.
+    );
+    subheading(30, "Generated sources");
+    paragraph(31, #string,oneline
+        \\At top level, `#insert <expression>` evaluates the expression during
+        \\checking and splices the resulting text into the program. That text is
+        \\hashed with SHA-256, written to
+        \\`generated/insert/v1/<hash>.glo` under the cache root, and the path of
+        \\that file becomes the source name for every span inside the generated
+        \\code. Publication is atomic, and an entry that already exists has its
+        \\contents verified rather than rewritten.
+    );
+    paragraph(32, #string,oneline
+        \\The name is the hash of the text alone, so the same generated source
+        \\lands on the same file name under every cache root and in every
+        \\project. That is what makes the entry shareable and makes a diagnostic
+        \\pointing into it reproducible.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#insert emit_helper();
+        \\
+        \\emit_helper :: () -> string {
+        \\    return "helper :: () -> s64 { return 42; }\n";
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", helper());
+        \\}
+    );
+    code_block(34, "text", #string
+        \\$ glosso --show-generated --run gen_ok.glo
+        \\glosso: compile gen_ok.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: generated source C:\Users\almag\AppData\Local\glosso\cache\generated\insert\v1\74f6963b….glo
+        \\glosso: link gen_ok.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done gen_ok.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\42
+        \\
+        \\$ cat C:\Users\almag\AppData\Local\glosso\cache\generated\insert\v1\74f6963b….glo
+        \\helper :: () -> s64 { return 42; }
+    );
+    paragraph(35, #string,oneline
+        \\`--show-generated` prints one `glosso: generated source <path>` line
+        \\per materialized `#insert`, plus any cache warning as
+        \\`glosso: warning: <text>`. It also disables the artifact cache for that
+        \\run, since a restored artifact would report no generated sources at
+        \\all.
+    );
+    paragraph(36, #string,oneline
+        \\The lines are printed after checking succeeds and before lowering
+        \\begins, so a build that fails inside generated code prints no such
+        \\line. In that case the path arrives through the diagnostic instead:
+        \\the note under the error names the same cache entry. Diagnostics:
+        \\Reading and Configuring Them shows the rendered form.
+    );
+    paragraph(37, #string,oneline
+        \\Redirecting the root moves the generated files with it, and the file
+        \\name does not change, because it is derived from the text and not from
+        \\the location.
+    );
+    code_block(38, "text", #string
+        \\$ glosso --cache-dir C:/probe/mycache --show-generated --backend llvm-ir -o go.ll gen_ok.glo
+        \\glosso: generated source C:\probe\mycache\generated\insert\v1\74f6963b….glo
+    );
+    paragraph(39, #string,oneline
+        \\When no cache root can be resolved at all, the text is still compiled
+        \\and the source name falls back to the virtual form
+        \\`<generated:#insert/<hash>.glo>`. Nothing is written, so nothing can be
+        \\opened, and the same build repeats the work every time.
+    );
+    paragraph(40, #string,oneline
+        \\The third subtree is filled by the compile-time C archive builder.
+        \\Importing a module that builds native code compiles its C sources once
+        \\for the output target and caches the archive under
+        \\`native/v6/<name>/<target>/<key>/`, which is why the first such import
+        \\is slow and every later one is not. Embedding Lua and Generating
+        \\Bindings with Bindgen cover the modules that use it.
+    );
+    code_block(41, "text", #string
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\lua55
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_rgfw
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins\wasm32-wasm-freestanding
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins\wasm32-wasm-wasi
+    );
+}

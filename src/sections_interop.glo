@@ -1,0 +1,1789 @@
+// Sections 131-137: interop and low-level code.
+
+render_section_131 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso calls C directly. There is no wrapper layer, no generated shim,
+        \\and no marshalling step: a `#foreign` declaration gives a Glosso
+        \\signature to a symbol that already exists in a native library, and the
+        \\call site lowers to an ordinary call in the target's C ABI.
+    );
+    paragraph(1, #string,oneline
+        \\Two declarations are involved. A `#library` declaration names the native
+        \\artifact the symbols live in, and each `#foreign` function declaration
+        \\binds one symbol. The library declaration is a compile-time constant like
+        \\any other, so it is named, scoped, and importable in the usual way.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\libc     :: #library "c";
+        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\c_puts   :: (s: *const s8) -> s32 #foreign libc "puts";
+        \\
+        \\main :: () {
+        \\    print("strlen = %\n", c_strlen("glosso"));
+        \\    c_puts("printed by C puts");
+        \\}
+    );
+    code_block(3, "text", #string
+        \\strlen = 6
+        \\printed by C puts
+    );
+
+    subheading(4, "Declaring a library");
+    paragraph(5, #string,oneline
+        \\A `#library` declaration is `<Name> :: #library[,<kind>] "<file>";`. The
+        \\string is the library file as the linker should see it, not a Glosso
+        \\module path. Exactly one link-kind modifier is allowed and the default is
+        \\`static`.
+    );
+    code_block(6, "glosso", #string
+        \\libc     :: #library "c";                  // static, the default
+        \\user32   :: #library,system "user32.lib";  // provided by the platform
+        \\kernel32 :: #library,dyn "kernel32.dll";   // resolved at run time
+    );
+    table_header(7, "Modifier   —   Resolution   —   Contribution to the link");
+    table_row(8, "`static` (default)   |   at link time   |   the mapped library argument");
+    table_row(9, "`system`   |   at link time   |   the mapped library argument");
+    table_row(10, "`dyn`   |   at first call   |   nothing; `-ldl` where one is needed");
+    paragraph(11, #string,oneline
+        \\`static` and `system` currently reach the linker through the same path:
+        \\`#library "yyyprobe"` and `#library,system "yyyprobe"` both fail with
+        \\`error: rust-lld: error: could not open 'yyyprobe.lib'`. The distinction
+        \\records intent, that a `system` library is expected to be found in the
+        \\platform's own search path rather than shipped with the program.
+    );
+    paragraph(12, #string,oneline
+        \\`dyn` is different in kind. Each bound symbol gets a lazily initialized
+        \\pointer slot named `__glo_dynsym_<symbol>`; the first call runs
+        \\`LoadLibraryA` plus `GetProcAddress` on Windows, or `dlopen` with
+        \\`RTLD_NOW` plus `dlsym` elsewhere, caches the address, and calls through
+        \\it. Nothing is passed to the linker, so the library need not exist at
+        \\build time. It is rejected where there is no dynamic loader:
+        \\`error: #library,dyn is not supported for target 'wasm32-unknown-unknown'`.
+    );
+    paragraph(13, #string,oneline
+        \\Both malformed spellings are caught at parse time. An unrecognized
+        \\modifier is `error: #library modifier must be system, dyn, or static`,
+        \\and `#library,static,system "x"` is
+        \\`error: #library accepts only one link-kind modifier`.
+    );
+
+    subheading(14, "Binding a function with `#foreign`");
+    paragraph(15, #string,oneline
+        \\`#foreign` is followed by either an identifier, which names a `#library`
+        \\declaration, or a string, which is the library file itself and needs no
+        \\`#library` declaration at all. An optional second string gives the C
+        \\symbol name; without it the Glosso name is used unchanged.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\libc :: #library "c";
+        \\
+        \\// (a) reference a #library declaration, then name the C symbol
+        \\a_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\
+        \\// (b) name the library file inline; no #library declaration needed
+        \\b_strlen :: (s: *const s8) -> u64 #foreign "c" "strlen";
+        \\
+        \\// (c) omit the symbol string when the Glosso name is already the C name
+        \\strlen :: (s: *const s8) -> u64 #foreign libc;
+        \\
+        \\main :: () {
+        \\    print("% % %\n", a_strlen("aa"), b_strlen("bbb"), strlen("cccc"));
+        \\}
+    );
+    code_block(17, "text", #string
+        \\2 3 4
+    );
+    paragraph(18, #string,oneline
+        \\`#foreign` makes the declaration bodyless: parsing stops after the
+        \\optional `;`, and attaching a block is
+        \\`error: bad decl name '{'` pointing at the brace. Naming a library that
+        \\was never declared is
+        \\`error: #foreign refers to unknown library 'nosuchlib' (declare it with #library)`.
+    );
+
+    subheading(19, "From library name to linker argument");
+    paragraph(20, #string,oneline
+        \\The compiler does not pass `#library` strings through verbatim. Each
+        \\name is translated into the spelling the target's linker expects, so one
+        \\source file can name `c` and link against the C runtime on every hosted
+        \\platform.
+    );
+    table_header(21, "Target   —   `c` or `libc`   —   Any other bare name");
+    table_row(22, "`*-windows-msvc`   |   `legacy_stdio_definitions.lib ucrt.lib`   |   `<base>.lib`");
+    table_row(23, "`*-windows-gnu`   |   `libmsvcrt.a`   |   `lib<base>.a`");
+    table_row(24, "ELF and Mach-O   |   nothing; libc is implicit   |   `-l<base>`");
+    paragraph(25, #string,oneline
+        \\A name that already contains `/` or `\` or ends in a known library
+        \\extension is passed through untouched, which is how a vendored archive is
+        \\named. A leading `lib` is stripped before the target spelling is applied,
+        \\so `libpng` and `png` produce the same argument.
+    );
+    code_block(26, "text", #string
+        \\# the program declares  zzz :: #library "zzzprobe";
+        \\$ glosso -o p08.exe p08_libnames.glo
+        \\error: rust-lld: error: could not open 'zzzprobe.lib': no such file or directory
+        \\
+        \\$ glosso --target x86_64-linux-musl -o p08l p08_libnames.glo
+        \\error: ld.lld: error: unable to find library -lzzzprobe
+    );
+    bullet(27, #string,oneline
+        \\Where a self-contained MinGW bundle is not available, an
+        \\`x86_64-windows-gnu` link is re-planned onto the installed Windows SDK and
+        \\the `lib<base>.a` spelling is rewritten back to `<base>.lib`. The observed
+        \\failure on such a host names `zzzprobe.lib`, not `libzzzprobe.a`.
+    );
+    bullet(28, #string,oneline
+        \\If any reachable `#foreign` call uses a `dyn` library, `-ldl` is added on
+        \\non-Windows, non-wasm targets so that `dlopen` resolves.
+    );
+
+    subheading(29, "The reachability rule");
+    paragraph(30, #string,oneline
+        \\Library arguments are collected by walking the runtime-reachable
+        \\functions and recording the library of every non-dynamic `#foreign` call
+        \\found there. A declaration that is never called contributes nothing. The
+        \\rule exists so that a large bindings file, most of which the program does
+        \\not use, does not drag its library onto the link line.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\ghost :: #library "no_such_library_at_all";
+        \\never_called :: (x: s32) -> s32 #foreign ghost "never_called";
+        \\
+        \\main :: () {
+        \\    print("linked without the ghost library\n");
+        \\}
+    );
+    code_block(32, "text", #string
+        \\linked without the ghost library
+    );
+    paragraph(33, #string,oneline
+        \\Adding one call to `never_called` changes the link, and the library that
+        \\was invisible a moment ago becomes a hard requirement:
+        \\`error: rust-lld: error: could not open 'no_such_library_at_all.lib': no such file or directory`.
+    );
+    note(34, #string,oneline
+        \\The reachability rule is measured after pruning, not after type checking.
+        \\A `#foreign` declaration reached only from dead code, or only from a
+        \\branch a `#if` removed, does not put its library on the link line, and the
+        \\build succeeds on a machine where that library is not installed.
+    );
+
+    subheading(35, "Passing arguments to the linker directly");
+    paragraph(36, #string,oneline
+        \\`--linker-arg <arg>` appends one raw argument and may be repeated. The
+        \\final order is the plan's own flags and objects, then the library
+        \\arguments derived from reachable `#foreign` calls, then every
+        \\`--linker-arg` in command-line order, then anything a build script added
+        \\with `add_current_linker_arg`. It is the mechanism for search paths,
+        \\subsystem selection, and any flag Glosso has no directive for.
+    );
+    code_block(37, "text", #string
+        \\$ glosso -o usegreet.exe usegreet.glo
+        \\glosso: compile usegreet.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link usegreet.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\error: rust-lld: error: could not open 'greet.lib': no such file or directory
+        \\
+        \\$ glosso --linker-arg /libpath:vendor -o usegreet.exe usegreet.glo
+        \\glosso: compile usegreet.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link usegreet.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done usegreet.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ ./usegreet.exe
+        \\greet_add(19, 23) = 42
+    );
+    paragraph(38, #string,oneline
+        \\The value is not translated between linker flavours. On
+        \\`x86_64-pc-windows-msvc` the linker is `lld-link`, so a POSIX spelling is
+        \\dropped with `rust-lld: warning: ignoring unknown argument '-L.'`. That
+        \\warning is only visible when the link fails; a successful link does not
+        \\surface the linker's own output.
+    );
+
+    subheading(39, "A complete link against a system library");
+    paragraph(40, #string,oneline
+        \\The program below binds one symbol from a Windows import library through
+        \\`#library,system` and one from a DLL through `#library,dyn`, so only the
+        \\first contributes a linker argument. Constants for the C header's `#define`
+        \\names are written as ordinary Glosso constants.
+    );
+    code_block(41, "glosso", #string
+        \\#import "Io";
+        \\
+        \\kernel32     :: #library,dyn "kernel32.dll";
+        \\GetTickCount :: () -> u32 #foreign kernel32 "GetTickCount";
+        \\
+        \\user32           :: #library,system "user32.lib";
+        \\GetSystemMetrics :: (index: s32) -> s32 #foreign user32 "GetSystemMetrics";
+        \\
+        \\SM_CXSCREEN :: 0;
+        \\SM_CYSCREEN :: 1;
+        \\
+        \\main :: () {
+        \\    print("tick count nonzero: %\n", GetTickCount() > 0);
+        \\    print("screen: % x %\n",
+        \\        GetSystemMetrics(SM_CXSCREEN),
+        \\        GetSystemMetrics(SM_CYSCREEN));
+        \\}
+    );
+    code_block(42, "text", #string
+        \\glosso: compile f03.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link f03.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done f03.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\tick count nonzero: 1
+        \\screen: 1600 x 1000
+    );
+}
+
+render_section_132 :: () {
+    paragraph(0, #string,oneline
+        \\`#c_call` selects the target's C calling convention and layout rules for
+        \\the declaration it is attached to. On a Glosso procedure with a body it
+        \\turns that procedure into an export a C program can call; on a
+        \\function-pointer type it describes a callback C will invoke; on a struct
+        \\it selects C field order.
+    );
+    paragraph(1, #string,oneline
+        \\A `#c_call` procedure is an ordinary Glosso procedure in every other
+        \\respect. It can be called from Glosso, it participates in overload
+        \\resolution, and it is type checked normally. The one thing it gives up is
+        \\the implicit context, which has no place in a C signature.
+    );
+    code_block(2, "glosso", #string
+        \\// glomath.glo: build with --backend static-lib --no-main
+        \\
+        \\add_s32 :: (left: s32, right: s32) -> s32 #c_call {
+        \\    return left + right;
+        \\}
+        \\
+        \\scale_f64 :: (value: f64, factor: f64) -> f64 #c_call {
+        \\    return value * factor;
+        \\}
+    );
+    table_header(3, "Site   —   Spelling   —   Effect");
+    table_row(4, "procedure   |   `f :: (…) -> T #c_call { … }`   |   C ABI, C-callable export, library root");
+    table_row(5, "function pointer   |   `#fn_ptr(…) -> T #c_call`   |   C ABI; part of the pointer's type");
+    table_row(6, "struct   |   `S :: struct #c_call { … }`   |   fields keep declaration order");
+    paragraph(7, #string,oneline
+        \\`#c_call` does not declare an import. A declaration with no body is only
+        \\legal with `#foreign` or `#magic`; writing
+        \\`f :: (a: s32) -> s32 #c_call;` is `error: unexpected token ';'` followed
+        \\by `error: unknown function f`. Calling into C is `#foreign`, which is
+        \\handled in Calling C from Glosso; `#c_call` is the outbound direction.
+    );
+
+    subheading(8, "Function pointers carry their convention");
+    paragraph(9, #string,oneline
+        \\The calling convention is part of a `#fn_ptr` type, not a property of the
+        \\value stored in it. A Glosso procedure without `#c_call` cannot be passed
+        \\where a `#c_call` pointer is expected; the diagnostic names both sides by
+        \\kind: `error: arg type fnptr != fnptr in call c_qsort`. This is what makes
+        \\a callback handed to C safe to invoke.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Compare :: #fn_ptr(a: *const void, b: *const void) -> s32 #c_call;
+        \\
+        \\libc    :: #library "c";
+        \\c_qsort :: (base: *void, count: u64, size: u64, compare: Compare)
+        \\    #foreign libc "qsort";
+        \\
+        \\compare_s32 :: (a: *const void, b: *const void) -> s32 #c_call {
+        \\    left  := (cast(*const s32)a).*;
+        \\    right := (cast(*const s32)b).*;
+        \\    if left < right return -1;
+        \\    if left > right return 1;
+        \\    return 0;
+        \\}
+        \\
+        \\main :: () {
+        \\    values: [5]s32;
+        \\    values[0] = 5; values[1] = 1; values[2] = 4; values[3] = 2; values[4] = 3;
+        \\    c_qsort(cast(*void)values.data, 5, 4, compare_s32);
+        \\    for i: 0..5 print("% ", values[i]);
+        \\    print("\n");
+        \\}
+    );
+    code_block(11, "text", #string
+        \\1 2 3 4 5
+    );
+
+    subheading(12, "`#c_call` on a struct");
+    paragraph(13, #string,oneline
+        \\An ordinary Glosso struct is free to reorder its fields, and it does:
+        \\storage is sorted by descending alignment, then descending size, then
+        \\declaration order. `#c_call` suppresses that and lays the fields out in
+        \\the order written, which is what a C declaration of the same type
+        \\produces. The general rules are in Struct Memory Layout.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Plain :: struct {
+        \\    a: u8;
+        \\    b: u32;
+        \\    c: u8;
+        \\}
+        \\
+        \\C_Layout :: struct #c_call {
+        \\    a: u8;
+        \\    b: u32;
+        \\    c: u8;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("Plain    size = %\n", size_of(Plain));
+        \\    print("C_Layout size = %\n", size_of(C_Layout));
+        \\}
+    );
+    code_block(15, "text", #string
+        \\Plain    size = 8
+        \\C_Layout size = 12
+    );
+
+    subheading(16, "The implicit context");
+    paragraph(17, #string,oneline
+        \\A C caller has no context to pass, so a `#c_call` procedure may not read
+        \\one: `error: cannot access 'context' in a #c_call / #no_context procedure`.
+        \\An export that needs an allocator must take it as a parameter or install
+        \\one itself. `#no_context` imposes the same restriction without changing
+        \\the calling convention.
+    );
+
+    subheading(18, "The `glo_` symbol prefix");
+    paragraph(19, #string,oneline
+        \\Glosso does not own the C namespace, so every symbol it defines is
+        \\prefixed with `glo_`. A `#c_call` export named `add_s32` is the native
+        \\symbol `glo_add_s32`, and the C header that declares it must say so. The
+        \\prefix is what lets a Glosso program define `open` or `write` without
+        \\colliding with the C runtime.
+    );
+    table_header(20, "Declaration   —   Native symbol");
+    table_row(21, "`f :: (…) #c_call { … }`   |   `glo_f`");
+    table_row(22, "any other Glosso procedure `f`   |   `glo_f`");
+    table_row(23, "`main`, through the hosted entry wrapper   |   `glo_main`, called from `wmain` or `main`");
+    table_row(24, "`f :: (…) #foreign lib \"sym\"`   |   `sym`, exactly as declared");
+    code_block(25, "text", #string
+        \\$ cat symbols.glo
+        \\exported :: (a: s32) -> s32 #c_call { return a + 1; }
+        \\plain    :: (a: s32) -> s32 { return a + 2; }
+        \\libc     :: #library "c";
+        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\main     :: () { x := exported(1) + plain(2); y := c_strlen("ab"); }
+        \\
+        \\$ glosso --backend llvm-ir -o symbols.ll symbols.glo
+        \\$ grep -E "glo_exported|glo_plain|glo_main|@strlen|@wmain" symbols.ll
+        \\define i32 @glo_exported(i32 %0) {
+        \\define i32 @glo_plain(i32 %0) {
+        \\define void @glo_main() {
+        \\declare i64 @strlen(ptr)
+        \\define i32 @wmain(i32 %0, ptr %1) {
+    );
+    paragraph(26, #string,oneline
+        \\One narrow exception exists: on a non-Windows, non-wasm target that is
+        \\also the host, a `#c_call` procedure named `main`, or one that lowered to
+        \\no code at all, keeps its bare name. Everything else, on every target,
+        \\takes the prefix. WebAssembly exports follow the same rule, which is why
+        \\the wasm link line reads `--export=glo_main`.
+    );
+
+    subheading(27, "`--no-main` and library roots");
+    paragraph(28, #string,oneline
+        \\Reachability normally starts at `main`. A library has no `main`, so the
+        \\roots must change: with `--no-main`, or with `--backend static-lib` or
+        \\`--backend shared-lib`, every defined `#c_call` procedure becomes a root
+        \\and the hosted entry wrapper and the `argc`/`argv` globals are not
+        \\emitted. Procedures reachable only from those roots are lowered with
+        \\internal linkage; procedures reachable from nothing are dropped.
+    );
+    code_block(29, "glosso", #string
+        \\exported_root :: (a: s32) -> s32 #c_call { return helper(a); }
+        \\
+        \\helper :: (a: s32) -> s32 { return a * 3; }
+        \\
+        \\not_reached :: (a: s32) -> s32 { return a - 1; }
+        \\
+        \\also_exported :: (a: f64) -> f64 #c_call { return a / 2.0; }
+    );
+    code_block(30, "text", #string
+        \\$ glosso --backend static-lib --no-main -o roots.lib roots.glo
+        \\glosso: compile roots.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link roots.lib (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done roots.lib  (backend=static-lib, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ llvm-nm --defined-only --extern-only --just-symbol-name roots.lib
+        \\__real@3fe0000000000000
+        \\_fltused
+        \\glo_also_exported
+        \\glo_exported_root
+    );
+    paragraph(31, #string,oneline
+        \\`not_reached` is gone and `helper` survives only as an internal symbol.
+        \\The rule cuts the other way too: in a normal executable build, a defined
+        \\but uncalled `#c_call` procedure is pruned exactly like any other dead
+        \\code. The same source compiled without `--no-main` contains no
+        \\`glo_exported` at all.
+    );
+
+    subheading(32, "A static library consumed from C");
+    code_block(33, "text", #string
+        \\/* driver.c */
+        \\#include <stdio.h>
+        \\
+        \\int    glo_add_s32(int left, int right);
+        \\double glo_scale_f64(double value, double factor);
+        \\
+        \\int main(void) {
+        \\    printf("glo_add_s32(19, 23) = %d\n", glo_add_s32(19, 23));
+        \\    printf("glo_scale_f64(2.5, 4.0) = %g\n", glo_scale_f64(2.5, 4.0));
+        \\    return 0;
+        \\}
+    );
+    code_block(34, "text", #string
+        \\$ glosso --backend static-lib --no-main -o glomath.lib glomath.glo
+        \\glosso: compile glomath.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link glomath.lib (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done glomath.lib  (backend=static-lib, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ clang driver.c glomath.lib -o driver.exe
+        \\$ ./driver.exe
+        \\glo_add_s32(19, 23) = 42
+        \\glo_scale_f64(2.5, 4.0) = 10
+    );
+    paragraph(35, #string,oneline
+        \\`--backend shared-lib` produces the same exports in a dynamic library and
+        \\additionally writes an import library where the platform uses one
+        \\(`glomath.dll` plus `glomath.dll.lib` on Windows). The artifact names per
+        \\backend and target are tabulated in Backends, Artifacts, and Optimization
+        \\Levels.
+    );
+    note(36, #string,oneline
+        \\Linking two separately compiled Glosso objects or archives into one image
+        \\collides on the floating-point marker symbol:
+        \\`error: rust-lld: error: duplicate symbol: _fltused`, reported against
+        \\both objects. `--linker-arg /FORCE:MULTIPLE` gets past it, and the shared
+        \\library route avoids it entirely. Linking one Glosso archive into a C
+        \\program, as above, does not hit this.
+    );
+}
+
+render_section_133 :: () {
+    paragraph(0, #string,oneline
+        \\Nothing is converted at a C boundary. The argument's machine image is
+        \\handed to the callee as it stands, so a type crosses correctly exactly
+        \\when its Glosso lowering is bit-for-bit the C type the header declares.
+        \\The checker does not verify this; it verifies the Glosso signature that
+        \\was written down, and a wrong signature becomes a wrong call.
+    );
+    paragraph(1, #string,oneline
+        \\Every scalar, every pointer shape, an enum with an explicit backing type,
+        \\a `distinct` type, a fixed array, and a `#c_call` struct all have exactly
+        \\one machine image, and it is the C one. Compiling `#c_call` signatures to
+        \\textual IR shows the lowering directly.
+    );
+    code_block(2, "glosso", #string
+        \\Color :: enum u8 { Red; Green; Blue; }
+        \\Point :: struct #c_call { x: s32; y: s32; }
+        \\Meters :: distinct f64;
+        \\Handler :: #fn_ptr(value: s32) -> s32 #c_call;
+        \\
+        \\f_scalar :: (a: s8, b: s32, c: u64, d: f32, e: f64) -> f64 #c_call { return e; }
+        \\f_bool   :: (a: bool) -> bool #c_call { return a; }
+        \\f_enum   :: (a: Color) -> Color #c_call { return a; }
+        \\f_ptr    :: (a: *s32, b: [*]u8, c: ?*s32, d: *void) -> *s32 #c_call { return a; }
+        \\f_fnptr  :: (a: Handler) -> Handler #c_call { return a; }
+        \\f_struct :: (a: Point) -> Point #c_call { return a; }
+        \\f_dist   :: (a: Meters) -> Meters #c_call { return a; }
+        \\f_array  :: (a: [4]s32) -> s64 #c_call { return 0; }
+        \\
+        \\f_string :: (a: string) -> s64 #c_call { return a.count; }
+        \\f_view   :: (a: []u8) -> s64 #c_call { return a.count; }
+        \\f_option :: (a: ?s32) -> s64 #c_call { return 0; }
+    );
+    code_block(3, "text", #string
+        \\$ glosso --backend llvm-ir --no-main -o f04.ll f04.glo
+        \\define double @glo_f_scalar(i8 %0, i32 %1, i64 %2, float %3, double %4) {
+        \\define zeroext i1 @glo_f_bool(i1 zeroext %0) {
+        \\define i8 @glo_f_enum(i8 %0) {
+        \\define ptr @glo_f_ptr(ptr %0, ptr %1, ptr %2, ptr %3) {
+        \\define ptr @glo_f_fnptr(ptr %0) {
+        \\define i64 @glo_f_struct(i64 %0) {
+        \\define double @glo_f_dist(double %0) {
+        \\define i64 @glo_f_array([4 x i32] %0) {
+        \\define i64 @glo_f_string({ i64, ptr, i64 } %0) {
+        \\define i64 @glo_f_view({ i64, ptr } %0) {
+        \\define i64 @glo_f_option(%Option_s32 %0) {
+    );
+    table_header(4, "Glosso type   —   Machine image   —   C spelling");
+    table_row(5, "`s8` `s16` `s32` `s64`   |   `i8` `i16` `i32` `i64`   |   `int8_t` through `int64_t`");
+    table_row(6, "`u8` `u16` `u32` `u64`   |   `i8` `i16` `i32` `i64`   |   `uint8_t` through `uint64_t`");
+    table_row(7, "`f32` `f64`   |   `float` `double`   |   `float`, `double`");
+    table_row(8, "`bool`   |   `i1 zeroext`   |   `_Bool`");
+    table_row(9, "`enum u8`, `enum_flags u32`   |   the backing integer   |   the enum's underlying type");
+    table_row(10, "`*T`, `*const T`, `[*]T`, `*void`   |   `ptr`   |   `T *`, `const T *`, `void *`");
+    table_row(11, "`?*T`, `?[*]T`   |   `ptr`   |   a pointer that may be null");
+    table_row(12, "`#fn_ptr(…) #c_call`   |   `ptr`   |   a function pointer");
+    table_row(13, "`struct #c_call`   |   declared field order   |   the matching `struct`");
+    table_row(14, "`distinct T`   |   the image of `T`   |   whatever `T` maps to");
+    table_row(15, "`[N]T`   |   `[N x T]`   |   `T[N]` in a struct field");
+    paragraph(16, #string,oneline
+        \\The remaining aggregate types are Glosso descriptors with no C
+        \\counterpart. They compile in a `#c_call` signature, because the checker
+        \\has no notion of C representability, and they pass the descriptor by
+        \\value. That is almost never what the C side expects.
+    );
+    table_header(17, "Glosso type   —   Machine image   —   Reason");
+    table_row(18, "`string`, `cstring`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
+    table_row(19, "`[]T`   |   `{ i64, ptr }`   |   count and data");
+    table_row(20, "`[..]T`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
+    table_row(21, "`?T` for non-pointer `T`   |   tag plus payload   |   a tagged union, not a null value");
+    table_row(22, "`E!T`, `union`, tuples   |   tag plus payload   |   a tagged union");
+
+    subheading(23, "`string` at a pointer parameter");
+    paragraph(24, #string,oneline
+        \\When a `string` argument meets a declared `*const s8` or `[*]u8`
+        \\parameter, the compiler extracts the descriptor's `data` field and passes
+        \\that pointer alone. No terminator is added and no copy is made, so the
+        \\call is free but the C callee's idea of where the text ends comes from
+        \\the bytes themselves.
+    );
+    paragraph(25, #string,oneline
+        \\String literals are stored NUL-terminated in the image, and results
+        \\marked `returns_fresh` such as `substring` are terminated copies, so both
+        \\happen to work. A buffer assembled by hand does not: the program below
+        \\prints its eight bytes and then keeps going into whatever follows them in
+        \\memory.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\c_puts :: (s: *const s8) -> s32 #foreign "c" "puts" #memory(reads(s), noescape(s));
+        \\
+        \\main :: () {
+        \\    c_puts("a string literal is NUL-terminated in the image");
+        \\    buf: [8]u8;
+        \\    buf[0] = #char "A"; buf[1] = #char "B"; buf[2] = #char "C";
+        \\    buf[3] = #char "X"; buf[4] = #char "Y"; buf[5] = #char "Z";
+        \\    buf[6] = #char "!"; buf[7] = #char "?";
+        \\    c_puts(cast(*const s8)buf.data);
+        \\}
+    );
+    paragraph(27, #string,oneline
+        \\The first line prints as written. The second prints `ABCXYZ!?` followed
+        \\by trailing garbage that changes between runs, which is the whole reason
+        \\`cstring` exists.
+    );
+
+    subheading(28, "`cstring`");
+    paragraph(29, #string,oneline
+        \\`cstring` is a distinct built-in string type that maintains the invariant
+        \\`data[count] == 0`; `count` and `capacity` both exclude the terminator.
+        \\It is not a pointer, it is a descriptor like `string`, and its purpose is
+        \\to own a buffer whose bytes are safe to hand to C. The conversions live in
+        \\`std/Strings/Utf8`.
+    );
+    table_header(30, "Call   —   Result   —   Storage");
+    table_row(31, "`cstring_from_string(text, allocator)`   |   `cstring`   |   `context.allocator` by default; release it");
+    table_row(32, "`c_string(text)`   |   `cstring`   |   the temporary allocator; no release");
+    table_row(33, "`cstring_to_string(text)`   |   `string`   |   a fresh copy");
+    table_row(34, "`cstring_free(text, allocator)`   |   nothing   |   releases a `cstring_from_string` result");
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\#import "Strings/Utf8";
+        \\
+        \\c_atoi :: (s: *const s8) -> s32 #foreign "c" "atoi" #memory(reads(s), noescape(s));
+        \\
+        \\main :: () {
+        \\    temporary := c_string("1234");             // temp-allocator copy
+        \\    print("atoi = %\n", c_atoi(temporary));
+        \\
+        \\    owned := cstring_from_string("hello");     // context.allocator copy
+        \\    defer cstring_free(owned);
+        \\    print("count = % round trip = %\n", owned.count, cstring_to_string(owned));
+        \\}
+    );
+    code_block(36, "text", #string
+        \\atoi = 1234
+        \\count = 5 round trip = hello
+    );
+    note(37, #string,oneline
+        \\Declare the `#foreign` parameter as a pointer and pass the `cstring` into
+        \\it, as above. Never declare the parameter as `cstring` or `string`: the
+        \\descriptor is then passed by value where C expects a pointer. With an
+        \\ordinary symbol that is a silent crash, `exit code: 0xc0000005`; with a
+        \\symbol the backend also has a builtin for, the LLVM verifier surfaces it
+        \\as `error: Call parameter type does not match function signature!`.
+    );
+
+    subheading(38, "C varargs");
+    paragraph(39, #string,oneline
+        \\A final `...` parameter marks a C-ABI variadic. It is accepted only on
+        \\`#foreign` declarations and `#c_call` definitions; anywhere else it is
+        \\`error: C vararg marker '...' on 'f' is only supported on #foreign declarations or #c_call definitions`.
+        \\Operators and macros are rejected separately, and a signature with `$T` or
+        \\compile-time parameters gives
+        \\`error: C vararg marker '...' on 'f' requires concrete runtime parameters`.
+        \\Glosso's own variadics are a different feature, described in Variadic
+        \\Parameters.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\#import "VarArg";
+        \\
+        \\libc   :: #library "c";
+        \\printf :: (format: *const s8, ...) -> s32 #foreign libc "printf";
+        \\
+        \\sum_s64 :: (count: s64, ...) -> s64 #c_call {
+        \\    ap: Va_List;
+        \\    start(*ap);
+        \\    defer end(*ap);
+        \\    total: s64 = 0;
+        \\    i: s64 = 0;
+        \\    while i < count {
+        \\        total += arg(s64, *ap);
+        \\        i += 1;
+        \\    }
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    printf("printf through C varargs: n=%ld flag=%d\n", 42, true);
+        \\    print("sum_s64(10, 20, 12) = %\n", sum_s64(3, 10, 20, 12));
+        \\}
+    );
+    code_block(41, "text", #string
+        \\sum_s64(10, 20, 12) = 42
+        \\printf through C varargs: n=42 flag=1
+    );
+    paragraph(42, #string,oneline
+        \\`std/VarArg` supplies `Va_List`, which is opaque target-ABI storage, plus
+        \\`start`, `end`, `copy`, and `arg(T, *Va_List)`. It also wraps `vprintf`,
+        \\`vfprintf`, and `vsnprintf` over an opaque `C_File`. The two lines of
+        \\output arrive in that order because Glosso's `print` and C's `printf`
+        \\buffer independently.
+    );
+    note(43, #string,oneline
+        \\No conversion happens in the variadic tail. Arguments after the last
+        \\declared parameter are pushed exactly as their Glosso representation, so
+        \\`c_printf("%s\n", "hello")` passes a three-word descriptor where C reads a
+        \\pointer and the program dies with `exit code: 0xc0000005`. Convert with
+        \\`c_string` first.
+    );
+}
+
+render_section_134 :: () {
+    paragraph(0, #string,oneline
+        \\`std/Bindgen` turns a C header into Glosso declarations. It runs during
+        \\compile-time execution, which means bindings can be produced and consumed
+        \\in the same build, and it reads the header for the target being compiled
+        \\for rather than the machine running the compiler: `long tgt_long(long a)`
+        \\generates `(a: s32) -> s32` on `x86_64-windows-msvc` and
+        \\`(a: s64) -> s64` on `x86_64-linux-musl`.
+    );
+    paragraph(1, #string,oneline
+        \\There are two entry points. Both take the header path, a library
+        \\descriptor, and an optional `Bindgen_Options`, and both return
+        \\`Bindgen_Error!string`.
+    );
+    table_header(2, "Call   —   Produces   —   Used with");
+    table_row(3, "`generate(header, output, library, options)`   |   writes a `.glo` file   |   a checked-in bindings file");
+    table_row(4, "`generate_source(header, library, options)`   |   returns the source text   |   `#insert`, no file on disk");
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\#import "Bindgen";
+        \\
+        \\emit :: () {
+        \\    if generate("counter.h", "counter_bindings.glo", static_library("counter", "")) == {
+        \\    case .Ok(message); print("[bindgen] %\n", message);
+        \\    case .Err(error);  print("[bindgen] failed: %\n", error.message);
+        \\    }
+        \\}
+        \\
+        \\#comptime emit();
+        \\
+        \\main :: () {}
+    );
+    code_block(6, "text", #string
+        \\/* counter.h */
+        \\#define COUNTER_VERSION 3
+        \\
+        \\typedef struct Counter_Stats {
+        \\    int hits;
+        \\    int misses;
+        \\} Counter_Stats;
+        \\
+        \\typedef struct Counter Counter;
+        \\
+        \\Counter *counter_open(int start);
+        \\void counter_close(Counter *counter);
+        \\int counter_bump(Counter *counter, int by);
+        \\Counter_Stats counter_stats(Counter *counter);
+    );
+    code_block(7, "glosso", #string
+        \\// Generated by Glosso's Clang C header bindgen from counter.h.
+        \\counter :: #library,static "counter";
+        \\
+        \\Counter_Stats :: struct #c_call {
+        \\    hits: s32;
+        \\    misses: s32;
+        \\}
+        \\
+        \\Counter :: struct #c_call {}
+        \\
+        \\COUNTER_VERSION :: 3;
+        \\
+        \\counter_open :: (start: s32) -> ?[*]Counter #foreign counter "counter_open" #memory unknown;
+        \\
+        \\counter_close :: (counter: ?[*]Counter) #foreign counter "counter_close" #memory unknown;
+        \\
+        \\counter_bump :: (counter: ?[*]Counter, by: s32) -> s32 #foreign counter "counter_bump" #memory unknown;
+        \\
+        \\counter_stats :: (counter: ?[*]Counter) -> Counter_Stats #foreign counter "counter_stats" #memory unknown;
+        \\
+        \\// bindgen: 2 type declarations, 0 aliases, 0 callbacks, 1 constants, 0 macros, 4 functions, 0 skipped declaration parts/macros (libclang).
+    );
+    paragraph(8, #string,oneline
+        \\The `.Ok` payload of `generate` is a status line, not a path: the run
+        \\above printed `[bindgen] bindgen: wrote counter_bindings.glo`. The `.Ok`
+        \\payload of `generate_source` is the source text itself.
+    );
+
+    subheading(9, "Library descriptors");
+    paragraph(10, #string,oneline
+        \\The third argument decides the `#library` declaration at the head of the
+        \\generated file. The descriptor's name becomes the Glosso identifier every
+        \\`#foreign` in the file refers to; its file or path becomes the string.
+        \\`static_library` and `system_library` default the file to the name.
+    );
+    table_header(11, "Descriptor   —   Emitted declaration");
+    table_row(12, "`static_library(\"small\", \"\")`   |   `small :: #library,static \"small\";`");
+    table_row(13, "`static_library(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
+    table_row(14, "`system_library(\"m\", \"\")`   |   `m :: #library,system \"m\";`");
+    table_row(15, "`dynamic_library(\"small\", \"libsmall.so\")`   |   `small :: #library,dyn \"libsmall.so\";`");
+
+    subheading(16, "`Bindgen_Options`");
+    code_block(17, "glosso", #string
+        \\Bindgen_Options :: struct #c_call {
+        \\    include_paths: [..]string;
+        \\    preprocessor_definitions: [..]string;
+        \\    compiler_args: [..]string;
+        \\    allow_textual_fallback: bool = false;
+        \\}
+    );
+    table_header(18, "Field   —   Becomes   —   Default");
+    table_row(19, "`include_paths`   |   `-I` arguments   |   empty");
+    table_row(20, "`preprocessor_definitions`   |   `-D` arguments, `NAME` or `NAME=VALUE`   |   empty");
+    table_row(21, "`compiler_args`   |   raw arguments to clang   |   empty");
+    table_row(22, "`allow_textual_fallback`   |   a limited non-clang parser   |   `false`");
+    paragraph(23, #string,oneline
+        \\Three mutators append to the arrays without naming the fields:
+        \\`add_include_path`, `add_bindgen_preprocessor_definition`, and
+        \\`add_bindgen_compiler_arg`, each taking a `*Bindgen_Options`. Definitions
+        \\reach the header exactly as clang would apply them, so
+        \\`add_bindgen_preprocessor_definition(*options, "SMALL_EXTRA=1")` selects
+        \\the other side of an `#ifdef` and changes the constants that come out.
+    );
+    paragraph(24, #string,oneline
+        \\`allow_textual_fallback` is `false` because a clang error is more useful
+        \\than a plausible-looking guess. With it off, a header clang cannot
+        \\preprocess fails the call with clang's own message, prefixed
+        \\`bindgen_generate_source: Clang could not preprocess <path> (status 1):`.
+        \\With it on, the same header is scanned by a textual parser that
+        \\understands simple declarations and object-like macros and ignores what
+        \\it cannot follow.
+    );
+    code_block(25, "glosso", #string
+        \\// broken.h begins with: #include <no_such_header_anywhere.h>
+        \\
+        \\emit :: (allow: bool) {
+        \\    options: Bindgen_Options;
+        \\    options.allow_textual_fallback = allow;
+        \\    if generate_source("broken.h", static_library("broken", ""), options) == {
+        \\    case .Ok(source);  print("[ok, allow=%]\n%\n", allow, source);
+        \\    case .Err(error);  print("[err, allow=%] %\n", allow, error.message);
+        \\    }
+        \\}
+    );
+    code_block(26, "text", #string
+        \\[ok, allow=1]
+        \\// Generated by Glosso's C header bindgen from broken.h.
+        \\broken :: #library,static "broken";
+        \\
+        \\BROKEN_ANSWER :: 7;
+        \\
+        \\broken_add :: (a: s32, b: s32) -> s32 #foreign broken "broken_add" #memory unknown;
+        \\
+        \\// bindgen: 0 type declarations, 0 aliases, 0 callbacks, 1 constants, 0 macros, 1 functions, 0 skipped declaration parts/macros.
+    );
+    paragraph(27, #string,oneline
+        \\The banner distinguishes the two parsers: libclang output says
+        \\`Clang C header bindgen` and ends its summary with `(libclang)`, the
+        \\textual parser says `C header bindgen` and omits the marker.
+    );
+
+    subheading(28, "What the generated declarations look like");
+    code_block(29, "text", #string
+        \\/* rich2.h */
+        \\#include <stddef.h>
+        \\
+        \\typedef enum Rich_Mode {
+        \\    RICH_MODE_OFF = 0,
+        \\    RICH_MODE_ON  = 1
+        \\} Rich_Mode;
+        \\
+        \\typedef unsigned long long Rich_Id;
+        \\
+        \\typedef int (*Rich_Callback)(int value, void *user);
+        \\
+        \\typedef struct Rich_Config {
+        \\    Rich_Mode     mode;
+        \\    Rich_Id       id;
+        \\    const char   *name;
+        \\    Rich_Callback on_event;
+        \\} Rich_Config;
+        \\
+        \\void   rich_configure(const Rich_Config *config);
+        \\char  *rich_describe(Rich_Mode mode);
+        \\size_t rich_count(void);
+    );
+    code_block(30, "glosso", #string
+        \\// Generated by Glosso's Clang C header bindgen from rich2.h.
+        \\rich :: #library,static "rich";
+        \\
+        \\Rich_Config :: struct #c_call {
+        \\    mode: s32;
+        \\    id: u64;
+        \\    name: ?[*]const s8;
+        \\    on_event: Rich_Callback;
+        \\}
+        \\
+        \\Rich_Mode :: s32;
+        \\
+        \\Rich_Id :: u64;
+        \\
+        \\Rich_Callback :: #fn_ptr(arg0: s32, arg1: ?[*]void) -> s32 #c_call;
+        \\
+        \\RICH_MODE_OFF :: 0;
+        \\
+        \\RICH_MODE_ON :: 1;
+        \\
+        \\rich_configure :: (config: ?[*]const Rich_Config) #foreign rich "rich_configure" #memory unknown;
+        \\
+        \\rich_describe :: (mode: s32) -> ?[*]s8 #foreign rich "rich_describe" #memory unknown;
+        \\
+        \\rich_count :: () -> u64 #foreign rich "rich_count" #memory unknown;
+        \\
+        \\// bindgen: 1 type declarations, 2 aliases, 1 callbacks, 2 constants, 0 macros, 3 functions, 0 skipped declaration parts/macros (libclang).
+    );
+    bullet(31, #string,oneline
+        \\Every record becomes a `struct #c_call`, so field order matches the C
+        \\declaration. An opaque `typedef struct Counter Counter;` becomes an empty
+        \\`struct #c_call {}` that exists only to be pointed at.
+    );
+    bullet(32, #string,oneline
+        \\A C `enum` becomes an integer alias plus one constant per enumerator, not
+        \\a Glosso `enum`. Enumerators are top-level constants, so `RICH_MODE_ON` is
+        \\written bare rather than as `.On`.
+    );
+    bullet(33, #string,oneline
+        \\Function-pointer typedefs become `#fn_ptr … #c_call` with positional
+        \\parameter names `arg0`, `arg1`, and so on; C parameter names are not
+        \\carried across.
+    );
+    bullet(34, #string,oneline
+        \\A plain C pointer parameter is spelled `?[*]T`, an optional many-pointer,
+        \\and `const` is part of that type. `?[*]Counter` and `?[*]const Counter`
+        \\are distinct and do not convert: passing one where the other is expected
+        \\is `error: arg type Option____Counter != Option____const_Counter in call counter_stats`,
+        \\and `cast` does not bridge them either.
+    );
+    bullet(35, #string,oneline
+        \\Object-like macros with constant values become constants; the summary
+        \\comment counts what was emitted and what was skipped.
+    );
+
+    subheading(36, "Supplying memory contracts");
+    paragraph(37, #string,oneline
+        \\Bindgen appends `#memory unknown` to every function it emits, and
+        \\`unknown` is operationally the same as no contract at all: it creates no
+        \\resource, tracks no ownership, and does not even silence the advisory
+        \\about an opaque call's return lifetime. A bindgen'd library therefore
+        \\enters the program uncontracted. The fix is a top-level `#memory` overlay
+        \\per function, which merges into the contract for the whole program;
+        \\overlays and the clause vocabulary are covered in Writing `#memory`
+        \\Contracts.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Compiler";
+        \\#import "Bindgen";
+        \\
+        \\#insert build_counter();
+        \\
+        \\build_counter :: () -> string {
+        \\    sources: [..]string;
+        \\    defer array_free(*sources);
+        \\    array_add(*sources, "counter.c");
+        \\    c_options: C_Compile_Options;
+        \\    archive: Native_Compile_Output;
+        \\    if compile_c_archive("counter", sources, c_options) == {
+        \\    case .Ok(built);  archive = built;
+        \\    case .Err(error); print("cc failed: %\n", error.message); return "";
+        \\    }
+        \\    if generate_source("counter.h", static_library("counter", archive.artifact)) == {
+        \\    case .Ok(source); return source;
+        \\    case .Err(error); print("bindgen failed: %\n", error.message); return "";
+        \\    }
+        \\}
+        \\
+        \\#memory counter_open  { returns_fresh, released_by(counter_close) };
+        \\#memory counter_close { kills(arg(0)), noescape(arg(0)) };
+        \\#memory counter_bump  { reads(arg(0)), writes(arg(0)), noescape(arg(0)) };
+        \\#memory counter_stats { returns_static, reads(arg(0)), noescape(arg(0)) };
+        \\
+        \\main :: () {
+        \\    print("COUNTER_VERSION = %\n", COUNTER_VERSION);
+        \\    c := counter_open(10);
+        \\    defer counter_close(c);
+        \\    print("bump -> %\n", counter_bump(c, 32));
+        \\    stats := counter_stats(c);
+        \\    print("hits = %\n", stats.hits);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\COUNTER_VERSION = 3
+        \\bump -> 42
+        \\hits = 1
+    );
+    paragraph(40, #string,oneline
+        \\That build is clean at the default `--borrow-check warning`. The overlays
+        \\are doing real work: `arg(N)` names parameters positionally, which is what
+        \\machine-generated declarations need, and with `counter_open` marked
+        \\`returns_fresh, released_by(counter_close)` a second close is caught
+        \\before the program runs.
+    );
+    paragraph(41, #string,oneline
+        \\Replacing the `defer` with a second `counter_close(c)` and building at
+        \\`--borrow-check error` stops the build with
+        \\`error: double release of resource`, framed on the second call, followed
+        \\by `note: first release occurred here` framed on the first. Neither call
+        \\has a body the compiler can see; the overlay is the only reason it knows.
+    );
+    note(42, #string,oneline
+        \\Without the overlays the same program still compiles, and prints
+        \\`warning: lifetime of memory returned by opaque foreign call 'counter_open' is unknown`
+        \\with `note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract`.
+        \\That note is the compiler asking for the overlay; `#memory unknown`, which
+        \\bindgen already wrote, does not answer it.
+    );
+}
+
+render_section_135 :: () {
+    paragraph(0, #string,oneline
+        \\`#asm` places target instructions directly in a procedure body. The
+        \\instructions are written as text, but the values they read and write
+        \\are named Glosso locals and expressions rather than register numbers,
+        \\so register allocation stays with the compiler. A block declares what
+        \\it reads, what it writes, and what it destroys; everything it does not
+        \\declare is assumed untouched.
+    );
+    paragraph(1, #string,oneline
+        \\There are two spellings. The structured form opens a brace block after
+        \\the directive and is the one to write. An older positional form takes a
+        \\single string and colon-separated operand lists carrying raw backend
+        \\constraint strings; it still parses, and it is the escape hatch for a
+        \\constraint the portable vocabulary cannot spell.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\add_via_asm :: (a: s64, b: s64) -> s64 {
+        \\    result: s64;
+        \\    #asm {
+        \\        \\movq {left}, {result}
+        \\        \\addq {right}, {result}
+        \\        result: out(.Register);
+        \\        left:  in(.Register) = a;
+        \\        right: in(.Register) = b;
+        \\        clobber: .Condition_Codes;
+        \\    }
+        \\    return result;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("asm add = %\n", add_via_asm(20, 22));
+        \\}
+    );
+    code_block(3, "text", #string
+        \\asm add = 42
+    );
+    paragraph(4, #string,oneline
+        \\That block lowers to one LLVM inline-assembly call. `--backend llvm-ir`
+        \\shows what the compiler built out of the operand list: the placeholders
+        \\became positional references, and the portable constraints became a
+        \\single constraint string.
+    );
+    code_block(5, "text", #string
+        \\%inline.asm = call i64 asm sideeffect "movq $1, $0\0Aaddq $2, $0", "=r,r,r,~{cc}"(i64 %r0.load, i64 %r1.load)
+    );
+    paragraph(6, #string,oneline
+        \\A structured block has three parts and they must appear in this order:
+        \\one or more template lines, then the operand bindings, then at most one
+        \\`clobber:` clause. A block that starts with anything but a template line
+        \\is `error: structured #asm expects one or more '\\' assembly lines`. An
+        \\operand written after the clobber clause is `error: structured #asm
+        \\operands must appear before the clobber clause`, and a second clobber
+        \\clause is `error: structured #asm may contain only one clobber clause`.
+    );
+    subheading(7, "Template lines");
+    paragraph(8, #string,oneline
+        \\Each template line begins with `\\` and contributes exactly one line to
+        \\the assembly text; the lines are joined with newlines and nothing else
+        \\is done to them. Escape sequences are not decoded, so the line carries
+        \\the characters written. Assembler directives and local numeric labels
+        \\are ordinary text and pass through unchanged, which is how a multi-line
+        \\sequence branches within itself.
+    );
+    paragraph(9, #string,oneline
+        \\`{name}` refers to the operand called `name`. `{name:modifier}` appends a
+        \\backend operand modifier, which is how a 64-bit operand is spelled as its
+        \\byte or word subregister. A literal brace is written `{{` or `}}`; a bare
+        \\closing brace is `error: unmatched '}' in structured #asm template; write
+        \\'}}' for a literal brace`. A placeholder naming nothing is `error: unknown
+        \\structured #asm template operand '{source}'`.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\rotate_left :: (value: u64, amount: u64) -> u64 {
+        \\    result := value;
+        \\    #asm {
+        \\        \\rolq {shift:b}, {result}
+        \\        result: inout(.Register);
+        \\        shift:  in(fixed(rcx)) = amount;
+        \\        clobber: .Condition_Codes;
+        \\    }
+        \\    return result;
+        \\}
+        \\
+        \\popcount :: (value: u64) -> u64 {
+        \\    result: u64;
+        \\    #asm {
+        \\        \\popcntq {source}, {result}
+        \\        result: out(.Register);
+        \\        source: in(.Register) = value;
+        \\        clobber: .Condition_Codes;
+        \\    }
+        \\    return result;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("rotate_left(1, 4) = %\n", rotate_left(1, 4));
+        \\    print("popcount(255)     = %\n", popcount(255));
+        \\}
+    );
+    code_block(11, "text", #string
+        \\rotate_left(1, 4) = 16
+        \\popcount(255)     = 8
+    );
+    paragraph(12, #string,oneline
+        \\`rotate_left` emits `"rolq ${1:b}, $0"` with the constraint string
+        \\`"=r,{rcx},0,~{cc}"`: the modifier survived, the fixed register became a
+        \\braced register name, and the `inout` operand became an output plus a
+        \\tied input. `rolq` needs its shift count in `cl`, and `{shift:b}` is how a
+        \\`u64` operand is named as that byte register without giving up the type.
+    );
+    subheading(13, "Operand directions");
+    table_header(14, "Direction   —   Meaning   —   What follows the constraint");
+    table_row(15, "`in`   |   read before the block runs   |   `= expression`, or nothing to read the local of the same name");
+    table_row(16, "`out`   |   written by the block, previous value dead   |   `= local` to retarget, or nothing to write the local of the same name");
+    table_row(17, "`inout`   |   read and then written   |   `= local` to retarget, or nothing");
+    paragraph(18, #string,oneline
+        \\An `out` or `inout` operand names storage, so its target must be a local
+        \\that already exists; a name nothing declared is `error: #asm out operand
+        \\needs an existing local, got 'result'`. A parameter counts as a local, so
+        \\`inout` on a parameter is legal. An `in` operand names a value, so it
+        \\takes any expression. The placeholder name and the target are independent:
+        \\`sum: out(.Register) = total;` writes the local `total` through the
+        \\placeholder `{sum}`.
+    );
+    paragraph(19, #string,oneline
+        \\An operand must have a type a machine register can hold: an integer, a
+        \\float, a `bool`, a pointer, a many-pointer, or a SIMD vector. A `string`
+        \\operand is `error: #asm input operand has unsupported type string` on the
+        \\way in and `error: #asm out operand 'text' has unsupported type string` on
+        \\the way out. A block with two outputs returns them as one aggregate value,
+        \\which is why the compiler and not the programmer decides where they land.
+    );
+    subheading(20, "The portable constraint vocabulary");
+    paragraph(21, #string,oneline
+        \\Every operand carries either an `Asm_Constraint` member or `fixed(<register>)`.
+        \\`Asm_Constraint` is declared in `std/Prelude/Assembly.glo` and is therefore
+        \\always in scope. The members describe allocation semantics, not a backend's
+        \\constraint letters; the compiler translates each one for the target being
+        \\compiled, so user code never embeds an LLVM or GCC constraint string.
+    );
+    table_header(22, "Constraint   —   Emitted class   —   Where it is accepted");
+    table_row(23, "`.Register`   |   `r`   |   any direction, every CPU");
+    table_row(24, "`.Byte_Register`   |   `q`   |   any direction, the x86 family only");
+    table_row(25, "`.Floating_Register`   |   `f`, `w` on aarch64, `t` on the arm family   |   any direction, every CPU");
+    table_row(26, "`.Vector_Register`   |   `x` on the x86 family, `w` on arm and aarch64, `v` on powerpc and s390x, `vr` on riscv64   |   any direction, those CPUs only");
+    table_row(27, "`.Predicate_Register`   |   `Yk` on the x86 family, `Upa` on aarch64   |   any direction, those CPUs only");
+    table_row(28, "`.Memory`   |   `m`   |   input operands only");
+    table_row(29, "`.Immediate`   |   `i`   |   input operands only");
+    table_row(30, "`.Constant`   |   `n`   |   input operands only");
+    table_row(31, "`.Address`   |   `p`   |   input operands only");
+    table_row(32, "`.Register_Or_Memory`, `.Register_Or_Immediate`, `.Register_Memory_Or_Immediate`   |   `rm`, `ri`, `g`   |   input operands only");
+    table_row(33, "`.Any`   |   `X`   |   input operands only");
+    table_row(34, "`fixed(<register>)`   |   the register name in braces   |   any direction, register must exist on the CPU");
+    paragraph(35, #string,oneline
+        \\The direction column is enforced, because an operand the block writes has
+        \\to be allocated somewhere the block can write. `result: out(.Memory);` is
+        \\`error: structured #asm constraint '.Memory' is valid only for input
+        \\operands`. The availability column is enforced too, and it is checked
+        \\against `--target`, not the host: `out(.Byte_Register)` compiled for
+        \\`aarch64-linux-musl` is `error: .Byte_Register is unavailable for the
+        \\aarch64 target`.
+    );
+    paragraph(36, #string,oneline
+        \\A misspelled member is `error: unknown structured #asm constraint '.Gpr'`,
+        \\and a bare identifier where a constraint belongs is `error: unknown
+        \\structured #asm operand placement 'rax'; expected an Asm_Constraint variant
+        \\or fixed(register)`: a raw register name must go through `fixed`. A
+        \\misspelled direction is `error: unknown structured #asm direction 'outp';
+        \\expected 'in', 'out', or 'inout'`.
+    );
+    subheading(37, "Fixed registers");
+    paragraph(38, #string,oneline
+        \\`fixed(<register>)` pins an operand to one machine register, which is what a
+        \\syscall ABI or a fixed-operand instruction requires. The name is validated
+        \\against a per-CPU register table, so a wrong-architecture name is caught at
+        \\compile time rather than by the assembler: `fixed(x0)` on x86_64 is
+        \\`error: unknown x86_64 register 'x0'`. On MIPS the symbolic names are
+        \\rewritten to their numbered form, so `fixed(a0)` and `fixed(r4)` denote the
+        \\same register.
+    );
+    subheading(39, "Clobbers and early clobber");
+    paragraph(40, #string,oneline
+        \\The `clobber:` clause lists what the block destroys beyond its declared
+        \\outputs. Entries are comma-separated and may mix the two `Asm_Clobber`
+        \\members with bare register names.
+    );
+    table_header(41, "Entry   —   Emitted as   —   Meaning");
+    table_row(42, "`.Memory`   |   `~{memory}`   |   the block reads or writes memory the compiler cannot see");
+    table_row(43, "`.Condition_Codes`   |   `~{cc}`   |   the block leaves the flags register in an unspecified state");
+    table_row(44, "a bare register name   |   `~{<register>}`   |   that register is destroyed; validated exactly like `fixed`");
+    paragraph(45, #string,oneline
+        \\A member outside that pair is `error: unknown structured #asm clobber
+        \\'.Flags'; expected '.Memory' or '.Condition_Codes'`. Anything comparing an
+        \\instruction, and every syscall sequence, needs `.Condition_Codes`; a
+        \\sequence that touches memory the compiler routed through a pointer needs
+        \\`.Memory`.
+    );
+    paragraph(46, #string,oneline
+        \\`.Early_Clobber` is an optional second argument on an output constraint:
+        \\`out(.Register, .Early_Clobber)`. It says the operand is written before all
+        \\inputs have been consumed, which stops the allocator from putting an input
+        \\and that output in the same register. Two sequential `slt` results computed
+        \\from the same pair of inputs need it. It is meaningless on an input, and
+        \\`in(.Register, .Early_Clobber)` is `error: structured #asm '.Early_Clobber'
+        \\is valid only for out and inout operands`.
+    );
+    note(47, #string,oneline
+        \\The compiler checks the frame, never the instructions. It does not parse
+        \\the template, so a sequence that writes a register absent from both the
+        \\operand list and the clobber list is accepted and silently wrong. The
+        \\declared lists are the whole contract.
+    );
+    subheading(48, "One block per CPU");
+    paragraph(49, #string,oneline
+        \\A template is target-specific by construction, so a portable procedure
+        \\selects its block with `#if OUT.cpu == { … }` and ends the switch with
+        \\`#compile_error`, which fires only for a target that reaches it. Static
+        \\branching is covered in Static Branching with `#if`, and `OUT` in Targets
+        \\and Cross-Compilation.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\
+        \\add_via_asm :: (a: s64, b: s64) -> s64 {
+        \\    result: s64;
+        \\    #if OUT.cpu == {
+        \\    case .X86_64;
+        \\        #asm {
+        \\            \\movq {left}, {result}
+        \\            \\addq {right}, {result}
+        \\            result: out(.Register);
+        \\            left:  in(.Register) = a;
+        \\            right: in(.Register) = b;
+        \\            clobber: .Condition_Codes;
+        \\        }
+        \\    case .Aarch64, .Riscv64;
+        \\        #asm {
+        \\            \\add {result}, {left}, {right}
+        \\            result: out(.Register, .Early_Clobber);
+        \\            left:  in(.Register) = a;
+        \\            right: in(.Register) = b;
+        \\        }
+        \\    else;
+        \\        #compile_error "add_via_asm has no instruction sequence for this CPU";
+        \\    }
+        \\    return result;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("asm add = %\n", add_via_asm(20, 22));
+        \\}
+    );
+    code_block(51, "text", #string
+        \\asm add = 42
+    );
+    paragraph(52, #string,oneline
+        \\That program builds for `x86_64-pc-windows-msvc`, `aarch64-linux-musl` and
+        \\`riscv64-linux-musl`; for `mips-linux-musl` it stops at the guarded
+        \\`#compile_error`. `examples/inline_asm.glo` is the full version of this
+        \\pattern: raw Linux syscalls and comparison sequences for every CPU the
+        \\Linux musl targets cover, using `inout(fixed(rax))`, `out(fixed(r7))`,
+        \\`.Early_Clobber`, and register clobber lists mixed with `.Memory` and
+        \\`.Condition_Codes`.
+    );
+    subheading(53, "`#bytes`");
+    paragraph(54, #string,oneline
+        \\`#bytes <expression>;` splices pre-assembled machine code into the function
+        \\body. The expression is const-evaluated and must be a list of compile-time
+        \\integers in `0..255`, which in practice means an array literal of `16#xx`
+        \\values bound with `::`. It is the tool for an instruction the assembler in
+        \\use will not accept, or for a sequence that has already been assembled
+        \\elsewhere.
+    );
+    code_block(55, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// 0xf3 0x90 is `pause`, the x86 spin-wait hint. It reads and writes nothing.
+        \\PAUSE_X86 :: .[16#f3, 16#90];
+        \\
+        \\spin :: (rounds: s64) {
+        \\    i := 0;
+        \\    while i < rounds {
+        \\        #if OUT.cpu == {
+        \\        case .X86_64, .X86, .I386; #bytes PAUSE_X86;
+        \\        else;                      #compile_error "no spin hint for this CPU";
+        \\        }
+        \\        i += 1;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    spin(4);
+        \\    print("spun\n");
+        \\}
+    );
+    code_block(56, "text", #string
+        \\spun
+    );
+    paragraph(57, #string,oneline
+        \\Each byte becomes one `.byte` directive in an inline-assembly block with an
+        \\empty constraint string: the emitted IR for that loop body is
+        \\`call void asm sideeffect ".byte 0xf3\0A.byte 0x90", ""()`. Nothing else is
+        \\attached to it.
+    );
+    note(58, #string,oneline
+        \\Because `#bytes` declares no operands and no clobbers, the byte sequence
+        \\must be self-contained: it cannot name a Glosso value, and it must restore
+        \\every register the surrounding code and the target ABI rely on.
+        \\`examples/inline_bytes.glo` does exactly that: each of its thirteen
+        \\per-CPU stubs saves the non-volatile registers it uses, carries its own
+        \\message bytes at the end, and branches over them to continue.
+    );
+    paragraph(59, #string,oneline
+        \\The operand must fold. A non-list is `error: #bytes expects a compile-time
+        \\list of bytes, got 5`; a value outside the range is `error: #bytes value
+        \\must be a compile-time integer 0..255, got 300`; a runtime array is
+        \\rejected while evaluating the name, as `error: unknown const code`.
+    );
+    subheading(60, "Neither form runs at compile time");
+    paragraph(61, #string,oneline
+        \\Both directives emit machine instructions, and neither compile-time engine
+        \\executes machine instructions. A procedure containing `#asm` called from a
+        \\constant is `error: statement is not available at compile time`. The same
+        \\call from a top-level `#comptime` reaches the compile-time VM instead and
+        \\is `error: #comptime stopped: #asm (inline assembly) cannot run on the VM;
+        \\use the LLVM backend`, with the matching `#bytes (inline machine code)
+        \\cannot run on the VM; use the LLVM backend`. The two engines are described
+        \\in What Runs When.
+    );
+}
+
+render_section_136 :: () {
+    paragraph(0, #string,oneline
+        \\`#magic "<name>"` on a declaration binds it to a compiler intrinsic. The
+        \\declaration has no body: its parameters and result type are the signature
+        \\the checker sees, and the string picks the implementation out of a registry
+        \\built into the compiler. This is how the standard library reaches the type
+        \\system, the host operating system, and the machine. 475 distinct intrinsic
+        \\names appear across `std`, in 575 declarations.
+    );
+    paragraph(1, #string,oneline
+        \\`#magic` exists so that these operations stay ordinary declarations. A
+        \\keyword per intrinsic would sit outside the type system; a `#magic`
+        \\declaration is a normal procedure, so it participates in overloading, in
+        \\`where` constraints, in typeclass instances, and in the module system. A
+        \\program may write its own, and the name may be any registered one.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// A user declaration may bind any registered intrinsic name.
+        \\byte_width :: (T: type) -> s64 #magic "size_of";
+        \\concat     :: (a: string, b: string) -> string #magic "str_concat";
+        \\
+        \\main :: () {
+        \\    print("byte_width(s32) = %\n", byte_width(s32));
+        \\    print("concat = %\n", concat("glo", "sso"));
+        \\}
+    );
+    code_block(3, "text", #string
+        \\byte_width(s32) = 4
+        \\concat = glosso
+    );
+    paragraph(4, #string,oneline
+        \\The name is not checked when the declaration is read. An unregistered name
+        \\type-checks, and the program fails only when code generation reaches the
+        \\call: `weird :: (a: s64) -> s64 #magic "no_such_intrinsic";` produces
+        \\`error: native LLVM lowering has no classification for #magic
+        \\'no_such_intrinsic' [opcode Magic] while lowering 'main' at IR instruction
+        \\2`. The check happens where the call is lowered, so a declaration that is
+        \\never called never produces it.
+    );
+    subheading(5, "The four availability classes");
+    paragraph(6, #string,oneline
+        \\Each registry entry carries two independent flags: whether the compile-time
+        \\VM has an implementation, and whether the checker may fold the call while
+        \\type checking. The four combinations are the availability classes, and every
+        \\refusal in this chapter follows from them.
+    );
+    table_header(7, "Class   —   Runs where   —   Representative names");
+    table_row(8, "compile-time only   |   folded by the checker; never in the VM and never natively   |   `size_of`, `type_info`, `field_name`, `pattern_missing`");
+    table_row(9, "VM and compile time   |   both compile-time engines and compiled code   |   `str_concat`, `substring`, file and process services, `compiler_compile`");
+    table_row(10, "VM, not foldable   |   the VM and compiled code, but not folded into a constant   |   `exit`, `assert_failed`, `int_add`, `num_lt`");
+    table_row(11, "native only   |   compiled code only   |   `ptr_add`, `va_arg`, `ctx_alloc`, `jump_goto`");
+    paragraph(12, #string,oneline
+        \\Membership follows the nature of the operation, not a policy. A query about
+        \\a type has no runtime existence, so it is compile-time only. An operation on
+        \\a raw address or on the implicit context has no meaning inside an evaluator
+        \\that has no addresses and no context, so it is native only. Everything that
+        \\is a pure computation on values, or a request to the host, works in both.
+    );
+    table_header(13, "Family   —   Class   —   Note");
+    table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
+    table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `str_repeat`, `substring`, `byte_string`, the `show_*` formatters");
+    table_row(16, "files, filesystem, processes   |   VM and compile time   |   so a build script can read the host; the handle-relative sandbox primitives stay native only");
+    table_row(17, "compiler and bindgen services   |   VM and compile time   |   `compiler_compile`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
+    table_row(18, "complex numbers, wrapping and saturating integers, indexing, ranges   |   VM and compile time   |   `complex_*`, `int_wrap_*`, `int_sat_*`, `index_array`, the `slice*` family, `type_eq`");
+    table_row(19, "arithmetic and comparison templates   |   VM, not foldable   |   `int_add`, `flt_mul`, `num_lt`, `bool_and`, `ptr_eq`");
+    table_row(20, "pointer arithmetic, varargs, jumps, raw memory   |   native only   |   `ptr_add`, `ptr_diff`, `ptr_index`, `memory_copy_magic`, `va_start`, `va_arg`, `jump_context_save`, `jump_goto`, `string_from_raw_parts`");
+    table_row(21, "allocation   |   native only   |   `ctx_alloc`, `ctx_free`, `temp_alloc`, `temp_free_all`, and the debug-allocator entries");
+    paragraph(22, #string,oneline
+        \\One entry is special-cased against its class. `get_cmdline_args` is
+        \\registered native only, but the compile-time runtime answers it anyway, so
+        \\that a build script can read the arguments after `--`. The two vectors are
+        \\different: at compile time it returns the trailing arguments, at run time
+        \\the process argv including `argv[0]`.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\#import "Compiler";
+        \\
+        \\#comptime {
+        \\    print("[ct] compiler = %\n", executable_path());
+        \\    args := get_cmdline_args();
+        \\    print("[ct] %  compile-time argument(s)\n", args.count);
+        \\    for args print("[ct] arg: %\n", it);
+        \\}
+        \\
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    print("[rt] % argument(s)\n", args.count);
+        \\}
+    );
+    code_block(24, "text", #string
+        \\$ glosso --run services.glo -- build --release
+        \\[ct] compiler = C:\Users\almag\Github\glosso\build\bin\glosso.exe
+        \\[ct] 2  compile-time argument(s)
+        \\[ct] arg: build
+        \\[ct] arg: --release
+        \\[rt] 1 argument(s)
+    );
+    subheading(25, "What the compile-time engines refuse");
+    paragraph(26, #string,oneline
+        \\Glosso runs compile-time code in two evaluators, described in What Runs
+        \\When: the constant evaluator, which walks the tree during checking, and the
+        \\compile-time VM, which executes top-level `#comptime` declarations as
+        \\bytecode. They reject an unavailable intrinsic differently, and the wording
+        \\is the fastest way to tell which engine was running.
+    );
+    table_header(27, "Situation   —   Diagnostic");
+    table_row(28, "an intrinsic with no VM implementation, reached while checking   |   `#magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`");
+    table_row(29, "the same intrinsic reached from a top-level `#comptime`   |   `#comptime stopped: VM: unknown #magic intrinsic 'ctx_alloc'`");
+    table_row(30, "no compile-time evaluator installed at all   |   `compile-time #magic '<name>' has no evaluator`");
+    table_row(31, "a `#foreign` call in a compile-time expression   |   `'c_strlen' is foreign, so its result is not compile-time known`");
+    table_row(32, "a statement neither engine implements, such as `#asm`   |   `statement is not available at compile time`");
+    table_row(33, "any other VM failure inside a top-level `#comptime`   |   `#comptime stopped: <error>`");
+    code_block(34, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\make :: () -> s64 {
+        \\    p := alloc(8);
+        \\    free(p);
+        \\    return 1;
+        \\}
+        \\
+        \\X ::= make();
+        \\
+        \\main :: () { print("%\n", X); }
+    );
+    code_block(35, "text", #string
+        \\error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation
+        \\  --> …\alloc.glo:5:10
+        \\  |
+        \\5 |     p := alloc(8);
+        \\  |          ^^^^^
+    );
+    paragraph(36, #string,oneline
+        \\Neither engine has a context allocator, so `alloc` and `free` are
+        \\unavailable in both, and so is `temp_alloc`. Dynamic arrays and `tprint`
+        \\are handled separately and do work. Allocation is covered in Allocators.
+    );
+    subheading(37, "What native lowering refuses");
+    paragraph(38, #string,oneline
+        \\The LLVM backend classifies every intrinsic name independently of the
+        \\registry, and its four answers produce four distinct messages. Each one
+        \\names the function and the IR instruction being lowered.
+    );
+    table_header(39, "Classification   —   Message");
+    table_row(40, "compile-time only, so it should have been folded   |   `#magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering`");
+    table_row(41, "deliberately unlowered representation   |   `native LLVM lowering rejects #magic 'sb_new': string-builder runtime representation is not lowered`");
+    table_row(42, "classified as implemented, but no lowering matched   |   `native LLVM magic coverage drift: #magic '<name>' is classified as implemented but no lowering matched`");
+    table_row(43, "name not in the backend's table   |   `native LLVM lowering has no classification for #magic '<name>'`");
+    paragraph(44, #string,oneline
+        \\The first of those is reachable only by writing a declaration the standard
+        \\library would not: a call to a compile-time-only intrinsic is folded during
+        \\lowering when the declaration has a `type`-valued parameter and the registry
+        \\entry is compile-time. That is the rule that lets `size_of(Vec3)` and
+        \\`field_name(Vec3, 1)` stand in a runtime body and become constants. Bind
+        \\`"size_of"` to a signature with no `type` parameter and the fold does not
+        \\happen, and the call arrives at the backend.
+    );
+    code_block(45, "glosso", #string
+        \\#import "Io";
+        \\
+        \\sneaky :: (a: s64) -> s64 #magic "size_of";
+        \\
+        \\main :: () {
+        \\    print("%\n", sneaky(1));
+        \\}
+    );
+    code_block(46, "text", #string
+        \\error: #magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering [opcode Magic] while lowering 'main' at IR instruction 2
+    );
+    note(47, #string,oneline
+        \\`sb_new`, `sb_append` and `sb_to_string` are the one family whose behaviour
+        \\differs between the two compile-time engines: the constant evaluator
+        \\special-cases the mutation through a pointer, and the VM does not, so a
+        \\`String_Builder` used inside a top-level `#comptime` silently produces the
+        \\empty string. Build compile-time text with `str_cat` instead.
+    );
+    subheading(48, "`#magic` on an aggregate");
+    paragraph(49, #string,oneline
+        \\`#magic` also appears on a `union` declaration, where it is a layout marker
+        \\rather than an intrinsic binding and the string is not looked up in the
+        \\intrinsic registry. Exactly two markers are recognised, `"option"` and
+        \\`"result"`, and they select niche layout instead of a tag word. They are
+        \\carried by the compiler-embedded `Option` and `Result` unions that `?T` and
+        \\`E!T` resolve to, which is why redeclaring `Option` in a program is
+        \\`error: type 'Option' is already declared`. Those types are described in
+        \\The Option Type `?T` and The Result Type `E!T`.
+    );
+}
+
+render_section_137 :: () {
+    paragraph(0, #string,oneline
+        \\`#import "Lua"` is not a binding file. `std/Lua/module.glo` contains a single
+        \\statement, `#insert static_bindings_source();`, and importing it therefore
+        \\runs a build: the bundled Lua 5.5 C sources are compiled for the output
+        \\target, cached as a static archive, and bindgen is run over the Lua headers
+        \\so that the resulting declarations are spliced into the program. The
+        \\mechanism is `#insert` plus the compile-time build API, both described in
+        \\`#insert` and Build Scripts; this chapter is what that machinery adds up to.
+    );
+    paragraph(1, #string,oneline
+        \\Nothing about the module is Lua-specific. `std/Lua/Build.glo` holds the
+        \\logic and has no top-level side effects of its own, so it can be imported
+        \\directly by a program that wants a different linkage. `std/Gui` is built the
+        \\same way.
+    );
+    paragraph(2, #string,oneline
+        \\The work `static_bindings_source` does on a supported target is: check the
+        \\target against the support matrix, locate the Lua source tree, hand the 32
+        \\C files to `compile_c_archive` with `LUA_USE_POSIX` defined on the Unix
+        \\family, add `-lm` to the link on Linux, macOS and FreeBSD, and return the
+        \\bindgen output for `glosso_lua.h` bound to the archive it produced.
+    );
+    code_block(3, "text", #string
+        \\<cache>/native/v6/lua55/x86_64-windows-msvc/<key>/lua55.lib
+        \\<cache>/native/v6/lua55/x86_64-linux-musl/<key>/liblua55.a
+        \\<cache>/generated/insert/v1/<sha256>.glo
+    );
+    paragraph(4, #string,oneline
+        \\The archive path is keyed by the target and by the C compile options, so a
+        \\host build and a cross build coexist. The bindings themselves are a
+        \\string-valued `#insert`, so they are also materialised in the generated-source
+        \\cache and `--show-generated` prints the path. Both caches are described in
+        \\The Build Cache and Generated Sources.
+    );
+    paragraph(5, #string,oneline
+        \\The cost is paid once. Building `examples/lua/hello.glo` with both caches
+        \\empty takes about eleven seconds, almost all of it the C archive; with the
+        \\archive cached but the final-artifact cache disabled, about four seconds;
+        \\and because the program has no top-level `#comptime`, the finished
+        \\executable is itself cacheable, so an unchanged rebuild is restored whole.
+    );
+    code_block(6, "text", #string
+        \\$ glosso --run lua_hello.glo
+        \\glosso: restored lua_hello.exe from the native artifact cache
+        \\Lua computed 42
+    );
+    subheading(7, "The support matrix");
+    paragraph(8, #string,oneline
+        \\The bundled runtime is compiled from C by the same native compiler the rest
+        \\of the toolchain uses, so it is available exactly where that compiler has a
+        \\usable target bundle. Every unmet condition is turned into a generated stub
+        \\that fails with `#compile_error`, so the diagnostic arrives during checking
+        \\and no artifact is written.
+    );
+    table_header(9, "Target   —   Result");
+    table_row(10, "the host Windows MSVC target with a matching CPU   |   supported");
+    table_row(11, "any Linux musl target   |   supported, including cross-compilation from Windows");
+    table_row(12, "a Linux non-musl target on a Linux host with a matching CPU   |   supported");
+    table_row(13, "a Linux non-musl target anywhere else   |   `cross-target static Lua on Linux requires a musl target bundle`");
+    table_row(14, "any other Windows target, including `windows-gnu` and a different CPU   |   `static Lua for Windows currently requires the host Windows MSVC target`");
+    table_row(15, "macOS, FreeBSD, wasm, freestanding   |   `bundled static Lua currently supports Windows and Linux targets`");
+    table_row(16, "sources missing from the resource tree   |   `Lua sources were not found (expected thirdparty/lua or an installed lib/lua)`");
+    paragraph(17, #string,oneline
+        \\A rejection is reported at the `#insert` in `std/Lua/module.glo`, with a
+        \\note pointing into the generated stub, so the message itself is visible
+        \\alongside the location that produced it.
+    );
+    code_block(18, "text", #string
+        \\$ glosso --backend object --target wasm32-wasi -o lua.o lua_hello.glo
+        \\glosso: compile lua_hello.glo (target=wasm32-unknown-wasi)
+        \\error: bundled static Lua currently supports Windows and Linux targets
+        \\  --> …\std\Lua\module.glo:5:1
+        \\  |
+        \\5 | #insert static_bindings_source();
+        \\  | ^^^^^^^
+        \\note: generated source failed here
+        \\  --> …\cache\generated\insert\v1\929f9018….glo:1:49
+        \\  |
+        \\1 | __lua_unsupported_target :: #comptime -> bool { #compile_error "bundled static Lua currently supports Windows and Linux targets"; return false; }
+        \\  |                                                 ^^^^^^^^^^^^^^
+    );
+    paragraph(19, #string,oneline
+        \\Two failures are reported through the same stub but print a `[Lua]` line
+        \\first: `could not compile the bundled Lua 5.5 sources` and `could not
+        \\generate Lua 5.5 bindings`, each followed by the underlying compiler or
+        \\bindgen message. Those are toolchain failures rather than target rejections.
+    );
+    subheading(20, "What the bindings look like");
+    paragraph(21, #string,oneline
+        \\The spliced source is ordinary bindgen output, about a thousand lines of it:
+        \\5 type declarations, 4 aliases, 7 callbacks, 104 constants, 47 macros and 156
+        \\functions for this build. The shapes it produces are the general ones,
+        \\covered in Generating Bindings with Bindgen; three of them matter for
+        \\everyday Lua code.
+    );
+    code_block(22, "text", #string
+        \\// Generated by Glosso's Clang C header bindgen from …\thirdparty\lua\src\glosso_lua.h.
+        \\lua :: #library,static "…\\glosso\\cache\\native\\v6\\lua55\\x86_64-windows-msvc\\63843400c56d4afb\\lua55.lib";
+        \\
+        \\lua_State :: struct #c_call {}
+        \\
+        \\LUA_OK :: 0;
+        \\
+        \\lua_CFunction :: #fn_ptr(arg0: ?[*]lua_State) -> s32 #c_call;
+        \\
+        \\luaL_newstate :: () -> ?[*]lua_State #foreign lua "luaL_newstate" #memory unknown;
+        \\
+        \\lua_tolstring :: (L: ?[*]lua_State, idx: s32, len: ?[*]u64) -> ?[*]const s8 #foreign lua "lua_tolstring" #memory unknown;
+        \\
+        \\lua_tostring :: (L: $Bindgen_Macro_T0, i: $Bindgen_Macro_T1) #expand,expression {
+        \\    return lua_tolstring ( L , cast(s32)(( i )) , null );
+        \\}
+    );
+    bullet(23, #string,oneline
+        \\`lua_State` is an empty `struct #c_call`, so it is an opaque handle. Every C
+        \\pointer becomes `?[*]T`, which is why `luaL_newstate` returns an option and
+        \\the result of `lua_tostring` is matched rather than null-tested.
+    );
+    bullet(24, #string,oneline
+        \\A C macro that expands to an expression becomes an `#expand,expression`
+        \\macro with inferred `Bindgen_Macro_T<N>` parameters. `lua_pop`,
+        \\`lua_pcall`, `lua_tointeger`, `lua_pushcfunction`, `lua_register`,
+        \\`luaL_openlibs` and `luaL_dostring` are all macros, not foreign functions.
+    );
+    bullet(25, #string,oneline
+        \\Every function carries `#memory unknown`, because a C header says nothing
+        \\about lifetimes. `#memory` contracts are covered in Writing `#memory`
+        \\Contracts.
+    );
+    paragraph(26, #string,oneline
+        \\That last point has a visible consequence: calls whose result is memory
+        \\produce a borrow-check warning on every build. It is a warning by default,
+        \\an error under `--borrow-check error`, and silent under `--borrow-check off`;
+        \\the flag is described in The `--borrow-check` Flag. The durable fix is an
+        \\overlay that gives the foreign declaration a real contract, as in Overlays
+        \\and Foreign Bindings.
+    );
+    code_block(27, "text", #string
+        \\warning: lifetime of memory returned by opaque foreign call 'luaL_newstate' is unknown
+        \\  --> …\lua_read.glo:8:14
+        \\  |
+        \\8 |     state := luaL_newstate();
+        \\  |              ^^^^^^^^^^^^^
+        \\note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract
+    );
+    subheading(28, "Calling Lua from Glosso");
+    paragraph(29, #string,oneline
+        \\With the bindings in scope the C API is used as it is in C: create a state,
+        \\open the libraries, run a chunk, read a global off the stack. `defer` is the
+        \\natural place for `lua_close`.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\#import "Lua";
+        \\
+        \\libc :: #library "c";
+        \\c_puts :: (message: *const u8) -> s32 #foreign libc "puts";
+        \\
+        \\main :: () {
+        \\    state := luaL_newstate();
+        \\    if state == null {
+        \\        print("could not create a Lua state\n");
+        \\        return;
+        \\    }
+        \\    defer lua_close(state);
+        \\    luaL_openlibs(state);
+        \\
+        \\    if luaL_dostring(state, "answer = 6 * 7") != LUA_OK {
+        \\        // bindgen spells every C pointer `?[*]T`, so the error text is
+        \\        // matched out of the option rather than compared against null.
+        \\        if #pattern .Some(message) = lua_tostring(state, -1)
+        \\            c_puts(cast(*const u8)message);
+        \\        return;
+        \\    }
+        \\
+        \\    lua_getglobal(state, "answer");
+        \\    print("Lua computed %\n", lua_tointeger(state, -1));
+        \\    lua_pop(state, 1);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\Lua computed 42
+    );
+    paragraph(32, #string,oneline
+        \\A string literal passed at a `?[*]const s8` parameter is lowered to its data
+        \\pointer, and literals are NUL-terminated in the image, so the chunk text and
+        \\the global name above reach C correctly. A buffer built at run time is not
+        \\terminated by anything and needs `cstring`; that boundary is covered in
+        \\C Data Across the Boundary. Replacing the chunk with a syntax error takes
+        \\the other branch and prints Lua's own message,
+        \\`[string "answer = 6 *= 7"]:1: unexpected symbol near '='`.
+    );
+    subheading(33, "Calling Glosso from Lua");
+    paragraph(34, #string,oneline
+        \\The reverse direction needs a procedure of the `lua_CFunction` shape:
+        \\`#c_call`, one `?[*]lua_State` parameter, and an `s32` result giving the
+        \\number of values it left on the Lua stack. `lua_register` pushes it and binds
+        \\it to a global name. Because it is `#c_call` it cannot touch the implicit
+        \\context, which is covered in Being Called from C.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\#import "Lua";
+        \\
+        \\glosso_triple :: (state: ?[*]lua_State) -> s32 #c_call {
+        \\    n := lua_tointeger(state, 1);
+        \\    lua_pushinteger(state, n * 3);
+        \\    return 1;
+        \\}
+        \\
+        \\main :: () {
+        \\    state := luaL_newstate();
+        \\    if state == null {
+        \\        print("could not create a Lua state\n");
+        \\        return;
+        \\    }
+        \\    luaL_openlibs(state);
+        \\
+        \\    lua_register(state, "triple", glosso_triple);
+        \\
+        \\    if luaL_dostring(state, "answer = triple(14)") != LUA_OK {
+        \\        print("lua error\n");
+        \\        lua_close(state);
+        \\        return;
+        \\    }
+        \\
+        \\    lua_getglobal(state, "answer");
+        \\    print("Lua called back into Glosso: %\n", lua_tointeger(state, -1));
+        \\    lua_pop(state, 1);
+        \\    lua_close(state);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\Lua called back into Glosso: 42
+    );
+    subheading(37, "Linking an application-owned Lua");
+    paragraph(38, #string,oneline
+        \\A program that ships its own Lua shared library imports `Lua/Build` instead
+        \\of `Lua` and inserts `dynamic_bindings_source(path)` from its own bindings
+        \\module. No C is compiled; bindgen runs against the same header and binds a
+        \\`#library,dyn` descriptor instead of the cached archive. The path is
+        \\required, so the empty call below is rejected by the same generated-stub
+        \\mechanism as an unsupported target.
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\#import "Lua/Build";
+        \\
+        \\#insert dynamic_bindings_source("");
+        \\
+        \\main :: () {}
+    );
+    code_block(40, "text", #string
+        \\error: dynamic Lua linkage needs a library path
+        \\  --> …\lua_dyn.glo:4:1
+        \\  |
+        \\4 | #insert dynamic_bindings_source("");
+        \\  | ^^^^^^^
+    );
+    paragraph(41, #string,oneline
+        \\Its target rule is narrower than the static one, because the running program
+        \\must be able to load the library: the output target has to equal the host in
+        \\OS and CPU, must not be musl, and must be Windows MSVC or a dynamically
+        \\linked Linux. Anything else is `dynamic Lua linkage requires a host Windows
+        \\MSVC or dynamically linked Linux target`.
+    );
+    note(42, #string,oneline
+        \\The bindings are generated from the bundled Lua 5.5 headers whichever route
+        \\is taken, so an application-supplied library must match that ABI. A
+        \\different Lua version will link and then misbehave, because nothing in the
+        \\build checks the library against the header it was described by.
+    );
+}

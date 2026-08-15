@@ -1,0 +1,3899 @@
+// Sections 68-82: typeclasses.
+
+render_section_68 :: () {
+    paragraph(0, #string,oneline
+        \\A typeclass is a named contract over one or more type parameters. It is
+        \\introduced by an ordinary constant declaration whose value is a
+        \\`typeclass` body, so the form is `Name :: typeclass (P: kind, ...) { ... }`.
+        \\The body lists requirements: methods that an instance must supply and
+        \\associated types that an instance must choose. A class declares no
+        \\representation and produces no runtime value of its own; it fixes a set of
+        \\names and signatures that instances then fill in.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Describable :: typeclass (T: type) #minimal(describe) {
+        \\    describe :: (value: T) -> string;
+        \\}
+        \\
+        \\Port :: struct { number: s64; }
+        \\
+        \\Port :: instance Describable {
+        \\    describe :: (value: Port) -> string { return "port " + show(value.number); }
+        \\}
+        \\
+        \\main :: () {
+        \\    p: Port = .{ .number = 80 };
+        \\    print("%\n", describe(p));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\port 80
+    );
+    paragraph(3, #string,oneline
+        \\Class names live in a single global namespace, and so do method names.
+        \\Re-declaring a name the standard library already uses is
+        \\`error: typeclass 'Show' is already declared`, and declaring a method whose
+        \\name another class owns is
+        \\`error: function 'show' is already owned by typeclass 'Show'`. The second
+        \\rule applies between two user classes as well, so a class body may not
+        \\reuse `show`, `fmap`, `bind`, or any other name already claimed. The reason
+        \\is dispatch: a method call is resolved by name across every instance in the
+        \\program, so one name can belong to only one contract.
+    );
+    subheading(4, "The declaration header");
+    paragraph(5, #string,oneline
+        \\The header between `typeclass` and the opening brace has a fixed clause
+        \\order. Everything after the parameter list is optional, but a `where`
+        \\clause may not follow a directive: `#minimal(f) where Base(T)` is
+        \\`error: unexpected token 'where'`.
+    );
+    table_header(6, "Clause   —   Count   —   Position");
+    table_row(7, "`(P: kind, ...)`   |   exactly one   |   immediately after `typeclass`");
+    table_row(8, "`where <expr>`   |   zero or more   |   after the parameter list");
+    table_row(9, "`#derive(macro, ...)`   |   zero or more   |   after the `where` clauses");
+    table_row(10, "`#minimal(formula)`   |   at most one   |   after the `where` clauses");
+    paragraph(11, #string,oneline
+        \\A trailing comma is allowed in the parameter list. `#derive` may appear
+        \\more than once; the macro it names is what generates an instance when a
+        \\type asks for one, which is the subject of Deriving Instances with
+        \\`#derive`. A second `#minimal` is
+        \\`error: duplicate #minimal directive on typeclass 'K'`.
+    );
+    subheading(12, "Parameter kinds");
+    paragraph(13, #string,oneline
+        \\A parameter is written as an ordinary annotated binding, and the annotation
+        \\is its kind. Two spellings carry meaning: `type` for a parameter that binds
+        \\a type, and an arrow for a parameter that binds a type constructor. The
+        \\number of parameters decides the shape of every instance head for the
+        \\class.
+    );
+    table_header(14, "Kind   —   Binds   —   Standard-library example");
+    table_row(15, "`T: type`   |   one type   |   `Show(T)`, `Iterable(T)`, `Try(Carrier)`");
+    table_row(16, "`L: type, R: type`   |   a pair of types   |   `Add(L, R)`, `PartialEq(L, R)`");
+    table_row(17, "`F: (type) -> type`   |   a one-argument type constructor   |   `Functor(F)`, `Monad(M)`");
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// one type parameter
+        \\Tagged :: typeclass (T: type) #minimal(tag_of) {
+        \\    tag_of :: (value: T) -> string;
+        \\}
+        \\
+        \\// two type parameters
+        \\Blend :: typeclass (L: type, R: type) #minimal(blend) {
+        \\    Output :: type;
+        \\    blend :: (left: L, right: R) -> Output;
+        \\}
+        \\
+        \\// a type-constructor parameter
+        \\Holder :: typeclass (F: (type) -> type) #minimal(peek) {
+        \\    peek :: (container: F($A)) -> A;
+        \\}
+        \\
+        \\Cell :: struct { value: $A; }
+        \\
+        \\s64 :: instance Tagged { tag_of :: (value: s64) -> string { return "int"; } }
+        \\
+        \\(s64, string) :: instance Blend {
+        \\    Output :: string;
+        \\    blend :: (left: s64, right: string) -> string { return show(left) + right; }
+        \\}
+        \\
+        \\Cell :: instance Holder {
+        \\    peek :: (container: Cell($A)) -> A { return container.value; }
+        \\}
+        \\
+        \\main :: () {
+        \\    n: s64 = 3;
+        \\    c: Cell(string) = .{ .value = "inside" };
+        \\    print("%\n", tag_of(n));
+        \\    print("%\n", blend(7, "x"));
+        \\    print("%\n", peek(c));
+        \\}
+    );
+    code_block(19, "text", #string
+        \\int
+        \\7x
+        \\inside
+    );
+    paragraph(20, #string,oneline
+        \\The three heads differ because the classes do. A one-parameter class takes
+        \\a single type; a two-parameter class takes a parenthesised argument tuple;
+        \\a constructor parameter takes the bare constructor name, with evidence
+        \\asked at the applied type. Arrows of higher arity are accepted, so
+        \\`(type, type) -> type` binds a two-argument constructor. An annotation that
+        \\is neither spelling parses, but the parameter still binds a type: there are
+        \\no value parameters on a class. Instance heads are the subject of
+        \\Instances: Heads, Bodies, and `where`, and constructor parameters of
+        \\Higher-Kinded Typeclasses.
+    );
+    note(21, #string,oneline
+        \\A class declared with an empty parameter list parses, but it can never
+        \\acquire evidence, because an evidence query is a question about a type
+        \\argument and there is nowhere to put one. Its instance methods fail that
+        \\check at every call, so `ping(n)` is
+        \\`error: no overload 'ping' accepts these arguments` even when an instance
+        \\declares exactly that signature. Give every class at least one parameter.
+    );
+    subheading(22, "Methods and associated types");
+    paragraph(23, #string,oneline
+        \\A class body holds two kinds of member. A member whose value starts with a
+        \\parenthesis is a method; any other member is an associated type. The
+        \\distinction is made at parse time, which is why there are no associated
+        \\constants: a non-parenthesised member is read with the type parser.
+    );
+    table_header(24, "Member   —   Meaning");
+    table_row(25, "`Name :: <type-expression>;`   |   an associated type an instance must choose");
+    table_row(26, "`name :: (params) -> Ret;`   |   a method requirement with no default");
+    table_row(27, "`name :: (params) -> Ret { ... }`   |   a method requirement with a default body");
+    table_row(28, "`'op' :: (params) -> Ret #operator(...);`   |   an operator requirement");
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Describable :: typeclass (T: type) #minimal(describe) {
+        \\    describe :: (value: T) -> string;
+        \\    describe_twice :: (value: T) -> string {
+        \\        return describe(value) + " / " + describe(value);
+        \\    }
+        \\}
+        \\
+        \\Port :: struct { number: s64; }
+        \\Host :: struct { name: string; }
+        \\
+        \\Port :: instance Describable {
+        \\    describe :: (value: Port) -> string { return "port " + show(value.number); }
+        \\}
+        \\
+        \\Host :: instance Describable {
+        \\    describe :: (value: Host) -> string { return "host " + value.name; }
+        \\    describe_twice :: (value: Host) -> string { return "host pair"; }
+        \\}
+        \\
+        \\label_for :: (value: $T) -> string where Describable(T) {
+        \\    return describe_twice(value);
+        \\}
+        \\
+        \\main :: () {
+        \\    p: Port = .{ .number = 80 };
+        \\    h: Host = .{ .name = "local" };
+        \\    print("%\n", label_for(p));
+        \\    print("%\n", label_for(h));
+        \\}
+    );
+    code_block(30, "text", #string
+        \\port 80 / port 80
+        \\host pair
+    );
+    paragraph(31, #string,oneline
+        \\`Port` inherits the default `describe_twice`; `Host` replaces it. An
+        \\instance method always beats a class default, because selection drops every
+        \\default candidate as soon as one instance candidate has matched. A default
+        \\body is therefore a fallback, never a preference. The class parameters are
+        \\in scope through the whole body as plain names, and writing one of them
+        \\again as a generic is
+        \\`error: typeclass parameter 'T' is already declared; use plain T inside the typeclass method`.
+    );
+    subheading(32, "Superclass constraints");
+    paragraph(33, #string,oneline
+        \\A `where` clause on the class declaration is a superclass constraint: it is
+        \\a condition on the class parameters that must hold before any instance of
+        \\the class counts. The clauses are evaluated on every evidence query, ahead
+        \\of the instance list.
+    );
+    code_block(34, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Weighted :: typeclass (T: type) #minimal(weight_of) {
+        \\    weight_of :: (value: T) -> s64;
+        \\}
+        \\
+        \\Ranked :: typeclass (T: type) where Weighted(T) #minimal(rank_of) {
+        \\    rank_of :: (value: T) -> s64;
+        \\}
+        \\
+        \\Crate :: struct { kilos: s64; }
+        \\Crate :: instance Weighted { weight_of :: (value: Crate) -> s64 { return value.kilos; } }
+        \\Crate :: instance Ranked   { rank_of   :: (value: Crate) -> s64 { return 1; } }
+        \\
+        \\Balloon :: struct { kilos: s64; }
+        \\Balloon :: instance Ranked { rank_of :: (value: Balloon) -> s64 { return 2; } }
+        \\
+        \\RANKED_CRATE   :: Ranked(Crate);
+        \\RANKED_BALLOON :: Ranked(Balloon);
+        \\
+        \\main :: () {
+        \\    c: Crate = .{ .kilos = 5 };
+        \\    print("Ranked(Crate)=% Ranked(Balloon)=%\n", RANKED_CRATE, RANKED_BALLOON);
+        \\    print("rank %\n", rank_of(c));
+        \\}
+    );
+    code_block(35, "text", #string
+        \\Ranked(Crate)=1 Ranked(Balloon)=0
+        \\rank 1
+    );
+    paragraph(36, #string,oneline
+        \\The `Balloon` instance is accepted at its declaration: a superclass clause
+        \\is not checked when an instance is written, only when the class is
+        \\consulted. The declaration is simply inert. Every query answers `0` and
+        \\every call is rejected, so calling `rank_of` on a `Balloon` in the program
+        \\above is `error: no overload 'rank_of' accepts these arguments`. Supplying
+        \\the missing `Weighted` instance revives the `Ranked` one with no other
+        \\edit.
+    );
+    paragraph(37, #string,oneline
+        \\The standard library uses this to layer contracts:
+        \\`Eq :: typeclass (T: type) where PartialEq(T, T) {}` is a marker over
+        \\structural equality, `Applicative` requires `Functor`, `Monad` requires
+        \\`Applicative`, and `Fractional` requires `Num(T) && Div(T, T)`. A single
+        \\clause may join conditions with `&&`, and several clauses may be chained;
+        \\all of them are conjoined.
+    );
+    subheading(38, "What a class declaration emits");
+    bullet(39, #string,oneline
+        \\A compile-time predicate under the class's own name. `Describable(Port)` is
+        \\a constant boolean, described in Evidence, Constraints, and Negative
+        \\Instances.
+    );
+    bullet(40, #string,oneline
+        \\One globally owned overload set per method name. Instance methods and class
+        \\defaults are candidates in that set; nothing else may declare the name.
+    );
+    bullet(41, #string,oneline
+        \\One projectable name per associated type, written `Class(args).Name` in
+        \\type position and covered in Associated Types.
+    );
+    bullet(42, #string,oneline
+        \\For an operator member, the spelling, arity, fixity and precedence, all
+        \\registered globally. The class alone makes `a <*> b` parse; only the
+        \\instance is missing, and the call is `error: no operator '<*>' for int, int`
+        \\until one exists. The Operator System covers the rules.
+    );
+}
+
+render_section_69 :: () {
+    paragraph(0, #string,oneline
+        \\`#minimal` states the smallest set of members an instance must supply for
+        \\the class to consider it complete. Members outside that set are expected to
+        \\have default bodies that are written in terms of the members inside it, so
+        \\the directive is what makes a class with several mutually defined methods
+        \\usable: an instance picks whichever member it can implement directly and
+        \\the rest follow.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Signed_Pair :: typeclass (T: type) #minimal(low | high) {
+        \\    low  :: (value: T) -> s64 { return -high(value); }
+        \\    high :: (value: T) -> s64 { return -low(value); }
+        \\}
+        \\
+        \\Floor :: struct {}
+        \\Ceil  :: struct {}
+        \\
+        \\Floor :: instance Signed_Pair { low  :: (value: Floor) -> s64 { return 5; } }
+        \\Ceil  :: instance Signed_Pair { high :: (value: Ceil)  -> s64 { return 9; } }
+        \\
+        \\main :: () {
+        \\    f: Floor;
+        \\    c: Ceil;
+        \\    print("Floor low=% high=%\n", low(f), high(f));
+        \\    print("Ceil  low=% high=%\n", low(c), high(c));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\Floor low=5 high=-5
+        \\Ceil  low=-9 high=9
+    );
+    paragraph(3, #string,oneline
+        \\Both members carry default bodies, so without the directive neither would
+        \\be required, an empty instance would be accepted, and `low` and `high`
+        \\would call each other forever. `#minimal(low | high)` states the real
+        \\obligation: implement one of the two, and the other is derived.
+    );
+    subheading(4, "The formula grammar");
+    paragraph(5, #string,oneline
+        \\The formula is a small propositional language over method names. It is
+        \\parsed by a dedicated parser, not by the expression parser, so the operator
+        \\table plays no part and the spellings below are the whole vocabulary.
+    );
+    code_block(6, "ebnf", #string
+        \\minimal     = disjunction ;
+        \\disjunction = conjunction { "|" conjunction } ;
+        \\conjunction = atom { "," atom } ;
+        \\atom        = method-name | quoted-operator | "(" disjunction ")" ;
+    );
+    table_header(7, "Form   —   Meaning");
+    table_row(8, "`name`   |   the method `name` is implemented");
+    table_row(9, "`'op'`   |   the operator member `op` is implemented");
+    table_row(10, "`A, B`   |   both `A` and `B`");
+    table_row(11, "`A | B`   |   either `A` or `B`");
+    table_row(12, "`( ... )`   |   grouping; empty parentheses are an error");
+    paragraph(13, #string,oneline
+        \\Conjunction binds tighter than disjunction, so `a, b | c` means
+        \\`(a, b) | c`. Parentheses are needed only for the other reading. An empty
+        \\group is `error: #minimal parentheses cannot be empty`, and a dangling
+        \\separator is `error: expected a method name after ',' in #minimal` or the
+        \\matching message for `|`. A name that is not a method of the class is
+        \\`error: #minimal references unknown typeclass method nope`.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Split :: typeclass (T: type) #minimal((head_of, tail_of) | whole_of) {
+        \\    head_of  :: (value: T) -> s64 { return whole_of(value) / 10; }
+        \\    tail_of  :: (value: T) -> s64 { return whole_of(value) % 10; }
+        \\    whole_of :: (value: T) -> s64 { return head_of(value) * 10 + tail_of(value); }
+        \\}
+        \\
+        \\Joined :: struct {}
+        \\Parted :: struct {}
+        \\
+        \\Joined :: instance Split { whole_of :: (value: Joined) -> s64 { return 47; } }
+        \\Parted :: instance Split {
+        \\    head_of :: (value: Parted) -> s64 { return 1; }
+        \\    tail_of :: (value: Parted) -> s64 { return 2; }
+        \\}
+        \\
+        \\main :: () {
+        \\    j: Joined;
+        \\    p: Parted;
+        \\    print("Joined head=% tail=% whole=%\n", head_of(j), tail_of(j), whole_of(j));
+        \\    print("Parted head=% tail=% whole=%\n", head_of(p), tail_of(p), whole_of(p));
+        \\}
+    );
+    code_block(15, "text", #string
+        \\Joined head=4 tail=7 whole=47
+        \\Parted head=1 tail=2 whole=12
+    );
+    subheading(16, "Operator atoms");
+    paragraph(17, #string,oneline
+        \\An operator member is named in a formula with its quoted spelling, the same
+        \\form used to declare it. Quoting is required: the formula parser reads an
+        \\unquoted operator token as punctuation, and `#minimal(+)` is
+        \\`error: operators in #minimal must use quoted operator names`.
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Nearby :: typeclass (L: type, R: type) #minimal('~=' | '!~') {
+        \\    '~=' :: (a: L, b: R) -> bool #operator(left, 8) { return !(a !~ b); }
+        \\    '!~' :: (a: L, b: R) -> bool #operator(left, 8) { return !(a ~= b); }
+        \\}
+        \\
+        \\Reading :: struct { value: s64; }
+        \\
+        \\(Reading, Reading) :: instance Nearby {
+        \\    '~=' :: (a: Reading, b: Reading) -> bool {
+        \\        d := a.value - b.value;
+        \\        if d < 0 d = -d;
+        \\        return d <= 2;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    x: Reading = .{ .value = 10 };
+        \\    y: Reading = .{ .value = 11 };
+        \\    z: Reading = .{ .value = 20 };
+        \\    print("x ~= y  %\n", x ~= y);
+        \\    print("x !~ z  %\n", x !~ z);
+        \\}
+    );
+    code_block(19, "text", #string
+        \\x ~= y  1
+        \\x !~ z  1
+    );
+    paragraph(20, #string,oneline
+        \\This is exactly the shape of the Prelude's `PartialEq`, which is declared
+        \\`#minimal('==' | '!=')` with each operator defaulting to the negation of
+        \\the other. An unsatisfied operator formula reports the quoted names back:
+        \\`error: instance '(Z, Z) :: Nearby' does not satisfy #minimal('~=' | '!~')`.
+    );
+    subheading(21, "The empty formula and the implicit minimal");
+    paragraph(22, #string,oneline
+        \\`#minimal()` requires nothing. It marks a class whose purpose is the
+        \\evidence itself rather than any method, and it is what lets an instance
+        \\body be empty even when the class declares members.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Trusted :: typeclass (T: type) #minimal() {
+        \\    audit :: (value: T) -> s64 { return 0; }
+        \\}
+        \\
+        \\Ledger :: struct {}
+        \\Ledger :: instance Trusted {}
+        \\
+        \\TRUSTED_LEDGER :: Trusted(Ledger);
+        \\
+        \\main :: () {
+        \\    l: Ledger;
+        \\    print("audit=% evidence=%\n", audit(l), TRUSTED_LEDGER);
+        \\}
+    );
+    code_block(24, "text", #string
+        \\audit=0 evidence=1
+    );
+    paragraph(25, #string,oneline
+        \\Omitting the directive is not the same as writing `#minimal()`. With no
+        \\directive the class gets an implicit minimal: every method requirement that
+        \\has no default body must be implemented. That is the common case and the
+        \\reason most classes need no directive at all. Its failure has its own
+        \\wording, and it names the members that are missing.
+    );
+    code_block(26, "glosso", #string
+        \\Pairish :: typeclass (T: type) {
+        \\    first  :: (value: T) -> s64;
+        \\    second :: (value: T) -> s64;
+        \\    both   :: (value: T) -> s64 { return first(value) + second(value); }
+        \\}
+        \\
+        \\Empty :: struct {}
+        \\Empty :: instance Pairish {}
+        \\
+        \\main :: () {}
+    );
+    code_block(27, "text", #string
+        \\error: instance 'Empty :: Pairish' does not satisfy the implicit minimal definition; missing first, second
+        \\  --> minimal.glo:8:1
+        \\  |
+        \\8 | Empty :: instance Pairish {}
+        \\  | ^^^^^
+    );
+    subheading(28, "How satisfaction is decided");
+    paragraph(29, #string,oneline
+        \\The check runs at declaration time, once per instance group, before any
+        \\call is resolved. For each member the class requires, the compiler builds a
+        \\signature key from the name, the arity, the fixity, and the parameter and
+        \\return annotations with the head arguments and the instance's associated
+        \\types substituted in; a supplied method satisfies a requirement when the
+        \\two keys agree. The formula is then evaluated over the requirements that
+        \\were matched.
+    );
+    code_block(30, "glosso", #string
+        \\Bounded :: typeclass (T: type) #minimal(least, greatest) {
+        \\    least    :: (value: T) -> s64;
+        \\    greatest :: (value: T) -> s64;
+        \\}
+        \\
+        \\Span :: struct {}
+        \\Span :: instance Bounded {
+        \\    least :: (value: Span) -> s64 { return 1; }
+        \\}
+        \\
+        \\main :: () {}
+    );
+    code_block(31, "text", #string
+        \\error: instance 'Span :: Bounded' does not satisfy #minimal(least, greatest)
+        \\  --> formula.glo:7:1
+        \\  |
+        \\7 | Span :: instance Bounded {
+        \\  | ^^^^
+        \\note: minimal complete definition declared here
+        \\  --> formula.glo:1:32
+        \\  |
+        \\1 | Bounded :: typeclass (T: type) #minimal(least, greatest) {
+        \\  |                                ^^^^^^^^
+    );
+    paragraph(32, #string,oneline
+        \\Because the comparison is on whole signature keys, a method that is present
+        \\but wrong reports as absent. Declaring `size_of_it :: (value: Z) -> s32`
+        \\against a requirement returning `s64`, or adding a parameter the
+        \\requirement does not have, both produce
+        \\`error: instance 'Z :: K' does not satisfy #minimal(size_of_it)` rather than
+        \\a separate mismatch message. When a formula fails, comparing the supplied
+        \\signature against the class declaration character by character is the way
+        \\to read it. The message re-renders the formula from its parse, so grouping
+        \\parentheses are dropped: `#minimal((head_of, tail_of) | whole_of)` reports
+        \\as `#minimal(head_of, tail_of | whole_of)`.
+    );
+    paragraph(33, #string,oneline
+        \\A supplied method that matches no requirement at all is reported
+        \\separately, once the minimal formula is satisfied:
+        \\`error: instance method hint does not match any declaration in typeclass 'K'`.
+        \\An instance may therefore not carry a helper of its own; helpers belong
+        \\outside the instance body.
+    );
+    note(34, #string,oneline
+        \\A `#modify` block on an instance method changes the signature key the
+        \\compiler computes, so the instance fails its `#minimal` check even when the
+        \\body is correct. Express the condition as a `where` clause on the instance
+        \\instead; that path is checked by evaluating the clause, not by comparing
+        \\keys.
+    );
+    table_header(35, "Diagnostic   —   Cause");
+    table_row(36, "`does not satisfy #minimal(...)`   |   the formula is unsatisfied, or a member's signature differs");
+    table_row(37, "`does not satisfy the implicit minimal definition; missing ...`   |   no directive, and a defaultless requirement was not supplied");
+    table_row(38, "`instance method X does not match any declaration in typeclass 'C'`   |   a supplied member matches no requirement");
+    table_row(39, "`#minimal references unknown typeclass method nope`   |   an atom names something the class does not declare");
+    table_row(40, "`duplicate #minimal directive on typeclass 'K'`   |   two directives on one class");
+}
+
+render_section_70 :: () {
+    paragraph(0, #string,oneline
+        \\An instance supplies a class's members for particular type arguments. It is
+        \\written `<head> :: instance Class { ... }`, where the head names the type or
+        \\types the instance is for and the body holds the methods and associated
+        \\type values. An instance has no name of its own and is never referred to
+        \\directly; it is found by the head, through the ordinary overload machinery
+        \\described in How an Instance Is Chosen.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Area_Of :: typeclass (T: type) #minimal(area_of) {
+        \\    area_of :: (value: T) -> f64;
+        \\}
+        \\
+        \\Rect :: struct { w: f64; h: f64; }
+        \\Disc :: struct { r: $T; }
+        \\
+        \\Rect :: instance Area_Of {
+        \\    area_of :: (value: Rect) -> f64 { return value.w * value.h; }
+        \\}
+        \\
+        \\Disc($T) :: instance Area_Of where Is_Float(T) {
+        \\    area_of :: (value: Disc(T)) -> f64 { return 3.14159 * cast(f64)(value.r * value.r); }
+        \\}
+        \\
+        \\main :: () {
+        \\    r: Rect = .{ .w = 2.0, .h = 3.0 };
+        \\    d: Disc(f32) = .{ .r = 1.0 };
+        \\    print("% %\n", area_of(r), area_of(d));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\6 3.14159
+    );
+    paragraph(3, #string,oneline
+        \\The head is every token before the `::`. The parser collects those tokens
+        \\raw, then re-lexes and re-parses them as a type annotation, which is why a
+        \\head may be any type expression and why a malformed one reports the text it
+        \\collected: `Z + :: instance K` is `error: invalid instance head 'Z+'`. The
+        \\`::` is what ends the scan, so omitting it does not give a bad head; it
+        \\gives no instance at all, and the declaration fails as
+        \\`error: unexpected token 'instance'`.
+    );
+    paragraph(4, #string,oneline
+        \\The head supplies exactly one argument per class parameter. For a
+        \\one-parameter class the whole head is that argument; for a class with more
+        \\than one, the head is a parenthesised tuple read left to right. A head with
+        \\the wrong number of arguments cannot be substituted into the requirement
+        \\signatures, so it surfaces as a `#minimal` failure rather than as an arity
+        \\message.
+    );
+    subheading(5, "Head shapes");
+    table_header(6, "Head   —   Matches");
+    table_row(7, "`s64`   |   one nominal type");
+    table_row(8, "`Box($A)`   |   every instantiation of the generic struct `Box`");
+    table_row(9, "`Pair(s64, $B)`   |   a partially concrete instantiation");
+    table_row(10, "`Box`   |   the bare constructor, for a class with a `(type) -> type` parameter");
+    table_row(11, "`$T`   |   any type; narrowed by `where`");
+    table_row(12, "`[]$T`   |   a view over any element type");
+    table_row(13, "`[..]$T`   |   a dynamic array");
+    table_row(14, "`*$T`   |   a pointer");
+    table_row(15, "`[*]const $T`   |   a const many-pointer");
+    table_row(16, "`?$T`   |   the built-in option type");
+    table_row(17, "`$E!$T`   |   the built-in result type, error first");
+    table_row(18, "`(A, B)`   |   one argument per parameter of a multi-parameter class");
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Label_Of :: typeclass (T: type) #minimal(label_of) {
+        \\    label_of :: (value: T) -> string;
+        \\}
+        \\
+        \\Box  :: struct { value: $A; }
+        \\Pair :: struct { a: $A; b: $B; }
+        \\
+        \\s64          :: instance Label_Of { label_of :: (value: s64) -> string { return "s64"; } }
+        \\Box($A)      :: instance Label_Of { label_of :: (value: Box(A)) -> string { return "Box"; } }
+        \\$T           :: instance Label_Of where Is_Float(T) { label_of :: (value: T) -> string { return "float"; } }
+        \\[]$T         :: instance Label_Of { label_of :: (value: []T) -> string { return "view"; } }
+        \\*$T          :: instance Label_Of { label_of :: (value: *T) -> string { return "pointer"; } }
+        \\[*]const $T  :: instance Label_Of { label_of :: (value: [*]const T) -> string { return "const many-pointer"; } }
+        \\?$T          :: instance Label_Of { label_of :: (value: ?T) -> string { return "option"; } }
+        \\$E!$T        :: instance Label_Of { label_of :: (value: E!T) -> string { return "result"; } }
+        \\Pair(s64,$B) :: instance Label_Of { label_of :: (value: Pair(s64, B)) -> string { return "Pair(s64, B)"; } }
+        \\
+        \\main :: () {
+        \\    n: s64 = 1;
+        \\    b: Box(string) = .{ .value = "x" };
+        \\    f: f64 = 1.5;
+        \\    storage: [3]s64;
+        \\    v: []s64 = storage[..];
+        \\    p: *s64 = *n;
+        \\    m: [*]const s64 = v.data;
+        \\    o: ?s64 = .Some(2);
+        \\    r: string!s64 = .Ok(3);
+        \\    q: Pair(s64, string) = .{ .a = 1, .b = "y" };
+        \\    print("% % % % % % % % %\n",
+        \\        label_of(n), label_of(b), label_of(f), label_of(v), label_of(p),
+        \\        label_of(m), label_of(o), label_of(r), label_of(q));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\s64 Box float view pointer const many-pointer option result Pair(s64, B)
+    );
+    paragraph(21, #string,oneline
+        \\A `$X` anywhere in the head declares a section generic that is bound when
+        \\the head is matched. Inside the body it is spelled without the `$`, as
+        \\`Box(A)` and `[]T` above, because the binder is already introduced. The
+        \\body may use it in parameter annotations, in return types, and in
+        \\associated type values.
+    );
+    paragraph(22, #string,oneline
+        \\Structural heads match on the exact form, not on what converts to it. The
+        \\`[]$T` instance does not accept a `[..]s64` or a `[*]s64`, and the
+        \\`[*]const $T` instance does not accept a plain `[*]s64`; each is
+        \\`error: no overload 'label_of' accepts these arguments`. Where two forms
+        \\should behave alike, declare both heads, as the program above declares
+        \\`[]$T` and `[*]const $T` separately.
+    );
+    subheading(23, "Tuple heads");
+    paragraph(24, #string,oneline
+        \\A class with several parameters is keyed on the whole argument tuple, so
+        \\`(s64, string)` and `(string, s64)` are different instances. This is what
+        \\makes asymmetric operations expressible: a program may give `Mul` a
+        \\`(Vector, f64)` instance and an `(f64, Vector)` instance with different
+        \\bodies. A tuple head may mix concrete types, section generics, and a
+        \\repeated binder.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Convert :: typeclass (From: type, To: type) #minimal(convert) {
+        \\    convert :: (value: From, #empty: To) -> To;
+        \\}
+        \\
+        \\Route :: typeclass (A: type, B: type, C: type) #minimal(route) {
+        \\    route :: (a: A, b: B, c: C) -> string;
+        \\}
+        \\
+        \\Flag :: struct { on: bool; }
+        \\
+        \\(s64, string) :: instance Convert {
+        \\    convert :: (value: s64, #empty: string) -> string { return "n" + show(value); }
+        \\}
+        \\
+        \\($T, T) :: instance Convert where Is_Float(T) {
+        \\    convert :: (value: T, #empty: T) -> T { return value + value; }
+        \\}
+        \\
+        \\(Flag, $T) :: instance Convert where Is_Integer(T) {
+        \\    convert :: (value: Flag, #empty: T) -> T { if value.on return cast(T)1; return cast(T)0; }
+        \\}
+        \\
+        \\(s64, string, Flag) :: instance Route {
+        \\    route :: (a: s64, b: string, c: Flag) -> string { return show(a) + b + show(c.on); }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", convert(7, string));
+        \\    print("%\n", convert(1.5, f64));
+        \\    f: Flag = .{ .on = true };
+        \\    print("%\n", convert(f, s64));
+        \\    print("%\n", route(2, "-", f));
+        \\}
+    );
+    code_block(26, "text", #string
+        \\n7
+        \\3
+        \\1
+        \\2-1
+    );
+    paragraph(27, #string,oneline
+        \\`($T, T)` is a single binder used twice: it matches only when both
+        \\arguments are the same type. The `#empty:` parameter carries the second
+        \\class parameter into the signature so that a call can decide it; witness
+        \\parameters are covered in Compile-Time and Type-Only Parameters. Giving a
+        \\two-parameter class a bare head such as `s64 :: instance Convert` is
+        \\`error: instance 's64 :: Convert' does not satisfy #minimal(convert)`,
+        \\because nothing binds `To`.
+    );
+    subheading(28, "Instance-level `where`");
+    paragraph(29, #string,oneline
+        \\A `where` clause after the class name guards the whole instance. It is what
+        \\turns a blanket head into a targeted one, and it is evaluated at compile
+        \\time against the bound head arguments.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Sized_Note :: typeclass (T: type) #minimal(note_of) {
+        \\    note_of :: (value: T) -> string;
+        \\}
+        \\
+        \\$T :: instance Sized_Note where Is_Integer(T) && size_of(T) <= 4 {
+        \\    note_of :: (value: T) -> string { return "small integer"; }
+        \\}
+        \\
+        \\$T :: instance Sized_Note where Is_Integer(T) where size_of(T) > 4 {
+        \\    note_of :: (value: T) -> string { return "wide integer"; }
+        \\}
+        \\
+        \\$T :: instance Sized_Note where Is_Float(T) {
+        \\    note_of :: (value: T) -> string { return "float"; }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: s16 = 1;
+        \\    b: s64 = 1;
+        \\    c: f32 = 1.0;
+        \\    print("% / % / %\n", note_of(a), note_of(b), note_of(c));
+        \\}
+    );
+    code_block(31, "text", #string
+        \\small integer / wide integer / float
+    );
+    paragraph(32, #string,oneline
+        \\Several `where` clauses may be chained and are conjoined, and a single
+        \\clause may join conditions with `&&`; the two spellings above are
+        \\equivalent. A clause is an ordinary compile-time expression, so a type
+        \\predicate, `size_of`, an equality on types, and an evidence query all
+        \\work. The clauses are copied onto every member of the instance, so an
+        \\associated type value is guarded exactly as the methods are: three blanket
+        \\instances can supply three different associated types for three disjoint
+        \\families of type.
+    );
+    note(33, #string,oneline
+        \\A `#modify` block is not accepted on an instance head:
+        \\`$T :: instance C #modify { ... }` is `error: unexpected token 'modify'`.
+        \\On an instance method it parses but breaks the `#minimal` check. Instance
+        \\conditions belong in `where`.
+    );
+    subheading(34, "Instance bodies");
+    paragraph(35, #string,oneline
+        \\A body holds two kinds of member, matching the class: a method, written
+        \\like any procedure but with the head's type arguments substituted in, and
+        \\an associated type value, written `Name :: <type>;`. A body may be empty,
+        \\which is what a marker class and a negative instance use. A method may end
+        \\at a `#magic` intrinsic instead of a body; the Prelude's arithmetic
+        \\instances are written that way, as
+        \\`'+' :: (left: T, right: T) -> Output #magic "int_add";`.
+    );
+    paragraph(36, #string,oneline
+        \\Every member must correspond to a declaration in the class. A member the
+        \\class does not declare is `error: function 'g' has no owning typeclass`,
+        \\which is also what naming an unknown class reports when the body holds a
+        \\method; with an empty body the same mistake is
+        \\`error: unknown typeclass 'Nonexistent'`. Associated type names are checked
+        \\too: `error: typeclass 'Registry' has no associated type 'Wrong'`.
+    );
+    bullet(37, #string,oneline
+        \\There is no orphan rule. An instance may pair anyone's type with anyone's
+        \\class, including a standard-library type with a standard-library class.
+        \\Which instance wins is decided by specificity, not by locality; see
+        \\Evidence, Constraints, and Negative Instances.
+    );
+    bullet(38, #string,oneline
+        \\`<head> :: instance !Class { }` declares that the head explicitly does not
+        \\implement the class. Negative instances are covered in Evidence,
+        \\Constraints, and Negative Instances.
+    );
+}
+
+render_section_71 :: () {
+    paragraph(0, #string,oneline
+        \\An associated type is a type that the instance chooses rather than the
+        \\caller. The class declares the name and the instance supplies a value for
+        \\it, so a single class parameter can carry a whole family of dependent
+        \\types: `Indexable` names the element an index produces, `Try` names the
+        \\output and the residual of a fallible carrier, `Add` names the type a sum
+        \\has.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Collection :: typeclass (C: type) #minimal(first_of, count_of) {
+        \\    Elem :: type;
+        \\    first_of :: (container: C) -> Elem;
+        \\    count_of :: (container: C) -> s64;
+        \\}
+        \\
+        \\Words  :: struct { items: []string; }
+        \\Scores :: struct { items: []s64; }
+        \\
+        \\Words :: instance Collection {
+        \\    Elem :: string;
+        \\    first_of :: (container: Words) -> string { return container.items[0]; }
+        \\    count_of :: (container: Words) -> s64 { return container.items.count; }
+        \\}
+        \\
+        \\Scores :: instance Collection {
+        \\    Elem :: s64;
+        \\    first_of :: (container: Scores) -> s64 { return container.items[0]; }
+        \\    count_of :: (container: Scores) -> s64 { return container.items.count; }
+        \\}
+        \\
+        \\main :: () {
+        \\    w_storage: [2]string;
+        \\    w_storage[0] = "alpha";
+        \\    w_storage[1] = "beta";
+        \\    s_storage: [2]s64;
+        \\    s_storage[0] = 4;
+        \\    s_storage[1] = 5;
+        \\
+        \\    w: Words  = .{ .items = w_storage[..] };
+        \\    s: Scores = .{ .items = s_storage[..] };
+        \\
+        \\    a: Collection(Words).Elem  = first_of(w);
+        \\    b: Collection(Scores).Elem = first_of(s);
+        \\    print("% %\n", a, b);
+        \\    print("% %\n", count_of(w), count_of(s));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\alpha 4
+        \\2 2
+    );
+    paragraph(3, #string,oneline
+        \\On the class side the member is `Elem :: type;`: a name followed by a type
+        \\expression and a semicolon, with no parentheses, which is what tells the
+        \\parser it is not a method. On the instance side the same name is bound to a
+        \\concrete type, `Elem :: string;`. Inside the class, the name is used as an
+        \\ordinary type in the requirement signatures, and the minimal check
+        \\substitutes the instance's value before comparing signatures, which is why
+        \\`first_of :: (container: Words) -> string` satisfies
+        \\`first_of :: (container: C) -> Elem`.
+    );
+    paragraph(4, #string,oneline
+        \\There is no default value. The type expression the class writes is a
+        \\requirement, not a fallback: writing a concrete type such as `Key :: s64;`
+        \\on the class side and omitting `Key` from the instance still fails the
+        \\minimal check, because the requirement signatures keep an unresolved `Key`
+        \\in them and nothing the instance supplies can match. The class side is not
+        \\a constraint on the choice either: an instance that answers `Key :: string;`
+        \\to a class that wrote `Key :: s64;` is accepted. The conventional spelling
+        \\is therefore `Name :: type;`.
+    );
+    subheading(5, "Projection");
+    paragraph(6, #string,oneline
+        \\An associated type is read back with `Class(args).Name`. This is a type
+        \\annotation form: it names a type and may appear anywhere a type may. The
+        \\arguments are the class's parameters, so the projection is resolved by
+        \\finding the instance for those arguments and reading its value.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Widen :: typeclass (T: type) #minimal(widen) {
+        \\    Wide :: type;
+        \\    widen :: (value: T) -> Wide;
+        \\}
+        \\
+        \\$T :: instance Widen where Is_Integer(T) { Wide :: s64; widen :: (value: T) -> s64 { return cast(s64)value; } }
+        \\$T :: instance Widen where Is_Float(T)   { Wide :: f64; widen :: (value: T) -> f64 { return cast(f64)value; } }
+        \\
+        \\main :: () {
+        \\    a: s16 = 7;
+        \\    b: f32 = 1.5;
+        \\    x: Widen(s16).Wide = widen(a);
+        \\    y: Widen(f32).Wide = widen(b);
+        \\    print("% %\n", x, y);
+        \\}
+    );
+    code_block(8, "text", #string
+        \\7 1.5
+    );
+    paragraph(9, #string,oneline
+        \\`Widen(s16).Wide` is `s64` and `Widen(f32).Wide` is `f64`, decided by the
+        \\same `where` guards that decide which `widen` runs. The instance-level
+        \\clauses are copied onto the associated type value as well as onto the
+        \\methods, so a projection can never resolve through an instance whose guard
+        \\is false.
+    );
+    subheading(10, "Projection in generic code");
+    paragraph(11, #string,oneline
+        \\The arguments of a projection may be generic binders, which is the form
+        \\that matters: a generic procedure states its return type in terms of the
+        \\caller's type without knowing it.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Collection :: typeclass (C: type) #minimal(first_of) {
+        \\    Elem :: type;
+        \\    first_of :: (container: C) -> Elem;
+        \\}
+        \\
+        \\Words  :: struct { items: []string; }
+        \\Scores :: struct { items: []s64; }
+        \\Words  :: instance Collection { Elem :: string; first_of :: (c: Words)  -> string { return c.items[0]; } }
+        \\Scores :: instance Collection { Elem :: s64;    first_of :: (c: Scores) -> s64    { return c.items[0]; } }
+        \\
+        \\head_of :: (container: $C) -> Collection(C).Elem where Collection(C) {
+        \\    return first_of(container);
+        \\}
+        \\
+        \\main :: () {
+        \\    ws: [1]string; ws[0] = "alpha";
+        \\    ss: [1]s64;    ss[0] = 9;
+        \\    w: Words  = .{ .items = ws[..] };
+        \\    s: Scores = .{ .items = ss[..] };
+        \\    print("% %\n", head_of(w), head_of(s));
+        \\}
+    );
+    code_block(13, "text", #string
+        \\alpha 9
+    );
+    note(14, #string,oneline
+        \\A projection works in a return annotation but not in a parameter
+        \\annotation. Adding `fallback: Collection(C).Elem` as a second parameter to
+        \\`head_of` above and calling it makes the call
+        \\`error: generic argument does not match call head_of`, even when the
+        \\argument's type is exactly what the projection resolves to. Take such a
+        \\value through a second generic binder and constrain it separately.
+    );
+    subheading(15, "The argument-free projection");
+    paragraph(16, #string,oneline
+        \\`Class.Name` with no arguments is accepted when exactly one instance in the
+        \\program supplies that associated type. It is a convenience for a class with
+        \\a single implementation, and it stops being legal the moment a second
+        \\instance appears.
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Registry :: typeclass (T: type) #minimal(key_of) {
+        \\    Key :: type;
+        \\    key_of :: (value: T) -> Key;
+        \\}
+        \\
+        \\Session :: struct { id: s64; }
+        \\Session :: instance Registry {
+        \\    Key :: s64;
+        \\    key_of :: (value: Session) -> s64 { return value.id; }
+        \\}
+        \\
+        \\main :: () {
+        \\    s: Session = .{ .id = 12 };
+        \\    k: Registry.Key = key_of(s);
+        \\    print("%\n", k);
+        \\}
+    );
+    code_block(18, "text", #string
+        \\12
+    );
+    paragraph(19, #string,oneline
+        \\Adding a second instance turns the same annotation into an error, and the
+        \\fix is to write the arguments.
+    );
+    code_block(20, "glosso", #string
+        \\Registry :: typeclass (T: type) #minimal(key_of) {
+        \\    Key :: type;
+        \\    key_of :: (value: T) -> Key;
+        \\}
+        \\
+        \\Session :: struct { id: s64; }
+        \\Ticket  :: struct { code: string; }
+        \\
+        \\Session :: instance Registry { Key :: s64;    key_of :: (value: Session) -> s64    { return value.id; } }
+        \\Ticket  :: instance Registry { Key :: string; key_of :: (value: Ticket)  -> string { return value.code; } }
+        \\
+        \\main :: () {
+        \\    k: Registry.Key = 1;
+        \\    _ := k;
+        \\}
+    );
+    code_block(21, "text", #string
+        \\error: associated type 'Registry.Key' is ambiguous; provide type arguments
+        \\   --> assoc.glo:13:8
+        \\   |
+        \\13 |     k: Registry.Key = 1;
+        \\   |        ^^^^^^^^^^^^
+    );
+    subheading(22, "Why the projection is not an expression");
+    paragraph(23, #string,oneline
+        \\`Class(args).name` is also the spelling for a scoped typeclass method
+        \\reference, and that is the reading the expression parser takes. The two
+        \\forms are told apart by position, not by the name: in a type annotation the
+        \\member is looked up among the class's associated types, and in an
+        \\expression it is looked up among the class's methods.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Registry :: typeclass (T: type) #minimal(key_of) {
+        \\    Key :: type;
+        \\    key_of :: (value: T) -> Key;
+        \\}
+        \\
+        \\Session :: struct { id: s64; }
+        \\Session :: instance Registry {
+        \\    Key :: s64;
+        \\    key_of :: (value: Session) -> s64 { return value.id; }
+        \\}
+        \\
+        \\main :: () {
+        \\    s: Session = .{ .id = 12 };
+        \\    k: Registry(Session).Key = Registry(Session).key_of(s);
+        \\    print("%\n", k);
+        \\}
+    );
+    code_block(25, "text", #string
+        \\12
+    );
+    paragraph(26, #string,oneline
+        \\The annotation projects the associated type and the initializer calls the
+        \\method, from the same spelling of the same class at the same argument.
+        \\Using an associated type in expression position therefore reports a missing
+        \\method: `t := Registry(Session).Key;` is
+        \\`error: typeclass 'Registry' has no method 'Key'`. Where the projected type
+        \\is wanted as a value, declare a binding with the projection as its
+        \\annotation and take `type_of` of the binding.
+    );
+    subheading(27, "Projecting another class");
+    paragraph(28, #string,oneline
+        \\A projection may appear inside an instance, including in the value of that
+        \\instance's own associated type. This is how a derived type is threaded
+        \\through: the instance defers to whatever `Add` decided rather than
+        \\committing to a concrete type.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Doubler :: typeclass (T: type) #minimal(twice) {
+        \\    Result_Of :: type;
+        \\    twice :: (value: T) -> Result_Of;
+        \\}
+        \\
+        \\$T :: instance Doubler where Add(T, T) {
+        \\    Result_Of :: Add(T, T).Output;
+        \\    twice :: (value: T) -> Add(T, T).Output { return value + value; }
+        \\}
+        \\
+        \\main :: () {
+        \\    n: s64 = 21;
+        \\    x: f64 = 1.25;
+        \\    print("% %\n", twice(n), twice(x));
+        \\    d: Doubler(s64).Result_Of = twice(n);
+        \\    print("%\n", d);
+        \\}
+    );
+    code_block(30, "text", #string
+        \\42 2.5
+        \\42
+    );
+    table_header(31, "Diagnostic   —   Cause");
+    table_row(32, "`no associated type value for Registry.Key`   |   the matching instance does not supply it");
+    table_row(33, "`associated type 'Registry.Key' is ambiguous; provide type arguments`   |   the argument-free form with more than one instance");
+    table_row(34, "`associated type arguments must follow the typeclass name`   |   written `Registry.Key(A)` instead of `Registry(A).Key`");
+    table_row(35, "`typeclass 'Registry' has no associated type 'Wrong'`   |   an instance supplies a name the class does not declare");
+    table_row(36, "`cyclic associated type definition involving 'Cy(A).Elem'`   |   a value that projects itself");
+}
+
+render_section_72 :: () {
+    paragraph(0, #string,oneline
+        \\Applying a class to a type produces a compile-time boolean: `Marker(s64)`
+        \\asks whether `s64` has a `Marker` instance and folds to `1` or `0` during
+        \\checking. This is the same query the compiler runs when it selects an
+        \\instance, exposed to the program so that generic code can branch on it or
+        \\demand it.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Marker :: typeclass (T: type) #minimal() {}
+        \\Other  :: typeclass (T: type) #minimal() {}
+        \\
+        \\$T :: instance Marker where Is_Integer(T) {}
+        \\$T :: instance Other  where Is_Integer(T) {}
+        \\
+        \\MARKED_S64 :: Marker(s64);
+        \\MARKED_F64 :: Marker(f64);
+        \\
+        \\report :: (value: $T) -> string {
+        \\    #if Marker(T) return "marked";
+        \\    else return "unmarked";
+        \\}
+        \\
+        \\both :: (value: $T) -> string where Marker(T) && Other(T) { return "both"; }
+        \\
+        \\main :: () {
+        \\    #assert Marker(s16);
+        \\    n: s64 = 1;
+        \\    f: f64 = 1.0;
+        \\    print("constants = % %\n", MARKED_S64, MARKED_F64);
+        \\    print("static if = % %\n", report(n), report(f));
+        \\    print("where     = %\n", both(n));
+        \\    print("comptime  = %\n", #comptime Marker(u8));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\constants = 1 0
+        \\static if = marked unmarked
+        \\where     = both
+        \\comptime  = 1
+    );
+    paragraph(3, #string,oneline
+        \\The query folds only in the contexts the constraint evaluator understands.
+        \\A `where` clause accepts a bare query or several joined with `&&`; every
+        \\other shape of `where` expression containing a query is rejected, because
+        \\the evaluator recognises the call form itself rather than evaluating an
+        \\arbitrary expression that contains it.
+    );
+    table_header(4, "Context   —   Folds");
+    table_row(5, "`where Class(T)`   |   yes");
+    table_row(6, "`where A(T) && B(T)`   |   yes");
+    table_row(7, "`#if Class(T)`, `#if !Class(T)`   |   yes");
+    table_row(8, "`EV :: Class(T);` at file scope   |   yes");
+    table_row(9, "`#comptime Class(T)`, `#assert Class(T)`   |   yes");
+    table_row(10, "`where !Class(T)`   |   no: `error: non-constant function call`");
+    table_row(11, "`where Class(T) == false` or `where A(T) || B(T)`   |   no: `error: non-constant function call`");
+    table_row(12, "a runtime expression   |   no: `error: internal error: 'Marker' is called but was never lowered`");
+    paragraph(13, #string,oneline
+        \\A negated or disjoint constraint is therefore written with `#if` inside the
+        \\body rather than with `where` on the signature, or split into two
+        \\procedures. Wrapping a query in a helper predicate does not work either:
+        \\the evaluator needs to see the class name at the call site, so
+        \\`where P(T)` where `P` returns `Class(T)` is
+        \\`error: constraint failed for use_it`.
+    );
+    note(14, #string,oneline
+        \\The expression form takes exactly one type argument, whatever the class's
+        \\arity. A multi-parameter class queried this way answers `0` rather than
+        \\reporting anything, so `PartialEq(s64)` is `0` even though `s64` compares
+        \\with `==`; supplying both arguments is
+        \\`error: PartialEq(T) expects one type argument`. Query a multi-parameter
+        \\class inside a `where` clause, where the full argument list is accepted.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\EQ_S64        :: Eq(s64);
+        \\EQ_F64        :: Eq(f64);
+        \\PARTIAL_EQ_S64 :: PartialEq(s64);
+        \\
+        \\main :: () {
+        \\    print("Eq(s64)=% Eq(f64)=% PartialEq(s64)=%\n", EQ_S64, EQ_F64, PARTIAL_EQ_S64);
+        \\}
+    );
+    code_block(16, "text", #string
+        \\Eq(s64)=1 Eq(f64)=0 PartialEq(s64)=0
+    );
+    subheading(17, "Negative instances");
+    paragraph(18, #string,oneline
+        \\`<head> :: instance !Class { }` declares that the head does not implement
+        \\the class. It is not the absence of an instance but a statement of absence,
+        \\and it overrides any positive instance that would otherwise match: evidence
+        \\is positive and not negative.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Tagged :: typeclass (T: type) #minimal(tag_of) {
+        \\    tag_of :: (value: T) -> string;
+        \\}
+        \\
+        \\$T :: instance Tagged where Is_Integer(T) { tag_of :: (value: T) -> string { return "integer"; } }
+        \\u8 :: instance !Tagged {}
+        \\
+        \\TAGGED_S64 :: Tagged(s64);
+        \\TAGGED_U8  :: Tagged(u8);
+        \\
+        \\main :: () {
+        \\    n: s64 = 1;
+        \\    print("Tagged(s64)=% Tagged(u8)=%\n", TAGGED_S64, TAGGED_U8);
+        \\    print("%\n", tag_of(n));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\Tagged(s64)=1 Tagged(u8)=0
+        \\integer
+    );
+    paragraph(21, #string,oneline
+        \\The exclusion reaches dispatch as well as queries. With the declaration
+        \\above, calling `tag_of` on a `u8` value is
+        \\`error: no overload 'tag_of' accepts these arguments`: the blanket instance
+        \\matches the argument, then loses its evidence and is dropped. A generic
+        \\procedure guarded by `where Tagged(T)` reports the constraint instead, as
+        \\`error: constraint failed for guarded`.
+    );
+    paragraph(22, #string,oneline
+        \\A negative instance's body is not checked and is never used, so it may be
+        \\empty even for a class with required methods, and a body written into one
+        \\is dead. Its purpose is to carve an exception out of a blanket instance
+        \\that is otherwise right. The Prelude uses it for floating point:
+        \\`$T :: instance !Eq where Is_Float(T) {}` keeps floats comparable with `==`
+        \\while denying them the total-equality marker, because NaN is not equal to
+        \\itself.
+    );
+    subheading(23, "Coherence and overlap");
+    paragraph(24, #string,oneline
+        \\Glosso has no orphan rule and no coherence check at declaration time. Two
+        \\instances may cover the same type, and the program compiles until a call
+        \\needs one of them. Overlap is reported at the use site, with a note on each
+        \\of the two instances that tied.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Label_Of :: typeclass (T: type) #minimal(label_of) {
+        \\    label_of :: (value: T) -> string;
+        \\}
+        \\
+        \\$T :: instance Label_Of where Is_Integer(T) { label_of :: (value: T) -> string { return "one"; } }
+        \\$T :: instance Label_Of where Is_Integer(T) { label_of :: (value: T) -> string { return "two"; } }
+        \\
+        \\main :: () {
+        \\    n: s64 = 1;
+        \\    print("%\n", label_of(n));
+        \\}
+    );
+    code_block(26, "text", #string
+        \\error: ambiguous typeclass operation 'label_of' for these argument types
+        \\   --> overlap.glo:12:18
+        \\   |
+        \\12 |     print("%\n", label_of(n));
+        \\   |                  ^^^^^^^^
+        \\note: first matching instance is declared here
+        \\  --> overlap.glo:8:47
+        \\  |
+        \\8 | $T :: instance Label_Of where Is_Integer(T) { label_of :: (value: T) -> string { return "two"; } }
+        \\  |                                               ^^^^^^^^
+        \\note: another matching instance is declared here
+        \\  --> overlap.glo:7:47
+        \\  |
+        \\7 | $T :: instance Label_Of where Is_Integer(T) { label_of :: (value: T) -> string { return "one"; } }
+        \\  |                                               ^^^^^^^^
+    );
+    paragraph(27, #string,oneline
+        \\Most overlap is not ambiguous, because selection scores candidates and a
+        \\concrete parameter outranks a generic one. A specific instance placed
+        \\beside a blanket instance wins for the type it names and leaves the rest to
+        \\the blanket, with no annotation and no ordering rule.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Label_Of :: typeclass (T: type) #minimal(label_of) {
+        \\    label_of :: (value: T) -> string;
+        \\}
+        \\
+        \\$T  :: instance Label_Of where Is_Integer(T) { label_of :: (value: T)   -> string { return "an integer"; } }
+        \\s64 :: instance Label_Of                     { label_of :: (value: s64) -> string { return "specifically s64"; } }
+        \\
+        \\main :: () {
+        \\    a: s64 = 1;
+        \\    b: s16 = 2;
+        \\    print("% / %\n", label_of(a), label_of(b));
+        \\}
+    );
+    code_block(29, "text", #string
+        \\specifically s64 / an integer
+    );
+    paragraph(30, #string,oneline
+        \\The same freedom applies across module boundaries. A program may add an
+        \\instance for a standard-library type and a standard-library class, and it
+        \\outranks the Prelude's blanket instance for the same type by being
+        \\concrete.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\u8 :: instance Show { show :: (value: u8) -> string { return "byte(" + show(cast(s64)value) + ")"; } }
+        \\
+        \\main :: () {
+        \\    b: u8 = 7;
+        \\    n: s64 = 7;
+        \\    print("% %\n", show(b), show(n));
+        \\}
+    );
+    code_block(32, "text", #string
+        \\byte(7) 7
+    );
+    note(33, #string,oneline
+        \\Evidence and dispatch are different questions. A method call is ordinary
+        \\overload resolution, so it goes through implicit coercions and a concrete
+        \\instance can capture an argument of a different but convertible type, even
+        \\though the evidence query for that type is false. Where an instance must
+        \\key on one type exactly, use a blanket head with `where T == s64` rather
+        \\than a concrete head.
+    );
+    code_block(34, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Label_Of :: typeclass (T: type) #minimal(label_of) {
+        \\    label_of :: (value: T) -> string;
+        \\}
+        \\
+        \\s64 :: instance Label_Of { label_of :: (value: s64) -> string { return "the s64 instance"; } }
+        \\
+        \\LABEL_U32 :: Label_Of(u32);
+        \\
+        \\main :: () {
+        \\    c: u32 = 3;
+        \\    print("call    = %\n", label_of(c));
+        \\    print("evidence = %\n", LABEL_U32);
+        \\}
+    );
+    code_block(35, "text", #string
+        \\call    = the s64 instance
+        \\evidence = 0
+    );
+}
+
+render_section_73 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso has no separate constraint-solving pass for typeclasses. A call to
+        \\a class method is resolved by the ordinary overload machinery, over the
+        \\set of every instance method and every class default that carries that
+        \\name. Instance selection is overload resolution, and every rule that
+        \\governs overloads governs it.
+    );
+    paragraph(1, #string,oneline
+        \\That single design decision produces most of the behaviour worth
+        \\memorising. A more specific instance outranks a more general one. An
+        \\implicit conversion applied to an argument can change which instance is
+        \\selected. Two equally good instances are a diagnostic at the call site,
+        \\not at the declaration.
+    );
+    subheading(2, "The resolution steps");
+    paragraph(3, #string,oneline
+        \\The checker performs these steps in order for every call whose name is
+        \\owned by a typeclass. Steps 5 and 6 exist only to break ties, and a
+        \\program that never writes overlapping instances never reaches them.
+    );
+    table_header(4, "Step   —   What the checker does");
+    table_row(5, "1   |   Collect every declaration with that name. A call written `Class(T).m(...)` drops candidates that do not belong to `Class`.");
+    table_row(6, "2   |   Unify and coerce every argument against each candidate's parameter annotations, accumulating a specificity score.");
+    table_row(7, "3   |   Run the candidate's `#modify` block, then its `where` clauses, then check that the instance head itself has evidence.");
+    table_row(8, "4   |   If any surviving match is a real instance method, discard every class-default match.");
+    table_row(9, "5   |   Sort by implicit `#empty` witness first, then by score, highest first.");
+    table_row(10, "6   |   If the top two still tie, narrow by the expected return type, then by compile-time-number defaulting.");
+    table_row(11, "7   |   A remaining tie is `error: ambiguous typeclass operation '<name>' for these argument types`.");
+    subheading(12, "The specificity score");
+    paragraph(13, #string,oneline
+        \\The score is a small integer accumulated while the arguments are matched.
+        \\It measures how much of the candidate's signature was pinned down by the
+        \\call rather than left generic, so a signature that names a concrete type
+        \\outscores one that names a type variable.
+    );
+    table_header(14, "Contribution   —   When it applies");
+    table_row(15, "`+2`   |   A parameter with a concrete annotation that the argument coerced to.");
+    table_row(16, "`+1`   |   A generic parameter, when the candidate is an instance method or a class default.");
+    table_row(17, "`+2`   |   An argument that is a typeclass method reference resolved against a concrete function parameter.");
+    table_row(18, "`+10_000`   |   Every argument's own type equalled its parameter type, with no coercion anywhere.");
+    paragraph(19, #string,oneline
+        \\The exactness bonus dominates everything else, which is why an instance
+        \\that matches the argument type on the nose beats one that would need a
+        \\widening conversion, however concrete the second one is. The primary sort
+        \\key is not the score at all: a candidate that consumed an implicit
+        \\`#empty:` type witness sorts behind one that did not, and only then does
+        \\the score decide.
+    );
+    subheading(20, "Specific instances beat general ones");
+    paragraph(21, #string,oneline
+        \\A blanket instance guarded by a `where` predicate and a concrete instance
+        \\for one type may both apply. When both match exactly, the concrete one
+        \\scores `+2` against the blanket's `+1` and wins.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Label_Of :: typeclass (T: type) #minimal(label_of) {
+        \\    label_of :: (value: T) -> string;
+        \\    describe :: (value: T) -> string { return "a " + label_of(value); }
+        \\}
+        \\
+        \\$T  :: instance Label_Of where Is_Integer(T) {
+        \\    label_of :: (value: T) -> string { return "integer"; }
+        \\}
+        \\s64 :: instance Label_Of {
+        \\    label_of :: (value: s64) -> string { return "s64"; }
+        \\    describe :: (value: s64) -> string { return "exactly s64"; }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: s64 = 1;
+        \\    b: u16 = 2;
+        \\    print("%\n", label_of(a));
+        \\    print("%\n", label_of(b));
+        \\    print("%\n", describe(a));
+        \\    print("%\n", describe(b));
+        \\}
+    );
+    code_block(23, "text", #string
+        \\s64
+        \\integer
+        \\exactly s64
+        \\exactly s64
+    );
+    paragraph(24, #string,oneline
+        \\`label_of(a)` scores `10002` for the `s64` instance against `10001` for
+        \\the blanket, so the concrete instance is chosen. `label_of(b)` reverses
+        \\it: `u16` matches the blanket's `T` exactly and earns the exactness bonus,
+        \\while the `s64` instance needs a widening conversion and scores only `2`.
+    );
+    paragraph(25, #string,oneline
+        \\The last line is the one that surprises. `describe(b)` has two candidates:
+        \\the class default, which matches `u16` exactly for `10001`, and the `s64`
+        \\instance method, which scores `2`. Step 4 runs before the sort, so the
+        \\default is discarded the moment any instance matched, and the low-scoring
+        \\instance method is what remains. An instance method always beats a class
+        \\default, regardless of score, because the default exists to be overridden.
+    );
+    note(26, #string,oneline
+        \\Because selection runs through the ordinary implicit conversions, an
+        \\instance written for one concrete type can capture arguments of every
+        \\type that converts to it. With no blanket instance in the program, there
+        \\is nothing to score higher and the conversion goes unremarked.
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Tag_Of :: typeclass (T: type) #minimal(tag_of) {
+        \\    tag_of :: (value: T) -> string;
+        \\}
+        \\
+        \\s64 :: instance Tag_Of { tag_of :: (value: s64) -> string { return "s64 instance"; } }
+        \\
+        \\main :: () {
+        \\    u: u16 = 1;
+        \\    print("u16 -> %\n", tag_of(u));
+        \\}
+    );
+    code_block(28, "text", #string
+        \\u16 -> s64 instance
+    );
+    paragraph(29, #string,oneline
+        \\An instance keyed on exactly one type is written as a blanket instance
+        \\whose predicate is a type equality, because a `where` clause is checked
+        \\after the argument has been bound and admits no conversion.
+        \\`$T :: instance Tag_Of where T == s64` matches `s64` and nothing else, and
+        \\`where Is_Integer(T) && T != s64` is the complementary instance.
+    );
+    subheading(30, "Dispatch by the expected return type");
+    paragraph(31, #string,oneline
+        \\A method whose class parameter appears only in return position gives the
+        \\arguments nothing to decide. Every instance then matches equally well, the
+        \\scores tie, and step 6 consults the type the call site expects.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Unit_Of :: typeclass (T: type) #minimal(unit_of) {
+        \\    unit_of :: () -> T;
+        \\}
+        \\
+        \\s64 :: instance Unit_Of { unit_of :: () -> s64 { return 7; } }
+        \\f64 :: instance Unit_Of { unit_of :: () -> f64 { return 1.5; } }
+        \\
+        \\pick :: () -> f64 { return unit_of(); }
+        \\
+        \\main :: () {
+        \\    a: s64 = unit_of();
+        \\    print("annotated = %\n", a);
+        \\    print("returned  = %\n", pick());
+        \\    b: f64 = 0.0;
+        \\    b = unit_of();
+        \\    print("assigned  = %\n", b);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\annotated = 7
+        \\returned  = 1.5
+        \\assigned  = 1.5
+    );
+    paragraph(34, #string,oneline
+        \\An annotated binding, a `return` in a function with a declared return
+        \\type, and an assignment to an already-typed variable all supply an
+        \\expected type. Nothing else does. `x := unit_of();` and
+        \\`cast(f64)unit_of()` both leave the call undirected and are
+        \\`error: ambiguous typeclass operation 'unit_of' for these argument types`,
+        \\with a note pointing at each of the two instances.
+    );
+    paragraph(35, #string,oneline
+        \\The narrowing prefers a candidate whose return type equals the expected
+        \\type exactly; if exactly one candidate's return type merely converts to
+        \\it, that one is taken instead, and two exact matches leave the tie
+        \\standing. Compile-time-number defaulting is the second tie-breaker: an
+        \\undecided numeric literal matches every numeric instance with a conversion
+        \\and never exactly, so it would otherwise read as ambiguous. Nothing
+        \\decided the literal, so its default type dispatches.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Twice :: typeclass (T: type) #minimal(twice) { twice :: (v: T) -> T; }
+        \\
+        \\s64 :: instance Twice { twice :: (v: s64) -> s64 { return v * 2; } }
+        \\f64 :: instance Twice { twice :: (v: f64) -> f64 { return v * 2.0; } }
+        \\
+        \\main :: () {
+        \\    print("twice(3)   = %\n", twice(3));
+        \\    print("twice(2.5) = %\n", twice(2.5));
+        \\}
+    );
+    code_block(37, "text", #string
+        \\twice(3)   = 6
+        \\twice(2.5) = 5
+    );
+    subheading(38, "Coherence, orphans, and evidence");
+    paragraph(39, #string,oneline
+        \\Two identical instances are legal to declare. Coherence is checked lazily,
+        \\at the call that cannot choose between them, and the diagnostic names both
+        \\declarations: `error: ambiguous typeclass operation 'tag_of' for these
+        \\argument types`, then
+        \\`note: first matching instance is declared here` and
+        \\`note: another matching instance is declared here`. The instance declared
+        \\last is reported first, because candidates are matched in reverse
+        \\declaration order.
+    );
+    paragraph(40, #string,oneline
+        \\There is no orphan rule. A program may declare an instance of a standard
+        \\class for a standard type, and it wins wherever it is more specific:
+        \\`u8 :: instance Show` outranks the Prelude's
+        \\`$T :: instance Show where Is_Integer(T)` for `u8` values and leaves every
+        \\other integer alone. Specificity, not locality, decides.
+    );
+    paragraph(41, #string,oneline
+        \\Step 3 is where a class-level `where` takes effect. The clause is a
+        \\superclass constraint evaluated when evidence is asked for, not when the
+        \\instance is declared, so an instance of `Refined :: typeclass (T: type)
+        \\where Base(T)` for a type with no `Base` instance compiles and is then
+        \\dropped from every candidate list. The call reports
+        \\`error: no overload 'sub_of' accepts these arguments` and lists the
+        \\candidates it rejected.
+    );
+    bullet(42, #string,oneline
+        \\Selection never consults a dictionary, so an instance method that is
+        \\selected is called directly and instance dispatch costs nothing at run
+        \\time. A class default and an instance method are distinguished only by
+        \\which body was written where; both are ordinary declarations in the same
+        \\candidate set.
+    );
+    note(43, #string,oneline
+        \\A class default whose signature omits one of the class parameters can
+        \\never be dispatched. For `Convert :: typeclass (From: type, To: type)`, a
+        \\default `describe :: (value: From) -> string` leaves `To` undetermined and
+        \\calling it is `error: no overload 'describe' accepts these arguments`.
+        \\Give every class parameter a position in the signature; an anonymous
+        \\`#empty:` witness parameter is the usual way to place one that carries no
+        \\value.
+    );
+}
+
+render_section_74 :: () {
+    paragraph(0, #string,oneline
+        \\A typeclass parameter carries a kind, written as an ordinary type
+        \\annotation. `T: type` declares a parameter that stands for a type;
+        \\`F: (type) -> type` declares one that stands for a type constructor, a
+        \\generic type that has not yet been applied to its argument. A class over
+        \\such a parameter is higher-kinded.
+    );
+    paragraph(1, #string,oneline
+        \\Inside the class body the parameter is applied like a generic type:
+        \\`F($A)` is the constructor at some inferred element type, and `F(B)` is
+        \\the same constructor at another. This is what lets one method signature
+        \\describe a transformation that changes the element type but keeps the
+        \\container.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Container :: typeclass (F: (type) -> type) #minimal(mapc, unwrap) {
+        \\    mapc   :: (fa: F($A), f: (A) -> $B) -> F(B);
+        \\    unwrap :: (fa: F($A)) -> A;
+        \\}
+        \\
+        \\Box  :: struct { value: $A; }
+        \\Pair :: struct { first: $A; second: A; }
+        \\
+        \\Box :: instance Container {
+        \\    mapc   :: (fa: Box($A), f: (A) -> $B) -> Box(B) { return .{ .value = f(fa.value) }; }
+        \\    unwrap :: (fa: Box($A)) -> A { return fa.value; }
+        \\}
+        \\
+        \\Pair :: instance Container {
+        \\    mapc   :: (fa: Pair($A), f: (A) -> $B) -> Pair(B) {
+        \\        return .{ .first = f(fa.first), .second = f(fa.second) };
+        \\    }
+        \\    unwrap :: (fa: Pair($A)) -> A { return fa.first; }
+        \\}
+        \\
+        \\double :: (x: s64) -> s64 { return x * 2; }
+        \\tag    :: (x: s64) -> string { return "n"; }
+        \\
+        \\main :: () {
+        \\    b: Box(s64)  = .{ .value = 21 };
+        \\    p: Pair(s64) = .{ .first = 3, .second = 4 };
+        \\    print("box  = %\n", unwrap(mapc(b, double)));
+        \\    print("pair = %\n", unwrap(mapc(p, double)));
+        \\    print("retype = %\n", unwrap(mapc(b, tag)));
+        \\}
+    );
+    code_block(3, "text", #string
+        \\box  = 42
+        \\pair = 6
+        \\retype = n
+    );
+    subheading(4, "Bare-constructor instance heads");
+    paragraph(5, #string,oneline
+        \\The instance head for a higher-kinded class is the bare constructor name.
+        \\`Box :: instance Container` supplies `Box` itself, not `Box` at some
+        \\element type, so a single instance covers every application of the
+        \\constructor at once. Writing `Box($A) :: instance Container` would supply a
+        \\type where a constructor is wanted.
+    );
+    table_header(6, "Class parameter   —   Instance head   —   Method parameter");
+    table_row(7, "`T: type`   |   `Box($A) :: instance C`   |   `(value: Box(A))`");
+    table_row(8, "`F: (type) -> type`   |   `Box :: instance C`   |   `(fa: Box($A))`");
+    paragraph(9, #string,oneline
+        \\In both forms the method's own generics are introduced with `$` at their
+        \\first occurrence and referred to without it afterwards. In the
+        \\higher-kinded form the `$A` belongs to the method, not to the head, which
+        \\is exactly why the head has no hole to fill.
+    );
+    subheading(10, "Evidence is asked at the applied type");
+    paragraph(11, #string,oneline
+        \\Although the instance is registered against the bare constructor, an
+        \\evidence query is answered for the applied type. `Box(s64)` and
+        \\`Box(string)` both implement `Functor` on the strength of one
+        \\`Box :: instance Functor`, and a type with no such instance is rejected
+        \\with the element type in the message.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\#import "Typeclass";
+        \\
+        \\Box   :: struct #derive(Functor) { value: $A; }
+        \\Plain :: struct { n: s64; }
+        \\
+        \\count_functors :: (values: ...Functor) -> s64 { return values.count; }
+        \\
+        \\main :: () {
+        \\    b: Box(s64)    = .{ .value = 1 };
+        \\    c: Box(string) = .{ .value = "x" };
+        \\    print("functors = %\n", count_functors(b, c));
+        \\}
+    );
+    code_block(13, "text", #string
+        \\functors = 2
+    );
+    paragraph(14, #string,oneline
+        \\Passing a `Plain` to the same procedure is
+        \\``error: variadic arg type `Plain` does not implement `Functor` in call
+        \\`count_functors` ``. Typeclass-constrained variadics are covered in
+        \\Typeclass-Constrained Variadics.
+    );
+    note(15, #string,oneline
+        \\There is no source-level spelling for a higher-kinded evidence query. The
+        \\constructor form `Container(Box)` is
+        \\`error: generic struct Box needs type arguments`, and the applied form
+        \\`Container(Box(s64))` is `error: non-constant function call`. Ask for the
+        \\evidence through a constrained variadic or a `where` clause on a method
+        \\that takes the applied type as an argument.
+    );
+    subheading(16, "Functor, Applicative, and Monad");
+    paragraph(17, #string,oneline
+        \\The standard library declares three higher-kinded classes in
+        \\`std/Typeclass`. They form a chain: each names the previous one as a
+        \\superclass in its class-level `where`, so evidence for `Monad` requires
+        \\evidence for `Applicative`, which requires `Functor`.
+    );
+    code_block(18, "glosso", #string
+        \\Functor :: typeclass (F: (type) -> type) #derive(derive_functor) {
+        \\    fmap :: (fa: F($A), f: (A) -> $B) -> F(B);
+        \\}
+        \\
+        \\Applicative :: typeclass (F: (type) -> type) where Functor(F) #derive(derive_applicative) {
+        \\    pure :: (x: $A) -> F(A);
+        \\    ap   :: (ff: F(($A) -> $B), fa: F(A)) -> F(B);
+        \\}
+        \\
+        \\Monad :: typeclass (M: (type) -> type) where Applicative(M) #derive(derive_monad) {
+        \\    bind :: (ma: M($A), f: (A) -> M($B)) -> M(B);
+        \\}
+    );
+    paragraph(19, #string,oneline
+        \\All three carry a derive hook, so a one-field struct or a tagged union can
+        \\request the instances instead of writing them. The derived `Applicative`
+        \\and `Monad` for a struct handle one-field structs only; for a union they
+        \\pick the single variant whose payload is the focused type parameter.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\#import "Typeclass";
+        \\
+        \\Ident :: struct #derive(Functor, Applicative, Monad) { value: $A; }
+        \\
+        \\inc  :: (x: s64) -> s64 { return x + 1; }
+        \\step :: (x: s64) -> Ident(s64) { return .{ .value = x * 10 }; }
+        \\
+        \\main :: () {
+        \\    i: Ident(s64) = .{ .value = 4 };
+        \\    m := fmap(i, inc);
+        \\    f: Ident((s64) -> s64) = .{ .value = inc };
+        \\    a := ap(f, i);
+        \\    b := bind(m, step);
+        \\    print("fmap = %\n", m.value);
+        \\    print("ap   = %\n", a.value);
+        \\    print("bind = %\n", b.value);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\fmap = 5
+        \\ap   = 5
+        \\bind = 50
+    );
+    paragraph(22, #string,oneline
+        \\`fmap`, `ap` and `bind` all dispatch on an argument whose type mentions
+        \\the class parameter, so ordinary selection resolves them. Deriving
+        \\Instances with `#derive` covers what the three macros generate, and
+        \\Writing a Derive Macro covers how they generate it.
+    );
+    subheading(23, "`pure` cannot be called");
+    paragraph(24, #string,oneline
+        \\`pure :: (x: $A) -> F(A)` mentions the class parameter only in return
+        \\position. The expected-type narrowing described in How an Instance Is
+        \\Chosen does not rescue it, because the candidate's return type is itself
+        \\generic and never equals the expected type.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\#import "Typeclass";
+        \\
+        \\Ident :: struct #derive(Functor, Applicative) { value: $A; }
+        \\
+        \\main :: () {
+        \\    p: Ident(s64) = pure(3);
+        \\    print("pure = %\n", p.value);
+        \\}
+    );
+    code_block(26, "text", #string
+        \\error: no overload 'pure' accepts these arguments
+        \\note: call pure cannot produce expected type Ident_int
+        \\note: possible candidates for 'pure':
+        \\candidate: pure :: (x: A) -> Ident(A)
+        \\candidate: pure :: (x: A) -> F(A)
+    );
+    paragraph(27, #string,oneline
+        \\A hand-written instance does not help; the limitation is in the
+        \\dispatcher, not in the derive macro. Construct the carrier directly
+        \\instead: `p: Ident(s64) = .{ .value = 3 };` says the same thing and
+        \\resolves without a class method.
+    );
+    subheading(28, "A worked example");
+    paragraph(29, #string,oneline
+        \\`examples/typeclasses.glo` in the compiler repository derives `Functor`
+        \\for a generic tagged union and writes `Applicative` and `Monad` by hand on
+        \\top of it. Both hand-written instance heads are the bare `Foo`.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\#import "Typeclass";
+        \\
+        \\Foo :: union #derive(Functor) {
+        \\    Some: $T;
+        \\    None: void;
+        \\}
+        \\
+        \\Foo :: instance Applicative {
+        \\    pure :: (x: $A) -> Foo(A) {
+        \\        return Foo.Some(x);
+        \\    }
+        \\
+        \\    ap :: (ff: Foo(($A) -> $B), fa: Foo(A)) -> Foo(B) {
+        \\        if ff == {
+        \\            case .Some(function);
+        \\                return fmap(fa, function);
+        \\            case .None;
+        \\                return .None;
+        \\        }
+        \\        return .None;
+        \\    }
+        \\}
+        \\
+        \\Foo :: instance Monad {
+        \\    bind :: (ma: Foo($A), f: (A) -> Foo($B)) -> Foo(B) {
+        \\        if ma == {
+        \\            case .Some(input);
+        \\                return f(input);
+        \\            case .None;
+        \\                return .None;
+        \\        }
+        \\        return .None;
+        \\    }
+        \\}
+        \\
+        \\inc :: (x: s64) -> s64 { return x + 1; }
+        \\to_option :: (x: s64) -> Foo(s64) { return Foo.Some(x + 10); }
+        \\
+        \\main :: () {
+        \\    o := Foo.Some(42);
+        \\    mapped := fmap(o, inc);
+        \\    chained := bind(mapped, to_option);
+        \\    if #pattern Foo.Some(total) = mapped && #pattern Foo.Some(chained_total) = chained
+        \\        print("typeclass totals % %\n", total, chained_total);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\typeclass totals 43 53
+    );
+    bullet(32, #string,oneline
+        \\A union payload is read through a pattern capture, never through
+        \\`ma.Some`. Every derived instance emits `case Variant(payload);` arms for
+        \\the same reason.
+    );
+    bullet(33, #string,oneline
+        \\A class-level `where` on a higher-kinded class behaves exactly as it does
+        \\on a first-order one: it is evaluated when evidence is asked for, and an
+        \\instance that fails it is silently unusable rather than rejected at its
+        \\declaration.
+    );
+    bullet(34, #string,oneline
+        \\A parameter of kind `(type) -> type` accepts a generic struct or a generic
+        \\union. The built-in `?T` and `E!T` have no bare constructor spelling: the
+        \\head `?$T :: instance C` supplies a type, and a lone `?` is
+        \\`error: invalid instance head '?'`.
+    );
+}
+
+render_section_75 :: () {
+    paragraph(0, #string,oneline
+        \\A `struct` or `union` declaration may carry `#derive(Class, ...)` between
+        \\the keyword and the body. Each named class must itself declare a derive
+        \\macro; the compiler runs that macro at declaration time and splices the
+        \\instance it produces into the program.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct #derive(Show, PartialEq) { x: s64; y: string; }
+        \\
+        \\Shape :: union #derive(Show, PartialEq) {
+        \\    Dot:    void;
+        \\    Line:   s64;
+        \\    Label:  string;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Point = .{ .x = 1, .y = "left" };
+        \\    b: Point = .{ .x = 1, .y = "left" };
+        \\    c: Point = .{ .x = 2, .y = "left" };
+        \\    print("show   = %\n", show(a));
+        \\    print("a == b = %\n", a == b);
+        \\    print("a == c = %\n", a == c);
+        \\
+        \\    s: Shape = Shape.Line(7);
+        \\    t: Shape = Shape.Line(7);
+        \\    u: Shape = Shape.Dot;
+        \\    print("union  = %\n", show(s));
+        \\    print("dot    = %\n", show(u));
+        \\    print("s == t = %\n", s == t);
+        \\    print("s == u = %\n", s == u);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\show   = {1, left}
+        \\a == b = 1
+        \\a == c = 0
+        \\union  = Line(7)
+        \\dot    = Dot
+        \\s == t = 1
+        \\s == u = 0
+    );
+    paragraph(3, #string,oneline
+        \\The generated instance is an ordinary instance in every respect. It takes
+        \\part in selection on the same terms as a hand-written one, under the rules
+        \\in How an Instance Is Chosen, and a second instance declared for the same
+        \\type is the ordinary ambiguity rather than an override.
+    );
+    paragraph(4, #string,oneline
+        \\A class with no derive macro cannot be derived. Naming one is
+        \\`error: typeclass 'Plain' does not declare a derive macro`, reported at
+        \\the type declaration, and every later call to the class method fails as
+        \\well because no instance was ever created.
+    );
+    subheading(5, "What the standard classes generate");
+    table_header(6, "Class   —   Macro   —   What it writes");
+    table_row(7, "`Show`   |   `derive_show`   |   `{f1, f2}` for a struct, `Variant` or `Variant(payload)` for a union.");
+    table_row(8, "`PartialEq`   |   `derive_partial_eq`   |   Field-by-field `&&` for a struct; same-variant payload comparison for a union.");
+    table_row(9, "`Functor`   |   `derive_functor`   |   `fmap` over the final type parameter, mapping every field or variant that uses it.");
+    table_row(10, "`Applicative`   |   `derive_applicative`   |   `pure` and `ap`; one-field structs only, or the single focused union variant.");
+    table_row(11, "`Monad`   |   `derive_monad`   |   `bind`, under the same shape restrictions as `Applicative`.");
+    table_row(12, "`Error`   |   `derive_error`   |   `report_error` for a non-generic tagged union whose every variant payload is itself `Error`.");
+    table_row(13, "`Serialize`, `Deserialize`   |   `derive_serialize`, `derive_deserialize`   |   Field-wise and variant-wise encoders and decoders, in `Serialization`.");
+    paragraph(14, #string,oneline
+        \\`FromString` deliberately ships no derive macro. A parser for a user type
+        \\has to decide what its accepted spellings are, and no field-wise rule
+        \\produces a useful answer. The `Error` derive and the `#from` union
+        \\variants that pair with it are covered in the chapter on `Error`,
+        \\`Termination`, and `main`.
+    );
+    bullet(15, #string,oneline
+        \\The `#derive(...)` list on a struct or union is a comma-separated list of
+        \\plain identifiers. There is no syntax for passing options to a macro, so
+        \\the `Derive_Options` a macro receives is always empty and every macro uses
+        \\its default focus.
+    );
+    bullet(16, #string,oneline
+        \\`#derive` is accepted on `struct`, `union`, and `distinct` declarations.
+        \\On an `enum` it does not parse: `Color :: enum #derive(Show) { ... }` is
+        \\`error: unexpected token 'derive'`.
+    );
+    bullet(17, #string,oneline
+        \\A derive macro that rejects the shape it was handed reports its own
+        \\`#compile_error` text, such as `Show derive is not defined for #raw union`
+        \\or `Functor derive needs exactly one focused type parameter`.
+    );
+    note(18, #string,oneline
+        \\A derived `Show` on a generic type is only lowered where a call demands
+        \\the monomorphization. `print("%", value)` boxes the argument and looks the
+        \\shower up by mangled name at code generation, so a generic instance with
+        \\no direct `show` call anywhere in the program prints the type name in
+        \\braces instead. Write `print("%", show(value))` for generic types.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Tagged :: union #derive(Show) { Some: $A; None: void; }
+        \\
+        \\main :: () {
+        \\    t: Tagged(s64) = Tagged.Some(9);
+        \\    print("through print = %\n", t);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\through print = {Tagged_int}
+    );
+    subheading(21, "Deriving on a `distinct` type");
+    paragraph(22, #string,oneline
+        \\`#derive` on a `distinct` declaration is a different feature that shares
+        \\the spelling. It generates no code at all. A `distinct` type inherits none
+        \\of its representation's operators by default, and the derive list is the
+        \\list of operator classes it is permitted to borrow.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Meters  :: distinct f64 #derive(Add, Sub, Neg, PartialEq, PartialOrd, Mul(Meters, f64), Show);
+        \\Seconds :: distinct f64 #derive,all;
+        \\
+        \\main :: () {
+        \\    a: Meters = 3.0;
+        \\    b: Meters = 4.0;
+        \\    print("a+b   = %\n", show(a + b));
+        \\    print("a-b   = %\n", show(a - b));
+        \\    print("-a    = %\n", show(-a));
+        \\    print("a*2   = %\n", show(a * 2.0));
+        \\    print("a<b   = %\n", a < b);
+        \\    print("a==b  = %\n", a == b);
+        \\
+        \\    s: Seconds = 3.0;
+        \\    t: Seconds = 4.0;
+        \\    print("s+t   = %\n", show(s + t));
+        \\    print("s/t   = %\n", show(s / t));
+        \\}
+    );
+    code_block(24, "text", #string
+        \\a+b   = 7
+        \\a-b   = -1
+        \\-a    = -3
+        \\a*2   = 6
+        \\a<b   = 1
+        \\a==b  = 0
+        \\s+t   = 7
+        \\s/t   = 0.75
+    );
+    paragraph(25, #string,oneline
+        \\The operator is resolved on the representation and the nominal tag is put
+        \\back only when the representation's result is the representation itself.
+        \\`Meters + Meters` is `Meters`, and so is `Meters / Meters`, but
+        \\`Meters == Meters` stays `bool`.
+    );
+    subheading(26, "Naming operand types");
+    paragraph(27, #string,oneline
+        \\A bare class name in the list derives the same-type instance: every
+        \\operand and the result are the nominal type. An entry with type arguments
+        \\names the operand types where they differ, which is what makes scaling a
+        \\dimensioned quantity expressible.
+    );
+    table_header(28, "Derive entry   —   Instance it permits");
+    table_row(29, "`Add`   |   `Meters + Meters`, yielding `Meters`.");
+    table_row(30, "`Mul(Meters, f64)`   |   `Meters * f64`, yielding `Meters`. The mirrored form needs its own `Mul(f64, Meters)`.");
+    table_row(31, "`#derive,all`   |   Every operator the representation supports, written instead of a list.");
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Meters :: distinct f64
+        \\    #derive(Add, Show, PartialEq, Mul(Meters, f64), Mul(f64, Meters), Div(Meters, Meters));
+        \\
+        \\main :: () {
+        \\    a: Meters = 3.0;
+        \\    b: Meters = 4.0;
+        \\    scale: f64 = 2.0;
+        \\    print("a * scale = %\n", show(a * scale));
+        \\    print("scale * a = %\n", show(scale * a));
+        \\    ratio := a / b;
+        \\    print("a / b     = %\n", show(ratio));
+        \\    print("ratio type= %\n", type_name(type_of(ratio)));
+        \\    print("cmp  type = %\n", type_name(type_of(a == b)));
+        \\}
+    );
+    code_block(33, "text", #string
+        \\a * scale = 6
+        \\scale * a = 6
+        \\a / b     = 0.75
+        \\ratio type= Meters
+        \\cmp  type = bool
+    );
+    paragraph(34, #string,oneline
+        \\An operator that was not derived names the fix in its diagnostic:
+        \\`no operator '*' for Meters and Meters: a distinct type gets only the
+        \\classes it derives; add '#derive(...)' or '#derive,all' on the declaration
+        \\of 'Meters'`. `#derive` on a `distinct` with neither a list nor `,all` is
+        \\`error: '#derive' on a distinct type needs a class list or ',all'`.
+    );
+    note(35, #string,oneline
+        \\The derive list on a `distinct` type gates operators only. A named
+        \\typeclass method still resolves through the ordinary generic instances,
+        \\because the predicates those instances test are true of the
+        \\representation. `Meters :: distinct f64;` with no derive at all still
+        \\answers `show(a)` with `3.5`.
+    );
+}
+
+render_section_76 :: () {
+    paragraph(0, #string,oneline
+        \\A derive macro is an ordinary `#expand` macro, named by the `#derive(...)`
+        \\directive on a typeclass declaration. The compiler calls it once per type
+        \\that requests the class, and the macro's job is to `#insert` an `instance`
+        \\declaration.
+    );
+    paragraph(1, #string,oneline
+        \\The call is always made with the same three parameters: the type itself,
+        \\a reflection summary of it, and the options the request carried. The macro
+        \\returns nothing; its effect is whatever it inserts.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Arity :: typeclass (T: type) #derive(derive_arity) #minimal(arity_of) {
+        \\    arity_of :: (value: T) -> s64;
+        \\}
+        \\
+        \\derive_arity :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
+        \\    if !Is_Struct(T) #compile_error "Arity can only be derived for structs";
+        \\    empty_focuses: []s64;
+        \\    empty_replacements: []Code;
+        \\    section    := derive_type_section(info, empty_focuses);
+        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    count      := info.fields.count;
+        \\    #insert #code {
+        \\        ``section :: instance Arity {
+        \\            arity_of :: (value: ``input_type) -> s64 { return ``count; }
+        \\        }
+        \\    };
+        \\}
+        \\
+        \\Point  :: struct #derive(Arity, Show) { x: s64; y: s64; }
+        \\Triple :: struct #derive(Arity) { a: s64; b: s64; c: s64; }
+        \\Pair   :: struct #derive(Arity) { k: $K; v: $V; }
+        \\
+        \\main :: () {
+        \\    p: Point  = .{ .x = 1, .y = 2 };
+        \\    t: Triple;
+        \\    q: Pair(s64, string) = .{ .k = 1, .v = "x" };
+        \\    print("Point  % arity=%\n", show(p), arity_of(p));
+        \\    print("Triple arity=%\n", arity_of(t));
+        \\    print("Pair   arity=%\n", arity_of(q));
+        \\}
+    );
+    code_block(3, "text", #string
+        \\Point  {1, 2} arity=2
+        \\Triple arity=3
+        \\Pair   arity=2
+    );
+    paragraph(4, #string,oneline
+        \\Everything the macro computes is spliced into the `#code` block with the
+        \\double-backtick escape. `section` and `input_type` are `Code` values built
+        \\by the reflection intrinsics, and `count` is an ordinary compile-time
+        \\integer; splicing all three is what makes one macro serve `Point`,
+        \\`Triple`, and the generic `Pair`. A body whose shape depends on a loop
+        \\over the members is usually built as a source string and `#insert`ed
+        \\instead, which is what the standard derives do.
+    );
+    subheading(5, "The reflection types");
+    paragraph(6, #string,oneline
+        \\`std/Typeclass/Derive.glo` declares the structures the compiler fills in.
+        \\The Prelude imports `Typeclass`, so `Derive_Type_Info`, `Derive_Options`,
+        \\`Code`, and the intrinsics below resolve in a program with no import line
+        \\at all; the `#import "Typeclass";` commonly written beside a derive macro
+        \\is not what makes them visible.
+    );
+    table_header(7, "Type   —   Member   —   Meaning");
+    table_row(8, "`Derive_Type_Info`   |   `base`   |   The ordinary `Type_Info`: tag, canonical name, size, alignment.");
+    table_row(9, "`Derive_Type_Info`   |   `params`   |   Generic parameters in declaration order, as `Type_Param_Info`.");
+    table_row(10, "`Derive_Type_Info`   |   `fields`   |   Struct fields, as `Derive_Field_Info`. Empty for a union.");
+    table_row(11, "`Derive_Type_Info`   |   `variants`   |   Tagged-union variants, as `Derive_Variant_Info`. Empty for a struct.");
+    table_row(12, "`Derive_Type_Info`   |   `raw_union`   |   True for a `#raw union`, where tagged-union logic does not apply.");
+    table_row(13, "`Type_Param_Info`   |   `name`, `index`   |   Source name and zero-based position; `index` is what the query helpers take.");
+    table_row(14, "`Derive_Field_Info`   |   `name`, `ty`   |   Field name and its type resolved in the type's generic scope.");
+    table_row(15, "`Derive_Variant_Info`   |   `name`, `payload`   |   Variant name and payload type; a payload-less variant reports `void`.");
+    table_row(16, "`Derive_Options`   |   `focus_params`   |   Requested focus parameter names. Always empty in current source.");
+    paragraph(17, #string,oneline
+        \\Because there is no syntax for passing options in `#derive(...)`, a macro
+        \\that calls `derive_focus_params(info, opts, n)` always gets the default:
+        \\the final `n` type parameters. A macro with no use for `opts` may leave the
+        \\parameter untouched; `derive_error` writes `_ := opts;` to record the
+        \\intent, and the other standard derives that ignore it write nothing.
+    );
+    subheading(18, "The code-building intrinsics");
+    table_header(19, "Call   —   Result");
+    table_row(20, "`derive_type_info(T)`   |   The `Derive_Type_Info` for `T`. The compiler supplies it to a derive macro already.");
+    table_row(21, "`derive_type_section(info, focuses)`   |   The instance head, with focused parameters left as holes: `Pair($K, _)`.");
+    table_row(22, "`derive_type_apply(info, focuses, reps)`   |   A concrete type expression, substituting `reps` for the focused parameters.");
+    table_row(23, "`derive_type_fn(params, ret)`   |   A function-type expression, for building `F(($A) -> $B)`.");
+    table_row(24, "`type_uses_param(T, i)`   |   True when `T` mentions parameter `i` anywhere.");
+    table_row(25, "`type_is_param(T, i)`   |   True when `T` is exactly parameter `i`: true for `A`, false for `[]A`.");
+    table_row(26, "`type_occurs_covariantly(T, i)`   |   True when every occurrence of parameter `i` in `T` is covariant.");
+    table_row(27, "`derive_focus_params(info, opts, n)`   |   The `n` focused parameter indexes, defaulting to the final `n`.");
+    paragraph(28, #string,oneline
+        \\The head shape a macro must emit depends on the arity of the class. A
+        \\one-parameter class takes the section alone; a two-parameter class such as
+        \\`PartialEq(L, R)` takes a tuple head, which for a same-type instance pairs
+        \\the section with the applied type.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\#import "Typeclass";
+        \\
+        \\Same_Shape :: typeclass (L: type, R: type) #derive(derive_same_shape) #minimal(same_shape) {
+        \\    same_shape :: (a: L, b: R) -> bool;
+        \\}
+        \\
+        \\derive_same_shape :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
+        \\    _ := opts;
+        \\    empty_focuses: []s64;
+        \\    empty_replacements: []Code;
+        \\    section := derive_type_section(info, empty_focuses);
+        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    #insert #code {
+        \\        (``section, ``input_type) :: instance Same_Shape {
+        \\            same_shape :: (a: ``input_type, b: ``input_type) -> bool {
+        \\                return true;
+        \\            }
+        \\        }
+        \\    };
+        \\}
+        \\
+        \\Point :: struct #derive(Same_Shape) { x: s64; y: s64; }
+        \\
+        \\main :: () {
+        \\    p: Point;
+        \\    q: Point;
+        \\    print("same = %\n", same_shape(p, q));
+        \\}
+    );
+    code_block(30, "text", #string
+        \\same = 1
+    );
+    subheading(31, "Reading fields and variants");
+    paragraph(32, #string,oneline
+        \\A macro that handles both struct and union shapes tests `Is_Struct` and
+        \\`Is_Union`, refuses a `#raw union` explicitly, and walks `info.fields` or
+        \\`info.variants`. Both loops run at compile time, so the string they build
+        \\is a constant by the time the instance is inserted.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\#import "Typeclass";
+        \\#import "String_Builder";
+        \\#import "Format";
+        \\
+        \\Members :: typeclass (T: type) #derive(derive_members) #minimal(member_names) {
+        \\    member_names :: (value: T) -> string;
+        \\}
+        \\
+        \\members_body :: (info: Derive_Type_Info) -> string
+        \\    #memory(returns_fresh, reads(info), noescape(info))
+        \\{
+        \\    source := sb_new();
+        \\    sb_append(*source, "return \"");
+        \\    first := true;
+        \\    for field: info.fields {
+        \\        if !first sb_append(*source, ", ");
+        \\        sb_append(*source, field.name);
+        \\        first = false;
+        \\    }
+        \\    for variant: info.variants {
+        \\        if !first sb_append(*source, ", ");
+        \\        sb_append(*source, variant.name);
+        \\        if variant.payload != void sb_append(*source, "(_)");
+        \\        first = false;
+        \\    }
+        \\    sb_append(*source, "\";");
+        \\    return sb_to_string(source);
+        \\}
+        \\
+        \\derive_members :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
+        \\    if !Is_Struct(T) && !Is_Union(T) {
+        \\        #compile_error "Members can only be derived for struct or union types";
+        \\    }
+        \\    if Is_Union(T) && info.raw_union {
+        \\        #compile_error "Members derive is not defined for #raw union";
+        \\    }
+        \\    _ := opts;
+        \\    empty_focuses: []s64;
+        \\    empty_replacements: []Code;
+        \\    section := derive_type_section(info, empty_focuses);
+        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    #insert #code {
+        \\        ``section :: instance Members {
+        \\            member_names :: (value: ``input_type) -> string {
+        \\                #insert members_body(info);
+        \\            }
+        \\        }
+        \\    };
+        \\}
+        \\
+        \\Point :: struct #derive(Members) { x: s64; y: s64; }
+        \\Shape :: union  #derive(Members) { Dot: void; Line: s64; }
+        \\Cell  :: struct #derive(Members) { key: $K; value: $V; }
+        \\
+        \\main :: () {
+        \\    p: Point;
+        \\    s: Shape = Shape.Dot;
+        \\    c: Cell(s64, string);
+        \\    print("Point = %\n", member_names(p));
+        \\    print("Shape = %\n", member_names(s));
+        \\    print("Cell  = %\n", member_names(c));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\Point = x, y
+        \\Shape = Dot, Line(_)
+        \\Cell  = key, value
+    );
+    paragraph(35, #string,oneline
+        \\Deriving `Members` for `Cell` produces one instance covering every
+        \\application, because `derive_type_section` with an empty focus list is the
+        \\type name alone and `derive_type_apply` reproduces the declared
+        \\parameters.
+    );
+    subheading(36, "Focused type parameters");
+    paragraph(37, #string,oneline
+        \\A class that transforms one type parameter needs the head to leave that
+        \\parameter open. `derive_focus_params` chooses which parameter that is,
+        \\`derive_type_section` turns it into a hole, and `derive_type_apply`
+        \\substitutes a replacement for it in each method signature. For a
+        \\two-parameter `Cell(K, V)` focused on the last parameter, the head becomes
+        \\`Cell($K, _)`, the input type `Cell(K, $A)`, and the output `Cell(K, B)`.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\#import "Typeclass";
+        \\
+        \\Map_Last :: typeclass (F: (type) -> type) #derive(derive_map_last) #minimal(map_last) {
+        \\    map_last :: (fa: F($A), f: (A) -> $B) -> F(B);
+        \\}
+        \\
+        \\map_last_field :: (field: Derive_Field_Info, focus: s64) -> Code {
+        \\    name := field.name;
+        \\    if !type_uses_param(field.ty, focus) return #code { .``name = fa.``name };
+        \\    if !type_is_param(field.ty, focus) {
+        \\        #compile_error "Map_Last handles a direct focused field only";
+        \\    }
+        \\    return #code { .``name = f(fa.``name) };
+        \\}
+        \\
+        \\derive_map_last :: (F: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
+        \\    if !Is_Struct(F) #compile_error "Map_Last can only be derived for structs";
+        \\    focuses := derive_focus_params(info, opts, 1);
+        \\    if focuses.count != 1 #compile_error "Map_Last needs exactly one focused type parameter";
+        \\    focus := focuses[0];
+        \\    section     := derive_type_section(info, focuses);
+        \\    input_type  := derive_type_apply(info, focuses, .[#code { $A }]);
+        \\    output_type := derive_type_apply(info, focuses, .[#code { B }]);
+        \\    #insert #code {
+        \\        ``section :: instance Map_Last {
+        \\            map_last :: (fa: ``input_type, f: (A) -> $B) -> ``output_type {
+        \\                return .{
+        \\                    #inline for field: info.fields {
+        \\                        ``map_last_field(field, focus),
+        \\                    }
+        \\                };
+        \\            }
+        \\        }
+        \\    };
+        \\}
+        \\
+        \\Cell :: struct #derive(Map_Last) { key: $K; value: $V; }
+        \\
+        \\length :: (s: string) -> s64 { return s.count; }
+        \\
+        \\main :: () {
+        \\    c: Cell(string, string) = .{ .key = "id", .value = "hello" };
+        \\    d := map_last(c, length);
+        \\    print("key = % value = %\n", d.key, d.value);
+        \\    print("type = %\n", type_name(type_of(d)));
+        \\}
+    );
+    code_block(39, "text", #string
+        \\key = id value = 5
+        \\type = Cell_string_int
+    );
+    paragraph(40, #string,oneline
+        \\`map_last_field` is a compile-time helper returning `Code`, and the
+        \\`#inline for` inside the aggregate literal splices one element per field.
+        \\`type_uses_param` distinguishes the field that must be transformed from
+        \\the ones that are copied; `type_is_param` refuses a field such as
+        \\`[]A` that mentions the parameter but is not it, which is the same
+        \\restriction the standard `Functor` derive enforces.
+    );
+    note(41, #string,oneline
+        \\A generated union arm must bind its payload with a pattern capture. Every
+        \\standard derive macro emits `case Variant(__glo_payload);` rather than
+        \\reading `value.Variant`, because a direct payload read is rejected unless
+        \\the tag has been proved. Writing `out.Variant = ...` on the way out is a
+        \\variant selection and needs no capture.
+    );
+    bullet(42, #string,oneline
+        \\A macro reports a bad shape with `#compile_error`, and the text appears
+        \\verbatim at the failing directive: deriving `Arity` for a union gives
+        \\`error: Arity can only be derived for structs`. The method the macro
+        \\writes still has to satisfy the class's `#minimal`, and because signature
+        \\keys are compared after the head arguments are substituted, a wrong return
+        \\type in generated code surfaces as a `#minimal` failure rather than as a
+        \\signature mismatch.
+    );
+}
+
+render_section_77 :: () {
+    paragraph(0, #string,oneline
+        \\Equality is a two-parameter class over the operand types, so the left and
+        \\right sides of `==` need not be the same type. Both operators have default
+        \\bodies written in terms of each other, and `#minimal` records that
+        \\implementing either one is enough.
+    );
+    code_block(1, "glosso", #string
+        \\PartialEq :: typeclass (L: type, R: type) #derive(derive_partial_eq)
+        \\    #minimal('==' | '!=')
+        \\{
+        \\    '==' :: (left: L, right: R) -> bool #operator(left, 8) #inline {
+        \\        return !(left != right);
+        \\    }
+        \\    '!=' :: (left: L, right: R) -> bool #operator(left, 8) #inline {
+        \\        return !(left == right);
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Writing both is permitted and is what the Prelude does for strings, where
+        \\each has its own intrinsic. Writing neither is
+        \\`error: instance '(Handle, Handle) :: PartialEq' does not satisfy
+        \\#minimal('==' | '!=')`, with a note pointing at the `#minimal` directive in
+        \\the standard library.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Handle :: struct { id: s64; }
+        \\Name   :: struct { text: string; }
+        \\
+        \\(Handle, Handle) :: instance PartialEq {
+        \\    '!=' :: (a: Handle, b: Handle) -> bool { return a.id != b.id; }
+        \\}
+        \\
+        \\(Handle, Name) :: instance PartialEq {
+        \\    '==' :: (a: Handle, b: Name) -> bool { return b.text == "h"; }
+        \\}
+        \\
+        \\main :: () {
+        \\    x: Handle = .{ .id = 1 };
+        \\    y: Handle = .{ .id = 1 };
+        \\    n: Name   = .{ .text = "h" };
+        \\    print("x == y = %\n", x == y);
+        \\    print("x != y = %\n", x != y);
+        \\    print("x == n = %\n", x == n);
+        \\    print("x != n = %\n", x != n);
+        \\    print("orderings = % % % %\n",
+        \\        cast(s64)Ordering.Less, cast(s64)Ordering.Equal,
+        \\        cast(s64)Ordering.Greater, cast(s64)Ordering.Unordered);
+        \\}
+    );
+    code_block(4, "text", #string
+        \\x == y = 1
+        \\x != y = 0
+        \\x == n = 1
+        \\x != n = 0
+        \\orderings = 0 1 2 3
+    );
+    paragraph(5, #string,oneline
+        \\The first instance supplies only `!=` and gets `==` from the default; the
+        \\second supplies only `==` for a mixed operand pair and gets `!=`. Because
+        \\the instance is keyed on the operand tuple, `(Handle, Name)` and
+        \\`(Name, Handle)` are separate instances and only the one that was written
+        \\exists.
+    );
+    paragraph(6, #string,oneline
+        \\`#derive(PartialEq)` writes a field-by-field conjunction for a struct and
+        \\a same-variant payload comparison for a union, which is described in
+        \\Deriving Instances with `#derive`. A hand-written instance for the same
+        \\operand pair does not replace the derived one: both are declared, and the
+        \\first call that has to choose between them is the ambiguity.
+    );
+    subheading(7, "`Eq` is a marker with a superclass");
+    paragraph(8, #string,oneline
+        \\`Eq` has no members at all. Its content is entirely in its class-level
+        \\`where`, which demands same-type `PartialEq`, and in the meaning attached
+        \\to it: an `Eq` type's equality is a real mathematical equality, reflexive
+        \\for every value.
+    );
+    code_block(9, "glosso", #string
+        \\Eq :: typeclass (T: type) where PartialEq(T, T) {}
+        \\
+        \\$T :: instance Eq where Is_Integer(T) {}
+        \\$T :: instance !Eq where Is_Float(T) {}
+        \\bool :: instance Eq {}
+        \\$T :: instance Eq where Is_String(T) {}
+        \\type :: instance Eq {}
+        \\label :: instance Eq {}
+        \\void :: instance Eq {}
+    );
+    paragraph(10, #string,oneline
+        \\`$T :: instance !Eq where Is_Float(T)` is a negative instance. Floats are
+        \\`PartialEq`, because `==` on them is well defined, but they are explicitly
+        \\not `Eq`, because a NaN is not equal to itself. A negative instance wins
+        \\over any positive one, so no later blanket instance can quietly restore
+        \\`Eq` for a float.
+    );
+    paragraph(11, #string,oneline
+        \\Marking a user type `Eq` is an empty instance body, and the evidence query
+        \\`Eq(T)` is a compile-time constant usable in a `where` clause, an `#if`,
+        \\or a top-level constant.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Version :: struct #derive(Show) { major: s64; minor: s64; }
+        \\
+        \\(Version, Version) :: instance PartialEq {
+        \\    '==' :: (a: Version, b: Version) -> bool {
+        \\        return a.major == b.major && a.minor == b.minor;
+        \\    }
+        \\}
+        \\
+        \\Version :: instance Eq {}
+        \\
+        \\(Version, Version) :: instance PartialOrd {
+        \\    '<=>' :: (a: Version, b: Version) -> Ordering {
+        \\        if a.major < b.major return Ordering.Less;
+        \\        if a.major > b.major return Ordering.Greater;
+        \\        if a.minor < b.minor return Ordering.Less;
+        \\        if a.minor > b.minor return Ordering.Greater;
+        \\        return Ordering.Equal;
+        \\    }
+        \\}
+        \\
+        \\EQ_VERSION :: Eq(Version);
+        \\EQ_F64     :: Eq(f64);
+        \\EQ_S64     :: Eq(s64);
+        \\
+        \\main :: () {
+        \\    a: Version = .{ .major = 1, .minor = 2 };
+        \\    b: Version = .{ .major = 1, .minor = 7 };
+        \\    print("a == b  = %  a != b = %\n", a == b, a != b);
+        \\    print("a <  b  = %  a <= b = %\n", a < b, a <= b);
+        \\    print("a >  b  = %  a >= b = %\n", a > b, a >= b);
+        \\    print("a <=> b = %\n", a <=> b);
+        \\    print("Eq(Version)=% Eq(f64)=% Eq(s64)=%\n", EQ_VERSION, EQ_F64, EQ_S64);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\a == b  = 0  a != b = 1
+        \\a <  b  = 1  a <= b = 1
+        \\a >  b  = 0  a >= b = 0
+        \\a <=> b = 0
+        \\Eq(Version)=1 Eq(f64)=0 Eq(s64)=1
+    );
+    paragraph(14, #string,oneline
+        \\A procedure that requires reflexive equality names it in its own `where`.
+        \\`find_at :: (values: []$T, wanted: T) -> s64 where Eq(T)` accepts an
+        \\`[]s64` or an `[]string` and rejects an `[]f64` with
+        \\`error: constraint failed for find_at`. The constraint expresses an intent
+        \\that `PartialEq` alone cannot: a lookup that must find back the value it
+        \\was given.
+    );
+    note(15, #string,oneline
+        \\`where Eq(T)` alone does not license `==` inside the body. `Eq` has no
+        \\members, and the body needs the class that owns the operator. The compiler
+        \\warns rather than failing:
+        \\`warning: no '==' for <T>: the where-clause only provides Eq`, with
+        \\`note: reported at the definition; add the class to the 'where' clause`.
+        \\Write `where PartialEq(T, T)`, adding `Eq(T)` beside it when reflexivity
+        \\is the real requirement.
+    );
+    subheading(16, "`PartialOrd` and `<=>`");
+    paragraph(17, #string,oneline
+        \\Ordering is also a two-parameter class. One member has no default; the
+        \\four comparison operators are all defined in terms of it, so an instance
+        \\that supplies `<=>` acquires `<`, `<=`, `>`, and `>=` unchanged.
+    );
+    code_block(18, "glosso", #string
+        \\PartialOrd :: typeclass (L: type, R: type) {
+        \\    '<=>' :: (a: L, b: R) -> Ordering #operator(left, 10);
+        \\
+        \\    '<' :: (a: L, b: R) -> bool #operator(left, 10) #inline {
+        \\        c := a <=> b;
+        \\        return c == Ordering.Less;
+        \\    }
+        \\    '<=' :: (a: L, b: R) -> bool #operator(left, 10) #inline {
+        \\        c := a <=> b;
+        \\        return c == Ordering.Less || c == Ordering.Equal;
+        \\    }
+        \\    '>' :: (a: L, b: R) -> bool #operator(left, 10) #inline {
+        \\        c := a <=> b;
+        \\        return c == Ordering.Greater;
+        \\    }
+        \\    '>=' :: (a: L, b: R) -> bool #operator(left, 10) #inline {
+        \\        c := a <=> b;
+        \\        return c == Ordering.Greater || c == Ordering.Equal;
+        \\    }
+        \\}
+    );
+    paragraph(19, #string,oneline
+        \\`PartialOrd` has no `#minimal` directive, so the implicit minimal applies:
+        \\every member without a default body must be implemented, which here is
+        \\`<=>` alone. Overriding one of the four defaults is allowed and is
+        \\occasionally worth doing when the type can answer `<` more cheaply than it
+        \\can answer a full three-way comparison.
+    );
+    paragraph(20, #string,oneline
+        \\All five operators sit at precedence tier 10, above the equality operators
+        \\at tier 8. The whole scale is set out in Operator Precedence and the 0-20
+        \\Scale.
+    );
+    subheading(21, "`Ordering` and what `Unordered` means");
+    paragraph(22, #string,oneline
+        \\`Ordering` is a plain enum with four variants, in this order:
+        \\`Less`, `Equal`, `Greater`, `Unordered`. `show` on an enum yields the
+        \\ordinal rather than the variant name, which is why `a <=> b` printed `0`
+        \\above rather than `Less`.
+    );
+    table_header(23, "Variant   —   Meaning");
+    table_row(24, "`Less`   |   The left operand precedes the right.");
+    table_row(25, "`Equal`   |   Neither precedes the other and they compare the same.");
+    table_row(26, "`Greater`   |   The left operand follows the right.");
+    table_row(27, "`Unordered`   |   The two operands are not comparable at all.");
+    paragraph(28, #string,oneline
+        \\`Unordered` is the reason the class is `PartialOrd` rather than a total
+        \\`Ord`. Floating point produces it for any comparison involving a NaN. The
+        \\four defaulted operators all answer `false` for an `Unordered` result, so
+        \\`a < b`, `a > b`, and `a == b` can all be false at once.
+    );
+    paragraph(29, #string,oneline
+        \\Every comparison-driven container and algorithm in the standard library
+        \\treats `Unordered` as a failure rather than as an ordering. Sorting,
+        \\`BinaryHeap`, `BTreeMap`, and `BTreeSet` all detect it and report an
+        \\error instead of proceeding, because a sort or a search tree built on an
+        \\inconsistent comparison has no correct answer to give.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\#import "Sort";
+        \\#import "Math";
+        \\
+        \\main :: () {
+        \\    good: [4]f64 = .[3.0, 1.0, 2.0, 0.5];
+        \\    r1 := sort(good[..]);
+        \\    if r1 == {
+        \\        case .Ok;         print("sorted = % % % %\n", good[0], good[1], good[2], good[3]);
+        \\        case .Err(error); print("sort err = %\n", sort_error_reason(error));
+        \\    }
+        \\
+        \\    bad: [3]f64 = .[1.0, quiet_nan(), 2.0];
+        \\    r2 := sort(bad[..]);
+        \\    if r2 == {
+        \\        case .Ok;         print("nan sort ok\n");
+        \\        case .Err(error); print("nan sort err = %\n", sort_error_reason(error));
+        \\    }
+        \\
+        \\    cmp := 1.0 <=> quiet_nan();
+        \\    print("1.0 <=> nan is Unordered = %\n", cmp == Ordering.Unordered);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\sorted = 0.5 1 2 3
+        \\nan sort err = comparison produced an unordered value
+        \\1.0 <=> nan is Unordered = 1
+    );
+    paragraph(32, #string,oneline
+        \\The two error enums carry a variant for it: `Sort_Error.Unordered` and
+        \\`Container_Error.Unordered`, both reporting `comparison produced an
+        \\unordered value`. The container operations preflight the comparisons they
+        \\will need and leave the structure logically unchanged; a sort may already
+        \\have rearranged part of the slice by the time it detects the problem.
+    );
+    bullet(33, #string,oneline
+        \\`void` has hand-written `PartialEq` and `PartialOrd` instances that answer
+        \\`true` and `Ordering.Equal` unconditionally. One inhabitant means one
+        \\answer, so neither is a comparison of stored bits.
+    );
+    bullet(34, #string,oneline
+        \\`?T` carries a hand-written `PartialEq` guarded by `where PartialEq(T, T)`
+        \\rather than a derived one, because the built-in option type cannot carry a
+        \\`#derive` directive. Two absences are equal, an absence and a presence
+        \\never are, and two presences defer to the payload.
+    );
+    bullet(35, #string,oneline
+        \\A `distinct` type inherits neither class automatically. `PartialEq` and
+        \\`PartialOrd` have to appear in its `#derive` list, and the result of a
+        \\comparison is `bool` rather than the nominal type.
+    );
+}
+
+render_section_78 :: () {
+    paragraph(0, #string,oneline
+        \\`Show` is the protocol every formatting call goes through. A `%`
+        \\placeholder in `print`, `format`, `tprint` or `format_args` consumes
+        \\one argument and replaces itself with `show` of that argument, so a
+        \\type becomes printable by acquiring a `Show` instance and by nothing
+        \\else. `FromString` is the parsing counterpart, and the two are
+        \\deliberately not symmetric: `Show` ships a derive macro, `FromString`
+        \\does not.
+    );
+    code_block(1, "glosso", #string
+        \\Show :: typeclass (T: type) #derive(derive_show) {
+        \\    show :: (value: T) -> string #memory unknown;
+        \\}
+        \\
+        \\FromString :: typeclass (T: type) {
+        \\    from_string :: (#empty: T, text: string) -> ?T
+        \\        #memory(unknown, reads(text), noescape(text));
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\Both live in `std/Prelude/Show_and_Read.glo`, which every program
+        \\loads unqualified, so neither name needs an import. `show` returns a
+        \\`string` and declares `#memory unknown`, which leaves each instance
+        \\free to return a borrow, a static, or a fresh allocation. The leading
+        \\`#empty:` parameter of `from_string` carries the result type without
+        \\becoming a runtime argument, which is why the type is written in the
+        \\call: `from_string(s64, "-42")`.
+    );
+    subheading(3, "The Prelude instances");
+    paragraph(4, #string,oneline
+        \\The Prelude keys most of its `Show` instances on a predicate rather
+        \\than on a type, so a whole family is covered by one instance. A
+        \\program may still add a concrete instance for any of these types; a
+        \\concrete head outranks a blanket one, and there is no orphan rule.
+    );
+    table_header(5, "Instance head   —   Renders as   —   Implementation");
+    table_row(6, "`string`, `string16`   |   the text itself   |   borrow; `string16` is decoded to UTF-8");
+    table_row(7, "`$T where Is_Integer(T)`   |   decimal digits   |   `#magic \"show_int\"`");
+    table_row(8, "`$T where Is_Float(T)`   |   decimal, `1.5`   |   `#magic \"show_float\"`");
+    table_row(9, "`$T where Is_Bool(T)`   |   `0` or `1`   |   `#magic \"show_bool\"`");
+    table_row(10, "`$T where Is_Enum(T)`   |   the ordinal, not the name   |   `#magic \"show_enum\"`");
+    table_row(11, "`$T where Is_Pointer(T) || Is_Procedure(T)`   |   the address   |   `#magic \"show_pointer\"`");
+    table_row(12, "`type`   |   the canonical type name   |   `#magic \"type_name\"`");
+    table_row(13, "`any`   |   the boxed value   |   `#magic \"show_any\"`");
+    table_row(14, "`label`   |   the label   |   `#magic \"show_label\"`");
+    table_row(15, "`void`   |   `.()`   |   hand written");
+    table_row(16, "`?$T where Show(T)`   |   `Some(payload)` or `None`   |   hand written, `?T` cannot carry `#derive`");
+    paragraph(17, #string,oneline
+        \\`FromString` has four Prelude instances: `string`, and blanket
+        \\instances guarded by `Is_Bool(T)`, `Is_Integer(T)` and `Is_Float(T)`.
+        \\The integer parser is overflow checked at every width including 128
+        \\bits, and the float parser accepts `inf`, `-inf`, `nan`, exponents
+        \\and subnormals. All of them consume the whole string and answer
+        \\`.None` on any leftover byte.
+    );
+    paragraph(18, #string,oneline
+        \\There is no `Show` instance for `E!T`. Passing a result to `print`
+        \\is `error: variadic arg type `Result_int_string` does not implement
+        \\`Show` in call `print``; match on it and show the payload instead.
+        \\`?T` does have one, so an option prints directly.
+    );
+    subheading(19, "What `#derive(Show)` produces");
+    paragraph(20, #string,oneline
+        \\`derive_show` accepts a struct or a tagged union. A struct renders as
+        \\its fields in declaration order inside braces; a union renders as the
+        \\variant name, with the payload in parentheses when the variant has
+        \\one. The generated body builds the text with a `String_Builder` in
+        \\the temporary allocator, and it reads a union payload through a
+        \\pattern capture rather than a field access, because a payload may
+        \\only be bound by a match. A `#raw` union is `error: Show derive is
+        \\not defined for #raw union`, since a raw union has no tag to
+        \\dispatch on.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\Money :: struct { cents: s64; }
+        \\
+        \\Money :: instance Show {
+        \\    show :: (value: Money) -> string {
+        \\        return tprint("$%.%", value.cents / 100, value.cents % 100);
+        \\    }
+        \\}
+        \\
+        \\Point :: struct #derive(Show) { x: s64; name: string; }
+        \\
+        \\Tag :: union #derive(Show) { Plain: void; Count: s64; }
+        \\
+        \\main :: () {
+        \\    m: Money = .{ .cents = 1234 };
+        \\    p: Point = .{ .x = 1, .name = "origin" };
+        \\    t: Tag = .Count(9);
+        \\    u: Tag = .Plain;
+        \\    print("money = %\n", m);
+        \\    print("point = %\n", p);
+        \\    print("tag   = % and %\n", t, u);
+        \\}
+    );
+    code_block(22, "text", #string
+        \\money = $12.34
+        \\point = {1, origin}
+        \\tag   = Count(9) and Plain
+    );
+    subheading(23, "`args: ...Show` and the `%` loop");
+    paragraph(24, #string,oneline
+        \\Every formatting entry point has the same shape: a `#comptime fmt:
+        \\string` followed by `args: ...Show`. The constraint on the pack is
+        \\what rejects an unprintable argument at the call site rather than
+        \\inside the formatter. Constrained variadics are covered in
+        \\Typeclass-Constrained Variadics.
+    );
+    paragraph(25, #string,oneline
+        \\The formatter itself is ordinary Glosso, in `__format` in
+        \\`std/Format.glo`. It walks the format string one byte at a time. A
+        \\`%` appends `show(args[ai])` and advances the argument index; every
+        \\other byte is copied. Nothing else in the format string is
+        \\interpreted: there are no width, precision, or conversion fields, and
+        \\a type controls its own rendering entirely through its instance.
+    );
+    paragraph(26, #string,oneline
+        \\Because `fmt` is a `#comptime` parameter, the placeholder count is
+        \\checked while the call is checked. Too few arguments is `error:
+        \\print: format has 3 '%' placeholder(s) but 1 argument(s) given`, and
+        \\too many is the same message with the numbers reversed. The runtime
+        \\fallbacks in `__format` for a surplus `%` are therefore unreachable
+        \\through `print`.
+    );
+    subheading(27, "Writing a literal percent");
+    paragraph(28, #string,oneline
+        \\A percent sign that is not a placeholder is written `\%`. The
+        \\formatter recognises the two-byte sequence and emits a single `%`,
+        \\and the compile-time placeholder count skips it, so an escaped
+        \\percent consumes no argument.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("% of % is %\n", 50, 200, 100);
+        \\    print("50\% of 200 is 100\n");
+        \\    print("progress: %\% done\n", 40);
+        \\}
+    );
+    code_block(30, "text", #string
+        \\50 of 200 is 100
+        \\50% of 200 is 100
+        \\progress: 40% done
+    );
+    subheading(31, "The `Format` helpers");
+    table_header(32, "Call   —   Result   —   Allocator");
+    table_row(33, "`print(fmt, args)`   |   written to standard output   |   temporary; `print` formats through `tprint`");
+    table_row(34, "`format(fmt, args)`   |   a fresh `string`   |   `context.allocator`");
+    table_row(35, "`tprint(fmt, args)`   |   a temporary `string`   |   `context.temp_allocator`");
+    table_row(36, "`format_args(fmt, args, .allocator = a)`   |   a fresh `string`   |   the named argument, defaulting to `context.allocator`");
+    table_row(37, "`format_int(value, base)`   |   digits in `base`   |   fresh; usable in a compile-time expression");
+    table_row(38, "`format_int_with_allocator(value, base, a)`   |   digits in `base`   |   the explicit allocator");
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    heap := format("% and %", 1, "two");
+        \\    temp := tprint("% and %", 3, "four");
+        \\    args := format_args("%-%", 5, 6, .allocator = context.temp_allocator);
+        \\    print("format     = %\n", heap);
+        \\    print("tprint     = %\n", temp);
+        \\    print("format_args= %\n", args);
+        \\    print("hex        = %\n", format_int(255, 16));
+        \\    print("binary     = %\n", format_int(10, 2));
+        \\}
+    );
+    code_block(40, "text", #string
+        \\format     = 1 and two
+        \\tprint     = 3 and four
+        \\format_args= 5-6
+        \\hex        = ff
+        \\binary     = 1010
+    );
+    subheading(41, "Writing a `FromString` instance");
+    paragraph(42, #string,oneline
+        \\`FromString` carries no derive macro on purpose: a parser has to
+        \\decide what it accepts, and no field-by-field expansion can guess
+        \\that. Asking for one is `error: typeclass 'FromString' does not
+        \\declare a derive macro`. An instance returns `?T`, answers `.None`
+        \\for anything it does not fully consume, and is free to call
+        \\`from_string` for its components.
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\Celsius :: struct { degrees: s64; }
+        \\
+        \\Celsius :: instance Show {
+        \\    show :: (value: Celsius) -> string {
+        \\        return tprint("%C", value.degrees);
+        \\    }
+        \\}
+        \\
+        \\Celsius :: instance FromString {
+        \\    from_string :: (#empty: Celsius, text: string) -> ?Celsius {
+        \\        if text.count == 0 return .None;
+        \\        if text[text.count - 1] != #char "C" return .None;
+        \\        digits := text[0..text.count - 1];
+        \\        n := from_string(s64, digits);
+        \\        if n == {
+        \\            case .Some(v); return .Some(.{ .degrees = v });
+        \\            case .None;    return .None;
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    a := from_string(Celsius, "21C");
+        \\    b := from_string(Celsius, "21F");
+        \\    if a == { case .Some(v); print("parsed  = %\n", v); case .None; print("parsed  = none\n"); }
+        \\    if b == { case .Some(v); print("refused = %\n", v); case .None; print("refused = none\n"); }
+        \\}
+    );
+    code_block(44, "text", #string
+        \\parsed  = 21C
+        \\refused = none
+    );
+    note(45, #string,oneline
+        \\A `%` placeholder boxes its argument into `any`, and the backend then
+        \\looks for a lowered `show` for that exact type. A concrete instance
+        \\always has one. A generic instance only produces one where some call
+        \\site demanded that monomorphisation, so a value whose only `Show`
+        \\instance is generic prints as its type name in braces. Writing
+        \\`print("%", show(x))` forces the instantiation and is the reliable
+        \\form for any generic carrier, `?T` included.
+    );
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Tagged :: union #derive(Show) { Some_Value: $A; Nothing: void; }
+        \\
+        \\Color :: enum { Red; Green; Blue; }
+        \\
+        \\main :: () {
+        \\    t: Tagged(s64) = .Some_Value(9);
+        \\    o: ?s64 = .Some(3);
+        \\    print("print only  = %\n", t);
+        \\    print("option only = %\n", o);
+        \\    print("enum        = %\n", Color.Green);
+        \\    print("bool        = %\n", true);
+        \\}
+    );
+    code_block(47, "text", #string
+        \\print only  = {Tagged_int}
+        \\option only = {Option_int}
+        \\enum        = 1
+        \\bool        = 1
+    );
+    note(48, #string,oneline
+        \\The same program with `show(t)` and `show(o)` written anywhere prints
+        \\`Some_Value(9)` and `Some(3)`. Enums and booleans render as ordinals
+        \\in every case: `show_enum` is the integer shower, so `Color.Green` is
+        \\`1` and `show(true)` is `1`. A variant name in output requires a
+        \\hand-written instance.
+    );
+}
+
+render_section_79 :: () {
+    paragraph(0, #string,oneline
+        \\Postfix `?` is not built into the compiler's notion of errors. It is
+        \\an operator owned by the `Try` typeclass, and any type that
+        \\implements `Try` is a carrier that `?` can unwrap. The class splits a
+        \\carrier into two associated types, an `Output` for the value the
+        \\happy path produces and a `Residual` for the token the failing path
+        \\carries, and gives three methods that convert between them.
+    );
+    code_block(1, "glosso", #string
+        \\Propagate :: typeclass (From: type, To: type) {
+        \\    propagate :: (#empty: To, value: From) -> To;
+        \\}
+        \\
+        \\Try_Branch :: union {
+        \\    Continue: $T;
+        \\    Break: $R;
+        \\}
+        \\
+        \\Try :: typeclass (Carrier: type)
+        \\    #minimal(from_output, from_residual, branch) {
+        \\    Output :: type;
+        \\    Residual :: type;
+        \\
+        \\    from_output :: (#empty: Carrier, output: Output) -> Carrier;
+        \\    from_residual :: (#empty: Carrier, residual: Residual) -> Carrier;
+        \\    branch :: (value: Carrier) -> Try_Branch(Output, Residual);
+        \\
+        \\    '?' :: (value: Carrier) -> Try_Branch(Output, Residual) #operator(suffix) {
+        \\        return branch(value);
+        \\    }
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`std/Typeclass/Try.glo` is the whole declaration. The `?` operator
+        \\has a default body in the class, so no instance ever writes `'?'`;
+        \\implementing `branch` is what makes `?` work, and an instance that
+        \\declares `'?'` with any other signature is `error: instance method
+        \\'?' does not match any declaration in typeclass 'Try'`. `#minimal`
+        \\names the three methods, and the two associated types are required
+        \\implicitly, because a missing `Output` makes the signature of
+        \\`from_output` unresolvable.
+    );
+    table_header(3, "Member   —   Direction   —   Role");
+    table_row(4, "`Output`   |   associated type   |   what a successful carrier holds");
+    table_row(5, "`Residual`   |   associated type   |   what a failed carrier holds, stripped of the carrier");
+    table_row(6, "`from_output`   |   value into carrier   |   wraps a bare `Output` returned from a Try-returning function");
+    table_row(7, "`from_residual`   |   residual into carrier   |   builds the carrier that `?` returns early");
+    table_row(8, "`branch`   |   carrier into token   |   the only method an instance must think about");
+    paragraph(9, #string,oneline
+        \\`Try_Branch(T, R)` is an ordinary two-variant union, not a compiler
+        \\type. `branch` returns `.Continue(value)` or `.Break(residual)`, and
+        \\that token is the entire interface between a carrier and the `?`
+        \\machinery. A carrier need not be a union itself; a struct carrier
+        \\that decides in `branch` which side it is on works exactly as well.
+    );
+    subheading(10, "How `x?` is checked");
+    paragraph(11, #string,oneline
+        \\`?` needs a boundary that can absorb a `Break`. That is either an
+        \\enclosing function whose return type implements `Try`, or an enclosing
+        \\`#try` block. Without one the operator is `error: postfix '?' requires
+        \\a Try-returning function or an enclosing #try block`. With one, the
+        \\checker performs these steps.
+    );
+    bullet(12, #string,oneline
+        \\The operand type must implement `Try`. A type with no instance at
+        \\all is `error: no suffix operator '?' for int`, because `?` is
+        \\resolved as an ordinary suffix operator before any Try-specific
+        \\reasoning happens.
+    );
+    bullet(13, #string,oneline
+        \\`Output` and `Residual` are projected from `Try(operand)`, and
+        \\`branch(operand)` is called. The result must be exactly
+        \\`Try_Branch(Output, Residual)`; an instance that returns something
+        \\else is rejected at the use site, for example `error: Try propagation
+        \\operator returned int, expected Try_Branch_int_X_Residual from
+        \\Try.branch`.
+    );
+    bullet(14, #string,oneline
+        \\On `.Continue(v)` the expression's value is `v`, typed as the
+        \\operand's `Output`.
+    );
+    bullet(15, #string,oneline
+        \\On `.Break(r)`, if the boundary's `Residual` differs from the
+        \\operand's, `propagate` is inserted to convert one into the other.
+        \\That conversion is the subject of `Propagate` and Multi-Error
+        \\Programs.
+    );
+    bullet(16, #string,oneline
+        \\`from_residual` on the boundary's carrier turns the converted
+        \\residual into the value the function returns, and control leaves the
+        \\boundary.
+    );
+    bullet(17, #string,oneline
+        \\Separately, returning a bare `Output` from a Try-returning function
+        \\wraps it with `from_output`, which is why `return x + y;` is legal in
+        \\a function declared `E!s64`.
+    );
+    paragraph(18, #string,oneline
+        \\Each of those pieces is callable by hand, so the expansion can be
+        \\written out and compared. The two functions below behave identically.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\fetch :: (ok: bool) -> string!s64 {
+        \\    if !ok return .Err("bad input");
+        \\    return .Ok(20);
+        \\}
+        \\
+        \\sugared :: (ok: bool) -> string!s64 {
+        \\    v := fetch(ok)?;
+        \\    return v + 1;
+        \\}
+        \\
+        \\expanded :: (ok: bool) -> string!s64 {
+        \\    v: s64;
+        \\    token := branch(fetch(ok));
+        \\    if token == {
+        \\        case .Continue(output); v = output;
+        \\        case .Break(residual);  return from_residual(string!s64, residual);
+        \\    }
+        \\    return from_output(string!s64, v + 1);
+        \\}
+        \\
+        \\report :: (r: string!s64) -> string {
+        \\    if r == {
+        \\        case .Ok(v);  return show(v);
+        \\        case .Err(e); return e;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("sugared  % %\n", report(sugared(true)), report(sugared(false)));
+        \\    print("expanded % %\n", report(expanded(true)), report(expanded(false)));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\sugared  21 bad input
+        \\expanded 21 bad input
+    );
+    paragraph(21, #string,oneline
+        \\The `#empty:` witness in `from_output(string!s64, v + 1)` is why the
+        \\carrier type is written as an argument. `Try(C).Output` and
+        \\`Try(C).Residual` are also usable as ordinary type annotations, which
+        \\is how a generic helper names the two halves of a carrier it was
+        \\handed.
+    );
+    subheading(22, "The built-in carriers");
+    paragraph(23, #string,oneline
+        \\`?T` and `E!T` are compiler-built-in types, but their `Try` instances
+        \\are ordinary Glosso in `std/Prelude/Option.glo` and
+        \\`std/Prelude/Result.glo`. Each residual is a separate type that
+        \\carries the failure without the carrier around it, which is what lets
+        \\one function's failure be converted into another's.
+    );
+    table_header(24, "Carrier   —   Output   —   Residual");
+    table_row(25, "`?T`   |   `T`   |   `Option_Residual`, an enum with the single variant `None`");
+    table_row(26, "`E!T`   |   `T`   |   `Result_Residual(E)`, a struct holding one `error: E`");
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Parse_Error :: struct #derive(Show) { text: string; }
+        \\
+        \\parse :: (text: string) -> Parse_Error!s64 {
+        \\    v := from_string(s64, text);
+        \\    if v == {
+        \\        case .Some(n); return .Ok(n);
+        \\        case .None;    return .Err(.{ .text = text });
+        \\    }
+        \\}
+        \\
+        \\sum_two :: (a: string, b: string) -> Parse_Error!s64 {
+        \\    x := parse(a)?;
+        \\    y := parse(b)?;
+        \\    return x + y;
+        \\}
+        \\
+        \\head :: (xs: []s64) -> ?s64 {
+        \\    if xs.count == 0 return .None;
+        \\    return .Some(xs[0]);
+        \\}
+        \\
+        \\first_plus_one :: (xs: []s64) -> ?s64 {
+        \\    return head(xs)? + 1;
+        \\}
+        \\
+        \\main :: () {
+        \\    r := sum_two("3", "4");
+        \\    e := sum_two("3", "oops");
+        \\    if r == { case .Ok(v); print("ok  %\n", v); case .Err(x); print("err %\n", show(x)); }
+        \\    if e == { case .Ok(v); print("ok  %\n", v); case .Err(x); print("err %\n", show(x)); }
+        \\
+        \\    storage: [1]s64;
+        \\    storage[0] = 41;
+        \\    empty: []s64;
+        \\    print("some %\n", show(first_plus_one(storage[..])));
+        \\    print("none %\n", show(first_plus_one(empty)));
+        \\}
+    );
+    code_block(28, "text", #string
+        \\ok  7
+        \\err {oops}
+        \\some Some(42)
+        \\none None
+    );
+    subheading(29, "`#try` blocks");
+    paragraph(30, #string,oneline
+        \\`#try { expr }` introduces a boundary without introducing a function.
+        \\It is an expression whose value is the carrier, so a `?` inside it
+        \\stops at the closing brace instead of leaving the enclosing function.
+        \\The carrier type is inferred from the first `?` in the block; a block
+        \\with none is `error: cannot infer the carrier type of #try expression;
+        \\propagate at least one value with '?'`.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Parse_Error :: struct #derive(Show) { text: string; }
+        \\
+        \\parse :: (text: string) -> Parse_Error!s64 {
+        \\    v := from_string(s64, text);
+        \\    if v == {
+        \\        case .Some(n); return .Ok(n);
+        \\        case .None;    return .Err(.{ .text = text });
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    good := #try { parse("5")? + parse("6")? };
+        \\    bad  := #try { parse("5")? + parse("x")? };
+        \\    if good == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\    if bad  == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\}
+    );
+    code_block(32, "text", #string
+        \\ok  11
+        \\err {x}
+    );
+    paragraph(33, #string,oneline
+        \\The grammar is narrow on purpose, because the block has to have a
+        \\value. It holds exactly one expression and no statements: a trailing
+        \\semicolon is `error: #try contains one expression; remove the
+        \\semicolon`, and a `return` inside it is `error: return is not allowed
+        \\inside a #try expression`. The expression's type must be the
+        \\carrier's `Output`. Error-only cleanup at a boundary is written with
+        \\`#try defer`, described in `defer` and `#try defer`.
+    );
+    subheading(34, "Writing a `Try` instance");
+    paragraph(35, #string,oneline
+        \\An instance supplies the two associated types and the three methods.
+        \\`branch` carries the real logic; `from_output` and `from_residual`
+        \\are usually one constructor each. Because the head may be generic,
+        \\a carrier parameterised by its payload is written with a section
+        \\hole and referred to without the `$` inside the body.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Validated :: union { Valid: $T; Invalid: string; }
+        \\Invalid_Reason :: struct { message: string; }
+        \\
+        \\Validated($T) :: instance Try {
+        \\    Output   :: T;
+        \\    Residual :: Invalid_Reason;
+        \\
+        \\    from_output :: (#empty: Validated(T), output: T) -> Validated(T) {
+        \\        return .Valid(output);
+        \\    }
+        \\    from_residual :: (#empty: Validated(T), residual: Invalid_Reason) -> Validated(T) {
+        \\        return .Invalid(residual.message);
+        \\    }
+        \\    branch :: (value: Validated(T)) -> Try_Branch(T, Invalid_Reason) {
+        \\        if value == {
+        \\            case .Valid(v);   return .Continue(v);
+        \\            case .Invalid(m); return .Break(.{ .message = m });
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\positive :: (n: s64) -> Validated(s64) {
+        \\    if n <= 0 return .Invalid("not positive");
+        \\    return .Valid(n);
+        \\}
+        \\
+        \\doubled :: (n: s64) -> Validated(s64) {
+        \\    v := positive(n)?;
+        \\    return v * 2;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := doubled(7);
+        \\    b := doubled(-1);
+        \\    if a == { case .Valid(v); print("valid   %\n", v); case .Invalid(m); print("invalid %\n", m); }
+        \\    if b == { case .Valid(v); print("valid   %\n", v); case .Invalid(m); print("invalid %\n", m); }
+        \\}
+    );
+    code_block(37, "text", #string
+        \\valid   14
+        \\invalid not positive
+    );
+    paragraph(38, #string,oneline
+        \\`return v * 2;` in `doubled` is a bare `Output`, wrapped by
+        \\`from_output`. The `Residual` is a type of the instance's own
+        \\choosing, and keeping it distinct from the carrier is what allows a
+        \\`Propagate` instance to convert it later.
+    );
+    note(39, #string,oneline
+        \\A missing associated type does not report itself as a missing
+        \\associated type. Dropping `Output` makes the declared signature of
+        \\`from_output` unresolvable, and the instance is rejected as `error:
+        \\instance 'X :: Try' does not satisfy #minimal(from_output,
+        \\from_residual, branch)` with a note pointing at the class. Check the
+        \\associated types first when that message appears.
+    );
+}
+
+render_section_80 :: () {
+    paragraph(0, #string,oneline
+        \\`Propagate` is the conversion `?` performs when the value being
+        \\propagated fails with one residual and the enclosing boundary
+        \\requires another. It is deliberately narrower than a general implicit
+        \\conversion protocol: nothing else in the language consults it, and it
+        \\is never applied to a successful value.
+    );
+    code_block(1, "glosso", #string
+        \\Propagate :: typeclass (From: type, To: type) {
+        \\    propagate :: (#empty: To, value: From) -> To;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\The class has two parameters and one method, and the head is written
+        \\as a tuple: `(From_Type, To_Type) :: instance Propagate`. The leading
+        \\`#empty:` witness names the target, which is what lets the compiler
+        \\select a conversion by its destination rather than by inference from
+        \\the return type. `?` inserts a `propagate` call only when the two
+        \\residual types differ; a function propagating its own error type
+        \\needs no instance at all.
+    );
+    subheading(3, "The Prelude's residual lifting");
+    paragraph(4, #string,oneline
+        \\A residual is not the error; for `E!T` it is `Result_Residual(E)`,
+        \\a struct wrapping one `E`. Writing conversions at the residual level
+        \\would mean writing wrapper structs by hand for every pair of error
+        \\types. The Prelude removes that step with one blanket instance in
+        \\`std/Prelude/Result.glo`.
+    );
+    code_block(5, "glosso", #string
+        \\(Result_Residual($From), Result_Residual($To)) :: instance Propagate
+        \\    where Propagate(From, To) {
+        \\    propagate :: (
+        \\        #empty: Result_Residual(To),
+        \\        value: Result_Residual(From),
+        \\    ) -> Result_Residual(To) {
+        \\        return .{ .error = propagate(To, value.error) };
+        \\    }
+        \\}
+    );
+    paragraph(6, #string,oneline
+        \\The consequence is the rule to remember: a `Propagate` instance
+        \\between two error types is enough to make `?` widen between the
+        \\corresponding results. The instance below converts `Low_Error` into
+        \\`High_Error`, and `?` in a `High_Error!s64` function then accepts a
+        \\`Low_Error!s64` with no other change.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Low_Error  :: struct #derive(Show) { code: s64; }
+        \\High_Error :: struct #derive(Show) { code: s64; note: string; }
+        \\
+        \\(Low_Error, High_Error) :: instance Propagate {
+        \\    propagate :: (#empty: High_Error, value: Low_Error) -> High_Error {
+        \\        return .{ .code = value.code, .note = "lifted" };
+        \\    }
+        \\}
+        \\
+        \\low :: (ok: bool) -> Low_Error!s64 {
+        \\    if !ok return .Err(.{ .code = 7 });
+        \\    return .Ok(2);
+        \\}
+        \\
+        \\high :: (ok: bool) -> High_Error!s64 {
+        \\    v := low(ok)?;
+        \\    return v * 10;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := high(true);
+        \\    b := high(false);
+        \\    if a == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\    if b == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\}
+    );
+    code_block(8, "text", #string
+        \\ok  20
+        \\err {7, lifted}
+    );
+    subheading(9, "Instances between residuals");
+    paragraph(10, #string,oneline
+        \\The lifting instance only covers result-to-result. Converting between
+        \\different carriers means writing the instance at the residual level,
+        \\because there is no error type on the option side to lift from.
+        \\Absorbing an option into a result is the common case: the residual
+        \\`Option_Residual` carries no information, so the instance supplies
+        \\the error it stands for.
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Missing :: struct #derive(Show) { key: string; }
+        \\
+        \\(Option_Residual, Result_Residual(Missing)) :: instance Propagate {
+        \\    propagate :: (
+        \\        #empty: Result_Residual(Missing),
+        \\        value: Option_Residual,
+        \\    ) -> Result_Residual(Missing) {
+        \\        return .{ .error = .{ .key = "unknown" } };
+        \\    }
+        \\}
+        \\
+        \\lookup :: (present: bool) -> ?s64 {
+        \\    if !present return .None;
+        \\    return .Some(9);
+        \\}
+        \\
+        \\required :: (present: bool) -> Missing!s64 {
+        \\    return lookup(present)? + 1;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := required(true);
+        \\    b := required(false);
+        \\    if a == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\    if b == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\}
+    );
+    code_block(12, "text", #string
+        \\ok  10
+        \\err {unknown}
+    );
+    paragraph(13, #string,oneline
+        \\The opposite direction, discarding an error to reach an option, is
+        \\not in the Prelude either, and for a stronger reason: throwing
+        \\information away is a decision a program makes, not a default. One
+        \\generic instance over every error type makes `?` usable from a `?T`
+        \\function.
+    );
+    code_block(14, "glosso", #string
+        \\(Result_Residual($E), Option_Residual) :: instance Propagate {
+        \\    propagate :: (#empty: Option_Residual, value: Result_Residual(E)) -> Option_Residual {
+        \\        return .None;
+        \\    }
+        \\}
+    );
+    paragraph(15, #string,oneline
+        \\Without one of these the call site names the missing conversion by
+        \\listing what it looked for: `error: no overload 'propagate' accepts
+        \\these arguments`, followed by the two candidates
+        \\`propagate :: (__empty0: Result_Residual(To), value:
+        \\Result_Residual(From)) -> Result_Residual(To)` and
+        \\`propagate :: (__empty0: To, value: From) -> To`. The first is the
+        \\lifting instance, the second the class requirement.
+    );
+    subheading(16, "Widening across a library boundary");
+    paragraph(17, #string,oneline
+        \\Because instance selection is global and there is no orphan rule, the
+        \\widening instance belongs to whichever code owns the wider error, not
+        \\to the library that raised the narrow one. A library can therefore
+        \\define a small, precise error type and stay unaware of every
+        \\application that folds it into a larger one.
+    );
+    code_block(18, "glosso", #string
+        \\// config.glo
+        \\Config_Error :: struct #derive(Show) { key: string; }
+        \\
+        \\lookup :: (key: string) -> Config_Error!string {
+        \\    if key == "port" return .Ok("8080");
+        \\    return .Err(.{ .key = key });
+        \\}
+    );
+    subheading(19, "`#from` variants");
+    paragraph(20, #string,oneline
+        \\Writing one `Propagate` instance per contributing error is
+        \\mechanical, so a union variant may be marked `#from`. The compiler
+        \\then generates the instance from the source type to the union. The
+        \\application below folds a library error and a local one into a single
+        \\`Boot_Error` and propagates both with plain `?`.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#load "config.glo";
+        \\
+        \\Bad_Number :: struct #derive(Show) { text: string; }
+        \\
+        \\Boot_Error :: union #derive(Show) {
+        \\    #from config: Config_Error;
+        \\    #from number: Bad_Number;
+        \\}
+        \\
+        \\to_number :: (text: string) -> Bad_Number!s64 {
+        \\    v := from_string(s64, text);
+        \\    if v == {
+        \\        case .Some(n); return .Ok(n);
+        \\        case .None;    return .Err(.{ .text = text });
+        \\    }
+        \\}
+        \\
+        \\port :: (key: string) -> Boot_Error!s64 {
+        \\    text := lookup(key)?;
+        \\    return to_number(text)?;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := port("port");
+        \\    b := port("host");
+        \\    if a == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\    if b == { case .Ok(v); print("ok  %\n", v); case .Err(e); print("err %\n", show(e)); }
+        \\}
+    );
+    code_block(22, "text", #string
+        \\ok  8080
+        \\err config({host})
+    );
+    paragraph(23, #string,oneline
+        \\`#from` is independent of `#derive(Error)`; it is a property of the
+        \\variant, and the generated instance is exactly what a hand-written
+        \\one would be. Writing the two instances below in place of the two
+        \\`#from` markers produces the same program.
+    );
+    code_block(24, "glosso", #string
+        \\(Config_Error, Boot_Error) :: instance Propagate {
+        \\    propagate :: (#empty: Boot_Error, value: Config_Error) -> Boot_Error {
+        \\        return .config(value);
+        \\    }
+        \\}
+        \\(Bad_Number, Boot_Error) :: instance Propagate {
+        \\    propagate :: (#empty: Boot_Error, value: Bad_Number) -> Boot_Error {
+        \\        return .number(value);
+        \\    }
+        \\}
+    );
+    paragraph(25, #string,oneline
+        \\The generator is narrow, because each restriction would otherwise
+        \\produce an instance that cannot be keyed on a single source type.
+    );
+    table_header(26, "Rejected form   —   Diagnostic");
+    table_row(27, "a `#raw` union   |   `#from is not defined for #raw union`");
+    table_row(28, "a generic union   |   `#from does not yet support generic unions`");
+    table_row(29, "a payload-less variant   |   `#from variant 'a' must have a payload`");
+    table_row(30, "two variants of one type   |   `#from variant 'b' duplicates the source type A_Error`");
+    note(31, #string,oneline
+        \\`Propagate` is consulted only by `?`. Returning `.Err(e)` explicitly
+        \\from a function whose error type differs is an ordinary type
+        \\mismatch, and no conversion is attempted. This keeps the widening
+        \\visible: it happens exactly where a `?` is written.
+    );
+}
+
+render_section_81 :: () {
+    paragraph(0, #string,oneline
+        \\`Error` and `Termination` are the two classes at the edge of a
+        \\program. `Error` says how a value explains itself to the operator;
+        \\`Termination` says how a value becomes a process exit status. `main`
+        \\may return any type that implements `Termination`, and the standard
+        \\pairing of the two is what makes `main :: () -> App_Error!void` a
+        \\complete error-reporting program.
+    );
+    code_block(1, "glosso", #string
+        \\Error :: typeclass (E: type) #derive(derive_error) #minimal(report_error) {
+        \\    report_error :: (error: E) -> void;
+        \\}
+        \\
+        \\Termination :: typeclass (T: type) #minimal(termination_status) {
+        \\    termination_status :: (value: T) -> s32;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`report_error` returns nothing and is expected to write a diagnostic,
+        \\conventionally to standard error. The class does not fix a format,
+        \\a destination, or a severity; it fixes only that an error type knows
+        \\how to describe itself without being handed a formatter.
+    );
+    subheading(3, "Allocation-free reporting");
+    paragraph(4, #string,oneline
+        \\Reporting is the last thing a failing program does, and it must work
+        \\when the allocator is exhausted and when the higher-level output
+        \\modules are themselves the thing that failed, since their own error
+        \\types implement `Error`. `std/Typeclass/Error.glo` therefore provides
+        \\two helpers that write straight to file descriptor 2 through the
+        \\`file_write_result` intrinsic, touching neither the allocator nor
+        \\`Io`.
+    );
+    code_block(5, "glosso", #string
+        \\error_report_write :: (text: string) {
+        \\    written, code := __error_file_write_result(2, text);
+        \\    _ := written;
+        \\    _ := code;
+        \\}
+        \\
+        \\error_report_line :: (category: string, message: string) {
+        \\    error_report_write(category);
+        \\    error_report_write(": ");
+        \\    error_report_write(message);
+        \\    error_report_write("\n");
+        \\}
+    );
+    table_header(6, "Helper   —   Writes");
+    table_row(7, "`error_report_write(text)`   |   `text`, exactly, with no newline");
+    table_row(8, "`error_report_line(category, message)`   |   `category`, `\": \"`, `message`, newline");
+    paragraph(9, #string,oneline
+        \\Both ignore the write result. A report that cannot be written has
+        \\nowhere left to report that fact, so the failure is dropped rather
+        \\than escalated. An instance that wants formatted output can still
+        \\call `tprint`, at the cost of depending on the temporary allocator on
+        \\the failure path.
+    );
+    subheading(10, "`derive_error`");
+    paragraph(11, #string,oneline
+        \\`#derive(Error)` on a tagged union writes the obvious instance: match
+        \\the union, and call `report_error` on the payload. It composes with
+        \\`#from`, so one union declaration can both aggregate several error
+        \\types and report all of them.
+    );
+    table_header(12, "Requirement   —   Diagnostic when violated");
+    table_row(13, "must be a tagged union   |   `Error can currently be derived only for tagged unions`");
+    table_row(14, "not `#raw`   |   `Error derive is not defined for #raw union`");
+    table_row(15, "not generic   |   `Error derive does not yet support generic unions`");
+    table_row(16, "every variant has a payload   |   `Error derive requires every union variant to have an Error payload`");
+    paragraph(17, #string,oneline
+        \\A payload that exists but has no `Error` instance is not caught by
+        \\that last check. The generated body fails to compile instead, with
+        \\`error: no overload 'report_error' accepts these arguments` pointing
+        \\into `std/Typeclass/Error.glo`, which is the line the macro emitted.
+    );
+    subheading(18, "`Termination` and the return type of `main`");
+    paragraph(19, #string,oneline
+        \\`prepare_main_termination_dispatch` checks `main`'s return type at
+        \\compile time and inserts the `termination_status` call. Two instances
+        \\ship with the standard library: one for every integer type, and one
+        \\for `E!void` where `E` implements `Error`.
+    );
+    code_block(20, "glosso", #string
+        \\$T :: instance Termination where Is_Integer(T) {
+        \\    termination_status :: (value: T) -> s32 {
+        \\        return cast(s32)value;
+        \\    }
+        \\}
+        \\
+        \\$E!void :: instance Termination where Error(E) {
+        \\    termination_status :: (value: E!void) -> s32 {
+        \\        if value == {
+        \\            case .Ok; return 0;
+        \\            case .Err(error);
+        \\                report_error(error);
+        \\                return 1;
+        \\        }
+        \\    }
+        \\}
+    );
+    table_header(21, "`main` returns   —   Status   —   Notes");
+    table_row(22, "nothing   |   0   |   the ordinary form");
+    table_row(23, "any integer type   |   the value, narrowed to `s32`   |   the host applies its own exit-code rules");
+    table_row(24, "`E!void` where `E: Error`   |   0 on `.Ok`, 1 on `.Err`   |   `report_error(error)` runs first");
+    table_row(25, "a type with a `Termination` instance   |   whatever `termination_status` returns   |   a struct or enum works; see below");
+    table_row(26, "`?T`, `bool`, `E!T` for non-`void` `T`   |   rejected   |   `main return type Option_int does not implement Termination`");
+    paragraph(27, #string,oneline
+        \\The `E!void` instance is the only one keyed on a result, and it is
+        \\keyed on `void` specifically: `main :: () -> My_Err!s64` is `error:
+        \\main return type Result_int_My_Err does not implement Termination`,
+        \\because a successful `s64` has no meaning at the process boundary
+        \\that the integer instance does not already give. `bool` is rejected
+        \\for the same reason `Is_Integer(bool)` is false.
+    );
+    paragraph(28, #string,oneline
+        \\An application-specific instance is a small declaration and needs
+        \\nothing else. Its `termination_status` must have a runtime body: a
+        \\`#magic` implementation is `main's Termination implementation must
+        \\have a runtime function body`.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Exit_Report :: struct { failures: s64; }
+        \\
+        \\Exit_Report :: instance Termination {
+        \\    termination_status :: (value: Exit_Report) -> s32 {
+        \\        if value.failures == 0 return 0;
+        \\        return 3;
+        \\    }
+        \\}
+        \\
+        \\main :: () -> Exit_Report {
+        \\    print("two tests failed\n");
+        \\    return .{ .failures = 2 };
+        \\}
+    );
+    code_block(30, "text", #string
+        \\two tests failed
+        \\glosso: program exited with status exit code: 3
+    );
+    subheading(31, "A complete failing program");
+    paragraph(32, #string,oneline
+        \\Putting the pieces together: each leaf error implements `Error`, a
+        \\union aggregates them with `#from` and derives `Error`, and `main`
+        \\returns that union in a result. Every `?` widens through the
+        \\generated `Propagate` instances, the union's derived `report_error`
+        \\dispatches to the payload's, and the `E!void` `Termination` instance
+        \\turns the whole thing into status 1.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Disk_Full :: struct { path: string; bytes: s64; }
+        \\Disk_Full :: instance Error {
+        \\    report_error :: (error: Disk_Full) -> void {
+        \\        error_report_write("disk full writing ");
+        \\        error_report_write(error.path);
+        \\        error_report_write("\n");
+        \\    }
+        \\}
+        \\
+        \\Timed_Out :: struct { seconds: s64; }
+        \\Timed_Out :: instance Error {
+        \\    report_error :: (error: Timed_Out) -> void {
+        \\        error_report_line("timed out", "the request took too long");
+        \\    }
+        \\}
+        \\
+        \\Job_Error :: union #derive(Error) {
+        \\    #from disk: Disk_Full;
+        \\    #from timeout: Timed_Out;
+        \\}
+        \\
+        \\run :: (which: s64) -> Job_Error!void {
+        \\    if which == 0 return .Err(.disk(.{ .path = "out.bin", .bytes = 4096 }));
+        \\    return .Err(.timeout(.{ .seconds = 30 }));
+        \\}
+        \\
+        \\main :: () -> Job_Error!void {
+        \\    print("starting\n");
+        \\    run(1)?;
+        \\    return .Ok();
+        \\}
+    );
+    code_block(34, "text", #string
+        \\starting
+        \\timed out: the request took too long
+        \\glosso: program exited with status exit code: 1
+    );
+    paragraph(35, #string,oneline
+        \\Returning `.Ok()` produces status 0 and prints nothing extra. The
+        \\`glosso:` line is the driver reporting a nonzero status under
+        \\`--run`; the exit status itself is the subject of Environment,
+        \\Toolchain, and Exit Codes.
+    );
+    note(36, #string,oneline
+        \\`Error` and `Termination` are separate on purpose. An error type
+        \\reports; a termination type decides a number. A program that wants
+        \\several distinct nonzero statuses writes its own `Termination`
+        \\instance over its error union rather than trying to encode the
+        \\status in `report_error`, whose return type is `void`.
+    );
+}
+
+render_section_82 :: () {
+    paragraph(0, #string,oneline
+        \\A variadic parameter may name a typeclass instead of a type. `args:
+        \\...Show` accepts any number of arguments provided every one of them
+        \\implements `Show`. The constraint is checked element by element at
+        \\the call site, so a rejected argument is reported at the argument
+        \\that caused it rather than inside the callee. The other variadic
+        \\forms are covered in Variadic Parameters.
+    );
+    code_block(1, "glosso", #string
+        \\show_all         :: (values: ...Show)                { }
+        \\count_both       :: (values: ...(Show && PartialEq)) { }
+        \\anything         :: (values: ...any)                 { }
+    );
+    paragraph(2, #string,oneline
+        \\A parenthesised `&&` list requires every named class of every
+        \\element. There is no `||` form; `...(Show || PartialEq)` is `error:
+        \\unexpected token '||'`, because a disjunction would leave the callee
+        \\with no method it could call on all elements. `...any` is the
+        \\unconstrained pack, useful when the body only reflects over the
+        \\element types.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\Named :: typeclass (T: type) #minimal(name_of) {
+        \\    name_of :: (value: T) -> string;
+        \\}
+        \\
+        \\$T :: instance Named where Is_Integer(T) { name_of :: (v: T) -> string { return "int"; } }
+        \\$T :: instance Named where Is_String(T)  { name_of :: (v: T) -> string { return "text"; } }
+        \\
+        \\join_names :: (args: ...Named) -> string {
+        \\    out := "";
+        \\    for args {
+        \\        if it_index > 0 out = tprint("%,%", out, name_of(it));
+        \\        else out = name_of(it);
+        \\    }
+        \\    return out;
+        \\}
+        \\
+        \\count_both :: (values: ...(Show && PartialEq)) -> s64 {
+        \\    return values.count;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("names = %\n", join_names(1, "x", 2));
+        \\    print("both  = %\n", count_both(10, "y"));
+        \\}
+    );
+    code_block(4, "text", #string
+        \\names = int,text,int
+        \\both  = 2
+    );
+    subheading(5, "Element-wise checking");
+    paragraph(6, #string,oneline
+        \\A failing element is named with its type, the class it lacks, and the
+        \\call it appeared in: passing a `string` to `join_names` above with no
+        \\string instance in scope is `error: variadic arg type `string` does
+        \\not implement `Named` in call `join_names``. A conjunction reports
+        \\the first class the element misses, not the whole list, so an
+        \\argument that is `Show` but not `PartialEq` reports only
+        \\`does not implement `PartialEq``.
+    );
+    paragraph(7, #string,oneline
+        \\Expansion is checked the same way. `xs...` splices a typed array
+        \\into the pack, and because every element has one type the check
+        \\runs once for that type: `error: expanded variadic element type
+        \\`Plain` does not implement `Show` in call `print``. This is the
+        \\form `print` takes when the arguments are already collected.
+    );
+    code_block(8, "glosso", #string
+        \\#import "Io";
+        \\
+        \\show_all :: (values: ...Show) {
+        \\    for values print("  [%] %\n", it_index, it);
+        \\}
+        \\
+        \\main :: () {
+        \\    fixed: [3]s32;
+        \\    fixed[0] = 10; fixed[1] = 20; fixed[2] = 30;
+        \\    show_all(fixed...);
+        \\    show_all(1, "two", 3.5);
+        \\}
+    );
+    code_block(9, "text", #string
+        \\  [0] 10
+        \\  [1] 20
+        \\  [2] 30
+        \\  [0] 1
+        \\  [1] two
+        \\  [2] 3.5
+    );
+    subheading(10, "The pack inside the callee");
+    paragraph(11, #string,oneline
+        \\The pack is a heterogeneous, read-only view. `type_of` on the pack
+        \\itself answers `tuple`; each element is boxed so it can be indexed
+        \\with a runtime index, which is what makes the `[]any` view real and
+        \\what `__format` relies on when it walks `args[ai]`. Indexing with a
+        \\constant, or iterating, recovers the element's precise static type.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\inspect :: (values: ...Show) {
+        \\    pack_type :: type_of(values);
+        \\    elem_type :: type_of(values[1]);
+        \\    print("pack type = %\n", pack_type);
+        \\    print("elem type = %\n", elem_type);
+        \\    print("count     = %\n", values.count);
+        \\    print("values[1] = %\n", values[1]);
+        \\}
+        \\
+        \\main :: () {
+        \\    inspect(1, "two", 3.5);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\pack type = tuple
+        \\elem type = string
+        \\count     = 3
+        \\values[1] = two
+    );
+    bullet(14, #string,oneline
+        \\`values.count` is the number of arguments, but it is an ordinary
+        \\runtime value inside the callee. Binding it with `::` or testing it
+        \\in a `#if` is `error: unknown const values`; a body that must branch
+        \\on arity does so with `#inline for` instead.
+    );
+    bullet(15, #string,oneline
+        \\A plain `for` over the pack is unrolled, so `it` has the element's
+        \\own static type in each iteration and `name_of(it)` dispatches to the
+        \\right instance. `it_index` is the position.
+    );
+    bullet(16, #string,oneline
+        \\A runtime index is allowed and reads through the boxed view, so a
+        \\`while i < values.count` loop over `values[i]` renders each element
+        \\correctly even though the index is not a constant.
+    );
+    bullet(17, #string,oneline
+        \\The view is read-only. Assigning to a pack element is not supported
+        \\and currently fails during lowering with `error: internal error:
+        \\'op_lbrrbreq_tuple_int_int' is called but was never lowered`; copy
+        \\the element into a local instead.
+    );
+    subheading(18, "`#inline for` and per-element evidence");
+    paragraph(19, #string,oneline
+        \\`#inline for` over a pack is the tool for code that must differ per
+        \\element. The body is expanded once per argument with the element's
+        \\type known, so `type_of(it)` can be bound to a compile-time constant
+        \\and that constant used in an evidence query. `#if Class(T)` answers
+        \\whether `T` has an instance, and only the taken branch is checked.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Unit :: typeclass (T: type) #minimal(unit_of) {
+        \\    unit_of :: (value: T) -> string;
+        \\}
+        \\
+        \\Meters  :: struct { n: f64; }
+        \\Seconds :: struct { n: f64; }
+        \\
+        \\Meters  :: instance Unit { unit_of :: (value: Meters)  -> string { return "m"; } }
+        \\Seconds :: instance Unit { unit_of :: (value: Seconds) -> string { return "s"; } }
+        \\Meters  :: instance Show { show :: (value: Meters)  -> string { return "meters"; } }
+        \\
+        \\label_all :: (values: ...Unit) {
+        \\    #inline for values {
+        \\        elem :: type_of(it);
+        \\        #if Show(elem) {
+        \\            print("  % (%) shows as %\n", elem, unit_of(it), Show(elem).show(it));
+        \\        } else {
+        \\            print("  % (%) has no Show\n", elem, unit_of(it));
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    m: Meters  = .{ .n = 3.0 };
+        \\    s: Seconds = .{ .n = 4.0 };
+        \\    label_all(m, s);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\  Meters (m) shows as meters
+        \\  Seconds (s) has no Show
+    );
+    paragraph(22, #string,oneline
+        \\`Show(elem).show` in that body is a scoped typeclass method
+        \\reference: it names the `show` of the instance for exactly `elem`,
+        \\which is what lets the call be written in a branch that only some
+        \\elements reach. The unqualified `unit_of(it)` needs no scope because
+        \\the constraint on the pack already guarantees an instance.
+    );
+    paragraph(23, #string,oneline
+        \\Structural conditions rather than class membership are written with
+        \\`#if !#meaningful { it.field; } continue;`, which skips an element
+        \\whose shape the body cannot use. That form belongs to Structural
+        \\Constraints with `#meaningful`.
+    );
+    note(24, #string,oneline
+        \\An evidence query is compile-time only. `Class(T)` in a runtime
+        \\expression is `error: internal error: 'Marker' is called but was
+        \\never lowered`; bind it to a constant or use it directly in `#if`.
+        \\The expression form also takes exactly one type argument:
+        \\`Convert(s64, string)` for a two-parameter class is `error:
+        \\Convert(T) expects one type argument`, and the one-argument form
+        \\answers `false` for such a class rather than reporting anything. A
+        \\multi-parameter class can only be queried usefully inside a `where`.
+    );
+}

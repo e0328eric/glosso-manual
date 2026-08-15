@@ -1,0 +1,2919 @@
+// Sections 116-127: memory and context.
+
+render_section_116 :: () {
+    paragraph(0, #string,oneline
+        \\Every procedure body sees one implicit value named `context`. It takes
+        \\no import, no parameter and no declaration: the compiler creates the
+        \\type, creates one instance of it, and makes the name visible
+        \\everywhere. Allocation, `print` formatting, logging and random-number
+        \\generation all read their policy out of that one value, which is how a
+        \\caller redirects a library's behaviour without changing a single
+        \\signature the library declares.
+    );
+    paragraph(1, #string,oneline
+        \\The type is built into the compiler rather than written in a `.glo`
+        \\file, and its spelling carries the directive sigil to say so: it is
+        \\`#Context`. The definition is fixed and has seven fields.
+    );
+    code_block(2, "glosso", #string
+        \\Context :: struct {
+        \\    print_style:      Print_Style;
+        \\    allocator:        Allocator;
+        \\    temp_allocator:   Allocator;
+        \\    logger:           Logger;
+        \\    random_generator: Random_Generator;
+        \\    user_ptr:         ?*void;
+        \\    user_index:       s64;
+        \\}
+    );
+    table_header(3, "Field   —   What reads it");
+    table_row(4, "`print_style`   |   `%` integer formatting; `default_format_int.base` is `10` in the default context");
+    table_row(5, "`allocator`   |   `alloc`, `free`, `array_add`, `format`, and every standard-library call that defaults its allocator parameter");
+    table_row(6, "`temp_allocator`   |   `tprint`, and everything else that returns arena-backed storage");
+    table_row(7, "`logger`   |   structured logging; the vtable is zeroed in the default context");
+    table_row(8, "`random_generator`   |   the random-number vtable; also zeroed in the default context");
+    table_row(9, "`user_ptr`   |   nothing; reserved for the program");
+    table_row(10, "`user_index`   |   nothing; reserved for the program");
+    paragraph(11, #string,oneline
+        \\`user_ptr` and `user_index` exist so that a program can thread its own
+        \\state through code it does not own, in the same way the allocator is
+        \\threaded. Nothing in the compiler or the standard library reads them.
+    );
+    subheading(12, "Reading and writing `context`");
+    paragraph(13, #string,oneline
+        \\`context` is an ordinary lvalue of type `#Context`. Its fields can be
+        \\read, assigned, copied into a local and passed to a procedure that
+        \\declares a `#Context` parameter. A bare assignment to a field is
+        \\permanent: the context is one process-wide global, not a per-call
+        \\record, so nothing restores it later.
+    );
+    code_block(14, "glosso", #string
+        \\with_index :: (base: #Context, index: s64) -> #Context {
+        \\    out := base;
+        \\    out.user_index = index;
+        \\    return out;
+        \\}
+        \\
+        \\main :: () {
+        \\    context.user_index = 7;
+        \\    later := with_index(context, 9);
+        \\}
+    );
+    subheading(15, "`#push_context`");
+    paragraph(16, #string,oneline
+        \\`#push_context expr body` installs `expr` as the whole context for the
+        \\duration of `body` and restores the previous value on the way out,
+        \\including through an early `return`. The restore is scheduled as a
+        \\`defer`, so it is not skipped by any exit the block has.
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("decimal %\n", 255);
+        \\    hex := context;
+        \\    hex.print_style.default_format_int.base = 16;
+        \\    #push_context hex {
+        \\        print("hex %\n", 255);
+        \\    }
+        \\    print("decimal again %\n", 255);
+        \\}
+    );
+    code_block(18, "text", #string
+        \\decimal 255
+        \\hex ff
+        \\decimal again 255
+    );
+    paragraph(19, #string,oneline
+        \\Written without an expression, `#push_context body` installs the
+        \\default context, the same value the process started with. That is the
+        \\way to run a piece of code under known settings regardless of what an
+        \\enclosing frame installed.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    context.user_index = 7;
+        \\    print("outer %\n", context.user_index);
+        \\    #push_context {
+        \\        print("bare %\n", context.user_index);
+        \\    }
+        \\    print("outer again %\n", context.user_index);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\outer 7
+        \\bare 0
+        \\outer again 7
+    );
+    paragraph(22, #string,oneline
+        \\The body may be a brace block or a single statement, so
+        \\`#push_context saved print("%\n", context.user_index);` is legal and
+        \\scopes to that one statement.
+    );
+    subheading(23, "`#push_allocator`");
+    paragraph(24, #string,oneline
+        \\`#push_allocator(expr);` replaces only `context.allocator`. It is a
+        \\statement rather than a block form: it takes effect where it is
+        \\written and is undone at the end of the enclosing block, again through
+        \\a deferred restore that also runs on `return`.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\served :: () -> bool {
+        \\    p := alloc(64);
+        \\    if #pattern .Some(raw) = p {
+        \\        free(p);
+        \\        return true;
+        \\    }
+        \\    return false;
+        \\}
+        \\
+        \\main :: () {
+        \\    {
+        \\        #push_allocator(nil_allocator());
+        \\        print("nil served %\n", served());
+        \\    }
+        \\    print("default served %\n", served());
+        \\}
+    );
+    code_block(26, "text", #string
+        \\nil served 0
+        \\default served 1
+    );
+    paragraph(27, #string,oneline
+        \\Both directives are statements. At file scope `#push_allocator(...)`
+        \\is `error: bad decl name 'push_allocator'`; a whole-program default is
+        \\set by assigning `context.allocator` at the top of `main` instead.
+    );
+    note(28, #string,oneline
+        \\`#push_allocator` changes where memory comes from, not who owns it.
+        \\An `alloc` inside `#push_allocator(context.temp_allocator)` still
+        \\carries a release obligation and still warns `resource must be
+        \\released by 'free' before leaving scope`. Ownership is the subject of
+        \\Ownership and Release Obligations.
+    );
+    subheading(29, "`#no_context`");
+    paragraph(30, #string,oneline
+        \\A procedure marked `#no_context` may not name `context` in its body.
+        \\`#c_call` implies the same restriction, because a procedure entered
+        \\from foreign code cannot assume the context global was ever
+        \\initialised by Glosso startup.
+    );
+    code_block(31, "glosso", #string
+        \\hash :: (n: s64) -> s64 #no_context {
+        \\    return n * 31 + context.user_index;
+        \\}
+    );
+    code_block(32, "text", #string
+        \\error: cannot access 'context' in a #c_call / #no_context procedure
+        \\  --> ...\bare_fn.glo:2:21
+        \\  |
+        \\2 |     return n * 31 + context.user_index;
+        \\  |                     ^^^^^^^
+    );
+    paragraph(33, #string,oneline
+        \\The restriction is on the name, not on the machinery. A `#no_context`
+        \\procedure may still call `print` or `alloc`, and those callees read the
+        \\context as usual, because the context is a global rather than a hidden
+        \\parameter. `#no_context` is also part of a procedure's overload key,
+        \\and a `#fn_ptr` type accepts the directive after its return type.
+    );
+    subheading(34, "Naming a context field type");
+    paragraph(35, #string,oneline
+        \\`#Context` and its fields are always reachable. The types of those
+        \\fields are not: they are declared in the `Context` module and stay
+        \\hidden until a file imports it, so that a program which only wants
+        \\`alloc` does not have twelve extra type names dropped into its global
+        \\namespace. Naming one without the import reports both the cause and
+        \\the fix.
+    );
+    code_block(36, "text", #string
+        \\error: 'Allocator' is a #Context field type; add `#import "Context";` to name it
+        \\  --> ...\field_type.glo:1:13
+        \\  |
+        \\1 | pool :: (a: Allocator) -> s64 {
+        \\  |             ^^^^^^^^^
+    );
+    table_header(37, "Context field   —   Types it introduces");
+    table_row(38, "`print_style`   |   `Print_Style`, `Print_Format_Int`");
+    table_row(39, "`allocator`, `temp_allocator`   |   `Allocator`, `Allocator_Proc`, `Allocator_Mode`, `Allocator_Error`");
+    table_row(40, "`logger`   |   `Logger`, `Logger_Proc`, `Logger_Level`");
+    table_row(41, "`random_generator`   |   `Random_Generator`, `Random_Generator_Proc`, `Random_Generator_Mode`");
+    paragraph(42, #string,oneline
+        \\The gate opens transitively: `#import "Io"` reaches `Context` through
+        \\`Format`, so a file that prints can also name `Allocator`. Reading and
+        \\writing `context.allocator` never needs the import; only spelling one
+        \\of these names as a type does. `Context` written without the sigil is
+        \\`error: the built-in Context type is written #Context`.
+    );
+    note(43, #string,oneline
+        \\`context` cannot be read during compile-time execution. A procedure
+        \\that touches it is `error: non-constant expression` at the `context`
+        \\reference as soon as anything calls it from a `#comptime` position,
+        \\even though the same procedure is fine at run time. Compile-time
+        \\evaluation is described in `#comptime`.
+    );
+}
+
+render_section_117 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso ships no allocation policy in the language. An allocator is a
+        \\value: a procedure pointer and an opaque data pointer, declared in the
+        \\`Context` module and stored in `context.allocator`. Every allocation
+        \\the language performs on a program's behalf goes through that one
+        \\record, which is what makes an arena, a pool or a tracking wrapper a
+        \\drop-in replacement rather than a rewrite.
+    );
+    code_block(1, "glosso", #string
+        \\Allocator_Proc :: #fn_ptr(
+        \\    data: ?*void,
+        \\    mode: Allocator_Mode,
+        \\    size: s64,
+        \\    alignment: s64,
+        \\    old_memory: ?*void,
+        \\    old_size: s64
+        \\) -> ?*void;
+        \\
+        \\Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }
+    );
+    paragraph(2, #string,oneline
+        \\Four of the slots are optional, and each for a reason. A stateless
+        \\allocator carries no `data`; `Alloc` and `Free_All` pass no
+        \\`old_memory`; an unsatisfiable request yields no memory; and
+        \\`procedure` itself is optional so that a zero-initialised `Allocator`
+        \\is the "none installed" sentinel. Because `.None` is address zero,
+        \\that sentinel is still the all-zero bit pattern.
+    );
+    subheading(3, "Modes");
+    paragraph(4, #string,oneline
+        \\One procedure serves every operation; `mode` selects which. The enum
+        \\is closed.
+    );
+    table_header(5, "Mode   —   Request   —   Value");
+    table_row(6, "`Alloc`   |   return `size` bytes at `alignment`   |   0");
+    table_row(7, "`Free`   |   release `old_memory`   |   1");
+    table_row(8, "`Free_All`   |   release everything this allocator owns   |   2");
+    table_row(9, "`Resize`   |   move `old_memory` from `old_size` to `size`   |   3");
+    table_row(10, "`Query_Features`   |   report which modes are implemented   |   4");
+    table_row(11, "`Query_Info`   |   report allocator metadata   |   5");
+    table_row(12, "`Alloc_Non_Zeroed`   |   `Alloc` without the obligation to zero   |   6");
+    table_row(13, "`Resize_Non_Zeroed`   |   `Resize` without zeroing the new tail   |   7");
+    paragraph(14, #string,oneline
+        \\An allocator may implement a subset and return `.None` for the rest;
+        \\that is what the supplied ones do. `Resize` is not optional in
+        \\practice, because a dynamic array grown by `array_add` and a
+        \\`String_Builder` grown by `write_string` both issue it, and an
+        \\allocator that answers `.None` there hands the caller no memory to
+        \\write into.
+    );
+    subheading(15, "Errors");
+    paragraph(16, #string,oneline
+        \\`Allocator_Error` names the ways a request can fail. Its variants
+        \\carry explicit values so that the enum is stable across versions, and
+        \\`allocator_error_reason` turns one into a message.
+    );
+    table_header(17, "Variant   —   Reason string   —   Value");
+    table_row(18, "`None`   |   `no error`   |   0");
+    table_row(19, "`Out_Of_Memory`   |   `out of memory`   |   1");
+    table_row(20, "`Invalid_Pointer`   |   `invalid pointer`   |   2");
+    table_row(21, "`Invalid_Argument`   |   `invalid argument`   |   3");
+    table_row(22, "`Mode_Not_Implemented`   |   `allocator mode is not implemented`   |   4");
+    paragraph(23, #string,oneline
+        \\`Allocator_Error` carries an `Error` instance, so a program that
+        \\propagates one gets the reporting described in `Error`,
+        \\`Termination`, and `main`. No entry point in the allocation API
+        \\returns one today: an `Allocator_Proc` signals failure by returning
+        \\`.None`, and so do `alloc` and `mem_alloc`.
+    );
+    subheading(24, "The supplied allocators");
+    paragraph(25, #string,oneline
+        \\The `Context` module supplies four allocators, each behind a
+        \\constructor that builds the two-field record. All four are stateless
+        \\and leave `data` empty.
+    );
+    table_header(26, "Constructor   —   Modes it answers   —   Backs onto");
+    table_row(27, "`heap_allocator()`   |   `Alloc`, `Alloc_Non_Zeroed`, `Resize`, `Resize_Non_Zeroed`, `Free`   |   the process heap");
+    table_row(28, "`debug_allocator()`   |   the same five, plus `Free_All`, which prints the leak report   |   the heap, with bookkeeping");
+    table_row(29, "`default_temp_allocator()`, `temp_allocator()`   |   `Alloc`, `Alloc_Non_Zeroed`, `Free_All`   |   the temporary arena");
+    table_row(30, "`nil_allocator()`   |   none; every request answers `.None`   |   nothing");
+    paragraph(31, #string,oneline
+        \\The default context installs the debug allocator in
+        \\`context.allocator` at `-O0` and the heap allocator at every other
+        \\optimization level, and always installs the default temporary
+        \\allocator in `context.temp_allocator`. The `-O0` swap is the subject
+        \\of The Debug Allocator.
+    );
+    subheading(32, "Allocating");
+    paragraph(33, #string,oneline
+        \\Two layers sit on top of the vtable. `alloc` and `free` route through
+        \\`context.allocator` and are the everyday pair; the `mem_*` family
+        \\takes an explicit allocator, defaulting to `context.allocator` when
+        \\the argument is omitted.
+    );
+    table_header(34, "Call   —   What it does");
+    table_row(35, "`alloc`   |   `alloc(n) -> ?*void`; `Alloc` through `context.allocator` at alignment 16");
+    table_row(36, "`free`   |   `free(p)`; `Free` through `context.allocator`");
+    table_row(37, "`mem_alloc`   |   `mem_alloc(size, allocator := context.allocator)`; `Alloc` at alignment 16");
+    table_row(38, "`mem_resize`   |   `mem_resize(old, old_size, size, allocator := context.allocator)`; the old pointer is invalidated");
+    table_row(39, "`mem_free`   |   `mem_free(p, allocator := context.allocator)`");
+    table_row(40, "`free_all`   |   `free_all(allocator := context.allocator)`; sends `Free_All`");
+    table_row(41, "`allocator_mem_alloc`, `allocator_mem_free`   |   the same allocate and release operations with the allocator written first");
+    paragraph(42, #string,oneline
+        \\`mem_free` accepts a `?*void`, so an allocation result is handed
+        \\straight back to it; `mem_resize` requires a plain `*void`, so the
+        \\result has to be matched first. An `Allocator` whose `procedure` slot
+        \\is empty serves nothing and releases nothing rather than calling
+        \\through it.
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    p := mem_alloc(8, heap_allocator());
+        \\    if #pattern .Some(raw) = p {
+        \\        cell := cast(*s64) raw;
+        \\        cell.* = 42;
+        \\        print("cell %\n", cell.*);
+        \\    }
+        \\    mem_free(p, heap_allocator());
+        \\
+        \\    q := mem_alloc(8, nil_allocator());
+        \\    served := false;
+        \\    if #pattern .Some(raw) = q served = true;
+        \\    print("nil served %\n", served);
+        \\    mem_free(q, nil_allocator());
+        \\}
+    );
+    code_block(44, "text", #string
+        \\cell 42
+        \\nil served 0
+    );
+    subheading(45, "Writing an allocator");
+    paragraph(46, #string,oneline
+        \\An allocator is one procedure with the `Allocator_Proc` shape plus a
+        \\constructor that packages it. The procedure switches on `mode` and
+        \\returns `.None` for anything it does not handle. Installing it with
+        \\`#push_allocator` redirects every allocation in the block, including
+        \\the ones made inside library code such as `format`.
+    );
+    code_block(47, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\requests: s64 = 0;
+        \\
+        \\tracking_proc :: (
+        \\    data: ?*void,
+        \\    mode: Allocator_Mode,
+        \\    size: s64,
+        \\    alignment: s64,
+        \\    old_memory: ?*void,
+        \\    old_size: s64
+        \\) -> ?*void #memory(unknown, noescape(data), noescape(old_memory)) {
+        \\    heap := heap_allocator();
+        \\    if mode == {
+        \\        case .Alloc, .Alloc_Non_Zeroed;
+        \\            requests += 1;
+        \\            return mem_alloc(size, heap);
+        \\        case .Resize, .Resize_Non_Zeroed;
+        \\            requests += 1;
+        \\            if #pattern .Some(old) = old_memory {
+        \\                return mem_resize(old, old_size, size, heap);
+        \\            }
+        \\            return mem_alloc(size, heap);
+        \\        case .Free;
+        \\            mem_free(old_memory, heap);
+        \\            return .None;
+        \\        else;
+        \\            return .None;
+        \\    }
+        \\}
+        \\
+        \\tracking_allocator :: () -> Allocator #memory returns_static {
+        \\    a: Allocator;
+        \\    a.procedure = tracking_proc;
+        \\    a.data = .None;
+        \\    return a;
+        \\}
+        \\
+        \\main :: () {
+        \\    #push_allocator(tracking_allocator());
+        \\    text := format("%-%", 1, 2);
+        \\    print("% after % request(s)\n", text, requests);
+        \\    string_free(text);
+        \\}
+    );
+    code_block(48, "text", #string
+        \\1-2 after 1 request(s)
+    );
+    paragraph(49, #string,oneline
+        \\The `#memory` contract on the procedure is what keeps the memory
+        \\analysis quiet about a body that hands out storage it did not create:
+        \\`unknown` states that the result's lifetime is not described by the
+        \\contract system, and the two `noescape` clauses state that neither
+        \\pointer argument is retained. Writing `#memory` Contracts covers the
+        \\vocabulary.
+    );
+    note(50, #string,oneline
+        \\The standard library's convention for a routine that allocates is a
+        \\trailing `allocator: Allocator = context.allocator` parameter, as in
+        \\`clone`, `builder_make_len_cap` and the `Container` constructors. A
+        \\caller that wants a different allocator for one call passes it; a
+        \\caller that wants it for a region uses `#push_allocator`.
+    );
+}
+
+render_section_118 :: () {
+    paragraph(0, #string,oneline
+        \\`context.temp_allocator` is a growing bump arena. It hands out
+        \\successive slices of one block, ignores `Free` entirely, and reclaims
+        \\everything at once when the arena is rewound. It exists for values
+        \\that are built, used and abandoned inside a bounded region: a
+        \\formatted line, a path joined for one system call, a line of input.
+    );
+    paragraph(1, #string,oneline
+        \\The initial block is not heap memory. It is a static buffer compiled
+        \\into the binary, sized by `--temp-allocator-size` and 4 MiB by
+        \\default. When a request does not fit, the arena mallocs an overflow
+        \\block whose capacity is the larger of the request and the initial
+        \\size, and links it onto the front; rewinding pops and releases those
+        \\blocks back down to the static one.
+    );
+    code_block(2, "text", #string
+        \\$ glosso --backend llvm-ir -o report.ll report.glo
+        \\$ grep "^@glo_temp_buf" report.ll
+        \\@glo_temp_buf = internal global [4194304 x i8] zeroinitializer, align 16
+        \\
+        \\$ glosso --backend llvm-ir --temp-allocator-size 65536 -o report.ll report.glo
+        \\$ grep "^@glo_temp_buf" report.ll
+        \\@glo_temp_buf = internal global [65536 x i8] zeroinitializer, align 16
+    );
+    paragraph(3, #string,oneline
+        \\`--temp-allocator-size <bytes>` and `--temp-allocator-size=<bytes>`
+        \\both work. The value must be a positive byte count; anything else,
+        \\including `0`, is rejected before compilation starts and the driver
+        \\exits with status 2.
+    );
+    code_block(4, "text", #string
+        \\$ glosso --temp-allocator-size 0 report.glo
+        \\glosso: --temp-allocator-size must be a positive byte count
+    );
+    paragraph(5, #string,oneline
+        \\Whether each thread gets its own arena is a target decision. The
+        \\buffer and the three globals that track it are emitted `thread_local`
+        \\on some targets and shared by every thread on others, Windows among
+        \\them. The context itself is never thread-local anywhere, so a thread
+        \\that wants its own settings installs them with `#push_context`.
+    );
+    subheading(6, "Frame boundaries");
+    paragraph(7, #string,oneline
+        \\The arena is rewound by the compiler, not by the program. Lowering
+        \\records the arena's high-water mark on entry to a body and restores it
+        \\on the way out, so an ordinary block is already a temporary frame.
+        \\Nothing has to be freed and nothing accumulates.
+    );
+    paragraph(8, #string,oneline
+        \\The marks are emitted only where temporary storage provably cannot
+        \\leave with the result. A signature is treated as able to carry it out,
+        \\and therefore gets no marks anywhere in its body, when either of the
+        \\following holds.
+    );
+    bullet(9, #string,oneline
+        \\The return type is a `string`, an `any`, a struct, a union, a pointer,
+        \\a many-pointer, an array or a tuple.
+    );
+    bullet(10, #string,oneline
+        \\Any parameter is a typed pointer, `*T` or `[*]T`.
+    );
+    paragraph(11, #string,oneline
+        \\A loop body in a procedure that satisfies neither reuses the same
+        \\arena bytes on every iteration.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    first: s64 = 0;
+        \\    for i: 0..3 {
+        \\        row := tprint("row-%", i);
+        \\        here := cast(s64) row.data;
+        \\        if i == 0 first = here;
+        \\        print("% reuses the first block: %\n", row, here == first);
+        \\    }
+        \\}
+    );
+    code_block(13, "text", #string
+        \\row-0 reuses the first block: 1
+        \\row-1 reuses the first block: 1
+        \\row-2 reuses the first block: 1
+    );
+    paragraph(14, #string,oneline
+        \\The contrast is visible in one program. `scalar` returns an `s64`, so
+        \\its mark is restored and two consecutive calls hand back the same
+        \\address. `carrier` takes a `*s64`, so no mark is taken and its two
+        \\temporaries sit sixteen bytes apart.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\scalar :: () -> s64 {
+        \\    return cast(s64) tprint("aaaa").data;
+        \\}
+        \\
+        \\carrier :: (sink: *s64) {
+        \\    first := cast(s64) tprint("aaaa").data;
+        \\    second := cast(s64) tprint("bbbb").data;
+        \\    sink.* = second - first;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("scalar reuse %\n", scalar() == scalar());
+        \\    delta: s64 = 0;
+        \\    carrier(*delta);
+        \\    print("carrier delta %\n", delta);
+        \\}
+    );
+    code_block(16, "text", #string
+        \\scalar reuse 1
+        \\carrier delta 16
+    );
+    paragraph(17, #string,oneline
+        \\This is exactly why `tprint` can return arena memory at all. The
+        \\return type is `string`, so no restore is emitted in `tprint` or in
+        \\any caller whose own signature also carries storage out, and the
+        \\result survives until the nearest enclosing frame that does take a
+        \\mark closes.
+    );
+    note(18, #string,oneline
+        \\A temporary value assigned out of an inner block is stale the moment
+        \\the block ends. The compiler does not diagnose it; the bytes are
+        \\handed to the next request that asks for them.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    held: string;
+        \\    {
+        \\        held = tprint("inner-%", 1);
+        \\    }
+        \\    _ := tprint("ABCDEFG");
+        \\    print("held=%\n", held);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\held=ABCDEFG
+    );
+    subheading(21, "`reset_temporary_storage`");
+    paragraph(22, #string,oneline
+        \\`reset_temporary_storage()` calls `free_all(context.temp_allocator)`,
+        \\which sends `Free_All` to the arena: overflow blocks are released and
+        \\the mark returns to the start of the static block. It is the explicit
+        \\spelling of what the compiler already does at a frame boundary.
+    );
+    paragraph(23, #string,oneline
+        \\Calling it does not move the boundary, though. The call is itself a
+        \\frame, so the mark taken on entry is restored on return and the arena
+        \\comes back exactly where it was; the sixteen-byte gap in `carrier`
+        \\above does not close if a reset is written between the two `tprint`
+        \\calls. Programs bound their temporary use by putting the work inside a
+        \\block, or inside a procedure whose signature cannot carry temporary
+        \\storage out, and letting the compiler place the boundary.
+    );
+    subheading(24, "What comes from temporary storage");
+    paragraph(25, #string,oneline
+        \\A value backed by the arena carries no release obligation and must not
+        \\be passed to `free` or `string_free`. These are the standard-library
+        \\entry points that produce one.
+    );
+    table_header(26, "Call   —   Result");
+    table_row(27, "`tprint`   |   the formatted string, in the arena");
+    table_row(28, "`read_line`   |   the `text` field of its `Read_Line`, in the arena");
+    table_row(29, "`c_string`   |   a NUL-terminated copy of the string, in the arena");
+    table_row(30, "`format_args`   |   the formatted string, when it is passed `.allocator = context.temp_allocator`");
+    table_row(31, "`builder_into_temporary_string`   |   the builder's arena-backed bytes as a string");
+    table_row(32, "`string_into_temporary`   |   the same string with its release obligation dropped");
+    paragraph(33, #string,oneline
+        \\`print` and `writef` build their output with `tprint`, and `write_int`
+        \\formats through the arena as well, so a procedure that prints is
+        \\already using temporary storage even if it never names it. `format` is
+        \\the owning counterpart: it allocates from `context.allocator` and its
+        \\result is released with `string_free`.
+    );
+    note(34, #string,oneline
+        \\A temporary value that has to outlive its frame is copied, not
+        \\retained. `clone(text)` and `format("%", value)` both produce an owned
+        \\string from `context.allocator`; writing `kept = clone(tprint(...))`
+        \\inside the inner block above makes the earlier example print
+        \\`kept=inner-1`. Built-in Strings covers the string representation
+        \\itself.
+    );
+}
+
+render_section_119 :: () {
+    paragraph(0, #string,oneline
+        \\At `-O0`, and only at `-O0`, the default `context.allocator` is the
+        \\debug allocator instead of the heap allocator. It is not requested by
+        \\a flag of its own and it is unrelated to `--borrow-check` and to the
+        \\sanitizers: the optimization level alone selects it.
+    );
+    paragraph(1, #string,oneline
+        \\Every allocation it serves gets a 48-byte header holding the size, the
+        \\source trace of the request and links into a live list, plus an
+        \\eight-byte guard written past the end of the user bytes. That
+        \\bookkeeping is what lets the allocator name the line a leaked block
+        \\came from, and it is why it is not installed at any other level.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    kept := alloc(64) #memory leak;
+        \\    scratch := alloc(32);
+        \\    free(scratch);
+        \\    print("done\n");
+        \\}
+    );
+    code_block(3, "text", #string
+        \\$ glosso -O0 --run trace.glo
+        \\done
+        \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
+        \\  leak: 64 byte(s)
+        \\    allocated at:
+        \\      ...\trace.glo:4:13
+        \\
+        \\$ glosso -O1 --run trace.glo
+        \\done
+    );
+    paragraph(4, #string,oneline
+        \\The report gives one `leak:` entry per block still live at exit, with
+        \\the byte count and the trace of the call that produced it. A dynamic
+        \\array is reported at its `array_add`, because that is the call that
+        \\asked the allocator for storage.
+    );
+    subheading(5, "Double free");
+    paragraph(6, #string,oneline
+        \\A second `free` of a block the allocator already reclaimed is reported
+        \\with all three positions: where the block came from, where it was
+        \\first released, and where the second release happened.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    free(p);
+        \\    free(p);
+        \\    print("still running\n");
+        \\}
+    );
+    code_block(8, "text", #string
+        \\$ glosso -O0 --borrow-check off --run twice.glo
+        \\glosso debug allocator: double free
+        \\    allocated at:
+        \\      ...\twice.glo:4:10
+        \\    first free at:
+        \\      ...\twice.glo:5:5
+        \\    second free at:
+        \\      ...\twice.glo:6:5
+        \\still running
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(9, #string,oneline
+        \\`--borrow-check off` is needed only to get past the compile-time
+        \\diagnostic, which catches this particular program on its own with
+        \\`warning: double release of resource`. The two mechanisms answer
+        \\different questions: the analysis reasons about the source, the debug
+        \\allocator reports what the process actually did. Where the analysis
+        \\cannot see, and Limits of the Memory Analysis lists where that is, the
+        \\allocator still can.
+    );
+    subheading(10, "Use after free");
+    paragraph(11, #string,oneline
+        \\At `-O0` the backend inserts a check before every load and store
+        \\through a pointer. If the address falls inside a block on the freed
+        \\list, the read or write is reported and then allowed to proceed.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    if #pattern .Some(raw) = p {
+        \\        bytes := cast([*]u8) raw;
+        \\        bytes[0] = 7;
+        \\        free(p);
+        \\        print("value=%\n", bytes[0]);
+        \\    }
+        \\}
+    );
+    code_block(13, "text", #string
+        \\$ glosso -O0 --borrow-check off --run after.glo
+        \\glosso debug allocator: use after free
+        \\    allocated at:
+        \\      ...\after.glo:4:10
+        \\    freed at:
+        \\      ...\after.glo:8:9
+        \\    used at:
+        \\      ...\after.glo:9:28
+        \\value=7
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    subheading(14, "Invalid free and invalid realloc");
+    paragraph(15, #string,oneline
+        \\A pointer the debug allocator never handed out, and that is not on its
+        \\freed list either, is an invalid free. Only the release site can be
+        \\named, because there is no header to read a history from.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    slot: s64 = 1;
+        \\    free(cast(*void) *slot);
+        \\    print("continued\n");
+        \\}
+    );
+    code_block(17, "text", #string
+        \\$ glosso -O0 --run notmine.glo
+        \\glosso debug allocator: invalid free
+        \\    free at:
+        \\      ...\notmine.glo:5:5
+        \\continued
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(18, #string,oneline
+        \\The same test on the resize path is `invalid realloc`. Its output also
+        \\shows what a trace is: not one position but the chain of call sites
+        \\that reached the allocator, innermost first. The single-line traces
+        \\above are single-line only because `alloc` and `free` lower directly
+        \\at the point of use.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    slot: s64 = 1;
+        \\    fresh := mem_resize(cast(*void) *slot, 8, 32);
+        \\    print("continued\n");
+        \\}
+    );
+    code_block(20, "text", #string
+        \\$ glosso -O0 --borrow-check off --run badresize.glo
+        \\glosso debug allocator: invalid realloc
+        \\    realloc at:
+        \\      ...\std\Context.glo:189:50
+        \\      ...\std\Context.glo:294:16
+        \\      ...\badresize.glo:6:14
+        \\continued
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    subheading(21, "The tail guard");
+    paragraph(22, #string,oneline
+        \\Eight bytes of `0xa5` are written past the end of every allocation and
+        \\checked on `Free` and again when the block is walked for the leak
+        \\report. A write that runs off the end of the requested size damages
+        \\the guard and is counted.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    p := alloc(16);
+        \\    if #pattern .Some(raw) = p {
+        \\        bytes := cast([*]u8) raw;
+        \\        bytes[16] = 1;
+        \\    }
+        \\    free(p);
+        \\    print("continued\n");
+        \\}
+    );
+    code_block(24, "text", #string
+        \\$ glosso -O0 --run overrun.glo
+        \\continued
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(25, #string,oneline
+        \\A damaged guard has no message of its own; it raises the error count
+        \\and nothing else. An error total with no fault report above it is
+        \\therefore an overrun, and the block that carried it is found by
+        \\narrowing the writes rather than by reading the output.
+    );
+    subheading(26, "When the report runs");
+    paragraph(27, #string,oneline
+        \\The report is emitted at most once per process, guarded by a flag the
+        \\report itself sets. It runs on a normal return from `main`, and also
+        \\before `exit`, before a failed `#assert` aborts and before an explicit
+        \\process abort, so a program that stops deliberately still says what it
+        \\was holding. It does not run on the safety-check path: a bounds or
+        \\overflow failure at `-O0` terminates with status 134 and prints
+        \\nothing, as Runtime Safety Checks and Panics describes.
+    );
+    paragraph(28, #string,oneline
+        \\`debug_allocator_report_leaks()` forces it early. Because of the
+        \\once-only flag, forcing it means nothing allocated afterwards is ever
+        \\reported. The magic behind it, `__debug_report_leaks`, sits in a
+        \\private section of the `Context` module and naming it directly is
+        \\`error: unknown function __debug_report_leaks`. The same report is
+        \\what `free_all(context.allocator)` triggers while the debug allocator
+        \\is installed, because `Free_All` is the mode it maps to.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    first := alloc(64) #memory leak;
+        \\    debug_allocator_report_leaks();
+        \\    second := alloc(32) #memory leak;
+        \\    print("done\n");
+        \\}
+    );
+    code_block(30, "text", #string
+        \\$ glosso -O0 --run early.glo
+        \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
+        \\  leak: 64 byte(s)
+        \\    allocated at:
+        \\      ...\early.glo:5:14
+        \\done
+    );
+    subheading(31, "The message set");
+    table_header(32, "Fault   —   Message after `glosso debug allocator:`   —   Traces");
+    table_row(33, "leak   |   `leaked N allocation(s), M byte(s)`, then a `leak:` entry per block   |   `allocated at:`");
+    table_row(34, "double free   |   `double free`   |   `allocated at:`, `first free at:`, `second free at:`");
+    table_row(35, "use after free   |   `use after free`   |   `allocated at:`, `freed at:`, `used at:`");
+    table_row(36, "invalid free   |   `invalid free`   |   `free at:`");
+    table_row(37, "invalid realloc   |   `invalid realloc`   |   `realloc at:`");
+    table_row(38, "total   |   `N allocator error(s)`, printed last   |   none");
+    paragraph(39, #string,oneline
+        \\None of them terminates the process. Each fault is recorded, execution
+        \\continues, and the total is printed with the report; the exit status
+        \\is unaffected, so a build step that wants a failure has to read the
+        \\output.
+    );
+    note(40, #string,oneline
+        \\The debug allocator sees only what passes through it. Storage from
+        \\`context.temp_allocator` is never tracked, because the arena serves
+        \\itself out of a static buffer, and neither is memory taken from a
+        \\foreign `malloc` or from an allocator installed with
+        \\`#push_allocator`.
+    );
+}
+
+render_section_120 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso has no garbage collector, no destructors, and no ownership in
+        \\its type system. Every allocation is released by an explicit call, and
+        \\the compiler's work is to say when that call is missing, duplicated, or
+        \\made too early. Five separate machineries do it: three during
+        \\compilation and two inside the emitted program.
+    );
+    paragraph(1, #string,oneline
+        \\Acting on a memory diagnostic starts with deciding which of the five
+        \\produced it. They differ in severity, in what silences them, and in
+        \\whether the claim is proved or merely assumed.
+    );
+    table_header(2, "Mechanism   —   When it runs   —   Severity");
+    table_row(3, "`#memory` contract validation   |   before any analysis   |   always an error");
+    table_row(4, "temporal analysis   |   after type checking, before lowering   |   set by `--borrow-check`, warning by default");
+    table_row(5, "static semantics   |   during type checking   |   always an error, relaxed only by `#enable`");
+    table_row(6, "runtime safety checks   |   in the program, at `-O0` and `-O1`   |   abort with exit status 134");
+    table_row(7, "debug allocator   |   in the program, at `-O0`   |   report on stderr, the program continues");
+
+    subheading(8, "Contract validation");
+    paragraph(9, #string,oneline
+        \\The validator reads every `#memory` directive and checks it against the
+        \\declaration it annotates: that the clause name exists, that a named
+        \\parameter exists, that a releaser is reachable and takes a
+        \\memory-capable first argument, that a return place names a real union
+        \\variant, and that the clauses do not contradict one another. None of
+        \\that depends on how the program behaves, so a failure is a hard error.
+    );
+    code_block(10, "glosso", #string
+        \\count :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\
+        \\main :: () { }
+    );
+    code_block(11, "text", #string
+        \\error: #memory returns_fresh requires 'count' to return a memory-capable value
+        \\  --> contract.glo:1:34
+        \\  |
+        \\1 | count :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\  |                                  ^^^^^^^^^^^^^
+    );
+    paragraph(12, #string,oneline
+        \\`--borrow-check off` does not silence this class. The flag chooses the
+        \\severity of the analysis, and an unusable contract leaves nothing to
+        \\analyse. The flag has its own chapter; the clause vocabulary is in the
+        \\chapter on writing `#memory` contracts.
+    );
+
+    subheading(13, "Temporal analysis");
+    paragraph(14, #string,oneline
+        \\The second mechanism is an abstract interpreter over the checked
+        \\program. It walks each function body, tracking every resource through
+        \\assignments, calls, branches, `defer`, and `return`, and reports the
+        \\states that contradict a release obligation: leaks, double releases,
+        \\use after release, stale references, and pointers to local storage that
+        \\escape the frame owning them.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    array_add(*values, 2);
+        \\    print("count=%\n", values.count);
+        \\}
+    );
+    code_block(16, "text", #string
+        \\warning: resource must be released by 'array_free' before leaving scope
+        \\  --> counts.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: release obligation was created here
+        \\  --> counts.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+    );
+    paragraph(17, #string,oneline
+        \\At the default setting that is a warning: the program still links, still
+        \\runs, and prints `count=2`. Under `--borrow-check error` the identical
+        \\text appears with `error:` in place of `warning:`, no executable is
+        \\produced, and the compiler exits 1.
+    );
+    paragraph(18, #string,oneline
+        \\`#memory` is a compile-time contract only. It changes no layout, no
+        \\calling convention, and no generated instruction; deleting every
+        \\directive from a program changes which diagnostics appear and nothing
+        \\else. A contract that lies therefore costs a silence, never a
+        \\miscompilation.
+    );
+
+    subheading(19, "Static semantics");
+    paragraph(20, #string,oneline
+        \\A third group of memory-relevant rules is enforced by the type checker.
+        \\`*T`, `[*]T`, and `#fn_ptr` exclude zero so that `?*T`, `?[*]T`, and
+        \\`?#fn_ptr` can spend the null value on their `.None` case, and a
+        \\tagged-union payload may only be reached by a pattern match. The second
+        \\rule is what stops the `?*void` returned by `alloc` from being read as a
+        \\pointer without a test.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    print("%\n", p.Some);
+        \\    free(p);
+        \\}
+    );
+    code_block(22, "text", #string
+        \\error: tagged-union payload '.Some' may only be bound by a pattern match
+        \\  --> payload.glo:5:20
+        \\  |
+        \\5 |     print("%\n", p.Some);
+        \\  |                    ^^^^
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+    );
+    paragraph(23, #string,oneline
+        \\These are errors, and `--borrow-check` has no bearing on them. The only
+        \\relaxation is a feature gate, described in the chapter on feature gates.
+    );
+
+    subheading(24, "The two runtime layers");
+    paragraph(25, #string,oneline
+        \\Runtime safety checks are instructions in the emitted program: array
+        \\bounds, integer overflow, a `cast(*T)` of a zero address, and the gated
+        \\union unwrap. They are emitted only when the optimization level is 0 or
+        \\1, and every failure ends the process with status 134. The chapter on
+        \\runtime safety checks and panics lists the full family.
+    );
+    paragraph(26, #string,oneline
+        \\The debug allocator is a wrapper around `context.allocator` installed at
+        \\`-O0` alone. It records an allocation trace for every block and reports
+        \\leaks, double frees, use after free, invalid frees, and invalid
+        \\reallocations on stderr. It never aborts; it prints an error count when
+        \\the process ends. Its own chapter covers the reports in detail.
+    );
+    paragraph(27, #string,oneline
+        \\Neither runtime layer knows anything about the compile-time ones, and
+        \\silencing one does not silence the other. `#memory leak` tells the
+        \\analyser that an allocation is deliberately never released, which
+        \\removes the compile-time obligation and nothing more.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    table := alloc(64) #memory leak;
+        \\    print("interned for the life of the process\n");
+        \\}
+    );
+    code_block(29, "text", #string
+        \\interned for the life of the process
+        \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
+        \\  leak: 64 byte(s)
+        \\    allocated at:
+        \\      keep.glo:4:14
+    );
+    paragraph(30, #string,oneline
+        \\That output is from `-O0`. The same program built at `-O1` prints its
+        \\own line and nothing else, because the report belongs to the allocator
+        \\and the allocator is installed only at `-O0`.
+    );
+
+    subheading(31, "What is proved and what is assumed");
+    paragraph(32, #string,oneline
+        \\Inside one non-generic function body, along the paths the interpreter
+        \\walks, a temporal diagnostic is a statement about the program. Every
+        \\claim that crosses a function boundary rests on a contract instead, and
+        \\several constructs are not modelled at all.
+    );
+    bullet(33, #string,oneline
+        \\A contract on a declaration with no body, which is every `#foreign`
+        \\declaration and most `#magic` ones, is an axiom. Nothing checks it
+        \\against an implementation because there is no implementation to check.
+    );
+    bullet(34, #string,oneline
+        \\A contract on a function that does have a body is compared with the
+        \\summary inferred from that body, and disagreement is reported, as in
+        \\`body of 'make' returns a resource released by 'free', but its #memory contract requires 'c_free'`.
+    );
+    bullet(35, #string,oneline
+        \\`#memory unknown` asserts nothing and pessimizes nothing. It records
+        \\that the analyser knows nothing about the function, which is what it
+        \\already assumed of an uncontracted one.
+    );
+    bullet(36, #string,oneline
+        \\A generic function body is not analysed at all, so a generic that
+        \\touches memory needs an explicit contract to be visible to its callers.
+    );
+    bullet(37, #string,oneline
+        \\A loop body is analysed once and joined with the state at the loop's
+        \\entry. There is no fixed point, so a defect that needs a second
+        \\iteration to appear is not found, and one that appears on the first is
+        \\sometimes described as a possible leak instead.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\
+        \\concrete :: (x: s64) -> s64 { p := alloc(64); return x; }
+        \\generic  :: (x: $T) -> T    { p := alloc(64); return x; }
+        \\
+        \\main :: () {
+        \\    print("% %\n", concrete(1), generic(2));
+        \\}
+    );
+    code_block(39, "text", #string
+        \\warning: resource must be released by 'free' before leaving scope
+        \\  --> both.glo:3:36
+        \\  |
+        \\3 | concrete :: (x: s64) -> s64 { p := alloc(64); return x; }
+        \\  |                                    ^^^^^
+        \\note: release obligation was created here
+        \\  --> both.glo:3:36
+        \\  |
+        \\3 | concrete :: (x: s64) -> s64 { p := alloc(64); return x; }
+        \\  |                                    ^^^^^
+    );
+    paragraph(40, #string,oneline
+        \\One warning, not two. The two bodies leak the same allocation and only
+        \\the concrete one is reported. The chapter on the limits of the memory
+        \\analysis gives the complete list of blind spots.
+    );
+    note(41, #string,oneline
+        \\Standard-library bodies never emit temporal diagnostics into a user
+        \\build. Their explicit contracts are still validated and their inferred
+        \\summaries still propagate to call sites; only the warnings their own
+        \\statements would raise are suppressed. Without that rule every program
+        \\would open with the library's own findings.
+    );
+}
+
+render_section_121 :: () {
+    paragraph(0, #string,oneline
+        \\`#memory` states facts about a function's effect on memory that the
+        \\analyser cannot work out for itself. Its principal use is a declaration
+        \\with no body: a `#foreign` or `#magic` function has nothing to infer
+        \\from, so without a contract it contributes no facts at all.
+    );
+    code_block(1, "glosso", #string
+        \\libc     :: #library "c";
+        \\c_malloc :: (n: u64) -> ?*void #foreign libc "malloc"
+        \\    #memory(returns_fresh, released_by(c_free));
+        \\c_free   :: (p: ?*void) #foreign libc "free" #memory(kills(p), noescape(p));
+        \\c_puts   :: (s: *const s8) -> s32 #foreign libc "puts"
+        \\    #memory(reads(s), noescape(s));
+    );
+    paragraph(2, #string,oneline
+        \\There are two spellings: a single clause written directly after
+        \\`#memory`, or a parenthesised comma-separated list. The directive may
+        \\also be repeated on one declaration, in which case the effect sets
+        \\concatenate, so the declaration below states exactly what the
+        \\parenthesised `c_free` above states. An empty list is refused at parse
+        \\time: `#memory()` is `error: #memory effect list cannot be empty`.
+    );
+    code_block(3, "glosso", #string
+        \\c_free :: (p: ?*void) #foreign libc "free" #memory kills(p) #memory noescape(p);
+    );
+
+    subheading(4, "The clause vocabulary");
+    paragraph(5, #string,oneline
+        \\There are thirteen clauses and no others; an unrecognised name is
+        \\`error: unknown #memory effect 'owns'`. Seven of them require a
+        \\parameter, and those seven are the ones describing what the call does to
+        \\an argument rather than to its result.
+    );
+    table_header(6, "Clause   —   Argument   —   States");
+    table_row(7, "`returns_fresh`   |   optional place   |   the result is newly created storage the caller now owns");
+    table_row(8, "`returns_static`   |   optional place   |   the result has static storage duration and needs no release");
+    table_row(9, "`returns_borrow`   |   parameter, after an optional place   |   the result aliases storage reached through that parameter");
+    table_row(10, "`released_by`   |   releaser, after an optional place   |   the fresh result must be released by calling that function");
+    table_row(11, "`resource`   |   `released_by:` releaser, after an optional place   |   this call produced a resource released by that function");
+    table_row(12, "`leak`   |   none   |   the resource is deliberately never released");
+    table_row(13, "`kills`   |   parameter   |   the call releases the resource reached through the parameter");
+    table_row(14, "`invalidates`   |   parameter   |   the call may replace the parameter's backing storage");
+    table_row(15, "`noescape`   |   parameter   |   the callee keeps no reference to the parameter past the call");
+    table_row(16, "`escapes`   |   parameter   |   the callee does keep one");
+    table_row(17, "`reads`   |   parameter   |   the call reads through the parameter");
+    table_row(18, "`writes`   |   parameter   |   the call writes through the parameter");
+    table_row(19, "`unknown`   |   optional place   |   the analyser is told nothing about the function or that place");
+    paragraph(20, #string,oneline
+        \\Some combinations are refused outright. `noescape(x)` together with
+        \\`escapes(x)` is `error: #memory noescape(p) conflicts with escapes(p)`;
+        \\two return origins on one function are
+        \\`error: conflicting #memory return origins 'returns_fresh' and 'returns_static'`;
+        \\and `released_by` without a fresh origin is
+        \\`error: #memory released_by requires a fresh returned resource`.
+    );
+
+    subheading(21, "Grammar");
+    code_block(22, "ebnf", #string
+        \\memory-directive := "#memory" ( effect | "(" effect { "," effect } ")" )
+        \\
+        \\effect := "returns_fresh"  [ "(" place ")" ]
+        \\        | "returns_static" [ "(" place ")" ]
+        \\        | "unknown"        [ "(" place ")" ]
+        \\        | "returns_borrow" "(" [ place "," ] param ")"
+        \\        | "released_by"    "(" [ place "," ] releaser ")"
+        \\        | "resource"       "(" [ place "," ] "released_by" ":" releaser ")"
+        \\        | "leak"
+        \\        | ( "kills" | "invalidates" | "noescape"
+        \\          | "escapes" | "reads" | "writes" ) "(" param ")"
+        \\
+        \\place    := ( "returned" | result-name ) { "." variant-name }
+        \\param    := identifier | "arg" "(" integer ")"
+        \\releaser := identifier { "." identifier }
+    );
+    paragraph(23, #string,oneline
+        \\In `returns_borrow` and `released_by` a lone argument is the parameter or
+        \\the releaser; when two are given the place comes first. `resource`
+        \\decides between its one- and two-argument forms by looking ahead for the
+        \\literal `released_by` followed by a colon, which is why that keyword is
+        \\part of the syntax rather than positional. A dotted name is always a
+        \\place, never a path into an argument: `kills(cfg.buffer)` is
+        \\`error: unexpected token '.'`, because a parameter can only be named
+        \\whole.
+    );
+
+    subheading(24, "Attachment sites");
+    paragraph(25, #string,oneline
+        \\`#memory` appears in four syntactic positions. The syntax does not
+        \\distinguish them, but each accepts a different set of clauses, because a
+        \\clause describing an acquisition has no meaning on a signature and a
+        \\clause describing a signature has no meaning on one call.
+    );
+    table_header(26, "Site   —   Written   —   Accepts");
+    table_row(27, "function declaration   |   in the attribute list after the signature   |   every clause except `leak` and `resource`");
+    table_row(28, "call expression   |   as a suffix on the call   |   every clause; here `released_by` creates the obligation");
+    table_row(29, "variable declaration   |   after the type or the initializer   |   `leak` only");
+    table_row(30, "overlay   |   `#memory Name { ... }`, at top level or in a block   |   every clause the target's own declaration accepts");
+    code_block(31, "glosso", #string
+        \\copy  := c_strdup(cast(*const s8) *text) #memory resource(released_by: c_free);
+        \\same  := c_strdup(cast(*const s8) *text) #memory released_by(c_free);
+        \\table := alloc(64) #memory leak;
+        \\c_puts(cast(*const s8) *text) #memory(reads(s), noescape(s));
+    );
+    paragraph(32, #string,oneline
+        \\Putting a clause in the wrong position is a contract error whose message
+        \\names the position it belongs to: `#memory leak` on a signature is
+        \\`error: #memory leak is only valid on an acquisition expression or variable declaration`,
+        \\and anything but `leak` on a binding is
+        \\`error: #memory reads is not valid on a variable declaration` with
+        \\`note: only #memory leak may annotate an owning variable declaration`. A
+        \\call-site contract also needs a statically resolved callee, so
+        \\annotating a call through a `#fn_ptr` is
+        \\`error: #memory on a call requires a statically resolved function`.
+        \\Overlays are the subject of the chapter on overlays and foreign
+        \\bindings.
+    );
+
+    subheading(33, "`arg(N)` and return places");
+    paragraph(34, #string,oneline
+        \\`arg(N)` names the N-th parameter counting from zero. It exists for
+        \\declarations whose parameter names are machine-generated or absent, and
+        \\it is accepted anywhere a parameter name is. An index that does not
+        \\exist produces the same shape of message a misspelled name does:
+        \\`#memory noescape names unknown parameter 'arg(3)' of 'f'`.
+    );
+    code_block(35, "glosso", #string
+        \\c_free :: (p: ?*void) #foreign libc "free"
+        \\    #memory(kills(arg(0)), noescape(arg(0)));
+    );
+    paragraph(36, #string,oneline
+        \\A place selects one variant of a tagged-union result, or one named
+        \\result of a multiple-return signature, instead of the whole result. The
+        \\root `returned` is contextual syntax standing for the unnamed result; it
+        \\never enters the identifier namespace. With named results the root is
+        \\the result's own name.
+    );
+    code_block(37, "glosso", #string
+        \\Open :: union { Ok: *u8; Err: s64; }
+        \\
+        \\xclose :: (f: *u8) #foreign libc "close_thing" #memory(kills(f), noescape(f));
+        \\xopen  :: () -> Open #foreign libc "open_thing"
+        \\    #memory(returns_fresh(returned.Ok), released_by(returned.Ok, xclose));
+        \\
+        \\good :: () {
+        \\    r := xopen();
+        \\    if r == { case .Ok(f); xclose(f); case .Err(e); }
+        \\}
+        \\
+        \\bad :: () {
+        \\    r := xopen();
+        \\    if r == { case .Ok(f); _ := f.*; case .Err(e); }
+        \\}
+    );
+    code_block(38, "text", #string
+        \\warning: resource in 'returned.Ok' may not be released by 'xclose' on every path
+        \\   --> open.glo:15:10
+        \\   |
+        \\15 |     r := xopen();
+        \\   |          ^^^^^
+        \\note: release obligation was created here
+        \\   --> open.glo:15:10
+        \\   |
+        \\15 |     r := xopen();
+        \\   |          ^^^^^
+    );
+    paragraph(39, #string,oneline
+        \\`good` is clean and only `bad` is reported, because the obligation
+        \\belongs to the `.Ok` variant and the `.Err` arm acquires nothing. A place
+        \\naming no such variant is
+        \\`error: #memory return place 'returned.Nope' names unknown union variant 'Nope'`,
+        \\and a root that is neither `returned` nor a declared result name is
+        \\`error: #memory return place 'x.Ok' must start with contextual 'returned'`.
+    );
+
+    subheading(40, "When a contract is an assertion");
+    paragraph(41, #string,oneline
+        \\On a declaration with no body a contract is taken on trust, and nothing
+        \\in the compiler can contradict it. On a function that has a body the
+        \\contract is also an assertion: the analyser infers a summary from the
+        \\body and compares the two. An explicit return origin still wins over the
+        \\inferred one, but the disagreement is reported.
+    );
+    code_block(42, "glosso", #string
+        \\libc   :: #library "c";
+        \\c_free :: (p: ?*void) #foreign libc "free" #memory(kills(p), noescape(p));
+        \\
+        \\make :: () -> ?*void #memory(returns_fresh, released_by(c_free)) {
+        \\    return alloc(8);
+        \\}
+    );
+    code_block(43, "text", #string
+        \\warning: body of 'make' returns a resource released by 'free', but its #memory contract requires 'c_free'
+        \\  --> wrap.glo:4:45
+        \\  |
+        \\4 | make :: () -> ?*void #memory(returns_fresh, released_by(c_free)) {
+        \\  |                                             ^^^^^^^^^^^
+    );
+    note(44, #string,oneline
+        \\The sibling messages are `body of 'f' contradicts #memory noescape(p)`,
+        \\raised when the body stores the parameter where it can outlive the call,
+        \\and `body of 'f' contradicts its #memory return-origin contract`, raised
+        \\when a `returns_static` function returns a fresh allocation. All three
+        \\are temporal diagnostics, so `--borrow-check off` silences them; the
+        \\clause errors elsewhere in this chapter are not, and it does not.
+    );
+}
+
+render_section_122 :: () {
+    paragraph(0, #string,oneline
+        \\A resource is a value the analyser has been told must be handed back,
+        \\and a releaser is the function that hands it back. Together they form an
+        \\obligation attached to the expression that created the resource. The
+        \\obligation is discharged by calling the releaser on that resource, and
+        \\reporting the paths where it is not is the analysis's main work.
+    );
+    paragraph(1, #string,oneline
+        \\An obligation is created in exactly three ways: by `released_by` on the
+        \\declaration of the producing function, by `resource(released_by: f)` or
+        \\its `released_by(f)` shorthand written on one call, and by the built-in
+        \\rule for dynamic arrays.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    print("%\n", values.count);
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\That program warns. The declaration `values: [..]s64` carries no
+        \\contract of its own and creates nothing; the `array_add` call is what
+        \\makes the array owned, because every such call attaches a release
+        \\requirement naming `array_free`. A dynamic array that is declared and
+        \\never grown owns no storage and is not reported.
+    );
+
+    subheading(4, "Discharging with `defer`");
+    paragraph(5, #string,oneline
+        \\`defer` is the ordinary way to discharge an obligation, and the analyser
+        \\models it exactly: deferred statements run at scope exit and at every
+        \\`return`, in reverse order of registration. Writing the release
+        \\immediately after the acquisition therefore covers every exit from the
+        \\block, including the exits added later.
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\make_buffer :: (n: s64) -> ?*void #memory(returns_fresh, released_by(free)) {
+        \\    return alloc(n);
+        \\}
+        \\
+        \\main :: () {
+        \\    b := make_buffer(64);
+        \\    defer free(b);
+        \\    print("owned by main\n");
+        \\}
+    );
+    paragraph(7, #string,oneline
+        \\Because the order is reverse registration, two `defer` statements that
+        \\both touch the resource must be written with the release last. Written
+        \\the other way round the release runs first, and the read that follows it
+        \\is a use after release reported at the deferred statement rather than at
+        \\the closing brace.
+    );
+    code_block(8, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    defer print("%\n", values.count);
+        \\    defer array_free(*values);
+        \\}
+    );
+    code_block(9, "text", #string
+        \\warning: use after release while reading memory
+        \\  --> order.glo:6:31
+        \\  |
+        \\6 |     defer print("%\n", values.count);
+        \\  |                               ^^^^^
+        \\note: resource was released here
+        \\  --> order.glo:7:11
+        \\  |
+        \\7 |     defer array_free(*values);
+        \\  |           ^^^^^^^^^^
+        \\note: resource originated here
+        \\  --> order.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+    );
+    note(10, #string,oneline
+        \\`#try defer` does not discharge an obligation. The analyser checks the
+        \\statement for validity and then discards its effects, because it follows
+        \\only the successful continuation of a postfix `?`. A cleanup that must
+        \\count toward the obligation has to be a plain `defer`.
+    );
+
+    subheading(11, "Conditional release");
+    paragraph(12, #string,oneline
+        \\At a branch join a resource that is alive on one path and released on
+        \\the other becomes maybe-dead, and the wording weakens from a definite
+        \\claim to a possible one. The two forms are worth telling apart: the
+        \\first says every path leaks, the second says at least one does.
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\
+        \\work :: (flag: bool) {
+        \\    p := alloc(64);
+        \\    if flag { free(p); }
+        \\}
+        \\
+        \\main :: () {
+        \\    work(true);
+        \\    print("done\n");
+        \\}
+    );
+    code_block(14, "text", #string
+        \\warning: resource may not be released by 'free' on every path
+        \\  --> sometimes.glo:4:10
+        \\  |
+        \\4 |     p := alloc(64);
+        \\  |          ^^^^^
+        \\note: release obligation was created here
+        \\  --> sometimes.glo:4:10
+        \\  |
+        \\4 |     p := alloc(64);
+        \\  |          ^^^^^
+    );
+
+    subheading(15, "Obligations on aggregate members");
+    paragraph(16, #string,oneline
+        \\Ownership reaches into members. A struct, union, array, or tuple field
+        \\that acquires a resource carries its own obligation, and the diagnostic
+        \\points at the member rather than at the binding, so the field that
+        \\actually owns storage is the one named.
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Holder :: struct { values: [..]s64; }
+        \\
+        \\main :: () {
+        \\    a: Holder;
+        \\    array_add(*a.values, 1);
+        \\    print("%\n", a.values.count);
+        \\}
+    );
+    code_block(18, "text", #string
+        \\warning: resource must be released by 'array_free' before leaving scope
+        \\  --> holder.glo:7:18
+        \\  |
+        \\7 |     array_add(*a.values, 1);
+        \\  |                  ^^^^^^
+        \\note: release obligation was created here
+        \\  --> holder.glo:7:18
+        \\  |
+        \\7 |     array_add(*a.values, 1);
+        \\  |                  ^^^^^^
+    );
+    paragraph(19, #string,oneline
+        \\The remedy is a releaser for the aggregate. A `kills(p)` contract kills
+        \\every place reachable through the argument, so one call discharges the
+        \\obligations of all the members at once, and the aggregate itself becomes
+        \\the resource a caller has to account for.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Buffer :: struct { values: [..]s64; label: string; }
+        \\
+        \\buffer_free :: (b: *Buffer) #memory(kills(b), noescape(b)) {
+        \\    array_free(*b.*.values);
+        \\}
+        \\
+        \\buffer_make :: () -> Buffer #memory(returns_fresh, released_by(buffer_free)) {
+        \\    b: Buffer #memory leak;
+        \\    b.label = "counts";
+        \\    return b;
+        \\}
+        \\
+        \\main :: () {
+        \\    b := buffer_make();
+        \\    defer buffer_free(*b);
+        \\    array_add(*b.values, 7);
+        \\    print("% %\n", b.label, b.values.count);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\counts 1
+    );
+
+    subheading(22, "Transfer through a return");
+    paragraph(23, #string,oneline
+        \\Returning a resource transfers the obligation to the caller. A function
+        \\that acquires and returns is not reported; its caller is, at the call
+        \\expression, which is where the resource enters a scope that could
+        \\release it.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\make_buffer :: (n: s64) -> ?*void {
+        \\    return alloc(n);
+        \\}
+        \\
+        \\main :: () {
+        \\    b := make_buffer(64);
+        \\    print("made\n");
+        \\}
+    );
+    code_block(25, "text", #string
+        \\warning: resource must be released by 'free' before leaving scope
+        \\  --> owner.glo:8:10
+        \\  |
+        \\8 |     b := make_buffer(64);
+        \\  |          ^^^^^^^^^^^
+        \\note: release obligation was created here
+        \\  --> owner.glo:8:10
+        \\  |
+        \\8 |     b := make_buffer(64);
+        \\  |          ^^^^^^^^^^^
+    );
+    paragraph(26, #string,oneline
+        \\That worked because `make_buffer` carries no contract at all, so the
+        \\releaser was inferred from its body. Writing any explicit return origin
+        \\draws an ownership boundary instead: a bare `#memory returns_fresh` says
+        \\the result is fresh and declines to say who releases it, and the
+        \\callee's releaser is not inherited. Adding that one clause to the
+        \\example silences the call site completely, which is why a
+        \\`returns_fresh` contract is normally paired with `released_by`.
+    );
+    paragraph(27, #string,oneline
+        \\Two different obligations on one resource are a conflict, not an
+        \\accumulation. A value that arrives with one required releaser and then
+        \\meets an operation demanding another is reported at the operation.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\my_free :: (a: *[..]s64) #memory(kills(a), noescape(a)) { array_free(a); }
+        \\
+        \\make :: () -> [..]s64 #memory(returns_fresh, released_by(my_free)) {
+        \\    v: [..]s64 #memory leak;
+        \\    return v;
+        \\}
+        \\
+        \\main :: () {
+        \\    v := make();
+        \\    array_add(*v, 1);
+        \\    my_free(*v);
+        \\}
+    );
+    code_block(29, "text", #string
+        \\warning: resource requires release by 'my_free', but this operation requires 'array_free'
+        \\   --> mismatch.glo:12:5
+        \\   |
+        \\12 |     array_add(*v, 1);
+        \\   |     ^^^^^^^^^
+        \\note: resource originated here
+        \\   --> mismatch.glo:11:10
+        \\   |
+        \\11 |     v := make();
+        \\   |          ^^^^
+    );
+
+    subheading(30, "Deliberate leaks");
+    paragraph(31, #string,oneline
+        \\`#memory leak` marks a resource that is never released on purpose: an
+        \\interned table, a global cache, anything whose lifetime is the process.
+        \\It is the only clause accepted on a variable declaration, and on an
+        \\aggregate binding it covers every member place reached from that name.
+        \\It removes the obligation and changes nothing else, so the `-O0` debug
+        \\allocator still reports the allocation when the process ends.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Holder :: struct { values: [..]s64; }
+        \\
+        \\main :: () {
+        \\    c: Holder #memory leak;
+        \\    array_add(*c.values, 3);
+        \\    print("%\n", c.values.count);
+        \\}
+    );
+    paragraph(33, #string,oneline
+        \\A binding with neither an initializer nor an aggregate type owns
+        \\nothing, so the annotation is refused: `x: s64 #memory leak;` is
+        \\`error: #memory leak requires an owned resource` with
+        \\`note: an uninitialized scalar or pointer binding has no allocation to leak`.
+    );
+
+    subheading(34, "The obligation diagnostics");
+    table_header(35, "Message   —   Raised when");
+    table_row(36, "`resource must be released by 'f' before leaving scope`   |   the obligation is live on every path out of the scope");
+    table_row(37, "`resource may not be released by 'f' on every path`   |   it is live on some paths and discharged on others");
+    table_row(38, "`resource in 'returned.Ok' must be released by 'f' before leaving scope`   |   the same pair of forms, for an obligation on a return place");
+    table_row(39, "`double release of resource`   |   a release reaches a resource already dead on every path");
+    table_row(40, "`resource may already have been released`   |   a release reaches one that is dead on some paths only");
+    table_row(41, "`use after release while reading memory`   |   a read reaches released storage");
+    table_row(42, "`resource requires release by 'A', but this operation requires 'B'`   |   two operations demand different releasers for one resource");
+    paragraph(43, #string,oneline
+        \\Each carries a `note` locating the origin of the resource, and the
+        \\release-related ones a second note at the release that already happened.
+        \\The write and return variants of the use-after-release message read
+        \\`while writing memory` and `while returning the value`.
+    );
+}
+
+render_section_123 :: () {
+    paragraph(0, #string,oneline
+        \\Aliasing is modelled with a counter. Every resource carries a
+        \\generation, and every reference to it records the generation it observed
+        \\when it was made. A reference whose recorded generation is behind the
+        \\resource's current one is stale, and using it is reported.
+    );
+    paragraph(1, #string,oneline
+        \\`invalidates(p)` is what advances the counter. It says the call may
+        \\replace the storage reached through `p`, so any address derived from the
+        \\old storage is now meaningless. The clause exists because that is what a
+        \\growing container does: reallocating the backing block leaves the
+        \\descriptor valid and every view of the old block dangling.
+    );
+    code_block(2, "glosso", #string
+        \\array_add   :: (a: *[..]$T, value: ...T) #magic "array_add"
+        \\    #memory(invalidates(a), writes(a), noescape(a));
+        \\array_free  :: (a: *[..]$T) #magic "array_free"
+        \\    #memory(kills(a), noescape(a));
+        \\array_view  :: (a: [..]$T) -> []T #magic "array_view"
+        \\    #memory(returns_borrow(a), reads(a), noescape(a));
+    );
+    paragraph(3, #string,oneline
+        \\Those three prelude declarations are the whole model in miniature:
+        \\growing invalidates, freeing kills, taking a view borrows. A view taken
+        \\before a growth and read after it is exactly the case the generation
+        \\counter exists to catch.
+    );
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    view := array_view(values);
+        \\    array_add(*values, 2);
+        \\    print("%\n", view[0]);
+        \\    array_free(*values);
+        \\}
+    );
+    code_block(5, "text", #string
+        \\warning: stale reference used after storage invalidation
+        \\  --> views.glo:8:18
+        \\  |
+        \\8 |     print("%\n", view[0]);
+        \\  |                  ^^^^
+        \\note: resource originated here
+        \\  --> views.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: storage was invalidated here
+        \\  --> views.glo:7:5
+        \\  |
+        \\7 |     array_add(*values, 2);
+        \\  |     ^^^^^^^^^
+    );
+
+    subheading(6, "Why the owner survives");
+    paragraph(7, #string,oneline
+        \\Only `view` is reported. The second `array_add` and the `array_free`
+        \\after it both go through `values`, and both are clean, even though the
+        \\same call raised the generation. When a call invalidates a parameter the
+        \\analyser bumps the generation and then refreshes the root expression
+        \\that was passed as that argument.
+    );
+    paragraph(8, #string,oneline
+        \\The reason is that the owner is the thing being updated. `array_add`
+        \\writes the new block's address back into the descriptor it was handed,
+        \\so `values` is current by construction while every reference derived
+        \\earlier from the old block is not. Refreshing exactly the argument root
+        \\encodes that asymmetry without the analyser needing to know anything
+        \\about the container's layout.
+    );
+    paragraph(9, #string,oneline
+        \\A reference made after the invalidation observes the new generation and
+        \\is current. The program below compiles with no diagnostics and prints
+        \\`1 2`: `old` is stale but never used, and `fresh` is fine.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    old := array_view(values);
+        \\    array_add(*values, 2);
+        \\    fresh := array_view(values);
+        \\    print("% %\n", fresh[0], fresh[1]);
+        \\    array_free(*values);
+        \\}
+    );
+    note(11, #string,oneline
+        \\The refresh follows the argument expression, not the type. A pointer
+        \\copied out of the owner before the call, such as `alias := *values`, is
+        \\a separate reference and does go stale, even though it has exactly the
+        \\type `array_add` expects. An alias of an owner is not an owner.
+    );
+
+    subheading(12, "Releasing through a stale reference");
+    paragraph(13, #string,oneline
+        \\A stale reference is as wrong for a release as it is for a read, and it
+        \\has its own message, because the failure differs: the storage handed to
+        \\the releaser is the block that was already replaced.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    alias := *values;
+        \\    array_add(*values, 2);
+        \\    array_free(alias);
+        \\}
+    );
+    code_block(15, "text", #string
+        \\warning: release through a stale reference
+        \\  --> alias.glo:8:5
+        \\  |
+        \\8 |     array_free(alias);
+        \\  |     ^^^^^^^^^^
+        \\note: storage was invalidated here
+        \\  --> alias.glo:7:5
+        \\  |
+        \\7 |     array_add(*values, 2);
+        \\  |     ^^^^^^^^^
+    );
+
+    subheading(16, "Conditional invalidation");
+    paragraph(17, #string,oneline
+        \\When the invalidating call sits inside a branch, the join leaves the
+        \\reference stale on one path and current on the other, and the wording
+        \\weakens accordingly. The note still points at the call that did it.
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    view := array_view(values);
+        \\    if values.count == 1 { array_add(*values, 2); }
+        \\    print("%\n", view[0]);
+        \\    array_free(*values);
+        \\}
+    );
+    code_block(19, "text", #string
+        \\warning: reference may be stale after conditional invalidation
+        \\  --> maybe.glo:8:18
+        \\  |
+        \\8 |     print("%\n", view[0]);
+        \\  |                  ^^^^
+        \\note: resource originated here
+        \\  --> maybe.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: storage was invalidated here
+        \\  --> maybe.glo:7:28
+        \\  |
+        \\7 |     if values.count == 1 { array_add(*values, 2); }
+        \\  |                            ^^^^^^^^^
+    );
+
+    subheading(20, "Borrows");
+    paragraph(21, #string,oneline
+        \\`returns_borrow(p)` is the clause that makes a result share a resource
+        \\with a parameter instead of owning one. The result acquires no
+        \\obligation of its own and inherits the resource's fate: releasing the
+        \\owner turns a later read through the borrow into a use after release
+        \\rather than a stale-reference report, because the storage is gone
+        \\instead of moved.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    view := array_view(values);
+        \\    array_free(*values);
+        \\    print("%\n", view[0]);
+        \\}
+    );
+    code_block(23, "text", #string
+        \\warning: use after release while reading memory
+        \\  --> freed.glo:8:18
+        \\  |
+        \\8 |     print("%\n", view[0]);
+        \\  |                  ^^^^
+        \\note: resource was released here
+        \\  --> freed.glo:7:5
+        \\  |
+        \\7 |     array_free(*values);
+        \\  |     ^^^^^^^^^^
+        \\note: resource originated here
+        \\  --> freed.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+    );
+    paragraph(24, #string,oneline
+        \\A borrow is a link from a result to a parameter and nothing more. There
+        \\is no borrow extent, no notation for a lifetime, and no reborrowing
+        \\relation: passing a view on to another function does not create a
+        \\derived borrow tracked separately, and no rule requires a borrow to end
+        \\before the owner is next mutated. What is caught is the use, at the
+        \\point of use.
+    );
+    table_header(25, "Clause   —   Effect on the analysis");
+    table_row(26, "`invalidates(p)`   |   raises the resource's generation and refreshes the argument root");
+    table_row(27, "`returns_borrow(p)`   |   the result references the resource behind `p` and owns nothing");
+    table_row(28, "`reads(p)`, `writes(p)`   |   the argument is checked for liveness and staleness at the call");
+    table_row(29, "`noescape(p)`   |   the callee keeps no reference past the call");
+    table_row(30, "`escapes(p)`   |   the callee keeps one, so a local address passed in is reported as escaping");
+
+    subheading(31, "`noalias`");
+    paragraph(32, #string,oneline
+        \\`noalias` is a parameter modifier, not a `#memory` clause. It is written
+        \\before the parameter name, it is valid nowhere else, and it lowers
+        \\directly to the LLVM `noalias` attribute on that argument. It asserts
+        \\that the storage reached through this parameter is reached through no
+        \\other parameter for the duration of the call.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\fill :: (noalias a: *s64, noalias b: *s64) -> s64 {
+        \\    a.* = 1;
+        \\    b.* = 2;
+        \\    return a.*;
+        \\}
+        \\
+        \\main :: () {
+        \\    x: s64 = 0;
+        \\    print("%\n", fill(*x, *x));
+        \\}
+    );
+    paragraph(34, #string,oneline
+        \\Nothing verifies that assertion. The program above passes one address
+        \\twice, compiles without a diagnostic at any `--borrow-check` setting,
+        \\and answers differently depending on the optimization level: `2` at
+        \\`-O0`, where the load actually happens, and `1` at `-O1` and `-O2`,
+        \\where the optimizer is entitled to assume the store through `b` cannot
+        \\have touched `a`.
+    );
+    note(35, #string,oneline
+        \\`noalias` is the one memory annotation in the language that can change
+        \\the result of a correct-looking program. `#memory` contracts affect
+        \\diagnostics only; a wrong `noalias` affects code generation. Write it
+        \\where the caller's contract genuinely forbids overlap, and nowhere else.
+    );
+    paragraph(36, #string,oneline
+        \\The modifier is not part of the parameter's type for overload purposes:
+        \\two declarations differing only in `noalias` are
+        \\`error: function 'f' is already declared`. Repeating it on one parameter
+        \\is `error: duplicate noalias parameter modifier`, and writing it on a
+        \\local binding does not parse at all.
+    );
+}
+
+render_section_124 :: () {
+    paragraph(0, #string,oneline
+        \\An overlay supplies a `#memory` contract for a function whose
+        \\declaration cannot be edited. It is written `#memory <target> {
+        \\<effects> }`, names the function it describes, and merges its
+        \\effects into that function's contract exactly as if they had been
+        \\written in the declaration's own attribute list. The clause
+        \\vocabulary is the one given in the chapter on writing `#memory`
+        \\contracts; an overlay adds no new effects, only a second place to
+        \\put them.
+    );
+    paragraph(1, #string,oneline
+        \\Overlays exist because the signature and the ownership rule usually
+        \\come from different places. A `#foreign` declaration states a C
+        \\signature, which is all a header can tell the compiler; whether the
+        \\returned pointer is owned, and which function releases it, is a
+        \\fact about the library that no header records. Generated bindings
+        \\make the gap unavoidable: `bindgen` appends `#memory unknown` to
+        \\every declaration it emits, and `unknown` is operationally the same
+        \\as writing no contract at all.
+    );
+    subheading(2, "The blanket-unknown problem");
+    paragraph(3, #string,oneline
+        \\`unknown` sets a flag on the function's summary and makes the
+        \\result an opaque value carrying no resource. It does not pessimize
+        \\anything, so a program built on blanket-`unknown` bindings gets no
+        \\ownership analysis whatsoever. This program contains a real double
+        \\free.
+    );
+    code_block(4, "glosso", #string
+        \\libc     :: #library "c";
+        \\c_malloc :: (n: u64) -> ?*void #foreign libc "malloc" #memory unknown;
+        \\c_free   :: (p: ?*void) #foreign libc "free" #memory unknown;
+        \\
+        \\main :: () {
+        \\    p := c_malloc(64);
+        \\    c_free(p);
+        \\    c_free(p);
+        \\}
+    );
+    paragraph(5, #string,oneline
+        \\Nothing is reported about the second release. The only diagnostic
+        \\is the advisory that fires for every opaque foreign call with no
+        \\return origin, and `unknown` does not even silence that: it only
+        \\changes the note, which then recommends three clauses that do not
+        \\include `unknown`.
+    );
+    code_block(6, "text", #string
+        \\warning: lifetime of memory returned by opaque foreign call 'c_malloc' is unknown
+        \\  --> ...\ex1.glo:6:10
+        \\  |
+        \\6 |     p := c_malloc(64);
+        \\  |          ^^^^^^^^
+        \\note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract
+    );
+    paragraph(7, #string,oneline
+        \\The build succeeds and the program aborts with the Windows
+        \\heap-corruption status `0xc0000374`. Two overlays turn the same
+        \\defect into a compile-time diagnostic without touching either
+        \\declaration.
+    );
+    code_block(8, "glosso", #string
+        \\libc     :: #library "c";
+        \\c_malloc :: (n: u64) -> ?*void #foreign libc "malloc" #memory unknown;
+        \\c_free   :: (p: ?*void) #foreign libc "free" #memory unknown;
+        \\
+        \\#memory c_malloc { returns_fresh, released_by(c_free), };
+        \\#memory c_free   { kills(arg(0)), noescape(arg(0)), };
+        \\
+        \\main :: () {
+        \\    p := c_malloc(64);
+        \\    c_free(p);
+        \\    c_free(p);
+        \\}
+    );
+    code_block(9, "text", #string
+        \\warning: double release of resource
+        \\   --> ...\ex2.glo:11:5
+        \\   |
+        \\11 |     c_free(p);
+        \\   |     ^^^^^^
+        \\note: first release occurred here
+        \\   --> ...\ex2.glo:10:5
+        \\   |
+        \\10 |     c_free(p);
+        \\   |     ^^^^^^
+    );
+    paragraph(10, #string,oneline
+        \\Deleting the second `c_free` makes the program compile with no
+        \\diagnostics at all: the overlay on `c_malloc` also satisfied the
+        \\opaque-return advisory, because the return origin is no longer
+        \\unknown.
+    );
+    subheading(11, "The two placements");
+    paragraph(12, #string,oneline
+        \\The same syntax means two different things depending on where it is
+        \\written. At top level an overlay is a program-wide amendment to the
+        \\target's contract; inside a body it is a statement whose effect
+        \\lasts to the end of the enclosing block.
+    );
+    table_header(13, "Placement   —   Reach   —   Applied by");
+    table_row(14, "Top level   |   The whole program; every call to the target sees it.   |   Concatenation onto the declaration's own effect list.");
+    table_row(15, "Statement in a body   |   From the statement to the end of the enclosing block.   |   A separate summary, checked against the declaration's contract for conflicts.");
+    paragraph(16, #string,oneline
+        \\Top-level overlays are collected from the whole program before any
+        \\analysis runs, so they may be written before or after the
+        \\declaration they amend, and in a different file. The natural place
+        \\for them is one hand-written file next to the generated bindings.
+    );
+    paragraph(17, #string,oneline
+        \\The effect list is comma-separated and a trailing comma before `}`
+        \\is accepted, which is what lets a generator emit one clause per
+        \\line. An empty list is `error: #memory overlay effect list cannot be
+        \\empty`; the semicolon after the closing brace is optional.
+    );
+    subheading(18, "Block-scoped overlays");
+    paragraph(19, #string,oneline
+        \\The statement form is for a local convention: a region of code that
+        \\knows more about a call than the program as a whole does. Outside
+        \\the block the declaration reverts to whatever contract it carries.
+    );
+    code_block(20, "glosso", #string
+        \\libc       :: #library "c";
+        \\opaque_get :: (n: u64) -> ?*void #foreign libc "malloc" #memory unknown;
+        \\opaque_put :: (p: ?*void) #foreign libc "free" #memory unknown;
+        \\
+        \\main :: () {
+        \\    {
+        \\        #memory opaque_get { returns_fresh, released_by(opaque_put) }
+        \\        a := opaque_get(16);
+        \\        _ := a;
+        \\    }
+        \\    b := opaque_get(16);
+        \\    _ := b;
+        \\}
+    );
+    code_block(21, "text", #string
+        \\warning: resource must be released by 'opaque_put' before leaving scope
+        \\   --> ...\a6.glo:10:14
+        \\   |
+        \\10 |         a := opaque_get(16);
+        \\   |              ^^^^^^^^^^
+        \\note: release obligation was created here
+        \\   --> ...\a6.glo:10:14
+        \\   |
+        \\10 |         a := opaque_get(16);
+        \\   |              ^^^^^^^^^^
+        \\
+        \\warning: lifetime of memory returned by opaque foreign call 'opaque_get' is unknown
+        \\   --> ...\a6.glo:13:10
+        \\   |
+        \\13 |     b := opaque_get(16);
+        \\   |          ^^^^^^^^^^
+        \\note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract
+    );
+    paragraph(22, #string,oneline
+        \\The two diagnostics are the whole story: inside the block the call
+        \\creates a release obligation and leaks it, and outside the block the
+        \\same call creates nothing and falls back to the advisory.
+    );
+    subheading(23, "Naming a parameter that has no usable name");
+    paragraph(24, #string,oneline
+        \\Every clause that takes a parameter accepts either an identifier or
+        \\`arg(N)`, the zero-based position of the parameter in the
+        \\declaration. Generated declarations frequently have names taken from
+        \\a header, renamed, or absent, so `arg(N)` is the spelling a
+        \\machine-written overlay uses. An index past the end of the parameter
+        \\list is `error: #memory kills names unknown parameter 'arg(3)' of
+        \\'c_free'`.
+    );
+    code_block(25, "glosso", #string
+        \\Texture       :: struct { id: u32; }
+        \\gfx           :: #library "c";
+        \\LoadTexture   :: (name: string) -> Texture #foreign gfx "LoadTexture" #memory unknown;
+        \\UnloadTexture :: (t: Texture) #foreign gfx "UnloadTexture" #memory unknown;
+        \\
+        \\#memory LoadTexture   { returns_fresh, released_by(UnloadTexture), noescape(arg(0)), };
+        \\#memory UnloadTexture { kills(arg(0)), noescape(arg(0)), };
+        \\
+        \\leaking :: () {
+        \\    t := LoadTexture("wall.png");
+        \\    _ := t.id;
+        \\}
+    );
+    code_block(26, "text", #string
+        \\warning: resource must be released by 'UnloadTexture' before leaving scope
+        \\   --> ...\a4.glo:12:10
+        \\   |
+        \\12 |     t := LoadTexture("wall.png");
+        \\   |          ^^^^^^^^^^^
+        \\note: release obligation was created here
+        \\   --> ...\a4.glo:12:10
+        \\   |
+        \\12 |     t := LoadTexture("wall.png");
+        \\   |          ^^^^^^^^^^^
+    );
+    paragraph(27, #string,oneline
+        \\A `Texture` is a struct of one `u32`, not a pointer, and the
+        \\analysis still tracks it. Named aggregates are treated as
+        \\memory-capable unconditionally, which is what makes handle types
+        \\like this one contractable.
+    );
+    subheading(28, "Resolving and validating the target");
+    paragraph(29, #string,oneline
+        \\The target name must select exactly one function declaration in the
+        \\program. A name that selects none is `error: #memory overlay names
+        \\unknown function 'no_such_function'`, reported before any analysis
+        \\runs, and like every other contract error it is fatal at every
+        \\`--borrow-check` setting.
+    );
+    paragraph(30, #string,oneline
+        \\The merged contract is then validated exactly like a written one, so
+        \\an overlay is subject to every rule in the contract validator: a
+        \\releaser must exist and must accept a memory-capable first
+        \\parameter, `released_by` requires a fresh return, `noescape(p)` and
+        \\`escapes(p)` on the same parameter conflict, and a return place must
+        \\name a real variant of a tagged-union result.
+    );
+    note(31, #string,oneline
+        \\An overlay is an assertion, not a check. The compiler has no body to
+        \\compare it against and does not verify the claim; a wrong overlay
+        \\silently teaches the analysis a wrong fact, which is worse than no
+        \\overlay at all. Write one only for a function whose ownership rule
+        \\is documented.
+    );
+    subheading(32, "Call-site contracts");
+    paragraph(33, #string,oneline
+        \\A `#memory` directive may also be attached to a single call
+        \\expression, after the argument list. This is the narrowest scope of
+        \\all: one call. It accepts the whole vocabulary, and here
+        \\`released_by` and `resource` do not describe an obligation but
+        \\create one.
+    );
+    table_header(34, "Spelling   —   Meaning at a call site");
+    table_row(35, "`#memory resource(released_by: f)`   |   This call produced a resource that `f` releases.");
+    table_row(36, "`#memory released_by(f)`   |   The same, in the shorthand form.");
+    table_row(37, "`#memory leak`   |   This resource is deliberately never released.");
+    table_row(38, "`#memory kills(p)`, `reads(p)`, `noescape(p)`   |   An effect overlay applied to this one call.");
+    code_block(39, "glosso", #string
+        \\libc       :: #library "c";
+        \\opaque_get :: (n: u64) -> ?*void #foreign libc "malloc" #memory unknown;
+        \\opaque_put :: (p: ?*void) #foreign libc "free" #memory(kills(p), noescape(p));
+        \\
+        \\main :: () {
+        \\    p := opaque_get(64) #memory resource(released_by: opaque_put);
+        \\    opaque_put(p);
+        \\}
+    );
+    paragraph(40, #string,oneline
+        \\That program compiles clean. Removing the `opaque_put` call gives
+        \\`warning: resource must be released by 'opaque_put' before leaving
+        \\scope`, pointing at the acquisition. `#memory leak` cannot stand
+        \\alone on such a call: without a releaser there is no obligation to
+        \\waive, and the compiler says `error: #memory leak requires an owned
+        \\result with a known releaser`, with the note `add released_by(...)
+        \\to the acquisition contract or remove #memory leak`.
+    );
+    paragraph(41, #string,oneline
+        \\A call-site contract may refine the declaration's contract but never
+        \\contradict it. Naming a different releaser is `error: call-site
+        \\#memory releaser 'c_free2' conflicts with function releaser
+        \\'c_free'`; claiming `escapes(p)` where the declaration says
+        \\`noescape(p)` is `error: call-site #memory escape facts conflict
+        \\with the function contract`.
+    );
+    bullet(42, #string,oneline
+        \\The callee must be statically known. Calling through a function
+        \\pointer gives `error: #memory on a call requires a statically
+        \\resolved function`, because the analyser has no single summary to
+        \\amend.
+    );
+    bullet(43, #string,oneline
+        \\The directive attaches only to a call. Writing it on any other
+        \\expression, as in `x := 1 + 2 #memory returns_fresh;`, gives
+        \\`error: #memory on an expression is only supported on a function
+        \\call`.
+    );
+    subheading(44, "Silencing the escape advisory");
+    paragraph(45, #string,oneline
+        \\The second advisory raised for opaque foreign calls concerns
+        \\arguments rather than results: passing the address of a local to a
+        \\callee whose contract does not say what it does with the pointer
+        \\gives `warning: pointer to local storage may escape through opaque
+        \\foreign call 'c_puts'`, with the note `add #memory noescape(s) if
+        \\the callee does not retain it`. An overlay is how that is answered
+        \\for a generated declaration.
+    );
+    code_block(46, "glosso", #string
+        \\libc   :: #library "c";
+        \\c_puts :: (s: *const s8) -> s32 #foreign libc "puts" #memory unknown;
+        \\
+        \\#memory c_puts { reads(arg(0)), noescape(arg(0)), };
+        \\
+        \\main :: () {
+        \\    buffer: [8]s8;
+        \\    buffer[0] = 66;
+        \\    buffer[1] = 0;
+        \\    c_puts(cast(*const s8) *buffer);
+        \\}
+    );
+    paragraph(47, #string,oneline
+        \\Without the overlay the advisory fires; with it the program compiles
+        \\silently. `escapes(arg(0))` does not silence it, and is not meant
+        \\to: it replaces the conditional warning with the definite `warning:
+        \\pointer escapes through this call`. The overlay states which of the
+        \\two is true.
+    );
+}
+
+render_section_125 :: () {
+    paragraph(0, #string,oneline
+        \\The memory pass is an abstract interpreter over the checked program.
+        \\It runs after type checking and before lowering, computes a summary
+        \\for every function, and walks each body once against those
+        \\summaries. It is deliberately an approximation, and it approximates
+        \\in the unsound direction: a clean build is not a proof that a
+        \\program is free of leaks, double frees, or dangling pointers.
+    );
+    paragraph(1, #string,oneline
+        \\This chapter is the list of places where the analysis is known to
+        \\be wrong. Most are false negatives: the pass says nothing where
+        \\something is. Three are the opposite, reporting a defect in a
+        \\correct program, and two of the entries are both at once depending
+        \\on what the program does. Both directions matter, because a warning
+        \\that cannot be true trains a reader to ignore the ones that can.
+    );
+    table_header(2, "Blind spot   —   What is missed");
+    table_row(3, "Generic bodies   |   Everything. A body behind a type parameter is not analysed at all.");
+    table_row(4, "Loops   |   The body is analysed once and joined with the entry state; there is no fixed point.");
+    table_row(5, "`unknown` contracts   |   All ownership facts about the call and its result.");
+    table_row(6, "Wrapper chains past depth 31   |   Inference stops, losing the effects and inventing a leak.");
+    table_row(7, "`#try defer`   |   Its cleanup is validated but its effects are discarded.");
+    table_row(8, "Address of a global   |   Read as local storage, producing an escape warning that cannot be silenced.");
+    table_row(9, "Standard-library bodies   |   Diagnostics are suppressed inside them by design.");
+    subheading(10, "Generic bodies are not analysed");
+    paragraph(11, #string,oneline
+        \\This is the largest hole. A function with a type parameter is a
+        \\template, and the pass never walks the template body nor any of its
+        \\instantiations. The two functions below differ only in the
+        \\parameter's type.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\concrete :: (x: s64) -> s64 {
+        \\    p := alloc(64);
+        \\    return x;
+        \\}
+        \\
+        \\generic :: (x: $T) -> T {
+        \\    p := alloc(64);
+        \\    return x;
+        \\}
+        \\
+        \\main :: () {
+        \\    _ := concrete(1);
+        \\    _ := generic(1);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\warning: resource must be released by 'free' before leaving scope
+        \\  --> ...\b1.glo:5:10
+        \\  |
+        \\5 |     p := alloc(64);
+        \\  |          ^^^^^
+        \\note: release obligation was created here
+        \\  --> ...\b1.glo:5:10
+        \\  |
+        \\5 |     p := alloc(64);
+        \\  |          ^^^^^
+    );
+    paragraph(14, #string,oneline
+        \\One warning, for line 5. The identical leak on line 10 is silent,
+        \\and so is a double free written in the same position.
+    );
+    paragraph(15, #string,oneline
+        \\The second half of this is worse than silence. A generic wrapper
+        \\does not merely fail to report its own defects; it drops the effects
+        \\of the calls it makes, so the obligation reaches the caller
+        \\unsatisfied and a correct program is diagnosed as leaking.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\gen_free :: (p: $T) { free(p); }
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    gen_free(p);
+        \\}
+    );
+    paragraph(17, #string,oneline
+        \\That is `warning: resource must be released by 'free' before leaving
+        \\scope`, on a program with no leak. Writing the contract out fixes
+        \\it, because an explicit contract is used whether or not the body was
+        \\analysed: `gen_free :: (p: $T) #memory(kills(p), noescape(p)) {
+        \\free(p); }` compiles clean. Contracts on generics are still
+        \\validated, so the mistake is caught if the contract itself is
+        \\wrong.
+    );
+    note(18, #string,oneline
+        \\A generic function that acquires or releases memory needs an
+        \\explicit `#memory` contract. Nothing will be inferred for it, and
+        \\its callers will be misdiagnosed without one. This is why the
+        \\standard library's `array_add`, `array_free`, and `array_view` carry
+        \\hand-written contracts.
+    );
+    subheading(19, "Loops are joined, not iterated");
+    paragraph(20, #string,oneline
+        \\A `while` or `for` body is analysed once from the entry state and
+        \\the result is joined back with it. There is no fixed point, so a
+        \\resource that is alive on entry and dead at the end of the body ends
+        \\up merely `MaybeDead`, and the second iteration is never modelled.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    for i: 0..2 {
+        \\        free(p);
+        \\    }
+        \\}
+    );
+    code_block(22, "text", #string
+        \\warning: resource may not be released by 'free' on every path
+        \\  --> ...\b3.glo:5:10
+        \\  |
+        \\5 |     p := alloc(64);
+        \\  |          ^^^^^
+        \\note: release obligation was created here
+        \\  --> ...\b3.glo:5:10
+        \\  |
+        \\5 |     p := alloc(64);
+        \\  |          ^^^^^
+    );
+    paragraph(23, #string,oneline
+        \\The program has a double free, and the diagnostic reports a possible
+        \\leak. This is the shape of every loop-related finding: the location
+        \\is right and the claim is about the wrong defect, because the
+        \\analysis is describing one pass through a body that runs twice.
+    );
+    subheading(24, "The wrapper depth cap");
+    paragraph(25, #string,oneline
+        \\Summary inference runs to a fixed point, but the loop is bounded at
+        \\thirty-two rounds and propagates roughly one call-graph edge per
+        \\round. A `kills` effect therefore travels at most thirty-one wrapper
+        \\frames from the function that declares it. The table below is a chain
+        \\`drop0` through `dropN`, where `drop0` calls a `kills`-contracted
+        \\`c_free` and `main` frees the same pointer a second time.
+    );
+    table_header(26, "Chain depth   —   Double release reported   —   Spurious leak reported");
+    table_row(27, "10   |   yes   |   no");
+    table_row(28, "31   |   yes   |   no");
+    table_row(29, "32   |   no   |   yes");
+    paragraph(30, #string,oneline
+        \\Past depth thirty-one both directions fail at once: the real double
+        \\release is missed, and a chain that does release correctly is
+        \\reported as `warning: resource must be released by 'c_free' before
+        \\leaving scope`. Nothing indicates that inference gave up.
+    );
+    subheading(31, "`unknown` and the contracts that are not there");
+    paragraph(32, #string,oneline
+        \\`#memory unknown` records that nothing is known and pessimizes
+        \\nothing. A call to an `unknown` function produces an opaque value
+        \\with no resource, so no obligation is created, no release is
+        \\tracked, and no misuse is reported. The chapter on overlays and
+        \\foreign bindings shows the fix; the point here is that a
+        \\bindgen-generated program is, by default, entirely unanalysed with
+        \\respect to ownership.
+    );
+    subheading(33, "`#try defer` cleanup does not count");
+    paragraph(34, #string,oneline
+        \\A plain `defer` is pushed onto the scope frame and replayed at every
+        \\exit, including every `return`. A `#try defer` is checked for
+        \\validity and then its effects are discarded, because the analyser
+        \\follows only the successful continuation of a postfix `?`. The
+        \\cleanup that runs on the error path is invisible.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\E :: enum { Bad; }
+        \\
+        \\plain :: (fail: bool) -> E!s64 {
+        \\    p := alloc(64);
+        \\    defer free(p);
+        \\    if fail return .Err(.Bad);
+        \\    return .Ok(1);
+        \\}
+        \\
+        \\trying :: (fail: bool) -> E!s64 {
+        \\    p := alloc(64);
+        \\    #try defer free(p);
+        \\    if fail return .Err(.Bad);
+        \\    free(p);
+        \\    return .Ok(1);
+        \\}
+    );
+    paragraph(36, #string,oneline
+        \\`plain` is clean. `trying` gives `warning: resource must be released
+        \\by 'free' before leaving scope` at its `alloc`, because on the
+        \\`.Err` path the analyser still sees the resource alive. This one is
+        \\a false positive rather than a false negative, and the plain `defer`
+        \\above is the spelling the analysis understands.
+    );
+    subheading(37, "Globals read as local storage");
+    paragraph(38, #string,oneline
+        \\Taking the address of a global and returning it is reported as an
+        \\escape of local storage. The origin is classified before any
+        \\contract is consulted, so the obvious answer does not work.
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\
+        \\storage: s64 = 7;
+        \\
+        \\get :: () -> *s64 { return *storage; }
+        \\
+        \\main :: () {
+        \\    p := get();
+        \\    print("p=%\n", p.*);
+        \\}
+    );
+    code_block(40, "text", #string
+        \\warning: pointer to local storage escapes through return
+        \\  --> ...\b6.glo:5:21
+        \\  |
+        \\5 | get :: () -> *s64 { return *storage; }
+        \\  |                     ^^^^^^
+        \\note: local storage was created here
+        \\  --> ...\b6.glo:5:28
+        \\  |
+        \\5 | get :: () -> *s64 { return *storage; }
+        \\  |                            ^
+    );
+    paragraph(41, #string,oneline
+        \\Adding `#memory returns_static` to `get` does not silence it; the
+        \\diagnostic is raised where the return place is recorded, which is
+        \\before the contract is read. The only setting that removes it today
+        \\is `--borrow-check off`.
+    );
+    subheading(42, "What is outside the analysis entirely");
+    bullet(43, #string,oneline
+        \\`noalias` is not verified. It is a parameter modifier that lowers to
+        \\the LLVM attribute and participates in overload mangling; passing
+        \\the same address to two `noalias` parameters compiles without
+        \\complaint.
+    );
+    bullet(44, #string,oneline
+        \\`#push_allocator` does not relax an obligation. An `alloc` inside a
+        \\temporary-arena block still requires a matching `free`, even though
+        \\the arena releases everything at once. The annotation for that is
+        \\`#memory leak` on the acquisition.
+    );
+    bullet(45, #string,oneline
+        \\Contradictory clause pairs are accepted. `#memory(returns_borrow(p),
+        \\kills(p))`, `#memory(unknown, returns_fresh)`, and a duplicated
+        \\`noescape(p)` all pass the validator; only `noescape` against
+        \\`escapes` on the same parameter is rejected.
+    );
+    bullet(46, #string,oneline
+        \\Standard-library bodies emit no diagnostics into a user build. They
+        \\still participate in summary inference and their written contracts
+        \\are still validated, but a finding inside a standard-library
+        \\implementation is suppressed.
+    );
+    subheading(47, "Reading a false negative");
+    paragraph(48, #string,oneline
+        \\Because the failure mode is silence, the useful habit is to treat a
+        \\clean memory pass as evidence about the code the pass could see. The
+        \\runtime layers cover a different set: the debug allocator at `-O0`
+        \\observes actual allocations, so it catches exactly the class the
+        \\static pass drops.
+    );
+    code_block(49, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\churn :: (x: $T) -> T {
+        \\    p := alloc(64);
+        \\    free(p);
+        \\    free(p);
+        \\    return x;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", churn(1));
+        \\}
+    );
+    paragraph(50, #string,oneline
+        \\The memory pass says nothing, because the body is generic. At the
+        \\default `-O1` the program aborts with `0xc0000374`. Built with
+        \\`-O0`, the debug allocator names both frees and the allocation, each
+        \\with the call chain that reached it.
+    );
+    code_block(51, "text", #string
+        \\$ glosso -O0 -o g1.exe g1.glo && ./g1.exe
+        \\glosso debug allocator: double free
+        \\    allocated at:
+        \\      ...\g1.glo:5:10
+        \\      ...\g1.glo:12:18
+        \\    first free at:
+        \\      ...\g1.glo:6:5
+        \\      ...\g1.glo:12:18
+        \\    second free at:
+        \\      ...\g1.glo:7:5
+        \\      ...\g1.glo:12:18
+        \\1
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(52, #string,oneline
+        \\The two tools are complementary and neither subsumes the other: the
+        \\static pass sees every path but only through concrete bodies, and
+        \\the debug allocator sees every body but only the paths that actually
+        \\ran, and only allocations that went through `context.allocator`. The
+        \\chapter on the debug allocator covers its full report set.
+    );
+}
+
+render_section_126 :: () {
+    paragraph(0, #string,oneline
+        \\`--borrow-check <off|warning|error>` selects the severity of the
+        \\temporal memory analysis: leaks, double releases, use after release,
+        \\stale references after invalidation, escaping pointers, and the
+        \\advisories raised for opaque foreign calls. The default is
+        \\`warning`. Both spellings of the value are accepted,
+        \\`--borrow-check error` and `--borrow-check=error`.
+    );
+    table_header(1, "Mode   —   Analysis runs   —   Effect on the build");
+    table_row(2, "`off`   |   no   |   No temporal diagnostics at all; the build proceeds.");
+    table_row(3, "`warning` (default)   |   yes   |   Findings print as warnings; the build proceeds and the compiler exits 0.");
+    table_row(4, "`error`   |   yes   |   Findings print as errors; no artifact is produced and the compiler exits 1.");
+    subheading(5, "The three modes on one leak");
+    paragraph(6, #string,oneline
+        \\A dynamic array that is grown and never freed is the shortest real
+        \\finding. The obligation comes from the `array_add` call, not from
+        \\the declaration: growing an array is what makes it owned.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    array_add(*values, 1);
+        \\    array_add(*values, 2);
+        \\    print("count=%\n", values.count);
+        \\}
+    );
+    paragraph(8, #string,oneline
+        \\At the default setting the finding is a warning, the program is
+        \\linked, and `--run` executes it.
+    );
+    code_block(9, "text", #string
+        \\$ glosso --run e1.glo
+        \\glosso: compile e1.glo (target=x86_64-pc-windows-msvc)
+        \\warning: resource must be released by 'array_free' before leaving scope
+        \\  --> ...\e1.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: release obligation was created here
+        \\  --> ...\e1.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\glosso: link e1.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done e1.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\count=2
+    );
+    paragraph(10, #string,oneline
+        \\At `error` the identical text is printed with `error:` in place of
+        \\`warning:`, and the run stops there: no link line, no artifact, no
+        \\program output.
+    );
+    code_block(11, "text", #string
+        \\$ glosso --borrow-check error --run e1.glo
+        \\glosso: compile e1.glo (target=x86_64-pc-windows-msvc)
+        \\error: resource must be released by 'array_free' before leaving scope
+        \\  --> ...\e1.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+        \\note: release obligation was created here
+        \\  --> ...\e1.glo:4:5
+        \\  |
+        \\4 |     values: [..]s64;
+        \\  |     ^^^^^^
+    );
+    paragraph(12, #string,oneline
+        \\At `off` the analysis does not run and nothing is printed. The same
+        \\program builds and runs exactly as it does under `warning`; the leak
+        \\is still there.
+    );
+    subheading(13, "Exit statuses");
+    table_header(14, "Situation   —   Exit status");
+    table_row(15, "Warnings only, under `warning` or `off`   |   0");
+    table_row(16, "Any finding under `error`   |   1");
+    table_row(17, "A malformed `#memory` directive, at any mode   |   1");
+    table_row(18, "A value other than `off`, `warning`, `error`   |   2");
+    paragraph(19, #string,oneline
+        \\The last of these is a driver error rather than a compile error, and
+        \\prints no source frame: `glosso: borrow-check mode must be off,
+        \\warning, or error`.
+    );
+    subheading(20, "What the flag does not cover");
+    paragraph(21, #string,oneline
+        \\`--borrow-check` selects the severity of the analysis. It has no
+        \\effect on the contract validator, which checks that a written
+        \\`#memory` directive is well formed and consistent. Contract errors
+        \\are produced before the analysis is even scheduled and abort the
+        \\build unconditionally.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\foo :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\
+        \\main :: () { print("%\n", foo(1)); }
+    );
+    code_block(23, "text", #string
+        \\$ glosso --borrow-check off --backend llvm-ir -o e2.ll e2.glo
+        \\glosso: compile e2.glo (target=x86_64-pc-windows-msvc)
+        \\error: #memory returns_fresh requires 'foo' to return a memory-capable value
+        \\  --> ...\e2.glo:3:32
+        \\  |
+        \\3 | foo :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\  |                                ^^^^^^^^^^^^^
+    );
+    paragraph(24, #string,oneline
+        \\`--borrow-check off` is therefore not a way to compile a program
+        \\whose contracts are wrong. It silences findings about code, never
+        \\complaints about annotations.
+    );
+    paragraph(25, #string,oneline
+        \\In the other direction, `error` promotes the whole temporal
+        \\analysis, including the advisories about opaque foreign calls. A
+        \\program built on bindings that carry `#memory unknown` fails to
+        \\compile under `error` with `error: lifetime of memory returned by
+        \\opaque foreign call 'c_malloc' is unknown` at the first such call.
+        \\That is the intended use: it turns "this library has no contracts
+        \\yet" into a build failure rather than a page of warnings.
+    );
+    subheading(26, "Raising the mode in a build script");
+    paragraph(27, #string,oneline
+        \\A build script sets the mode per compilation through the
+        \\`borrow_check` field of `Compile_Options`, whose type is
+        \\`Compiler_Borrow_Check` with variants `Off`, `Warning`, and `Error`.
+        \\The field defaults to `Warning`, matching the command line.
+        \\`Build_Options` carries the same field for the whole-workspace
+        \\form.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\#import "Compiler";
+        \\
+        \\build :: () {
+        \\    set_build_options_dc(.do_output = false);
+        \\    options: Compile_Options;
+        \\    options.borrow_check = Compiler_Borrow_Check.Error;
+        \\    if compile("leaky_child.glo", "leaky_child.exe", options) == {
+        \\    case .Ok(path);   print("[build] ok %\n", path);
+        \\    case .Err(error); print("[build] memory diagnostics are fatal here\n"); exit(1);
+        \\    }
+        \\}
+        \\
+        \\#comptime build();
+        \\
+        \\main :: () {}
+    );
+    code_block(29, "text", #string
+        \\glosso: compile e6.glo (target=x86_64-pc-windows-msvc)
+        \\[build] memory diagnostics are fatal here
+    );
+    paragraph(30, #string,oneline
+        \\The nested compilation returns `.Err` and its diagnostics arrive in
+        \\`error.message`, printed by the script rather than by the compiler.
+        \\Without the `exit(1)` the outer build succeeds and returns 0: a
+        \\failed inner compilation is a value, not a signal. The chapter on
+        \\build scripts covers the rest of `Compile_Options`.
+    );
+    paragraph(31, #string,oneline
+        \\The mode to choose is a project decision rather than a language one.
+        \\`error` is appropriate once a program's foreign bindings all carry
+        \\contracts, since from then on a new finding is almost always a new
+        \\defect. `off` is appropriate for a program whose memory is managed
+        \\by an arena the analysis cannot model, where the findings are known
+        \\in advance to be noise, and for the one case that has no annotation:
+        \\returning the address of a global.
+    );
+}
+
+render_section_127 :: () {
+    paragraph(0, #string,oneline
+        \\`#enable(...)` and `#disable(...)` open and close a feature gate.
+        \\A gate relaxes a rule the language otherwise enforces, and the set
+        \\of gates is closed: the parser recognises exactly four names, and
+        \\anything else is `error: unknown feature 'memory_strict'`.
+    );
+    table_header(1, "Gate   —   What `#enable` permits");
+    table_row(2, "`lossy_numerics`   |   Implicit integer-to-integer conversions that lose information: narrowing, and sign reinterpretation.");
+    table_row(3, "`pointer_punning`   |   Pointee-unchecked pointer conversions, and `*T` interchangeable with `[*]T`.");
+    table_row(4, "`allow_union_unwrap`   |   Direct tagged-union payload access outside a pattern match.");
+    table_row(5, "`private_section`, `private_sections`   |   Declaration visibility. Accepts a second argument, `siblings`. Not a safety gate.");
+    paragraph(6, #string,oneline
+        \\The two spellings `private_section` and `private_sections` are
+        \\synonyms, and the second argument is legal only on them: any other
+        \\pairing is `error: unknown feature 'lossy_numerics,siblings'`.
+        \\Visibility is covered in the chapter on visibility and private
+        \\sections; the three remaining gates are relaxations of static
+        \\semantics and are the subject here.
+    );
+    subheading(7, "Form and placement");
+    paragraph(8, #string,oneline
+        \\A feature directive is a top-level section directive, not a
+        \\statement. It takes effect at the point it appears and stays in
+        \\effect until the matching `#disable` or the end of the file. It
+        \\cannot appear inside a body.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Token :: union { Name: s64; Code: s64; }
+        \\
+        \\main :: () {
+        \\    #enable(allow_union_unwrap);
+        \\    t := Token.Code(3);
+        \\    print("%\n", t.Code);
+        \\}
+    );
+    code_block(10, "text", #string
+        \\error: unexpected directive 'enable'
+        \\  --> ...\f1.glo:6:5
+        \\  |
+        \\6 |     #enable(allow_union_unwrap);
+        \\  |     ^^^^^^^
+    );
+    paragraph(11, #string,oneline
+        \\The reason is that a gate is a property of a declaration, not of a
+        \\region of statements. The parser stamps the currently-open set onto
+        \\every declaration it parses, and the checker reads the stamp back
+        \\when it checks that declaration. A gate opened inside a body would
+        \\have nothing to attach to, and would have to mean something
+        \\different from a gate opened outside one.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Token :: union { Name: s64; Code: s64; }
+        \\
+        \\#enable(allow_union_unwrap);
+        \\
+        \\inside :: (t: Token) -> s64 { return t.Code; }
+        \\
+        \\#disable(allow_union_unwrap);
+        \\
+        \\after :: (t: Token) -> s64 { return t.Code; }
+    );
+    code_block(13, "text", #string
+        \\error: tagged-union payload '.Code' may only be bound by a pattern match
+        \\   --> ...\f2.glo:11:39
+        \\   |
+        \\11 | after :: (t: Token) -> s64 { return t.Code; }
+        \\   |                                       ^^^^
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+    );
+    paragraph(14, #string,oneline
+        \\`inside` compiles and `after` does not, and the split is decided at
+        \\the declaration, not at the call. Deleting `after` leaves a program
+        \\in which an ungated `main` calls the gated `inside` and prints `3`.
+        \\A gate is not contagious in either direction.
+    );
+    subheading(15, "The reach of a gate");
+    paragraph(16, #string,oneline
+        \\Every position that carries an expression the checker evaluates is a
+        \\declaration in this sense, so a gate reaches further than function
+        \\bodies. It is installed for function bodies, global initialisers,
+        \\constant initialisers, struct field defaults, and top-level
+        \\`#comptime` blocks.
+    );
+    table_header(17, "Position   —   Gated");
+    table_row(18, "Function body   |   yes");
+    table_row(19, "Global variable initialiser   |   yes");
+    table_row(20, "`::` constant initialiser   |   yes");
+    table_row(21, "Struct field default   |   yes");
+    table_row(22, "Top-level `#comptime` block   |   yes");
+    paragraph(23, #string,oneline
+        \\This matters because the payload rule is now a default error rather
+        \\than a relaxation of a permissive default: a gate that could not
+        \\reach an initialiser would leave that position with no escape hatch
+        \\at all.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Res :: union { Ok: s64; Err: s64; }
+        \\
+        \\SOURCE :: Res.Ok(7);
+        \\
+        \\#enable(allow_union_unwrap);
+        \\
+        \\WIDTH :: SOURCE.Ok;
+        \\
+        \\gated_global: s64 = SOURCE.Ok;
+        \\
+        \\#disable(allow_union_unwrap);
+        \\
+        \\ungated_global: s64 = SOURCE.Ok;
+        \\
+        \\main :: () {
+        \\    print("% %\n", WIDTH, gated_global);
+        \\}
+    );
+    paragraph(25, #string,oneline
+        \\The constant and the gated global are accepted; only
+        \\`ungated_global` is rejected, with the payload-access error pointing
+        \\at line 15. Removing that line leaves a program that prints `7 7`.
+        \\The same holds for a top-level `#comptime` block: gated, it runs and
+        \\prints; after `#disable`, an identical block is an error.
+    );
+    subheading(26, "What each gate actually relaxes");
+    paragraph(27, #string,oneline
+        \\`lossy_numerics` is narrower than its name suggests. The gate is
+        \\consulted at exactly one place in the checker, inside the branch that
+        \\compares an integer type against an integer type. Narrowing and sign
+        \\reinterpretation become implicit; float conversions do not, in either
+        \\direction and at any width.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#enable(lossy_numerics);
+        \\
+        \\main :: () {
+        \\    big: s64 = 300;
+        \\    small: u8 = big;
+        \\    negative: s64 = -1;
+        \\    wrapped: u8 = negative;
+        \\    print("% %\n", small, wrapped);
+        \\}
+    );
+    code_block(29, "text", #string
+        \\44 255
+    );
+    paragraph(30, #string,oneline
+        \\Under the same gate, `narrow: f32 = wide;` with `wide: f64` is
+        \\`error: got f64, expected f32`, and the widening direction is
+        \\rejected the same way. There are no implicit float conversions in
+        \\Glosso, gate or no gate; the chapter on conversions gives the full
+        \\rule and `cast` gives the explicit spelling.
+    );
+    paragraph(31, #string,oneline
+        \\`pointer_punning` relaxes the pointee check and the distinction
+        \\between a single pointer and a many-pointer. Both assignments below
+        \\are rejected without it, with `error: got *int, expected [*]int` and
+        \\`error: got *int, expected *u8`; with it, both are accepted and the
+        \\program prints `65 65`.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#enable(pointer_punning);
+        \\
+        \\main :: () {
+        \\    value: s64 = 65;
+        \\    single: *s64 = *value;
+        \\    many: [*]s64 = single;
+        \\    bytes: *u8 = single;
+        \\    print("% %\n", many[0], bytes.*);
+        \\}
+    );
+    paragraph(33, #string,oneline
+        \\What it does not relax is const. The gate is tested inside the
+        \\branch that has already established the qualifier direction is
+        \\legal, so discarding `const` remains an error under the gate:
+        \\`writable: *s64 = readonly;` with `readonly: *const s64` is `error:
+        \\got *const int, expected *int`.
+    );
+    subheading(34, "The checks a gate keeps");
+    paragraph(35, #string,oneline
+        \\`allow_union_unwrap` removes a compile-time rule and replaces it
+        \\with a runtime one; it does not remove the check. A gated payload
+        \\read compiles to a tag comparison at `-O0` and `-O1`, and reading
+        \\the wrong variant aborts with the site named.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#enable(allow_union_unwrap);
+        \\
+        \\Res :: union { Ok: s64; Err: s64; }
+        \\
+        \\make :: (flag: bool) -> Res {
+        \\    if flag return Res.Ok(5);
+        \\    return Res.Err(9);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", make(true).Ok);
+        \\    print("%\n", make(false).Ok);
+        \\}
+    );
+    code_block(37, "text", #string
+        \\$ glosso -O1 -o f6.exe f6.glo && ./f6.exe
+        \\5
+        \\...\f6.glo:14:30: union access: expected .Ok, but the value holds one of .Ok | .Err
+        \\$ echo $?
+        \\134
+        \\
+        \\$ glosso -O2 -o f6.exe f6.glo && ./f6.exe
+        \\5
+        \\9
+    );
+    paragraph(38, #string,oneline
+        \\At `-O2` and above the check is not emitted and the wrong payload is
+        \\read, as the second half of the transcript shows. The tag check
+        \\belongs to the runtime-check family described in the chapter on
+        \\runtime safety checks and panics, which is enabled at `-O0` and
+        \\`-O1` only; the size modes disable it too.
+    );
+    note(39, #string,oneline
+        \\A gate is not a promise that the compiler will stop looking. If the
+        \\tag can be folded at compile time, the gated read is still a hard
+        \\error: `R :: Res.Err(9);` followed by `R.Ok` gives `error: this holds
+        \\.Err; reading .Ok is never valid`, with the note that the tag is
+        \\known at compile time, so the gate's runtime check would fail on
+        \\every execution.
+    );
+    paragraph(40, #string,oneline
+        \\The other two gates keep nothing comparable, because there is
+        \\nothing left to check: a narrowed integer and a punned pointer are
+        \\ordinary values by the time they reach code generation. Their cost is
+        \\paid entirely at the declaration that opened the gate, which is the
+        \\argument for keeping such a section short and adjacent to the code
+        \\that needs it.
+    );
+}

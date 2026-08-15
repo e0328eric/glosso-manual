@@ -1,6 +1,9 @@
 // Synchronize Tree-sitter query data into the browser host.
 
-TREE_SITTER_QUERY_BEGIN :: "// BEGIN GENERATED TREE-SITTER QUERY\n";
+// The markers exclude their line terminator. .gitattributes checks app.js out
+// with CRLF on Windows and LF elsewhere, so the terminator is discovered from
+// the file and reused for the line this script generates.
+TREE_SITTER_QUERY_BEGIN :: "// BEGIN GENERATED TREE-SITTER QUERY";
 TREE_SITTER_QUERY_END :: "// END GENERATED TREE-SITTER QUERY";
 
 tree_sitter_write_escaped_string :: (
@@ -38,13 +41,17 @@ tree_sitter_write_escaped_string :: (
 }
 
 tree_sitter_append_text :: (path: string, text: string) -> bool {
-    opened := append_file(path);
-    if result_is_err(opened) return false;
-    file := opened.Ok;
+    file: File;
+    if append_file(path) == {
+        case .Ok(opened); file = opened;
+        case .Err; return false;
+    }
     wrote := write(file, text);
     closed := close(*file);
-    return result_is_ok(wrote) && wrote.Ok == text.count &&
-        result_is_ok(closed);
+    if #pattern .Ok(written) = wrote {
+        return written == text.count && result_is_ok(closed);
+    }
+    return false;
 }
 
 sync_tree_sitter :: () -> bool {
@@ -56,13 +63,13 @@ sync_tree_sitter :: () -> bool {
         case .Err;
             print("could not read tree-sitter/highlights.scm\n");
             return false;
-        case .Ok; query = query_result.Ok;
+        case .Ok(text); query = text;
     }
     if app_result == {
         case .Err;
             print("could not read app.js\n");
             return false;
-        case .Ok; app = app_result.Ok;
+        case .Ok(text); app = text;
     }
 
     begin := index_of(app, TREE_SITTER_QUERY_BEGIN);
@@ -71,6 +78,13 @@ sync_tree_sitter :: () -> bool {
         return false;
     }
     content_start := begin + TREE_SITTER_QUERY_BEGIN.count;
+    line_end := "\n";
+    if content_start < app.count && app[content_start] == #char "\r" {
+        line_end = "\r\n";
+        content_start += 1;
+    }
+    if content_start < app.count && app[content_start] == #char "\n"
+        content_start += 1;
     finish := index_of_from(app, TREE_SITTER_QUERY_END, content_start);
     if finish < 0 {
         print("app.js is missing the Tree-sitter query end marker\n");
@@ -80,7 +94,8 @@ sync_tree_sitter :: () -> bool {
     replacement := builder_make_len_cap(0, query.count + 128);
     write_string(*replacement, "const GLOSSO_HIGHLIGHTS_QUERY = ");
     tree_sitter_write_escaped_string(*replacement, query);
-    write_string(*replacement, ";\n");
+    write_string(*replacement, ";");
+    write_string(*replacement, line_end);
     replacement_text := builder_into_temporary_string(replacement);
     initialized := write_file("app.js", app[0..content_start]);
     if result_is_err(initialized) ||

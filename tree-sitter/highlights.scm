@@ -2,7 +2,6 @@
   "if"
   "ifx"
   "else"
-  "case"
   "while"
   "for"
   "return"
@@ -48,6 +47,7 @@
   "#packed"
   "#no_context"
   "#dump"
+  "#fallback"
   "#must"
   "#noreturn"
   "#returns_twice"
@@ -101,6 +101,7 @@
 (suffix_operator) @operator
 (range_operator) @operator
 (binding_operator) @operator
+(constant_pattern_operator) @operator
 (try_operator) @operator
 
 ; Types
@@ -268,3 +269,4 @@
 (structured_asm_clobber_kind) @constant.builtin
 (import_selector mode: _ @attribute)
 (expand_directive mode: (identifier) @attribute)
+(distinct_derive_directive mode: _ @attribute)

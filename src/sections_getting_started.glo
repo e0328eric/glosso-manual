@@ -1,0 +1,1594 @@
+// Sections 0-5: getting started.
+
+render_section_0 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso program is one source file handed to the compiler.
+        \\Execution begins at the procedure named `main`, which every hosted
+        \\program must declare. The smallest complete program declares it and
+        \\nothing else.
+    );
+    code_block(1, "glosso", #string
+        \\main :: () {}
+    );
+    paragraph(2, #string,oneline
+        \\`::` binds a name to a compile-time constant, and the constant here
+        \\is a procedure: an empty parameter list, no return type, an empty
+        \\body. Compiling that file links an executable that starts, returns
+        \\immediately, and reports status 0. Nothing is printed because nothing
+        \\asked for output.
+    );
+    subheading(3, "Printing");
+    paragraph(4, #string,oneline
+        \\`print` is an ordinary procedure, not a statement or a keyword, and
+        \\it is not one of the names the implicit prelude supplies. It comes
+        \\from the `Io` module, so a program that prints begins with an import.
+        \\The Implicit Prelude lists what does arrive with no import at all.
+    );
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("hello, world\n");
+        \\}
+    );
+    code_block(6, "text", #string
+        \\$ glosso --run hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link hello.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done hello.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\hello, world
+    );
+    paragraph(7, #string,oneline
+        \\Omitting the import is the first mistake a new program makes. The
+        \\checker does not know `print`, and the name it suggests instead is
+        \\`tprint`, the prelude's temp-allocated formatting helper, because
+        \\that one is genuinely in scope.
+    );
+    code_block(8, "text", #string
+        \\// main :: () { print("hi\n"); }
+        \\error: unknown function print
+        \\help: did you mean 'tprint'?
+    );
+    subheading(9, "What the build prints");
+    paragraph(10, #string,oneline
+        \\Every line the driver writes about its own progress goes to stderr
+        \\and is prefixed `glosso: `. Stdout belongs to the program and to
+        \\compile-time execution, so the two streams can be separated without
+        \\filtering text. A default build prints three lines; the rest of the
+        \\vocabulary appears only for particular backends and options.
+    );
+    table_header(11, "Progress line   —   When it appears");
+    table_row(12, #string,oneline
+        \\`glosso: compile <source> (target=<triple>)`   |   Once, before
+        \\checking begins, on every build.
+    );
+    table_row(13, #string,oneline
+        \\`glosso: link <output> (target=<triple>, <-O flag>)`   |   For the
+        \\backends that invoke a linker or an archiver: `llvm`, `static-lib`,
+        \\`shared-lib`.
+    );
+    table_row(14, #string,oneline
+        \\`glosso: done <output>  (backend=…, target=…, <-O flag>)`   |   After
+        \\a linked artifact has been written.
+    );
+    table_row(15, #string,oneline
+        \\`glosso: wrote <output>  (backend=…, target=…, <-O flag>)`   |   In
+        \\place of `link` and `done`, for the unlinked backends `object` and
+        \\`llvm-ir`.
+    );
+    table_row(16, #string,oneline
+        \\`glosso: wrote import library <path>`   |   `shared-lib` only, on the
+        \\targets that produce one.
+    );
+    table_row(17, #string,oneline
+        \\`glosso: restored <output> from the native artifact cache`   |   In
+        \\place of every other line, when an unchanged build is served from the
+        \\cache.
+    );
+    table_row(18, #string,oneline
+        \\`glosso: program exited with status <status>`   |   `--run` only, and
+        \\only when the program's status is not 0.
+    );
+    code_block(19, "text", #string
+        \\$ glosso --run hello.glo 2>/dev/null
+        \\hello, world
+    );
+    subheading(20, "The signature of `main`");
+    paragraph(21, #string,oneline
+        \\`main` takes no parameters. There is no argument-vector form of the
+        \\declaration on a hosted target; command-line arguments are read with
+        \\`get_cmdline_args()`, which the prelude supplies. The one exception
+        \\is the freestanding WebAssembly entry point, described in
+        \\Freestanding, Bare Metal, UEFI, and WebAssembly.
+    );
+    code_block(22, "text", #string
+        \\// main :: (args: []string) {}
+        \\error: main must not take parameters; use get_cmdline_args() for command-line arguments
+    );
+    paragraph(23, #string,oneline
+        \\The return type is optional. A `main` with no return type, or with an
+        \\explicit `-> void`, always reports status 0. Any other return type is
+        \\accepted only if it implements the `Termination` typeclass, which is
+        \\the protocol that turns a returned value into a process status.
+    );
+    code_block(24, "glosso", #string
+        \\Termination :: typeclass (T: type) #minimal(termination_status) {
+        \\    termination_status :: (value: T) -> s32;
+        \\}
+        \\
+        \\$T :: instance Termination where Is_Integer(T) {
+        \\    termination_status :: (value: T) -> s32 {
+        \\        return cast(s32)value;
+        \\    }
+        \\}
+    );
+    paragraph(25, #string,oneline
+        \\That instance is why every integer type works as a return type
+        \\directly. The value is narrowed to `s32` and handed to the host,
+        \\which then applies its own rules for what a status may be.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () -> int {
+        \\    print("working\n");
+        \\    return 3;
+        \\}
+    );
+    code_block(27, "text", #string
+        \\$ glosso -o status.exe status.glo
+        \\glosso: compile status.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link status.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done status.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\$ ./status.exe
+        \\working
+        \\$ echo $?
+        \\3
+    );
+    paragraph(28, #string,oneline
+        \\The protocol is open. Declaring an instance for an application's own
+        \\result type makes that type a legal return type for `main`, and puts
+        \\the mapping from outcome to status in one place instead of scattering
+        \\numeric literals through the program. `Termination` needs no import:
+        \\the implicit prelude brings the whole `Typeclass` module into scope.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Exit_Reason :: enum { Success; Bad_Input; No_Space; }
+        \\
+        \\Exit_Reason :: instance Termination {
+        \\    termination_status :: (value: Exit_Reason) -> s32 {
+        \\        if value == {
+        \\        case .Success;   return 0;
+        \\        case .Bad_Input; return 64;
+        \\        case .No_Space;  return 70;
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\main :: () -> Exit_Reason {
+        \\    print("checking input\n");
+        \\    return .Bad_Input;
+        \\}
+    );
+    code_block(30, "text", #string
+        \\$ ./reason.exe
+        \\checking input
+        \\$ echo $?
+        \\64
+    );
+    paragraph(31, #string,oneline
+        \\The prelude also gives `E!void` a `Termination` instance for every
+        \\error type `E` that implements `Error`. `.Ok` is status 0; `.Err`
+        \\calls `report_error` on the payload and then reports status 1. A
+        \\`main` declared that way can use `?` on any failing call in its body.
+        \\The reporting protocol itself belongs to `Error`, `Termination`, and
+        \\`main`.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\App_Error :: struct { message: string; }
+        \\
+        \\App_Error :: instance Error {
+        \\    report_error :: (error: App_Error) {
+        \\        error_report_line("app", error.message);
+        \\    }
+        \\}
+        \\
+        \\step :: (ok: bool) -> App_Error!s64 {
+        \\    if !ok return .Err(.{ .message = "step failed" });
+        \\    return .Ok(7);
+        \\}
+        \\
+        \\main :: () -> App_Error!void {
+        \\    value := step(false)?;
+        \\    print("value = %\n", value);
+        \\    return .Ok;
+        \\}
+    );
+    code_block(33, "text", #string
+        \\$ ./apperr.exe
+        \\app: step failed
+        \\$ echo $?
+        \\1
+    );
+    table_header(34, "Declaration of `main`   —   Process status");
+    table_row(35, #string,oneline
+        \\`main :: () { … }`, `main :: () -> void { … }`   |   Always 0.
+    );
+    table_row(36, #string,oneline
+        \\`main :: () -> int { … }` and any other integer type   |   The
+        \\returned value, narrowed to `s32`.
+    );
+    table_row(37, #string,oneline
+        \\`main :: () -> E!void { … }` where `E` implements `Error`   |   0 for
+        \\`.Ok`; 1 for `.Err`, after `report_error` has run.
+    );
+    table_row(38, #string,oneline
+        \\`main :: () -> T { … }` for any `T` with a `Termination`
+        \\instance   |   Whatever that instance's `termination_status`
+        \\returns.
+    );
+    table_row(39, #string,oneline
+        \\Any other return type   |   Rejected while checking, for example
+        \\`error: main return type bool does not implement Termination`.
+    );
+    note(40, #string,oneline
+        \\`--run` reports the program's status but does not adopt it. A program
+        \\that exits 3 makes the compiler print `glosso: program exited with
+        \\status exit code: 3` and then exit 1 itself. An exact status is
+        \\observable only by building the executable and running it directly.
+    );
+    paragraph(41, #string,oneline
+        \\`exit(status)` ends the process immediately from anywhere in the
+        \\program. It is also supplied by the prelude, so it needs no import,
+        \\and unlike a `return` from `main` it does not run the remaining
+        \\`defer` statements.
+    );
+    code_block(42, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("before exit\n");
+        \\    exit(9);
+        \\    print("never printed\n");
+        \\}
+    );
+    code_block(43, "text", #string
+        \\$ ./exitp.exe
+        \\before exit
+        \\$ echo $?
+        \\9
+    );
+    paragraph(44, #string,oneline
+        \\A file with no `main` is not a compile error. Checking succeeds, the
+        \\backend emits a module with no entry point, and the platform linker
+        \\is the component that complains. Building a library rather than a
+        \\program is what `--backend static-lib`, `--backend shared-lib`, and
+        \\`--no-main` are for; they are covered in Using the Compiler and in
+        \\Backends, Artifacts, and Optimization Levels.
+    );
+    code_block(45, "text", #string
+        \\$ glosso helper.glo
+        \\glosso: compile helper.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link helper.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\error: rust-lld: error: undefined symbol: wmain
+    );
+}
+
+render_section_1 :: () {
+    paragraph(0, #string,oneline
+        \\The driver compiles exactly one source file: `glosso [options]
+        \\<file.glo>`. There is no project file, no source list, and no
+        \\separate link step. Everything else a program needs enters through
+        \\`#import` and `#load` from inside that one file, and the whole graph
+        \\reached that way is a single compilation unit.
+    );
+    code_block(1, "glosso", #string
+        \\// app.glo
+        \\#import "Io";
+        \\#load "parts/geometry.glo";
+        \\
+        \\main :: () {
+        \\    print("area = %\n", area(6, 7));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\$ glosso --run app.glo
+        \\glosso: compile app.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link app.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done app.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\area = 42
+    );
+    paragraph(3, #string,oneline
+        \\`parts/geometry.glo` is part of the program but is not a program:
+        \\naming it on the command line instead compiles it on its own, and it
+        \\then has no `main` to link against. Which file is named therefore
+        \\decides what is built. If more than one positional argument is given
+        \\the last one silently wins; `glosso a.glo b.glo` builds `b.exe` from
+        \\`b.glo` and never mentions `a.glo`.
+    );
+    subheading(4, "The option list");
+    paragraph(5, #string,oneline
+        \\`glosso --help` prints the complete list and exits 0. It is printed
+        \\before the backend, the target, and the source file are validated, so
+        \\it works alongside otherwise invalid options. There is no `--version`
+        \\option: `glosso --version` is `glosso: unknown option --version`.
+    );
+    code_block(6, "text", #string
+        \\usage: glosso [options] <file.glo>
+        \\
+        \\  --backend <llvm|object|static-lib|shared-lib|llvm-ir>
+        \\                           target backend            (default: llvm)
+        \\  --target <os-cpu-abi>    target triple for OUT     (default: host)
+        \\                           also accepts cpu-os-abi forms like x86_64-windows-gnu
+        \\  --print-targets          list targets this compiler can emit
+        \\  -O<0|1|2|3>              speed optimization level   (default: 1)
+        \\  -Os                      optimize for size
+        \\  -Oz                      optimize harder for size
+        \\  -Ozz                     minimize uncompressed binary size; strips symbols
+        \\  -o <file>                output path                (default: <file> or <file>.<ext>)
+        \\  --linker-arg <arg>       pass a raw argument to the final linker
+        \\  --memory-sanitizer       enable Clang-compatible MemorySanitizer
+        \\  --thread-sanitizer       enable Clang-compatible ThreadSanitizer
+        \\  --borrow-check <off|warning|error>
+        \\                           temporal memory diagnostics (default: warning)
+        \\  --temp-allocator-size <bytes>
+        \\                           initial temporary arena size (default: 4 MiB)
+        \\  --no-main                use defined #c_call exports as runtime roots
+        \\  --run                    build and run the result   (llvm only)
+        \\  --cache-dir <dir>        override the per-user cache directory
+        \\  --print-cache-dir        print the resolved cache directory and exit
+        \\  --show-generated         print cached #insert source paths
+        \\  --color <auto|always|never>
+        \\                           color diagnostics          (default: auto)
+        \\  --std <dir>              standard library directory (default: auto-discovered)
+        \\  -- <args...>             expose trailing arguments to get_cmdline_args()
+        \\                           during compile-time execution
+        \\  -h, --help               show this help
+    );
+    paragraph(7, #string,oneline
+        \\Every option that takes a value accepts both the separated and the
+        \\`=`-joined spelling, so `--backend=object`, `--color=never`,
+        \\`--std=<dir>`, `--target=wasm32-wasi`, `--cache-dir=<dir>`,
+        \\`--linker-arg=<arg>`, and `--temp-allocator-size=8192` are equivalent
+        \\to the two-token forms. `-o` is the exception: it has no `=` form,
+        \\and `-o=out.obj` is rejected with `glosso: unknown option -o=out.obj`.
+    );
+    table_header(8, "Option   —   Value   —   Default");
+    table_row(9, "`--backend`   |   `llvm`, `object`, `static-lib`, `shared-lib`, `llvm-ir`   |   `llvm`");
+    table_row(10, "`--target`   |   an `os-cpu-abi` or `cpu-os-abi` triple   |   the host");
+    table_row(11, "`--print-targets`   |   none; prints and exits   |   not applicable");
+    table_row(12, "`-O0` `-O1` `-O2` `-O3`   |   none   |   `-O1`");
+    table_row(13, "`-Os` `-Oz` `-Ozz`   |   none   |   no size mode");
+    table_row(14, "`-o`   |   an output path, separated form only   |   derived from the source stem");
+    table_row(15, "`--linker-arg`   |   one raw linker argument; repeatable   |   none");
+    table_row(16, "`--memory-sanitizer`   |   none   |   off");
+    table_row(17, "`--thread-sanitizer`   |   none   |   off");
+    table_row(18, "`--borrow-check`   |   `off`, `warning`, `error`   |   `warning`");
+    table_row(19, "`--temp-allocator-size`   |   a positive byte count   |   `4194304` (4 MiB)");
+    table_row(20, "`--no-main`   |   none   |   off");
+    table_row(21, "`--run`   |   none; `--backend llvm` and the host target only   |   off");
+    table_row(22, "`--cache-dir`   |   an absolute directory   |   the per-user cache root");
+    table_row(23, "`--print-cache-dir`   |   none; prints and exits   |   not applicable");
+    table_row(24, "`--show-generated`   |   none   |   off");
+    table_row(25, "`--color`   |   `auto`, `always`, `never`   |   `auto`");
+    table_row(26, "`--std`   |   a directory holding `Prelude.glo` or `Prelude/`   |   auto-discovered");
+    table_row(27, "`--`   |   everything after it, as compile-time arguments   |   empty");
+    table_row(28, "`-h`, `--help`   |   none; prints and exits   |   not applicable");
+    paragraph(29, #string,oneline
+        \\Without `-o` the output name is derived from the source file's stem
+        \\and the chosen backend and target; the full set of default names is
+        \\in Backends, Artifacts, and Optimization Levels. `-o` with a path
+        \\whose parent directory does not exist creates the directory. `-o ""`
+        \\is not an error; the empty string falls back to the backend default.
+    );
+    subheading(30, "`--std`");
+    paragraph(31, #string,oneline
+        \\`--std <dir>` names the standard-library root. The directory must
+        \\contain either a `Prelude.glo` file or a `Prelude/` directory, and
+        \\anything else is `glosso: --std directory must contain Prelude.glo or
+        \\Prelude/`. Without the option the driver searches, in order,
+        \\`$GLOSSO_STD`, `<cwd>/std`, and then `std` beside the compiler
+        \\executable and one and two directories above it, followed by the
+        \\per-user install locations; the first candidate that holds a prelude
+        \\wins. Finding none is `glosso: could not find the project-local or
+        \\installed Glosso standard library`.
+    );
+    subheading(32, "`--run`");
+    paragraph(33, #string,oneline
+        \\`--run` builds the program and then executes it with no arguments,
+        \\inheriting stdout and stderr. It is accepted only for the default
+        \\`llvm` backend, because no other backend produces something that can
+        \\be executed, and the target must be the host.
+    );
+    code_block(34, "text", #string
+        \\$ glosso --run --backend object hello.glo
+        \\glosso: --run is available only for --backend llvm
+        \\
+        \\$ glosso --run --target x86_64-linux-musl hello.glo
+        \\glosso: --run can only execute the host target (got x86_64-pc-linux-musl)
+    );
+    note(35, #string,oneline
+        \\The first of those two is a command-line error and exits 2; the
+        \\second is discovered after the options parse and exits 1. `--run`
+        \\never adopts the program's own status either, so it is a convenience
+        \\for development rather than a way to script a build.
+    );
+    subheading(36, "`--no-main`");
+    paragraph(37, #string,oneline
+        \\Reachability normally starts at `main`. `--no-main` starts it at
+        \\every `#c_call` function that has a body instead, which is what a
+        \\library wants; the `static-lib` and `shared-lib` backends do this on
+        \\their own and do not need the flag. The effect is visible in the
+        \\emitted module: with the flag, the allocators, the formatters, and
+        \\the hosted entry wrapper are all gone.
+    );
+    code_block(38, "glosso", #string
+        \\add  :: (a: s32, b: s32) -> s32 #c_call { return a + b; }
+        \\main :: () #c_call { }
+    );
+    code_block(39, "text", #string
+        \\$ glosso --no-main --backend llvm-ir -o roots.ll roots.glo
+        \\$ grep '^define' roots.ll
+        \\define i32 @glo_add(i32 %0, i32 %1) {
+        \\define void @glo_main() {
+        \\define internal void @glo_temp_restore(i64 %0) {
+        \\
+        \\$ glosso --backend llvm-ir -o roots2.ll roots.glo
+        \\$ grep -c '^define' roots2.ll
+        \\34
+    );
+    paragraph(40, #string,oneline
+        \\Combining `--no-main` with the executable backend on a hosted target
+        \\is a mistake: the flag suppresses the platform entry wrapper as well,
+        \\so the link fails with `error: rust-lld: error: undefined symbol:
+        \\wmain` on Windows and the equivalent elsewhere. The flag belongs with
+        \\an object, library, or bare-metal build.
+    );
+    subheading(41, "`--color`");
+    paragraph(42, #string,oneline
+        \\`--color auto` is the default and enables colored diagnostics only
+        \\when stderr is a terminal. `--color always` and `--color never` force
+        \\the choice, and any other value is `glosso: --color must be auto,
+        \\always, or never`. Setting `NO_COLOR` in the environment turns color
+        \\off whatever the flag says, including `--color always`.
+    );
+    subheading(43, "Compile-time arguments after `--`");
+    paragraph(44, #string,oneline
+        \\`get_cmdline_args()` returns the process argument vector when the
+        \\program runs, and the arguments written after `--` when the same call
+        \\is made during compile-time execution. That is how a build script
+        \\written in Glosso is parameterized without an extra configuration
+        \\file.
+    );
+    code_block(45, "glosso", #string
+        \\#import "Io";
+        \\
+        \\show_args :: (label: string) {
+        \\    args := get_cmdline_args();
+        \\    print("% count = %\n", label, args.count);
+        \\    for arg: args print("%   %\n", label, arg);
+        \\}
+        \\
+        \\#comptime { show_args("[comptime]"); }
+        \\
+        \\main :: () {
+        \\    show_args("[runtime] ");
+        \\}
+    );
+    code_block(46, "text", #string
+        \\$ glosso -o cmdargs.exe cmdargs.glo -- build --release "two words"
+        \\glosso: compile cmdargs.glo (target=x86_64-pc-windows-msvc)
+        \\[comptime] count = 3
+        \\[comptime]   build
+        \\[comptime]   --release
+        \\[comptime]   two words
+        \\glosso: link cmdargs.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done cmdargs.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\$ ./cmdargs.exe
+        \\[runtime]  count = 1
+        \\[runtime]    C:\Users\almag\...\cmdargs.exe
+    );
+    paragraph(47, #string,oneline
+        \\The two vectors differ in more than their contents: the runtime
+        \\vector begins with the executable path, and the compile-time one does
+        \\not. `--` also swallows the whole rest of the command line,
+        \\so the source file and every driver option have to appear before it.
+    );
+    subheading(48, "Exit codes");
+    table_header(49, "Situation   —   Exit code");
+    table_row(50, #string,oneline
+        \\A successful build, and the options that print and stop: `--help`,
+        \\`--print-targets`, `--print-cache-dir`   |   `0`
+    );
+    table_row(51, #string,oneline
+        \\A compile or type error, an unreadable source file, a link failure,
+        \\`--run` on a non-host target, or a program that `--run` executed and
+        \\that exited nonzero   |   `1`
+    );
+    table_row(52, #string,oneline
+        \\A command-line error: an unknown option, no source file, a bad
+        \\`--backend`, `--color`, `--std`, `--cache-dir`, `--borrow-check`, or
+        \\`--temp-allocator-size` value, or two sanitizers at once   |   `2`
+    );
+    table_row(53, #string,oneline
+        \\A top-level `#comptime` that called `exit(n)`   |   `n`, and no
+        \\artifact is written
+    );
+    paragraph(54, #string,oneline
+        \\Command-line errors are plain `glosso: ` lines with no source frame,
+        \\because there is no source to frame yet. An unknown option is
+        \\followed by the full usage block.
+    );
+    code_block(55, "text", #string
+        \\glosso: unknown option --bogus-option
+        \\glosso: unknown backend 'nope' (choose llvm, object, static-lib, shared-lib, or llvm-ir)
+        \\glosso: --color must be auto, always, or never
+        \\glosso: --std directory must contain Prelude.glo or Prelude/
+        \\glosso: --temp-allocator-size must be a positive byte count
+        \\glosso: borrow-check mode must be off, warning, or error
+        \\glosso: --run is available only for --backend llvm
+        \\glosso: choose only one sanitizer mode (already using --memory-sanitizer, got --thread-sanitizer)
+        \\glosso: --backend needs an argument
+        \\glosso: cannot read missing.glo
+    );
+    bullet(56, #string,oneline
+        \\`-O` accepts a single digit 0 through 3 and nothing else. `-O4` is
+        \\not a clamped level, it is `glosso: unknown option -O4`.
+    );
+    bullet(57, #string,oneline
+        \\The last optimization flag wins and resets the other mode entirely:
+        \\`-Ozz -O1` builds exactly as plain `-O1` does, size modes included.
+    );
+    bullet(58, #string,oneline
+        \\`--memory-sanitizer` and `--thread-sanitizer` are mutually exclusive
+        \\rather than last-wins; asking for both is a command-line error.
+    );
+}
+
+render_section_2 :: () {
+    paragraph(0, #string,oneline
+        \\`--backend` chooses what a build produces. All five backends go
+        \\through LLVM, and the one that produces an executable is spelled
+        \\`llvm`; `llvm-ir` is the one that stops at textual IR instead of
+        \\generating machine code.
+    );
+    table_header(1, "`--backend`   —   Produces   —   Accepts `--run`");
+    table_row(2, "`llvm` (default)   |   A linked native executable   |   yes");
+    table_row(3, "`object`   |   One relocatable object file, not linked   |   no");
+    table_row(4, "`static-lib`   |   A static archive, assembled by the archiver   |   no");
+    table_row(5, "`shared-lib`   |   A shared library, plus an import library where the target has one   |   no");
+    table_row(6, "`llvm-ir`   |   Textual LLVM IR, not linked   |   no");
+    paragraph(7, #string,oneline
+        \\`exe` and `executable` are not spellings of the first one. An
+        \\unrecognized name is a command-line error, reported before the source
+        \\file is read: `glosso: unknown backend 'exe' (choose llvm, object,
+        \\static-lib, shared-lib, or llvm-ir)`. The library backends root
+        \\reachability at the
+        \\defined `#c_call` functions on their own, so they do not need
+        \\`--no-main`.
+    );
+    code_block(8, "text", #string
+        \\$ glosso --backend object lib.glo
+        \\glosso: compile lib.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: wrote lib.obj  (backend=object, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ glosso --backend static-lib lib.glo
+        \\glosso: compile lib.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link lib.lib (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done lib.lib  (backend=static-lib, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ glosso --backend shared-lib lib.glo
+        \\glosso: compile lib.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link lib.dll (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: wrote import library lib.dll.lib
+        \\glosso: done lib.dll  (backend=shared-lib, target=x86_64-pc-windows-msvc, -O1)
+        \\
+        \\$ glosso --backend llvm-ir lib.glo
+        \\glosso: compile lib.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: wrote lib.ll  (backend=llvm-ir, target=x86_64-pc-windows-msvc, -O1)
+    );
+    subheading(9, "Default artifact names");
+    paragraph(10, #string,oneline
+        \\Without `-o`, the output name is the source file's stem plus whatever
+        \\naming convention the target uses for that kind of artifact. The stem
+        \\is taken from the file, not from any declaration inside it, so
+        \\`lib.glo` gives the names below.
+    );
+    table_header(11, "Backend   —   Default output for `lib.glo`");
+    table_row(12, #string,oneline
+        \\`llvm`   |   `lib.exe` on Windows, `lib.wasm` on a WebAssembly
+        \\target, `lib` with no extension on ELF and Mach-O targets.
+    );
+    table_row(13, #string,oneline
+        \\`object`   |   `lib.obj` on `*-windows-msvc`, `lib.o` on every other
+        \\target including `*-windows-gnu`.
+    );
+    table_row(14, #string,oneline
+        \\`static-lib`   |   `lib.lib` on Windows targets that are not `-gnu`,
+        \\`liblib.a` everywhere else.
+    );
+    table_row(15, #string,oneline
+        \\`shared-lib`   |   `lib.dll` on Windows, `liblib.dylib` on Darwin,
+        \\`liblib.wasm` on WebAssembly, `liblib.so` elsewhere.
+    );
+    table_row(16, "`llvm-ir`   |   `lib.ll` on every target.");
+    paragraph(17, #string,oneline
+        \\A Windows `shared-lib` build writes a second file, the import library
+        \\that a consumer links against: `lib.dll.lib` under the MSVC ABI and
+        \\`liblib.dll.a` under the GNU one. It is announced by its own progress
+        \\line, and it is the file to name in a `#library` declaration on the
+        \\consuming side, not the `.dll` itself.
+    );
+    code_block(18, "text", #string
+        \\# all four library backends, one target per line
+        \\x86_64-windows-msvc:  lib.obj  lib.lib   lib.dll  lib.dll.lib   lib.ll
+        \\x86_64-windows-gnu:   lib.o    liblib.a  lib.dll  liblib.dll.a  lib.ll
+        \\x86_64-linux-gnu:     lib.o    liblib.a  liblib.so             lib.ll
+        \\wasm32-wasi:          lib.o    liblib.a  liblib.wasm           lib.ll
+    );
+    paragraph(19, #string,oneline
+        \\Only `llvm`, `object`, and `static-lib` participate in the native
+        \\artifact cache; a `shared-lib` or `llvm-ir` build recompiles every
+        \\time. Building the same `llvm-ir` file twice therefore prints
+        \\`glosso: wrote lib.ll` twice, where the object build prints
+        \\`glosso: restored lib.obj from the native artifact cache` the second
+        \\time. The cache itself is described in The Build Cache and Generated
+        \\Sources.
+    );
+    subheading(20, "Optimization levels");
+    paragraph(21, #string,oneline
+        \\There are seven optimization flags in two families. `-O0` through
+        \\`-O3` are speed levels; `-Os`, `-Oz`, and `-Ozz` are size modes. The
+        \\level applies to the Glosso IR optimizer and to LLVM code generation,
+        \\and the size modes additionally change the linker invocation. The
+        \\default is `-O1`.
+    );
+    table_header(22, "Flag   —   IR level and size mode   —   Runtime checks");
+    table_row(23, "`-O0`   |   level 0, no size mode   |   on, and the default allocator becomes the debug allocator");
+    table_row(24, "`-O1` (default)   |   level 1, no size mode   |   on");
+    table_row(25, "`-O2`   |   level 2, no size mode   |   off");
+    table_row(26, "`-O3`   |   level 3, no size mode   |   off");
+    table_row(27, "`-Os`   |   level 2, size mode `Small`   |   off");
+    table_row(28, "`-Oz`   |   level 3, size mode `VerySmall`   |   off");
+    table_row(29, "`-Ozz`   |   level 3, size mode `Tiny`, symbols stripped   |   off");
+    paragraph(30, #string,oneline
+        \\The runtime checks are kept exactly when the optimization level is 0
+        \\or 1. That is a single rule about the level, not about the family, so
+        \\the third column follows from the second: each size mode raises the
+        \\level to 2 or 3, and the checks go with it.
+    );
+    note(31, #string,oneline
+        \\`-Os`, `-Oz`, and `-Ozz` remove every runtime safety check, exactly
+        \\as `-O2` and `-O3` do. A build chosen for size is also a build
+        \\without overflow, bounds, tag, and null checking; there is no flag
+        \\that asks for small code and keeps them.
+    );
+    subheading(32, "What the checks cover");
+    bullet(33, #string,oneline
+        \\Signed and unsigned integer overflow on `+`, `-`, and `*`.
+    );
+    bullet(34, #string,oneline
+        \\Array bounds on any index into something with a known element count.
+        \\A many-pointer `[*]T` has no count and is never checked.
+    );
+    bullet(35, #string,oneline
+        \\Union tag mismatch, on the unchecked payload reads that
+        \\`#enable(allow_union_unwrap)` permits.
+    );
+    bullet(36, #string,oneline
+        \\A null address when an integer or an enum is converted to `*T`,
+        \\`[*]T`, or a `#fn_ptr` type.
+    );
+    paragraph(37, #string,oneline
+        \\A failing check aborts the process with status 134. Most check sites
+        \\abort silently; only the union-tag check carries a report string and
+        \\names its own source location. The checks and the panic mechanism are
+        \\the subject of Runtime Safety Checks and Panics.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: s32 = 2147483647;
+        \\    b: s32 = 1;
+        \\    print("sum = %\n", a + b);
+        \\    print("survived\n");
+        \\}
+    );
+    code_block(39, "text", #string
+        \\-O0    (no output)                       status 134
+        \\-O1    (no output)                       status 134
+        \\-O2    sum = -2147483648 / survived      status 0
+        \\-O3    sum = -2147483648 / survived      status 0
+        \\-Os    sum = -2147483648 / survived      status 0
+        \\-Oz    sum = -2147483648 / survived      status 0
+        \\-Ozz   sum = -2147483648 / survived      status 0
+    );
+    paragraph(40, #string,oneline
+        \\The wrap-around result at `-O2` is not undefined behaviour; it is the
+        \\defined two's-complement result of the same instruction, with the
+        \\trap removed. The bounds check behaves the same way: the read that
+        \\aborts at `-O1` returns whatever the address held at `-O2`.
+    );
+    code_block(41, "glosso", #string
+        \\#import "Io";
+        \\
+        \\element :: (values: []s32, index: s64) -> s32 {
+        \\    return values[index];
+        \\}
+        \\
+        \\main :: () {
+        \\    storage: [3]s32;
+        \\    storage[0] = 10; storage[1] = 20; storage[2] = 30;
+        \\    view := array_view(storage);
+        \\    print("in range: %\n", element(view, 1));
+        \\    print("out of range: %\n", element(view, 7));
+        \\    print("survived\n");
+        \\}
+    );
+    code_block(42, "text", #string
+        \\$ glosso -O1 -o bounds.exe bounds.glo && ./bounds.exe
+        \\in range: 20
+        \\$ echo $?
+        \\134
+        \\
+        \\$ glosso -O2 -o bounds.exe bounds.glo && ./bounds.exe
+        \\in range: 20
+        \\out of range: 0
+        \\survived
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#enable(allow_union_unwrap);
+        \\
+        \\main :: () {
+        \\    r: string!s32 = .Err("nope");
+        \\    print("value = %\n", r.Ok);
+        \\}
+    );
+    code_block(44, "text", #string
+        \\$ glosso -O1 -o unionfail.exe unionfail.glo && ./unionfail.exe
+        \\...\unionfail.glo:6:28: union access: expected .Ok, but the value holds one of .Ok | .Err
+        \\$ echo $?
+        \\134
+        \\
+        \\$ glosso -O2 -o unionfail.exe unionfail.glo && ./unionfail.exe
+        \\value = 4
+    );
+    paragraph(45, #string,oneline
+        \\`4` is the length of `"nope"`: the `.Err` payload is a string
+        \\descriptor, and reading it as an `s32` picks up the low half of its
+        \\count field. That is the cost of the missing check stated plainly. At
+        \\`-O1` the program stops at the line that is wrong; at `-O2` it
+        \\continues with a value that means nothing.
+    );
+    subheading(46, "`-O0` and the debug allocator");
+    paragraph(47, #string,oneline
+        \\`-O0` changes one more thing besides the optimizer: the default
+        \\`context.allocator` becomes the debug allocator, which records every
+        \\allocation with its source location and prints a leak report when the
+        \\process ends. At `-O1` and above it is the plain heap allocator and
+        \\the same program says nothing. The allocator itself is described in
+        \\The Debug Allocator.
+    );
+    code_block(48, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    p := alloc(64);
+        \\    print("allocated\n");
+        \\}
+    );
+    code_block(49, "text", #string
+        \\$ glosso -O0 -o leak.exe leak.glo && ./leak.exe
+        \\allocated
+        \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
+        \\  leak: 64 byte(s)
+        \\    allocated at:
+        \\      ...\leak.glo:5:10
+        \\
+        \\$ glosso -O1 -o leak.exe leak.glo && ./leak.exe
+        \\allocated
+    );
+    subheading(50, "Size modes at the linker");
+    paragraph(51, #string,oneline
+        \\A size mode also changes the link. It adds dead-section elimination
+        \\in whatever spelling the target's linker understands, and on COFF and
+        \\ELF it adds identical-code folding from `-Oz` upward; Mach-O and Wasm
+        \\have no folding pass to ask for. `-O2` and `-Os` run the same IR
+        \\level, so the whole gap between them in the measurements below comes
+        \\from the LLVM pipeline and from these linker flags.
+    );
+    table_header(52, "Object format   —   `-Os`   —   `-Oz`");
+    table_row(53, "COFF   |   `/opt:ref`   |   `/opt:ref /opt:icf`");
+    table_row(54, "ELF   |   `--gc-sections`   |   `--gc-sections --icf=all`");
+    table_row(55, "Mach-O   |   `-dead_strip`   |   `-dead_strip`");
+    table_row(56, "Wasm   |   `--gc-sections`   |   `--gc-sections`");
+    paragraph(57, #string,oneline
+        \\`-Ozz` passes everything `-Oz` passes and then strips: nothing extra
+        \\on COFF, `--strip-all --build-id=none` on ELF, `-S -x -no_uuid` on
+        \\Mach-O, and `--strip-all` on Wasm. On COFF the two modes are
+        \\therefore the same size, while on ELF the strip is worth several
+        \\kilobytes on a trivial program.
+    );
+    code_block(58, "text", #string
+        \\# bytes, a hello-world program, x86_64-pc-windows-msvc
+        \\-O0   156160     -Os    56832
+        \\-O1   139776     -Oz    56320
+        \\-O2   139264     -Ozz   56320
+        \\-O3   139264
+        \\
+        \\# bytes, the same program, x86_64-linux-musl
+        \\-O0   144472     -Os    44552
+        \\-O1   128792     -Oz    43816
+        \\-O2   128440     -Ozz   36096
+        \\-O3   128440
+    );
+    paragraph(59, #string,oneline
+        \\The ELF pair also differs in content, not only in size: the string
+        \\`glo_main` is still present in the `-Oz` image and gone from the
+        \\`-Ozz` one, because the symbol table survives the first and not the
+        \\second. A stripped image is harder to profile and to read a backtrace
+        \\from, which is the trade `-Ozz` asks for.
+    );
+    bullet(60, #string,oneline
+        \\`-Ozz` does not compress the image. Executable packing is a separate
+        \\step over the finished artifact.
+    );
+    bullet(61, #string,oneline
+        \\A bare-metal target cannot use `-O0` or `-O1` without supplying an
+        \\`abort`, because that is what a failing runtime check calls. See
+        \\Freestanding, Bare Metal, UEFI, and WebAssembly.
+    );
+}
+
+render_section_3 :: () {
+    paragraph(0, #string,oneline
+        \\A build is one compiler process running a fixed sequence of phases
+        \\over the whole program. Each phase consumes what the phase before it
+        \\produced, so every failure is reported in the vocabulary of the phase
+        \\that found it: the lexer talks about characters, the parser about
+        \\tokens, the checker about types, the linker about symbols.
+    );
+    paragraph(1, #string,oneline
+        \\The order is not configurable and no option skips a phase. `--backend`,
+        \\`--target` and the `-O` level change what the last two phases do;
+        \\everything up to Glosso IR is the same work for every build.
+    );
+    table_header(2, "Phase   —   Timing label   —   Produces");
+    table_row(3, "Lexing   |   `prepare`   |   One token stream per source file.");
+    table_row(4, "Operator prescan   |   `prepare`   |   The spellings, fixities and precedences the parser will use.");
+    table_row(5, "Parsing   |   `prepare`   |   Declaration nodes, each stamped with the feature gates active where it was written.");
+    table_row(6, "Resolution   |   `prepare`   |   One flat declaration list: built-ins, the Prelude, imports, loads, root file.");
+    table_row(7, "Checking   |   `check`   |   Types, instance selection, monomorphized bodies, constant-evaluated `#comptime`.");
+    table_row(8, "Memory analysis   |   `memory`   |   Release obligations and the temporal findings `--borrow-check` governs.");
+    table_row(9, "Lowering   |   `lower`   |   Glosso IR, one function per reachable declaration.");
+    table_row(10, "Compile-time execution   |   `consume`   |   The side effects of top-level `#comptime`, run in the bytecode VM.");
+    table_row(11, "Backend emission   |   `consume`   |   The LLVM module, and whatever the backend links out of it.");
+    paragraph(12, #string,oneline
+        \\Setting the environment variable `GLOSSO_TIMINGS` to any value prints
+        \\one line per phase to stderr. It is the cheapest way to see where a
+        \\build spends its time, and where compile-time output falls relative to
+        \\the rest of the work.
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\
+        \\announce :: (tag: string) -> int {
+        \\    print("[%] evaluated during checking\n", tag);
+        \\    return 1;
+        \\}
+        \\
+        \\CONSTANT :: #comptime announce("const");
+        \\
+        \\#comptime { print("[vm] evaluated after lowering\n"); }
+        \\
+        \\main :: () { print("runtime %\n", CONSTANT); }
+    );
+    code_block(14, "text", #string
+        \\glosso: compile engines.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: timing prepare 237.568 ms
+        \\[const] evaluated during checking
+        \\[const] evaluated during checking
+        \\glosso: timing check 570.978 ms
+        \\glosso: timing memory 33.838 ms
+        \\glosso: timing lower 304.605 ms
+        \\[vm] evaluated after lowering
+        \\glosso: link engines.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done engines.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: timing consume 306.244 ms
+        \\runtime 1
+    );
+    paragraph(15, #string,oneline
+        \\The transcript places the two compile-time engines. The `[const]` lines
+        \\come from the constant evaluator, which folds `CONSTANT` while the
+        \\checker is running, and which visits the initializer more than once.
+        \\The `[vm]` line comes from the bytecode VM, which runs top-level
+        \\`#comptime` exactly once after lowering and before the backend emits.
+        \\What Runs When treats the difference in full.
+    );
+    subheading(16, "Lexing");
+    paragraph(17, #string,oneline
+        \\The lexer turns a file's bytes into tokens. It has no recovery: the
+        \\first lexical error ends the build, and no diagnostic from any later
+        \\phase for that file is printed beside it. The file below contains an
+        \\illegal declaration name on line 1, which is a parse error, and an
+        \\unterminated literal on line 2, which is a lex error. Only the second
+        \\is reported.
+    );
+    code_block(18, "glosso", #string
+        \\1bad :: 3;
+        \\main :: () { s := "unterminated
+        \\}
+    );
+    code_block(19, "text", #string
+        \\error: unterminated string literal
+        \\  --> …\scan.glo:2:19
+        \\  |
+        \\2 | main :: () { s := "unterminated
+        \\  |                   ^^^^^^^^^^^^^
+    );
+    subheading(20, "The operator prescan");
+    paragraph(21, #string,oneline
+        \\Every operator in Glosso is a typeclass method carrying an `#operator`
+        \\directive, so a token like `<^>` means nothing until such a declaration
+        \\has been read. Parsing cannot discover the fixity as it goes, because
+        \\the declaration may come after the use. The prescan therefore walks the
+        \\token stream once before parsing starts and records every `#operator`
+        \\and `#precedence` mode and level it finds.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("2 <^> 3 <^> 2 = %\n", 2 <^> 3 <^> 2);
+        \\}
+        \\
+        \\Power :: typeclass (T: type) {
+        \\    '<^>' :: (a: T, b: T) -> T #operator(right, 17);
+        \\}
+        \\
+        \\int :: instance Power {
+        \\    '<^>' :: (a: int, b: int) -> int #operator(right, 17) {
+        \\        r := 1;
+        \\        i := 0;
+        \\        while i < b { r *= a; i += 1; }
+        \\        return r;
+        \\    }
+        \\}
+    );
+    code_block(23, "text", #string
+        \\2 <^> 3 <^> 2 = 512
+    );
+    paragraph(24, #string,oneline
+        \\The declaration sits below its own use and the expression still groups
+        \\to the right: `2 <^> (3 <^> 2)` is 512. Changing both directives to
+        \\`#operator(left, 17)` prints 64 instead. The prescan reads one file at
+        \\a time, starting from the table the Prelude establishes, so an operator
+        \\introduced by a `#load`ed file is not available to the file that loads
+        \\it; the use then fails with `error: unexpected token '<^>'`. The
+        \\Operator Prescan gives the complete rules.
+    );
+    subheading(25, "Parsing and feature gates");
+    paragraph(26, #string,oneline
+        \\The parser recovers. It records a diagnostic, skips to the next
+        \\plausible declaration boundary and continues, so one run reports every
+        \\top-level form it could not read and finishes with a count.
+    );
+    code_block(27, "glosso", #string
+        \\1bad :: 3;
+        \\Foo : struct { x: int; }
+        \\main :: () {}
+    );
+    code_block(28, "text", #string
+        \\error: bad decl name '1'
+        \\  --> …\decls.glo:1:1
+        \\  |
+        \\1 | 1bad :: 3;
+        \\  | ^
+        \\
+        \\error: a top-level constant binding uses '::'; the second ':' is missing
+        \\  --> …\decls.glo:2:5
+        \\  |
+        \\2 | Foo : struct { x: int; }
+        \\  |     ^
+        \\
+        \\error: aborting due to 2 previous errors
+    );
+    paragraph(29, #string,oneline
+        \\Feature gates are resolved here rather than by the checker. `#enable`
+        \\and `#disable` are sticky from the directive to the end of the file,
+        \\and the parser stamps the gates that were active onto each declaration
+        \\it builds; the checker reads the stamp back when it checks that
+        \\declaration. That is why wrapping one procedure in
+        \\`#enable(lossy_numerics)` relaxes conversions in that procedure alone.
+        \\An unrecognised name is rejected immediately with
+        \\`error: unknown feature 'bogus_feature'`. Feature Gates: `#enable` and
+        \\`#disable` lists the four that exist.
+    );
+    subheading(30, "Resolution");
+    paragraph(31, #string,oneline
+        \\Resolution assembles the program: it installs the compiler-owned
+        \\declarations, loads `std/Prelude`, expands `#load`, resolves `#import`,
+        \\applies private sections, and appends the root file, producing a single
+        \\declaration list with no ordering rule inside it. A module that cannot
+        \\be found is reported here, as is a `#load` path that does not exist.
+        \\Resolution failures do not stop the checker: both sets of diagnostics
+        \\are printed in one batch sorted by line and column, so a file with one
+        \\bad import and one bad conversion reports both and ends with
+        \\`error: aborting due to 2 previous errors`. Source Files, Imports, and
+        \\Loads covers what resolution accepts.
+    );
+    subheading(32, "Checking and monomorphization");
+    paragraph(33, #string,oneline
+        \\Checking gives every expression a type, selects a typeclass instance
+        \\for every operator and method call, and checks each generic body once
+        \\per instantiation. A generic declaration on its own proves nothing: the
+        \\body is checked against the types it is actually called with, which is
+        \\why the diagnostic points into the generic body while the reason for it
+        \\is at the call site.
+    );
+    code_block(34, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Pair :: struct { a: int; b: int; }
+        \\
+        \\twice :: (x: $T) -> T { return x + x; }
+        \\
+        \\main :: () {
+        \\    p: Pair;
+        \\    print("%\n", twice(p).a);
+        \\}
+    );
+    code_block(35, "text", #string
+        \\error: no operator '+' for Pair, Pair
+        \\  --> …\twice.glo:5:34
+        \\  |
+        \\5 | twice :: (x: $T) -> T { return x + x; }
+        \\  |                                  ^
+    );
+    paragraph(36, #string,oneline
+        \\A `where` clause moves the check back to the call and names the callee
+        \\instead: `error: constraint failed for double`. Constraints with `where`
+        \\explains when to prefer one over the other.
+    );
+    note(37, #string,oneline
+        \\Nothing after checking runs when checking failed. A program that does
+        \\not type-check never reaches memory analysis, so its aliasing warnings
+        \\stay invisible until the type errors are gone.
+    );
+    subheading(38, "Compile-time execution");
+    paragraph(39, #string,oneline
+        \\Compile-time code runs in two places. Values, which means
+        \\`X :: #comptime f()`, `#comptime` parameters, `#if`, `#assert` and
+        \\`#insert`, are produced by the constant evaluator during checking. A
+        \\top-level `#comptime` block or call is lowered to an IR function and
+        \\executed by the bytecode VM after lowering, once each and in
+        \\declaration order, whichever backend was selected.
+    );
+    paragraph(40, #string,oneline
+        \\A VM failure ends the build with the phase named in the message, for
+        \\example
+        \\`error: #comptime stopped: VM: unknown #magic intrinsic 'ctx_alloc'`.
+        \\Calling `exit(n)` from compile time is the one path that hands an
+        \\arbitrary status to the shell: the compiler stops after this phase,
+        \\writes no artifact, and exits with `n`.
+    );
+    subheading(41, "Temporal memory analysis");
+    paragraph(42, #string,oneline
+        \\The memory pass runs between checking and lowering. It follows where a
+        \\resource is created, where its release obligation is discharged, and
+        \\which places alias it, using the `#memory` contracts on the
+        \\declarations involved.
+    );
+    code_block(43, "glosso", #string
+        \\make    :: () -> *u8 #foreign "c" "make" #memory returns_fresh;
+        \\release :: (p: *u8)  #foreign "c" "release" #memory(kills(p), noescape(p));
+        \\
+        \\main :: () {
+        \\    p := make();
+        \\    release(p);
+        \\    _ := p.*;
+        \\}
+    );
+    code_block(44, "text", #string
+        \\warning: use after release while reading memory
+        \\  --> …\release.glo:7:11
+        \\  |
+        \\7 |     _ := p.*;
+        \\  |           ^^
+        \\note: resource was released here
+        \\  --> …\release.glo:6:5
+        \\  |
+        \\6 |     release(p);
+        \\  |     ^^^^^^^
+        \\note: resource originated here
+        \\  --> …\release.glo:5:10
+        \\  |
+        \\5 |     p := make();
+        \\  |          ^^^^
+    );
+    paragraph(45, #string,oneline
+        \\The finding is a warning by default and the artifact is still written.
+        \\`--borrow-check error` turns the same finding into an error and
+        \\`--borrow-check off` suppresses the pass's diagnostics. A malformed or
+        \\contradictory `#memory` clause is a contract error, which is always an
+        \\error and always stops the build before lowering. What the Compiler
+        \\Checks About Memory describes the analysis.
+    );
+    subheading(46, "Lowering, emission, and linking");
+    paragraph(47, #string,oneline
+        \\Lowering turns checked declarations into Glosso IR, and rejects the
+        \\constructs that survive checking but have no runtime form, such as
+        \\`error: recursive call to lazy function 'rec' is not supported`.
+        \\Backend emission then translates IR into an LLVM module; an unregistered
+        \\intrinsic fails here with `error: native LLVM lowering has no
+        \\classification for #magic 'no_such_intrinsic'`. The linker is last and
+        \\speaks only about symbols, which is why a file with no `main` compiles
+        \\without complaint and then fails.
+    );
+    code_block(48, "text", #string
+        \\glosso: compile helper.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link helper.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\error: rust-lld: error: undefined symbol: wmain
+        \\>>> referenced by exe_common.inl:90
+        \\>>>               msvcrt.lib(exe_wmain.obj):(int __cdecl invoke_main(void))
+    );
+    subheading(49, "Reading a diagnostic by its phase");
+    paragraph(50, #string,oneline
+        \\Matching a message to the phase that produced it says what the compiler
+        \\already knew when it complained, and therefore what can and cannot be
+        \\the cause. Every message below is real output from this compiler.
+    );
+    table_header(51, "Message   —   Phase");
+    table_row(52, "`unterminated string literal`   |   Lexing");
+    table_row(53, "`unexpected token '<^>'`   |   Parsing, for an operator the prescan never saw");
+    table_row(54, "`unknown feature 'bogus_feature'`   |   Parsing");
+    table_row(55, "`cannot find module \"X\" (looked for …)`   |   Resolution");
+    table_row(56, "`no operator '+' for Pair, Pair`   |   Checking, at one instantiation");
+    table_row(57, "`use after release while reading memory`   |   Memory analysis");
+    table_row(58, "`recursive call to lazy function 'rec' is not supported`   |   Lowering");
+    table_row(59, "`#comptime stopped: VM: unknown #magic intrinsic 'ctx_alloc'`   |   Compile-time execution");
+    table_row(60, "`rust-lld: error: undefined symbol: wmain`   |   Linking");
+}
+
+render_section_4 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso source file is a flat sequence of top-level declarations with
+        \\no ordering rule. `main` may call a procedure declared below it, a type
+        \\may be used above its declaration, and `#import` and `#load` may sit
+        \\anywhere in the file, including on the last line.
+    );
+    code_block(1, "glosso", #string
+        \\main :: () {
+        \\    p: Point = .{ .x = 3, .y = 4 };
+        \\    print("manhattan = %\n", manhattan(p));
+        \\}
+        \\
+        \\#load "parts/geometry.glo";
+        \\#import "Io";
+    );
+    code_block(2, "text", #string
+        \\manhattan = 7
+    );
+    paragraph(3, #string,oneline
+        \\The reason is that resolution assembles the entire program's
+        \\declaration list before checking begins, so by the time any name is
+        \\looked up every declaration of every file in the build is already
+        \\present. Order matters for exactly two things: the file-name order in
+        \\which a directory module's files are loaded, and the declaration order
+        \\in which top-level `#comptime` blocks run.
+    );
+    paragraph(4, #string,oneline
+        \\`#import` and `#load` are declarations, not statements. Written inside
+        \\a procedure body, `#import "Io";` is
+        \\`error: unexpected directive 'import'`.
+    );
+    subheading(5, "`#import`");
+    paragraph(6, #string,oneline
+        \\`#import` names a module in the standard-library search path and brings
+        \\its public declarations into the importing file. Five forms are
+        \\accepted. `only` and `hide` are the only modifiers; anything else is
+        \\`error: #import modifier must be only or hide`.
+    );
+    table_header(7, "Form   —   Effect");
+    table_row(8, "`#import \"Io\";`   |   Public names enter the importing file's scope unqualified.");
+    table_row(9, "`M :: #import \"Math/Core\";`   |   Names are reachable only as `M.abs`, `M.clamp`.");
+    table_row(10, "`#import,only(clamp) \"Math/Core\";`   |   Exactly the listed names enter scope.");
+    table_row(11, "`#import,hide(clamp) \"Math/Core\";`   |   Everything except the listed names enters scope.");
+    table_row(12, "`M :: #import,only(clamp) \"Math/Core\";`   |   Both at once: a namespace holding a selection.");
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\M :: #import "Math/Core";
+        \\#import,only(clamp) "Math/Core";
+        \\
+        \\main :: () {
+        \\    print("M.abs = %\n", M.abs(-3.5));
+        \\    print("clamp = %\n", clamp(9.0, 0.0, 5.0));
+        \\}
+    );
+    code_block(14, "text", #string
+        \\M.abs = 3.5
+        \\clamp = 5
+    );
+    paragraph(15, #string,oneline
+        \\A name in an `only` or `hide` list must be a public module-level
+        \\declaration. A typeclass method is not one, so
+        \\`#import,only(sqrt) "Math/Core";` fails with
+        \\`error: #import,only names unknown public declaration 'sqrt' in module
+        \\"Math/Core"` followed by a `note: public names:` list of what is
+        \\selectable. Repeating a name is
+        \\`error: duplicate name 'print' in #import,only`. An empty list,
+        \\`#import,only() "Io";`, is legal and imports nothing at all.
+    );
+    paragraph(16, #string,oneline
+        \\Hiding removes the name outright: after
+        \\`#import,hide(clamp) "Math/Core";` a call to `clamp` is
+        \\`error: unknown function clamp` with `help: did you mean 'lerp'?`.
+        \\Importing the same module twice is harmless. Names beginning with `_`
+        \\are imported by a plain `#import` but are excluded from `only` and
+        \\`hide` lists; Visibility and Private Sections has that rule.
+    );
+    note(17, #string,oneline
+        \\`#import "Math"` is rewritten to `Math/Core`; there is no
+        \\`std/Math.glo`, and no other directory gets this treatment. The rewrite
+        \\applies to the unqualified form only. `M :: #import "Math";` currently
+        \\fails with dozens of errors reported inside `std/Math/Core.glo`; write
+        \\`M :: #import "Math/Core";` instead.
+    );
+    subheading(18, "How a module name resolves");
+    paragraph(19, #string,oneline
+        \\A module name is a path with `/` separators. It is validated first:
+        \\`..`, backslashes, absolute paths and empty components are rejected by
+        \\`error: invalid standard module name`, which then quotes the spelling
+        \\it refused. The resolver looks for two things in the standard-library
+        \\directory.
+    );
+    table_header(20, "On disk   —   Result");
+    table_row(21, "`std/Name.glo`   |   That one file is the module.");
+    table_row(22, "`std/Name/module.glo` exists   |   Every `.glo` file directly inside `std/Name/` is the module, in file-name order.");
+    table_row(23, "both exist   |   `error: ambiguous module \"Name\": both <file> and <dir>/module.glo exist`");
+    table_row(24, "neither exists   |   `error: cannot find module \"Name\" (looked for std/Name.glo or std/Name/module.glo)`");
+    paragraph(25, #string,oneline
+        \\Only files directly inside the directory are taken; sub-directories are
+        \\separate modules addressed with a slash. `module.glo` is often nothing
+        \\but `#load` lines and may be empty: its existence is what marks the
+        \\directory as a module, and it is loaded along with its siblings.
+    );
+    paragraph(26, #string,oneline
+        \\Both shapes coexist in the standard library, and a name can have both a
+        \\file and a directory without being ambiguous. `std/File_System.glo` and
+        \\`std/File_System/` both exist; because the directory carries no
+        \\`module.glo`, `#import "File_System"` resolves to the file, which
+        \\imports the components it wants.
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\#import "File_System";
+        \\
+        \\main :: () {
+        \\    if #pattern .Ok(found) = exists("lookup.glo") {
+        \\        print("exists = %\n", found);
+        \\    }
+        \\}
+    );
+    code_block(28, "text", #string
+        \\exists = 1
+    );
+    subheading(29, "Namespace-only directories");
+    paragraph(30, #string,oneline
+        \\A directory without `module.glo` is a namespace, not a module.
+        \\`#import "Container";` is
+        \\`error: cannot find module "Container" (looked for std/Container.glo or
+        \\std/Container/module.glo)`. Its contents are imported one component at
+        \\a time, by path. `Container`, `Crypto`, `Net`, `Serialization`,
+        \\`Strings` and `Math` are all of this kind.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\#import "Strings/Utf8";
+        \\
+        \\main :: () {
+        \\    print("%\n", substring("compiler", 0, 4));
+        \\}
+    );
+    code_block(32, "text", #string
+        \\comp
+    );
+    paragraph(33, #string,oneline
+        \\The same path form also names one file of a real module, so
+        \\`#import "Io/Core";` imports a single component of the `Io` directory.
+        \\Not every component stands alone, though: `#import "Time/Core";` fails
+        \\with `error: unknown type 'Duration'` reported inside
+        \\`std/Time/Core.glo`, because that file depends on its siblings. Such
+        \\directories are imported whole. The Standard Library Map says which is
+        \\which.
+    );
+    subheading(34, "`#load`");
+    paragraph(35, #string,oneline
+        \\`#load` splices a source file into the current compilation unit. The
+        \\path is relative to the file containing the directive, not to the
+        \\working directory, and no search path and no module are involved. An
+        \\alias puts the spliced names under a namespace instead of into the
+        \\loading file's scope.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\G :: #load "parts/geometry.glo";
+        \\
+        \\main :: () {
+        \\    p: G.Point = .{ .x = 3, .y = -4 };
+        \\    print("manhattan = %\n", G.manhattan(p));
+        \\}
+    );
+    code_block(37, "text", #string
+        \\manhattan = 1
+    );
+    bullet(38, #string,oneline
+        \\Each distinct path is loaded once; a repeated `#load` of the same path
+        \\is a no-op rather than a redeclaration error.
+    );
+    bullet(39, #string,oneline
+        \\With an alias the names are reachable only through it: writing `Point`
+        \\alone gives `error: unknown type 'Point'`.
+    );
+    bullet(40, #string,oneline
+        \\A missing file is
+        \\`error: #load: cannot find file "parts/nope.glo" (looked for <absolute
+        \\path>)`, and the absolute path the compiler tried is printed in full.
+    );
+    bullet(41, #string,oneline
+        \\An `#import` inside a loaded file brings its names into the loading
+        \\unit as well, so a file that loads a helper which imports `Io` can call
+        \\`print` itself.
+    );
+    bullet(42, #string,oneline
+        \\Declarations in a private section of a loaded file stay invisible to
+        \\the loader; Visibility and Private Sections has the rules.
+    );
+    note(43, #string,oneline
+        \\The operator prescan runs per file. An operator declared in a `#load`ed
+        \\file is not available to the file that loads it, even though every
+        \\other name is. The Operator Prescan explains why.
+    );
+}
+
+render_section_5 :: () {
+    paragraph(0, #string,oneline
+        \\Every compilation begins with names already in scope. Nothing in the
+        \\program declares them and no import produces them. They arrive in three
+        \\layers, in this order: type spellings the parser recognises,
+        \\declarations the compiler injects, and the eight files of
+        \\`std/Prelude`.
+    );
+    paragraph(1, #string,oneline
+        \\The Prelude is loaded unqualified for every program, before any
+        \\`#import` in the program is resolved. It is the only module treated
+        \\this way, and it cannot be turned off.
+    );
+    subheading(2, "Built-in type names");
+    paragraph(3, #string,oneline
+        \\A fixed set of names is recognised as a type by the parser itself.
+        \\They are not declarations, and they need no import in any program.
+    );
+    table_header(4, "Group   —   Spellings");
+    table_row(5, "Sized integers   |   `s8`, `s16`, `s32`, `s64`, `s128`, `u8`, `u16`, `u32`, `u64`, `u128`");
+    table_row(6, "Default integers   |   `int`, `uint`");
+    table_row(7, "Floating point   |   `f16`, `f32`, `f64`, `f80`, `f128`");
+    table_row(8, "Complex   |   `c32`, `c64`, `c128`, `c160`, `c256`");
+    table_row(9, "Text   |   `string`, `cstring`, `string16`, `cstring16`");
+    table_row(10, "Other   |   `bool`, `void`, `any`, `type`, `label`, `Code`, `pattern`");
+    paragraph(11, #string,oneline
+        \\`int` and `s64` name the same type, as do `uint` and `u64`. The
+        \\Primitive Types covers the set and its representations.
+    );
+    subheading(12, "Declarations the compiler injects");
+    paragraph(13, #string,oneline
+        \\Before the Prelude is read the compiler installs two source fragments
+        \\of its own, under the pseudo-paths `<builtin:Types>` and
+        \\`<builtin:Context>`. The first declares the two unions that `?T` and
+        \\`E!T` resolve to.
+    );
+    code_block(14, "glosso", #string
+        \\Option :: union #magic "option" {
+        \\    None: void;
+        \\    Some: $T;
+        \\}
+        \\
+        \\Result :: union #magic "result" {
+        \\    Ok: $T;
+        \\    Err: $E;
+        \\}
+    );
+    paragraph(15, #string,oneline
+        \\Those names are internal and the parser rejects them wherever a program
+        \\could write one: `Option(int)` is
+        \\`error: the built-in option type is written '?T'; its variants are
+        \\'.Some(x)' and '.None'`, and `Result(string, int)` is
+        \\`error: the built-in result type is written 'E!T'; its variants are
+        \\'.Ok(x)' and '.Err(e)'`. They are built in rather than declared in
+        \\`std` so that a program cannot reshape the type that `?`, `#try` and
+        \\pattern lowering resolve to. `std/Prelude/Option.glo` and
+        \\`std/Prelude/Result.glo` supply everything else about them.
+    );
+    paragraph(16, #string,oneline
+        \\The second fragment declares the implicit context's type. Its spelling
+        \\carries the `#`: a parameter typed `Context` is
+        \\`error: the built-in Context type is written #Context`.
+    );
+    code_block(17, "glosso", #string
+        \\Context :: struct {
+        \\    print_style:      Print_Style;
+        \\    allocator:        Allocator;
+        \\    temp_allocator:   Allocator;
+        \\    logger:           Logger;
+        \\    random_generator: Random_Generator;
+        \\    user_ptr:         ?*void;
+        \\    user_index:       s64;
+        \\}
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\depth :: (c: #Context) -> s64 { return c.user_index; }
+        \\main :: () { print("user_index = %\n", depth(context)); }
+    );
+    code_block(19, "text", #string
+        \\user_index = 0
+    );
+    paragraph(20, #string,oneline
+        \\The struct is always in scope but its field types are gated. Naming
+        \\`Print_Style`, `Allocator`, `Logger` or `Random_Generator` in a program
+        \\that has not imported `Context` gives
+        \\`error: 'Print_Style' is a #Context field type`, and the rest of the
+        \\message asks for `#import "Context";`. The Implicit Context and
+        \\Allocators cover what the fields do.
+    );
+    subheading(21, "The eight Prelude files");
+    paragraph(22, #string,oneline
+        \\`std/Prelude/module.glo` is eight `#load` lines. Everything the loaded
+        \\files declare is in scope for every program.
+    );
+    table_header(23, "File   —   Supplies");
+    table_row(24, "`Show_and_Read.glo`   |   `Show`, the protocol behind `%` and `print`; `FromString`; `Ordering`; the `derive_show` macro.");
+    table_row(25, "`Primitive_Typeclasses.glo`   |   `PartialEq`, `Eq`, `PartialOrd`, `Num`, `Step`, `Iterable`, `For_Flags`.");
+    table_row(26, "`Primitive_Operators.glo`   |   The operator typeclasses and their primitive instances, plus `Indexable`, the range classes and `ToPattern`.");
+    table_row(27, "`Option.glo`   |   `option_some`, `option_none`, `option_is_some`, `option_is_none`, `option_unwrap_or`, `Option_Residual`, the instances for `?T`.");
+    table_row(28, "`Result.glo`   |   `result_ok`, `result_err`, `result_is_ok`, `result_is_err`, `result_unwrap_or`, `map_error`, `bind_error`, `ap_error`, `Result_Residual`.");
+    table_row(29, "`Array.glo`   |   `array_add`, `array_append`, `array_reset`, `array_free`, `array_deinit`, `array_view`.");
+    table_row(30, "`Assembly.glo`   |   `Asm_Constraint`, `Asm_Operand_Flags`, `Asm_Clobber`, the vocabulary `#asm` operands are written in.");
+    table_row(31, "`Utilities.glo`   |   `Target_OS`, `Target_CPU`, `Target_ABI`, `Target_Endian`, `Output_Target`, `Host_Target`, `target_endian`, `get_cmdline_args`, `exit`.");
+    paragraph(32, #string,oneline
+        \\Two of those files begin with `#import "Meta"`, `#import "Typeclass"`,
+        \\`#import "String_Builder"` and `#import "Format"`, and an import inside
+        \\a loaded file reaches the loading unit, so the public names of those
+        \\four modules are in scope with no import as well.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\main :: () {
+        \\    print("type_name = %\n", type_name(s32));
+        \\    print("size_of   = %\n", size_of(f64));
+        \\    print("str_cat   = %\n", str_cat("a", "b"));
+        \\    print("format    = %\n", format_int(255, 16));
+        \\    print("tprint    = %\n", tprint("% + %", 1, 2));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\type_name = s32
+        \\size_of   = 8
+        \\str_cat   = ab
+        \\format    = ff
+        \\tprint    = 1 + 2
+    );
+    paragraph(35, #string,oneline
+        \\`OUT` and `HOST` come from no file: the checker installs them as
+        \\constants once `Output_Target` and `Host_Target` exist, which is why
+        \\`Utilities.glo` declares the shapes but not the values. Targets and
+        \\Cross-Compilation covers what they hold.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    maybe: ?int = .Some(21);
+        \\    outcome: string!int = .Ok(42);
+        \\    print("% %\n", option_is_some(maybe), result_is_ok(outcome));
+        \\
+        \\    xs: [..]int;
+        \\    array_add(*xs, 3);
+        \\    array_add(*xs, 4);
+        \\    print("count=% sum=%\n", xs.count, xs[0] + xs[1]);
+        \\    array_free(*xs);
+        \\
+        \\    print("ordering=% show=%\n", 1 <=> 2, show(7));
+        \\    print("os=% endian=% args=%\n", OUT.os, target_endian(), get_cmdline_args().count);
+        \\}
+    );
+    code_block(37, "text", #string
+        \\1 1
+        \\count=2 sum=7
+        \\ordering=0 show=7
+        \\os=3 endian=0 args=1
+    );
+    subheading(38, "The operator typeclasses");
+    paragraph(39, #string,oneline
+        \\Every operator in the language is a method of a typeclass declared in
+        \\`Primitive_Operators.glo` or `Primitive_Typeclasses.glo`, with its
+        \\fixity and precedence written on the requirement. That is what the
+        \\operator prescan reads out of the Prelude, and it is why `a + b` needs
+        \\no import while a library's own operator does.
+    );
+    table_header(40, "Class   —   Operator   —   Fixity and level");
+    table_row(41, "`Add`, `Sub`   |   `+`, `-`   |   left, 17");
+    table_row(42, "`Mul`, `Div`, `Rem`   |   `*`, `/`, `%`   |   left, 18");
+    table_row(43, "`Neg`, `BitNot`, `LogicalNot`   |   `-`, `~`, `!`   |   prefix");
+    table_row(44, "`ShiftLeft`, `ShiftRight`   |   `<<`, `>>`   |   left, 16");
+    table_row(45, "`BitAnd`   |   `&`   |   left, 14");
+    table_row(46, "`BitXor`   |   `^`   |   left, 13");
+    table_row(47, "`BitOr`   |   `|`   |   left, 12");
+    table_row(48, "`PartialOrd`   |   `<=>`, `<`, `<=`, `>`, `>=`   |   left, 10");
+    table_row(49, "`PartialEq`   |   `==`, `!=`   |   left, 8");
+    table_row(50, "`LogicalAnd`   |   `&&`   |   left, 6");
+    table_row(51, "`LogicalOr`   |   `||`   |   left, 4");
+    table_row(52, "`RangeExclusiveOp`, `RangeInclusiveOp`   |   `..`, `..=`   |   left, 2");
+    table_row(53, "`AddAssign` and the rest of the assign family   |   `+=`, `-=`, `*=`, `/=`, `%=`   |   assign, 0");
+    paragraph(54, #string,oneline
+        \\The wrapping and saturating families (`WrapAdd`, `SaturatingMul` and
+        \\their assigning forms) follow the same shape, and `Indexable` and
+        \\`IndexSet` own `[]` and `[]=` without a precedence. The Operator System
+        \\and Operator Precedence and the 0-20 Scale give the complete table.
+    );
+    paragraph(55, #string,oneline
+        \\`LogicalAnd` and `LogicalOr` declare their right operand `#lazy`, which
+        \\is the whole mechanism behind short-circuiting `&&` and `||`; Lazy
+        \\Parameters and Short-Circuit Operators explains it.
+    );
+    subheading(56, "The command line and exit");
+    paragraph(57, #string,oneline
+        \\`Utilities.glo` also supplies the two process-level procedures every
+        \\program can reach without an import.
+    );
+    code_block(58, "glosso", #string
+        \\get_cmdline_args :: () -> []const string #magic "get_cmdline_args"
+        \\    #memory returns_static;
+        \\exit :: (status: int) #noreturn #magic "exit";
+    );
+    paragraph(59, #string,oneline
+        \\`get_cmdline_args` returns the process argument vector at run time,
+        \\including the program path at index 0. During compile-time execution it
+        \\returns the arguments written after `--` on the compiler's own command
+        \\line, without a leading program path. `exit` ends the process, and
+        \\called from a top-level `#comptime` it ends the build with that status
+        \\and writes no artifact.
+    );
+    subheading(60, "What is not in the Prelude");
+    paragraph(61, #string,oneline
+        \\`print` is not. It belongs to `Io`, so the smallest program that writes
+        \\anything needs one import. The help text points at `tprint`, which is
+        \\in scope because it arrives with `Show`.
+    );
+    code_block(62, "glosso", #string
+        \\main :: () { print("hello from glosso\n"); }
+    );
+    code_block(63, "text", #string
+        \\error: unknown function print
+        \\  --> …\hello.glo:1:14
+        \\  |
+        \\1 | main :: () { print("hello from glosso\n"); }
+        \\  |              ^^^^^
+        \\help: did you mean 'tprint'?
+    );
+    note(64, #string,oneline
+        \\Numeric constants are not in the Prelude either. `PI`, `S64_MAX`,
+        \\`F64_MAX` and the rest live in `Math/Constants`; with no import at all
+        \\`S64_MAX` is `error: unbound 'S64_MAX'`. They appear to be free only
+        \\because `#import "Io"` reaches them transitively, which is also why a
+        \\top-level `PI :: 3.14;` beside that import is
+        \\`error: constant 'PI' is already declared`.
+    );
+}

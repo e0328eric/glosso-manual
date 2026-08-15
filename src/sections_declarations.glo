@@ -1,0 +1,1433 @@
+// Sections 16-21: declarations and scope.
+
+render_section_16 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso has no `let`, `var`, or `const` keyword. A declaration is a name,
+        \\an optional type annotation, and an initialiser, and the punctuation
+        \\between them carries the whole meaning: whether the name is immutable,
+        \\whether its value is required at compile time, and whether the type is
+        \\written or inferred.
+    );
+    paragraph(1, #string,oneline
+        \\A colon introduces the type annotation. What follows the annotation
+        \\decides the kind of binding. A single `:` or a `::` before the
+        \\initialiser binds a constant; an `=`, `:=`, or `::=` binds something
+        \\that can be written to. A declaration with a type and no initialiser
+        \\is zero-filled.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    LIMIT :: 64;
+        \\    step ::= 2;
+        \\    total := 0;
+        \\    scale: f64 = 1.5;
+        \\    seen: s64;
+        \\    total = LIMIT / step;
+        \\    print("total=% scale=% seen=%\n", total, scale, seen);
+        \\}
+    );
+    code_block(3, "text", #string
+        \\total=32 scale=1.5 seen=0
+    );
+
+    subheading(4, "The declaration forms");
+    paragraph(5, #string,oneline
+        \\The same eight spellings are accepted at file scope and inside a
+        \\procedure body, and two of them mean different things in the two
+        \\places. The difference is that only a declaration inside a body is
+        \\entered into the checker's compile-time environment, so only a local
+        \\binding can be a compile-time binding.
+    );
+    table_header(6, "Spelling   —   At file scope   —   In a body");
+    table_row(7, "`x :: v`   |   Constant.   |   Constant.");
+    table_row(8, "`x : T : v`   |   Typed constant.   |   Typed constant.");
+    table_row(9, "`x : T :: v`   |   Typed constant.   |   Typed constant.");
+    table_row(10, "`x ::= v`   |   Mutable global.   |   Compile-time binding.");
+    table_row(11, "`x : T := v`   |   Mutable global.   |   Typed compile-time binding.");
+    table_row(12, "`x := v`   |   Mutable global.   |   Mutable local.");
+    table_row(13, "`x : T = v`   |   Mutable global.   |   Mutable local.");
+    table_row(14, "`x : T;`   |   Zero-filled global.   |   Zero-filled local.");
+    paragraph(15, #string,oneline
+        \\Both `:` and `::` are accepted after a type annotation, so `MAX: int :
+        \\100` and `MAX: int :: 100` declare the same typed constant. The
+        \\trailing semicolon is optional on all of these forms in both scopes;
+        \\Statements and Semicolons gives the rule.
+    );
+    note(16, #string,oneline
+        \\`::=` is the one spelling whose meaning flips between the two scopes.
+        \\A file-scope `G ::= 7;` is an ordinary mutable global, not a
+        \\compile-time constant, and a `#if G == 7` that follows it fails with
+        \\`error: unknown const G`. Use `::` for a file-scope constant.
+    );
+
+    subheading(17, "Constants");
+    paragraph(18, #string,oneline
+        \\`::` means an immutable binding. It comes in two flavours, and the
+        \\compiler chooses between them without any help from the source: if the
+        \\initialiser can be evaluated during checking the name becomes a
+        \\compile-time constant, and if it cannot the name becomes a
+        \\runtime-frozen constant instead. A `::` whose initialiser is not
+        \\compile-time evaluable is not an error.
+    );
+    paragraph(19, #string,oneline
+        \\A runtime-frozen constant is lowered like an ordinary local: the
+        \\initialiser is evaluated once, at the declaration, and the name is
+        \\bound to that result for the rest of the scope. Later changes to
+        \\whatever the initialiser read do not reach it.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    n := 7;
+        \\    FROZEN :: n * 2;
+        \\    print("FROZEN=%\n", FROZEN);
+        \\    n = 100;
+        \\    print("FROZEN=%\n", FROZEN);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\FROZEN=14
+        \\FROZEN=14
+    );
+    paragraph(22, #string,oneline
+        \\The two flavours differ in exactly one visible way: a frozen constant
+        \\is not a compile-time value, so it cannot drive a construct that
+        \\demands one. Adding `#if FROZEN == 14` to the program above gives
+        \\`error: unknown const FROZEN`, `#assert #comptime FROZEN == 14` gives
+        \\`error: #assert #comptime condition is not compile-time evaluable`, and
+        \\passing it to a `#comptime` parameter gives
+        \\`error: argument for #comptime parameter 'v' must be known at compile time`.
+        \\Each of those carries `note: unknown const FROZEN`.
+    );
+    paragraph(23, #string,oneline
+        \\Neither flavour has storage. `p := *FROZEN` is
+        \\`error: cannot take a pointer to a non-addressable expression: 'FROZEN'`,
+        \\and the same holds for a file-scope constant.
+    );
+
+    subheading(24, "Compile-time bindings");
+    paragraph(25, #string,oneline
+        \\Inside a body, `x ::= v` and `x: T := v` declare a compile-time
+        \\binding. The initialiser must be compile-time evaluable, the name is
+        \\registered in the compile-time environment, and the binding may be
+        \\updated by ordinary assignment during checking. This is what drives
+        \\`#inline while` counters and static branching.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    width ::= 4;
+        \\    width = width * 2;
+        \\    #if width == 8 print("the static branch saw %\n", width);
+        \\}
+    );
+    code_block(27, "text", #string
+        \\the static branch saw 8
+    );
+    paragraph(28, #string,oneline
+        \\An initialiser the checker cannot fold is rejected rather than frozen:
+        \\`K ::= n * 2` over a runtime `n` is
+        \\`error: comptime variable initializer must be compile-time evaluable`.
+        \\A compile-time binding also has no runtime storage, so its address
+        \\cannot be taken: `p := *width` is `error: cannot take pointer to width`.
+        \\Types with no runtime representation, such as `type` and `Code`, must
+        \\be bound this way or with `::`.
+    );
+
+    subheading(29, "Variables");
+    paragraph(30, #string,oneline
+        \\`x := v` and `x: T = v` declare a mutable binding with storage. `:=`
+        \\infers the type from the initialiser; the annotated form fixes it and
+        \\checks the initialiser against it. `x: T;` declares a mutable binding
+        \\with no initialiser, and the storage is zero-filled rather than left
+        \\holding whatever was on the stack. A declaration with neither a type
+        \\nor an initialiser has nothing to work from and is rejected.
+    );
+
+    subheading(31, "Assigning to a constant");
+    paragraph(32, #string,oneline
+        \\Assignment to a constant is always rejected, but the diagnostic
+        \\depends on where the constant was declared and how it was spelled. A
+        \\file-scope constant is not in the assignable namespace at all, so name
+        \\resolution fails before the assignment rule is ever consulted; a local
+        \\constant is found and then refused, with a help line naming the
+        \\spelling that would have made it mutable.
+    );
+    table_header(33, "Binding   —   Assigning to it");
+    table_row(34, "`K :: 7;` at file scope   |   `error: unbound 'K'`");
+    table_row(35, "`MAX: int : 100;` at file scope   |   `error: unbound 'MAX'`");
+    table_row(36, "`c :: 9;` in a body   |   `error: constant cannot be modified`, with `help: change '::' to ':=' to make the binding mutable`");
+    table_row(37, "`c: s64 : 9;` in a body   |   the same error, with `help: change ':' to '=' to make the binding mutable`");
+    table_row(38, "`c: s64 :: 9;` in a body   |   the same error, with `help: change '::' to '=' to make the binding mutable`");
+    table_row(39, "`g := 0;` at file scope   |   Accepted; a global is an ordinary mutable binding.");
+    paragraph(40, #string,oneline
+        \\The refusal reaches through members and indexes, not just through the
+        \\bare name. For `p :: Point.{ .x = 1, .y = 2 };` the statement `p.x =
+        \\5;` is the same `error: constant cannot be modified`, reported at the
+        \\field, and for `a: [3]s64 :: .[1, 2, 3];` so is `a[0] = 9;`.
+    );
+
+    subheading(41, "`#undefined` initialisers");
+    paragraph(42, #string,oneline
+        \\`x: T = #undefined;` declares a binding whose initial contents are not
+        \\defined. It exists to skip the zero fill for a buffer that is about to
+        \\be overwritten in full, which is why the standard library's binary
+        \\readers open with `bytes: [16]u8 = #undefined;` before reading into
+        \\the slice. The spelling is the directive; a bare `undefined` is
+        \\`error: unbound 'undefined'`.
+    );
+    code_block(43, "glosso", #string
+        \\zeroed :: () -> u8 {
+        \\    b: [64]u8;
+        \\    return b[3];
+        \\}
+        \\
+        \\scratch :: () -> u8 {
+        \\    b: [64]u8 = #undefined;
+        \\    return b[3];
+        \\}
+    );
+    code_block(44, "text", #string
+        \\define i8 @glo_zeroed() {
+        \\entry:
+        \\  %r0 = alloca i64, align 8
+        \\  %r1 = alloca [64 x i8], align 1
+        \\  %r2 = alloca i64, align 8
+        \\  %r3 = alloca i8, align 1
+        \\  %temp.mark = load i64, ptr @glo_temp_used, align 8
+        \\  store i64 %temp.mark, ptr %r0, align 8
+        \\  store [64 x i8] zeroinitializer, ptr %r1, align 1
+        \\  store i64 3, ptr %r2, align 8
+        \\
+        \\define i8 @glo_scratch() {
+        \\entry:
+        \\  %r0 = alloca i64, align 8
+        \\  %r1 = alloca [64 x i8], align 1
+        \\  %r2 = alloca i64, align 8
+        \\  %r3 = alloca i8, align 1
+        \\  %temp.mark = load i64, ptr @glo_temp_used, align 8
+        \\  store i64 %temp.mark, ptr %r0, align 8
+        \\  store i64 3, ptr %r2, align 8
+    );
+    paragraph(45, #string,oneline
+        \\Under `--backend llvm-ir -O0` the two bodies differ by exactly one
+        \\instruction: `zeroed` emits
+        \\`store [64 x i8] zeroinitializer, ptr %r1` and `scratch` does not.
+        \\`#undefined` has no standalone type of its own. It takes the type of
+        \\the declaration, parameter, or field that receives it; bound alone with
+        \\`x := #undefined` it falls back to the `label` type used for an absent
+        \\jump target.
+    );
+    note(46, #string,oneline
+        \\`#undefined` changes nothing at file scope. A global lives in the
+        \\program image and has to be given some pattern of bytes, so
+        \\`buffer: [8]u8 = #undefined;` still emits
+        \\`@glo_global_buffer = internal global [8 x i8] zeroinitializer`. The
+        \\directive only pays for itself on a local.
+    );
+}
+
+render_section_17 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso source file is a flat sequence of top-level declarations.
+        \\There is no package statement, no header, and no forward-declaration
+        \\form, because there is nothing to declare forward: the whole file is
+        \\read before anything in it is checked.
+    );
+    paragraph(1, #string,oneline
+        \\Order is therefore free. `main` may be the first declaration in the
+        \\file and call a procedure written below it, a global may be typed by a
+        \\struct declared later, and `#import` and `#load` may sit at the very
+        \\bottom.
+    );
+    code_block(2, "glosso", #string
+        \\main :: () {
+        \\    print("later() = %\n", later());
+        \\    print("LIMIT = % origin.x = %\n", LIMIT, origin.x);
+        \\}
+        \\
+        \\LIMIT :: 64;
+        \\Point :: struct { x: int; y: int; }
+        \\origin: Point = .{ .x = 3, .y = 4 };
+        \\later :: () -> int { return LIMIT / 2; }
+        \\
+        \\#import "Io";
+    );
+    code_block(3, "text", #string
+        \\later() = 32
+        \\LIMIT = 64 origin.x = 3
+    );
+
+    subheading(4, "What may appear at file scope");
+    paragraph(5, #string,oneline
+        \\The parser reads the name first and then decides from the token that
+        \\follows it. Everything below is a complete top-level declaration, and
+        \\the trailing semicolon on each is optional.
+    );
+    table_header(6, "Form   —   Declares");
+    table_row(7, "`name :: expr;`   |   A constant.");
+    table_row(8, "`name : T : expr;`, `name : T :: expr;`   |   A typed constant.");
+    table_row(9, "`name := expr;`, `name ::= expr;`   |   A mutable global, type inferred.");
+    table_row(10, "`name : T = expr;`, `name : T := expr;`   |   A mutable global with a written type.");
+    table_row(11, "`name : T;`   |   A zero-filled global.");
+    table_row(12, "`name :: (params) -> R { … }`   |   A procedure.");
+    table_row(13, "`name :: struct`, `union`, `enum`, `enum_flags`   |   An aggregate type.");
+    table_row(14, "`name :: distinct T;`   |   A nominal type.");
+    table_row(15, "`name :: typeclass (…) { … }`   |   A typeclass.");
+    table_row(16, "`head :: instance Class { … }`   |   An instance.");
+    table_row(17, "`name :: #fn_ptr(…) -> R;`   |   A function-pointer type.");
+    table_row(18, "`name :: #library[,kind] \"file\";`   |   A foreign library handle.");
+    table_row(19, "`#import \"M\";`, `name :: #import \"M\";`   |   A module import.");
+    table_row(20, "`#load \"path\";`, `name :: #load \"path\";`   |   A source splice.");
+    table_row(21, "`#thread_local <global declaration>`   |   A thread-local global.");
+    table_row(22, "`#comptime { … }`, `#comptime call();`   |   A compile-time step.");
+    table_row(23, "`#insert <string expression>;`   |   Declarations generated during checking.");
+    table_row(24, "`#memory name { … }`   |   A memory contract attached to a function declared elsewhere.");
+    table_row(25, "`#enable(feature);`, `#disable(feature);`   |   A feature gate, sticky to the end of the file.");
+    paragraph(26, #string,oneline
+        \\Two directives that look like they belong here do not. `#if` and
+        \\`#assert` are statements, not declarations: at file scope they are
+        \\`error: bad decl name 'if'` and `error: bad decl name 'assert'`. A
+        \\target-conditional constant is written inside a procedure body or a
+        \\`#comptime` block instead.
+    );
+    paragraph(27, #string,oneline
+        \\File scope also collects declarations that were not written there. A
+        \\`name :: (…)`, `struct`, `union`, `enum`, or `distinct` declaration
+        \\written inside a procedure body is hoisted out to file scope and is
+        \\visible to every other top-level declaration. Blocks, Scope, and
+        \\Shadowing covers that rule and what it does to name lookup.
+    );
+
+    subheading(28, "Globals and their initialisers");
+    paragraph(29, #string,oneline
+        \\A global is a mutable binding with static storage and a name visible
+        \\to the whole compilation unit, unless a private section narrows it;
+        \\Visibility and Private Sections covers that. Its initialiser is
+        \\evaluated by the compiler, not by the program: the expression is folded
+        \\during checking and the result is emitted as the symbol's static
+        \\initial value.
+    );
+    paragraph(30, #string,oneline
+        \\That is a hard requirement, not an optimisation. An initialiser the
+        \\checker cannot fold is an error, and the most common way to hit it is
+        \\to read another global. A global variable is not a compile-time value,
+        \\so `second: s64 = first + 1;` gives `error: unknown const first`.
+        \\Anything that needs the running program is rejected the same way:
+        \\`buffer: ?*void = alloc(64);` is
+        \\`error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`.
+    );
+    paragraph(31, #string,oneline
+        \\Anything the compile-time evaluator can run is allowed, including
+        \\calls to procedures declared later in the file and constants declared
+        \\later in the file.
+    );
+    code_block(32, "glosso", #string
+        \\compute :: () -> s64 { return 6 * 7; }
+        \\
+        \\answer: s64 = compute();
+        \\table: [4]s64 = .[1, 2, 3, 4];
+        \\blank: s64;
+        \\
+        \\main :: () { x := answer + table[0] + blank; }
+    );
+    code_block(33, "text", #string
+        \\@glo_global_answer = internal global i64 42
+        \\@glo_global_blank = internal global i64 0
+        \\@glo_global_table = internal global [4 x i64] [i64 1, i64 2, i64 3, i64 4]
+    );
+
+    subheading(34, "Initialisation order");
+    paragraph(35, #string,oneline
+        \\Because every global initial value is a folded constant, there is no
+        \\runtime global-initialisation pass at all. Nothing runs before `main`
+        \\to fill globals in, so there is no initialisation order to specify and
+        \\no order-of-initialisation hazard between files. The guarantee the
+        \\compiler makes is that every global holds its declared initial value,
+        \\or zero, from the first instruction of the program.
+    );
+    paragraph(36, #string,oneline
+        \\The visible consequence is that a side effect in a global initialiser
+        \\happens during the build, not during the run.
+    );
+    code_block(37, "glosso", #string
+        \\#import "Io";
+        \\
+        \\noisy :: () -> s64 { print("initializer ran\n"); return 1; }
+        \\
+        \\value: s64 = noisy();
+        \\
+        \\main :: () { print("value=%\n", value); }
+    );
+    code_block(38, "text", #string
+        \\glosso: compile program.glo (target=x86_64-pc-windows-msvc)
+        \\initializer ran
+        \\glosso: link program.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\glosso: done program.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
+        \\value=1
+    );
+    note(39, #string,oneline
+        \\`initializer ran` is printed by the compiler, on the compiler's
+        \\stdout, between the `compile` and `link` progress lines. Work that has
+        \\to happen once at program start belongs at the top of `main` or behind
+        \\an explicit initialisation procedure, not in a global initialiser.
+    );
+
+    subheading(40, "Thread-local storage");
+    paragraph(41, #string,oneline
+        \\`#thread_local` prefixes a global variable declaration and gives each
+        \\thread its own copy of the storage. Everything else about the
+        \\declaration is unchanged: the initialiser is still folded at compile
+        \\time, and an omitted initialiser still means zero.
+    );
+    code_block(42, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#thread_local depth: s64 = 0;
+        \\#thread_local scratch: [4]u8;
+        \\
+        \\main :: () {
+        \\    depth += 1;
+        \\    scratch[0] = 7;
+        \\    print("depth=% scratch[0]=%\n", depth, scratch[0]);
+        \\}
+    );
+    code_block(43, "text", #string
+        \\depth=1 scratch[0]=7
+    );
+    paragraph(44, #string,oneline
+        \\The directive prefixes a variable and nothing else. `#thread_local K
+        \\:: 5;` and `#thread_local f :: () { }` are both
+        \\`error: #thread_local can only prefix a global variable declaration`,
+        \\and inside a body it is not a statement at all:
+        \\`error: unexpected directive 'thread_local'`.
+    );
+    note(45, #string,oneline
+        \\Whether `#thread_local` reaches the object file depends on the target.
+        \\On a hosted target the global is emitted as
+        \\`@glo_global_depth = internal thread_local global i64 0`; on Windows,
+        \\on freestanding Linux x86-64, and on bare metal the backend drops the
+        \\`thread_local` qualifier and emits an ordinary internal global,
+        \\because those targets do not use the ELF thread-local model the
+        \\runtime is built around. Targets and Cross-Compilation covers the
+        \\target list.
+    );
+}
+
+render_section_18 :: () {
+    paragraph(0, #string,oneline
+        \\`place = value;` is a statement, not an expression. It has no result
+        \\and it cannot be nested: `y := (x = 2);` is
+        \\`error: unexpected token '='`, and so is `if x = 1 { }`. An assignment
+        \\written where a comparison was meant is a parse error rather than a
+        \\silent truth test. The update-assignment operators described below are
+        \\a separate mechanism and do produce values.
+    );
+    paragraph(1, #string,oneline
+        \\The type rule is the ordinary conversion rule, with no relaxation for
+        \\assignment. The right side must already be, or implicitly convert to,
+        \\the type of the left side. Widening between integer types is implicit;
+        \\narrowing is not, so `small: s32 = 1; big: s64 = 2; small = big;` is
+        \\`error: assign int to s32`. An unrelated type is the same shape of
+        \\message: assigning a `string` to an `s32` is
+        \\`error: assign string to s32`. Conversions: What Is Implicit gives the
+        \\full rule, and Relaxing Strictness with `lossy_numerics` gives the
+        \\gate that turns the narrowing case back on.
+    );
+
+    subheading(2, "What can be assigned to");
+    paragraph(3, #string,oneline
+        \\The left side must denote storage. Four forms do: a mutable name,
+        \\a field of one, an element of one, and the target of a pointer
+        \\dereference. They compose, and an element reached through a view
+        \\writes through to the array the view was taken from.
+    );
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    arr: [4]s64 = .[1, 2, 3, 4];
+        \\    arr[1] += 10;
+        \\
+        \\    x := 5;
+        \\    p := *x;
+        \\    p.* += 2;
+        \\
+        \\    view := arr[0..2];
+        \\    view[0] += 100;
+        \\
+        \\    print("arr = % % % %   x = %\n", arr[0], arr[1], arr[2], arr[3], x);
+        \\}
+    );
+    code_block(5, "text", #string
+        \\arr = 101 12 3 4   x = 7
+    );
+    paragraph(6, #string,oneline
+        \\Anything else is `error: left side of assignment is not assignable`.
+        \\That covers a literal (`5 = 3;`), the result of a call (`f() = 3;`),
+        \\and any computed expression (`(a + b) = 3;`). Constants get their own
+        \\diagnostics, listed in Values, Constants, and Variables. Parameters,
+        \\by contrast, are ordinary mutable bindings and may be assigned to; the
+        \\caller's value is unaffected because arguments are passed by value.
+    );
+
+    subheading(7, "Assignment copies");
+    paragraph(8, #string,oneline
+        \\Assignment of an aggregate copies it. A struct or fixed array bound
+        \\from another one is an independent value, and writing through the
+        \\copy does not disturb the original. Views and pointers are the
+        \\exception, and only because the thing being copied is the reference,
+        \\not what it refers to.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct { x: int; y: int; }
+        \\
+        \\main :: () {
+        \\    a: Point = .{ .x = 1, .y = 2 };
+        \\    b := a;
+        \\    b.x = 99;
+        \\    print("a.x=% b.x=%\n", a.x, b.x);
+        \\
+        \\    c: [3]s64 = .[1, 2, 3];
+        \\    d := c;
+        \\    d[0] = 99;
+        \\    print("c[0]=% d[0]=%\n", c[0], d[0]);
+        \\}
+    );
+    code_block(10, "text", #string
+        \\a.x=1 b.x=99
+        \\c[0]=1 d[0]=99
+    );
+
+    subheading(11, "Update assignment");
+    paragraph(12, #string,oneline
+        \\Every `op=` spelling is a genuine operator, declared in the Prelude as
+        \\a typeclass method carrying `#operator(assign, 0)`. Level 0 is the
+        \\loosest tier on the precedence scale, so everything on the right of it
+        \\groups first, and the result is stored back into the left operand.
+        \\Because it is an operator rather than statement syntax,
+        \\`y := (x += 1);` compiles and binds `y` to the updated value.
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    total := 10;
+        \\    total += 3;
+        \\    total <<= 2;
+        \\
+        \\    saturated: u8 = 250;
+        \\    saturated +|= 10;
+        \\
+        \\    wrapped: u8 = 250;
+        \\    wrapped +%= 10;
+        \\
+        \\    ready := false;
+        \\    ready ||= total > 0;
+        \\
+        \\    print("total=% saturated=% wrapped=% ready=%\n",
+        \\          total, saturated, wrapped, ready);
+        \\}
+    );
+    code_block(14, "text", #string
+        \\total=52 saturated=255 wrapped=4 ready=1
+    );
+    paragraph(15, #string,oneline
+        \\There are nineteen of them, and each has its own two-parameter
+        \\typeclass with an `Output` associated type. None of those classes has
+        \\to be implemented directly: the Prelude ships a blanket instance for
+        \\every one, conditioned on the corresponding binary operator class, so
+        \\a type that implements `Add` gets `+=` for free.
+    );
+    table_header(16, "Operator   —   Typeclass   —   Blanket instance requires");
+    table_row(17, "`+=`   |   `AddAssign`   |   `Add(L, R)`");
+    table_row(18, "`-=`   |   `SubAssign`   |   `Sub(L, R)`");
+    table_row(19, "`*=`   |   `MulAssign`   |   `Mul(L, R)`");
+    table_row(20, "`/=`   |   `DivAssign`   |   `Div(L, R)`");
+    table_row(21, "`%=`   |   `RemAssign`   |   `Rem(L, R)`");
+    table_row(22, "`+%=`   |   `WrapAddAssign`   |   `WrapAdd(L, R)`");
+    table_row(23, "`-%=`   |   `WrapSubAssign`   |   `WrapSub(L, R)`");
+    table_row(24, "`*%=`   |   `WrapMulAssign`   |   `WrapMul(L, R)`");
+    table_row(25, "`+|=`   |   `SaturatingAddAssign`   |   `SaturatingAdd(L, R)`");
+    table_row(26, "`-|=`   |   `SaturatingSubAssign`   |   `SaturatingSub(L, R)`");
+    table_row(27, "`*|=`   |   `SaturatingMulAssign`   |   `SaturatingMul(L, R)`");
+    table_row(28, "`<<=`   |   `ShiftLeftAssign`   |   `ShiftLeft(L, R)`");
+    table_row(29, "`<<|=`   |   `SaturatingShiftLeftAssign`   |   `SaturatingShiftLeft(L, R)`");
+    table_row(30, "`>>=`   |   `ShiftRightAssign`   |   `ShiftRight(L, R)`");
+    table_row(31, "`&=`   |   `BitAndAssign`   |   `BitAnd(L, R)`");
+    table_row(32, "`|=`   |   `BitOrAssign`   |   `BitOr(L, R)`");
+    table_row(33, "`^=`   |   `BitXorAssign`   |   `BitXor(L, R)`");
+    table_row(34, "`&&=`   |   `LogicalAndAssign`   |   `LogicalAnd(L, R)`");
+    table_row(35, "`||=`   |   `LogicalOrAssign`   |   `LogicalOr(L, R)`");
+    paragraph(36, #string,oneline
+        \\A type with no instance reports the missing operator rather than a
+        \\type mismatch: `a: Point; b: Point; a += b;` is
+        \\`error: no operator '+=' for Point, Point`. The Operator System and
+        \\Assignment Operators cover declaring new ones and what `#operator(assign,
+        \\0)` means for parsing.
+    );
+    note(37, #string,oneline
+        \\The wrapping, saturating, and shifting families exist because the
+        \\plain arithmetic operators trap on overflow at `-O0` and `-O1`. `+%=`
+        \\wraps and `+|=` clamps, which is why `250 +%= 10` is `4` and `250 +|=
+        \\10` is `255` on a `u8`. Overflow, Traps, and the `-O` Level explains
+        \\when the trap is emitted.
+    );
+
+    subheading(38, "Binding several names at once");
+    paragraph(39, #string,oneline
+        \\A declaration may take a comma-separated list of names on the left,
+        \\which destructures a multiple-result call or a tuple. `_` in that list
+        \\discards a component. This is a declaration form, not an assignment
+        \\form: `::`, `:=` and `::=` all accept a name list.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\
+        \\divmod :: (a: int, b: int) -> (int, int) { return a / b, a % b; }
+        \\
+        \\main :: () {
+        \\    q, r := divmod(7, 2);
+        \\    print("q=% r=%\n", q, r);
+        \\
+        \\    _, remainder := divmod(9, 4);
+        \\    print("remainder=%\n", remainder);
+        \\
+        \\    pair := .(1, "two");
+        \\    n, s := pair;
+        \\    print("n=% s=%\n", n, s);
+        \\}
+    );
+    code_block(41, "text", #string
+        \\q=3 r=1
+        \\remainder=1
+        \\n=1 s=two
+    );
+    paragraph(42, #string,oneline
+        \\There is no multiple-assignment statement. Once the names exist,
+        \\`a, b = divmod(9, 4);` is `error: unexpected token '='`, and so is the
+        \\swap idiom `x, y = y, x;`. The right side of a destructuring
+        \\declaration is one expression, not a list: `a, b := 1, 2;` is
+        \\`error: unexpected token ','`, and the tuple literal `a, b := .(1, 2);`
+        \\is the spelling that works.
+    );
+    paragraph(43, #string,oneline
+        \\The name count must match what the right side produces:
+        \\`a, b, c := divmod(7, 2);` is
+        \\`error: destructuring binds 3 names from a 2-value result`. Function
+        \\Declarations covers multiple and named results, and Tuples covers the
+        \\values themselves.
+    );
+}
+
+render_section_19 :: () {
+    paragraph(0, #string,oneline
+        \\A block is a brace-delimited statement list used as a statement in its
+        \\own right. It introduces a scope: a name declared inside it is
+        \\unreachable after the closing brace. Scoping is lexical and
+        \\sequential, so a name is visible from its declaration to the end of
+        \\the scope that holds it, and not before.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := 1;
+        \\    {
+        \\        print("inner sees outer a=%\n", a);
+        \\        a := 99;
+        \\        print("inner a=%\n", a);
+        \\    }
+        \\    print("outer a=%\n", a);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\inner sees outer a=1
+        \\inner a=99
+        \\outer a=1
+    );
+    paragraph(3, #string,oneline
+        \\The first `print` resolves `a` to the outer binding because the inner
+        \\declaration has not been reached yet, and the inner `a := 99;`
+        \\declares a second variable rather than assigning to the first, so the
+        \\outer one is unchanged once the block ends. Naming a binding after its
+        \\scope has closed is `error: unbound 'hidden'`; in call position the
+        \\same failure reads `error: unknown function hidden`, because the
+        \\checker resolves callees through a lookup separate from the one it
+        \\uses for values.
+    );
+    subheading(4, "What introduces a scope");
+    paragraph(5, #string,oneline
+        \\Every construct with a body carries its own scope, and the checker
+        \\clones the environment when it enters one. A body written without
+        \\braces is still a body: `if true  a := 5;` followed by a use of `a`
+        \\on the next line is `error: unbound 'a'`.
+    );
+    table_header(6, "Construct   —   Scope");
+    table_row(7, "`{ ... }` as a statement   |   A fresh scope, closed by the `}`.");
+    table_row(8, "A procedure body   |   A fresh scope; the parameters are declared in it.");
+    table_row(9, "An `if` or `else` body   |   A fresh scope, whether or not it is braced.");
+    table_row(10, "A `while` or `for` body   |   A fresh scope, re-entered on every iteration.");
+    table_row(11, "A switch or pattern arm body   |   A fresh scope per arm, holding that arm's captures.");
+    table_row(12, "A `#push_context` or `#push_allocator` body   |   A fresh scope.");
+    table_row(13, "A lambda body   |   A fresh scope that cannot reach enclosing locals.");
+    subheading(14, "Nested declarations do not nest");
+    paragraph(15, #string,oneline
+        \\A `::` declaration written inside a procedure body is not necessarily
+        \\local. `name :: (...)`, `name :: struct`, `name :: enum`,
+        \\`name :: union` and `name :: distinct` are lifted out of the body by
+        \\the parser and become file-level declarations; only constants and
+        \\variables such as `name :: 3` and `name := 3` stay local. The
+        \\declaration forms themselves are covered in Top-Level Declarations and
+        \\Thread-Local Storage.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\collect :: () {
+        \\    Sample :: struct { v: int; }
+        \\    s: Sample = .{ .v = 3 };
+        \\    print("collect %\n", s.v);
+        \\}
+        \\
+        \\report :: () {
+        \\    t: Sample = .{ .v = 9 };
+        \\    print("report %\n", t.v);
+        \\}
+        \\
+        \\main :: () { collect(); report(); }
+    );
+    code_block(17, "text", #string
+        \\collect 3
+        \\report 9
+    );
+    paragraph(18, #string,oneline
+        \\`Sample` is declared inside `collect` and used from `report`, which
+        \\never mentions it. The cost of that convenience is a shared file
+        \\namespace: two procedures that each declare a `step :: () -> int`
+        \\collide with `error: function 'step' is already declared`.
+    );
+    note(19, #string,oneline
+        \\Hoisting happens in the parser, before any `#if` is evaluated. A
+        \\procedure declared inside `#if false { ... }` still exists and is
+        \\still callable; the static branch removes the statements around the
+        \\declaration, not the declaration.
+    );
+    subheading(20, "Captures and pattern bindings");
+    paragraph(21, #string,oneline
+        \\A pattern capture is a binding whose scope is exactly the branch that
+        \\proved the pattern. It does not exist before the arm and it does not
+        \\survive it.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Res :: union { Ok: int; Err: string; }
+        \\
+        \\main :: () {
+        \\    r := Res.Ok(5);
+        \\    if r == {
+        \\    case .Ok(v);  print("ok %\n", v);
+        \\    case .Err(e); print("err %\n", e);
+        \\    }
+        \\    if #pattern .Ok(v) = r print("tested v=%\n", v);
+        \\}
+    );
+    code_block(23, "text", #string
+        \\ok 5
+        \\tested v=5
+    );
+    paragraph(24, #string,oneline
+        \\Naming `v` after the switch is `error: unbound 'v'`, with `help: did
+        \\you mean 'r'?`. The `else` of an `if #pattern` test cannot see the
+        \\captures either: on that path the pattern did not match, so there is
+        \\nothing for them to name.
+    );
+    paragraph(25, #string,oneline
+        \\The one form that binds outward is `#pattern P := subject else { ... }`,
+        \\which places the captures in the enclosing scope so a procedure is not
+        \\indented one level deeper per optional. That is sound only because the
+        \\`else` block is checked without the bindings and must not fall
+        \\through; the form is covered in Bind or Diverge.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Res :: union { Ok: int; Err: string; }
+        \\
+        \\take :: (r: Res) -> int {
+        \\    #pattern .Ok(v) := r else { return -1; }
+        \\    return v * 10;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", take(Res.Ok(4)));
+        \\    print("%\n", take(Res.Err("no")));
+        \\}
+    );
+    code_block(27, "text", #string
+        \\40
+        \\-1
+    );
+    paragraph(28, #string,oneline
+        \\`using p;` inserts a struct's field names into the current scope for
+        \\the remainder of it, and they disappear with the scope: reading `x`
+        \\after the block that said `using p;` is `error: unbound x`. The
+        \\statement is covered in `using`, `#empty`, and `#as`.
+    );
+    paragraph(29, #string,oneline
+        \\A lambda body is a scope that deliberately cannot reach outward.
+        \\Reading an enclosing local gives `error: lambda captures local 'base',
+        \\but captured closures are not supported`, with `help: pass the value
+        \\as an explicit callback or context argument`. Globals and constants
+        \\remain readable; see Lambdas.
+    );
+    subheading(30, "Shadowing");
+    paragraph(31, #string,oneline
+        \\Inside a procedure, shadowing is unrestricted. A local may hide a
+        \\parameter, a global variable, a top-level constant, a type name or a
+        \\procedure name, and a nested block may hide anything the enclosing
+        \\block declared.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\LIMIT :: 100;
+        \\counter := 10;
+        \\
+        \\scale :: (x: int) -> int {
+        \\    x := x * 2;
+        \\    LIMIT := 3;
+        \\    counter := 0;
+        \\    return x + LIMIT + counter;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("scale=% LIMIT=% counter=%\n", scale(4), LIMIT, counter);
+        \\}
+    );
+    code_block(33, "text", "scale=11 LIMIT=100 counter=10");
+    paragraph(34, #string,oneline
+        \\Redeclaring a name in the same block is accepted as well: `a := 1;
+        \\a := 2;` is two declarations rather than a declaration and an
+        \\assignment, and the second binding wins from that point on. Call
+        \\position and value position are resolved separately, so shadowing a
+        \\procedure name does not make the procedure uncallable: after
+        \\`print := 3;` the call `print("%\n", print);` still resolves and
+        \\prints `3`.
+    );
+    paragraph(35, #string,oneline
+        \\Shadowing is refused at file scope. The top level of a program is one
+        \\flat namespace, and a second declaration of a name already declared
+        \\there is an error, whether it came from the file itself, from a
+        \\`#load`, or from hoisting out of a procedure body.
+    );
+    table_header(36, "Duplicate at file scope   —   Diagnostic");
+    table_row(37, "`K :: 1;` then `K :: 2;`   |   `error: constant 'K' is already declared`");
+    table_row(38, "Two procedures named `helper`   |   `error: function 'helper' is already declared`");
+    table_row(39, "Two structs named `Point`   |   `error: type 'Point' is already declared`");
+    note(40, #string,oneline
+        \\The standard library's public names occupy that same namespace. A
+        \\top-level `PI :: 3.14;` in a user file is `error: constant 'PI' is
+        \\already declared`, because the Prelude already owns the name. Local
+        \\bindings are free to shadow it.
+    );
+    bullet(41, #string,oneline
+        \\Labels are function-scoped rather than block-scoped: they are
+        \\collected in a pre-pass over the whole body, so a jump may go forward,
+        \\and may enter a nested block from outside it. See Labels and `goto`.
+    );
+    bullet(42, #string,oneline
+        \\A `defer` belongs to the scope it is written in and runs when that
+        \\scope is left. See `defer` and `#try defer`.
+    );
+    bullet(43, #string,oneline
+        \\Visibility is not scoped by blocks at all: `#enable(private_section)`
+        \\runs to the end of the file. See Visibility and Private Sections.
+    );
+}
+
+render_section_20 :: () {
+    paragraph(0, #string,oneline
+        \\Every top-level declaration is public by default. There is no `pub`
+        \\modifier and no per-declaration visibility syntax; visibility is
+        \\controlled by a pair of file-scoped directives that apply to every
+        \\declaration parsed while they are in effect.
+    );
+    code_block(1, "glosso", #string
+        \\#enable(private_section);            // file-private from here on
+        \\#disable(private_section);
+        \\
+        \\#enable(private_section,siblings);   // module-private from here on
+        \\#disable(private_section);
+    );
+    paragraph(2, #string,oneline
+        \\The state is sticky from the directive to the end of the file. The
+        \\parser stamps the currently open visibility onto each declaration as
+        \\it reads it, so a region is closed by writing `#disable`, not by
+        \\reaching the end of a block.
+    );
+    table_header(3, "Directive   —   Effect on declarations that follow");
+    table_row(4, "`#enable(private_section);`   |   Reachable only from this one source file.");
+    table_row(5, "`#enable(private_section,siblings);`   |   Reachable from any file with the same module identity.");
+    table_row(6, "`#disable(private_section);`   |   Public again.");
+    paragraph(7, #string,oneline
+        \\`private_sections` is an accepted synonym of `private_section` in
+        \\either directive. `siblings` is the only second argument and it is
+        \\valid only on this feature: `#enable(private_section,bogus);` is
+        \\`error: unknown feature 'private_section,bogus'`, and an unrecognized
+        \\feature name is `error: unknown feature 'bogus_feature'`. The other
+        \\three gates that share this syntax are covered in Feature Gates.
+    );
+    subheading(8, "File-sticky, not block-scoped");
+    paragraph(9, #string,oneline
+        \\`#enable` and `#disable` are section directives, handled before the
+        \\declaration parser runs; they are not statements. Writing one inside a
+        \\procedure body is `error: unexpected directive 'enable'`. There is no
+        \\way to scope a private region to a block.
+    );
+    paragraph(10, #string,oneline
+        \\The stickiness stops at the file boundary, because a fresh parser is
+        \\created for each source file. A gate left open across a `#load` does
+        \\not reach into the loaded file, and the loaded file's own gates do not
+        \\leak back into the loader.
+    );
+    code_block(11, "glosso", #string
+        \\// parts/extra.glo
+        \\EXTRA_PUBLIC :: 1;
+        \\
+        \\// app.glo
+        \\#import "Io";
+        \\#enable(private_section);
+        \\#load "parts/extra.glo";
+        \\#disable(private_section);
+        \\
+        \\main :: () { print("%\n", EXTRA_PUBLIC); }
+    );
+    code_block(12, "text", "1");
+    paragraph(13, #string,oneline
+        \\Because the region ends only at the end of the file, an unclosed one
+        \\swallows `main`. The entry point is renamed along with everything
+        \\else and then cannot be found. Nothing in the compile step mentions
+        \\visibility; the build reaches the link step and fails there with
+        \\whatever the platform linker reports for a missing entry point.
+    );
+    code_block(14, "glosso", #string
+        \\// app.glo
+        \\#import "Io";
+        \\#enable(private_section);
+        \\
+        \\main :: () { print("hello\n"); }
+    );
+    code_block(15, "text", #string
+        \\glosso: compile app.glo (target=x86_64-pc-windows-msvc)
+        \\glosso: link app.exe (target=x86_64-pc-windows-msvc, -O1)
+        \\error: rust-lld: error: could not open 'pthread.lib': no such file or directory
+    );
+    note(16, #string,oneline
+        \\Close a private region with `#disable` before `main`, or place `main`
+        \\above the region. A linker error naming a C runtime library, with no
+        \\compile diagnostic before it, is the signature of this mistake.
+    );
+    subheading(17, "The mangled private name");
+    paragraph(18, #string,oneline
+        \\Privacy is implemented by renaming. A private declaration becomes
+        \\`$private$<hash>$<name>`, where the hash is sixteen hexadecimal digits
+        \\of an FNV-1a hash of the declaring file's path with backslashes
+        \\normalized to forward slashes. References from the same file are
+        \\rewritten to the mangled name; references from anywhere else keep
+        \\looking for the original and never find it, which is why the failure
+        \\reads as an unbound name rather than as a visibility error.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\#enable(private_section);
+        \\secret :: (a: int) -> int #dump { return a + 1; }
+        \\#disable(private_section);
+        \\
+        \\main :: () { print("%\n", secret(1)); }
+    );
+    code_block(20, "text", #string
+        \\; ---- #dump typed-ir $private$47244d184ab1756c$secret(a: int) -> int  [5 ins] ----
+        \\   0  temp_mark v1
+        \\   1  const v2 =1
+        \\   2  magic v3 'int_add' [v0,v2]
+        \\   3  temp_restore v1
+        \\   4  ret v3
+        \\; ---- end $private$47244d184ab1756c$secret ----
+    );
+    paragraph(21, #string,oneline
+        \\Because the hash comes from the path, the same private name may be
+        \\declared in as many files as needed without collision; each file gets
+        \\its own symbol and its own references resolve to it. Removing the
+        \\gates from the program below turns the two `helper` declarations into
+        \\ordinary file-scope declarations, and they collide with `error:
+        \\function 'helper' is already declared`.
+    );
+    code_block(22, "glosso", #string
+        \\// parts/left.glo
+        \\#enable(private_section);
+        \\helper :: () -> int { return 1; }
+        \\#disable(private_section);
+        \\
+        \\left_value :: () -> int { return helper(); }
+        \\
+        \\// parts/right.glo
+        \\#enable(private_section);
+        \\helper :: () -> int { return 2; }
+        \\#disable(private_section);
+        \\
+        \\right_value :: () -> int { return helper(); }
+        \\
+        \\// app.glo
+        \\#import "Io";
+        \\#load "parts/left.glo";
+        \\#load "parts/right.glo";
+        \\
+        \\main :: () { print("left=% right=%\n", left_value(), right_value()); }
+    );
+    code_block(23, "text", "left=1 right=2");
+    subheading(24, "File scope versus module identity");
+    paragraph(25, #string,oneline
+        \\There are two levels of restriction and they answer different
+        \\questions. `private_section` asks whether the reference is in the same
+        \\source file; `private_section,siblings` asks whether it is in the same
+        \\module.
+    );
+    table_header(26, "Visibility   —   Reachable from");
+    table_row(27, "Public   |   Anywhere in the program.");
+    table_row(28, "Private   |   The one source file that declares it.");
+    table_row(29, "Siblings   |   Any file sharing the declaring file's module identity.");
+    paragraph(30, #string,oneline
+        \\A standard-library module's identity is the module itself, so every
+        \\`.glo` file in a `std/<Name>/` directory is a sibling of every other
+        \\one. A user program's identity is its root file, shared by that root
+        \\and by every file reached from it through `#load`; for a program,
+        \\`siblings` therefore means the whole compilation unit. Module
+        \\resolution is covered in Source Files, Imports, and Loads.
+    );
+    code_block(31, "glosso", #string
+        \\// std/Demo/module.glo
+        \\DEMO_PUBLIC :: 1;
+        \\_demo_internal :: 9;
+        \\
+        \\#enable(private_section);
+        \\DEMO_PRIVATE :: 2;
+        \\#disable(private_section);
+        \\
+        \\demo_use_private :: () -> int { return DEMO_PRIVATE + 1; }
+        \\
+        \\#enable(private_section,siblings);
+        \\DEMO_SIBLING :: 3;
+        \\#disable(private_section);
+        \\
+        \\// std/Demo/other.glo
+        \\demo_sibling_reader :: () -> int { return DEMO_SIBLING + 1; }
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\#import "Demo";
+        \\
+        \\main :: () {
+        \\    print("public=%\n", DEMO_PUBLIC);
+        \\    print("through the module=%\n", demo_use_private());
+        \\    print("sibling file=%\n", demo_sibling_reader());
+        \\}
+    );
+    code_block(33, "text", #string
+        \\public=1
+        \\through the module=3
+        \\sibling file=4
+    );
+    paragraph(34, #string,oneline
+        \\Both restricted names work from inside the module and neither works
+        \\from the importer, where each is `error: unbound '<name>'`. Moving the
+        \\reference one file across separates them: a use of `DEMO_SIBLING`
+        \\added to `Demo/other.glo` compiles, while a use of `DEMO_PRIVATE`
+        \\added there is `error: unbound 'DEMO_PRIVATE'`, reported against
+        \\`Demo/other.glo`.
+    );
+    paragraph(35, #string,oneline
+        \\The same two levels apply to a user program built from `#load`. A
+        \\private declaration in a loaded file is invisible to the file that
+        \\loaded it, while a `siblings` declaration is visible across the whole
+        \\load graph.
+    );
+    code_block(36, "glosso", #string
+        \\// parts/store.glo
+        \\STORE_PUBLIC :: 1;
+        \\
+        \\#enable(private_section);
+        \\STORE_KEY :: 2;
+        \\#disable(private_section);
+        \\
+        \\store_read_key :: () -> int { return STORE_KEY; }
+        \\
+        \\#enable(private_section,siblings);
+        \\STORE_SHARED :: 3;
+        \\#disable(private_section);
+        \\
+        \\// app.glo
+        \\#import "Io";
+        \\#load "parts/store.glo";
+        \\
+        \\main :: () {
+        \\    print("public=% accessor=% shared=%\n",
+        \\          STORE_PUBLIC, store_read_key(), STORE_SHARED);
+        \\}
+    );
+    code_block(37, "text", "public=1 accessor=2 shared=3");
+    paragraph(38, #string,oneline
+        \\Naming `STORE_KEY` from `app.glo` is `error: unbound 'STORE_KEY'`,
+        \\even though `store_read_key` in the same loaded file reads it without
+        \\difficulty. Types are diagnosed through the type namespace instead: a
+        \\private `struct` named from another file is `error: unknown type
+        \\'Hidden_Point'`.
+    );
+    subheading(39, "Private names and imports");
+    paragraph(40, #string,oneline
+        \\Restricted declarations are not part of a module's public surface, so
+        \\they cannot be named in an `#import` selector. The diagnostic prints
+        \\the surface that remains, which is a convenient way to see what a
+        \\module actually exports.
+    );
+    code_block(41, "text", #string
+        \\error: #import,only names unknown public declaration '_demo_internal' in module "Demo"
+        \\note: public names: DEMO_PUBLIC, demo_sibling_reader, demo_use_private
+    );
+    paragraph(42, #string,oneline
+        \\That listing also shows the leading-underscore rule. A name beginning
+        \\with `_` or `$` counts as non-public for the purposes of `only` and
+        \\`hide` selection only: `_demo_internal` cannot be selected by name,
+        \\yet a plain `#import "Demo";` still brings it in and reading it prints
+        \\`9`. The selectors themselves are covered in Source Files, Imports,
+        \\and Loads.
+    );
+    bullet(43, #string,oneline
+        \\Visibility is a name-resolution mechanism, not an access-control one:
+        \\a private declaration is still compiled and still linked, and it stays
+        \\reachable through any public procedure that calls it or returns its
+        \\value.
+    );
+    bullet(44, #string,oneline
+        \\Because the mangled symbol embeds the file path, moving a file changes
+        \\the symbols its private declarations produce. No source refers to
+        \\those symbols, so only build artifacts and `#dump` output change.
+    );
+}
+
+render_section_21 :: () {
+    paragraph(0, #string,oneline
+        \\`defer` schedules a statement to run when the enclosing scope is left.
+        \\Two forms are accepted: `defer <statement>;` and `defer { ... }`. The
+        \\statement is not executed where it is written; it is pushed onto the
+        \\scope's pending list and run on the way out.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    defer print("end of main\n");
+        \\    {
+        \\        defer print("A\n");
+        \\        defer print("B\n");
+        \\        defer { print("C1\n"); print("C2\n"); }
+        \\        print("block body\n");
+        \\    }
+        \\    print("after block\n");
+        \\}
+    );
+    code_block(2, "text", #string
+        \\block body
+        \\C1
+        \\C2
+        \\B
+        \\A
+        \\after block
+        \\end of main
+    );
+    paragraph(3, #string,oneline
+        \\Pending statements run last-in, first-out, so cleanup unwinds in the
+        \\reverse of the order it was set up, which is the order that matches
+        \\acquisition. The block form is a single entry: `C1` and `C2` run
+        \\together, and together they run before `B`.
+    );
+    paragraph(4, #string,oneline
+        \\Each entry belongs to the scope it was written in, not to the
+        \\procedure. The inner block's three entries run at its closing brace;
+        \\the entry in `main` waits until `main` returns.
+    );
+    subheading(5, "Which exits run the pending statements");
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    i := 0;
+        \\    while i < 4 {
+        \\        defer print("  defer sees i=%\n", i);
+        \\        i += 1;
+        \\        if i == 2 continue;
+        \\        if i == 4 break;
+        \\        print("  body i=%\n", i);
+        \\    }
+        \\    print("done i=%\n", i);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\  body i=1
+        \\  defer sees i=1
+        \\  defer sees i=2
+        \\  body i=3
+        \\  defer sees i=3
+        \\  defer sees i=4
+        \\done i=4
+    );
+    paragraph(8, #string,oneline
+        \\The loop body is a scope, so the entry is registered and discharged
+        \\once per iteration: four times, including the iteration cut short by
+        \\`continue` and the one cut short by `break`. The printed value is
+        \\equally informative. `i` is incremented after the `defer` line, and
+        \\the trace shows the incremented value, because a deferred statement is
+        \\evaluated when it runs and not when it is written.
+    );
+    table_header(9, "Leaving the scope by   —   Pending statements");
+    table_row(10, "Reaching the closing brace   |   Run.");
+    table_row(11, "`return`   |   Run, for every scope between the `return` and the procedure body.");
+    table_row(12, "`break` or `continue`   |   Run, for every scope up to and including the loop body.");
+    table_row(13, "The end of a loop iteration   |   Run, once per iteration.");
+    table_row(14, "`goto`   |   Not run.");
+    table_row(15, "`exit()`   |   Not run; the process ends inside the call.");
+    paragraph(16, #string,oneline
+        \\`goto` transfers to a label rather than unwinding scopes, so it steps
+        \\over the pending list entirely. That is why `defer` cannot carry
+        \\cleanup in a procedure that uses the jump library for control
+        \\transfer; see Explicit Control Transfer with the Jump Library.
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\#import "Jump";
+        \\
+        \\main :: () {
+        \\    {
+        \\        defer print("inner defer\n");
+        \\        print("before goto\n");
+        \\        goto('out);
+        \\    }
+        \\    'out;
+        \\    print("after goto\n");
+        \\}
+    );
+    code_block(18, "text", #string
+        \\before goto
+        \\after goto
+    );
+    note(19, #string,oneline
+        \\Pending statements run before the caller observes the result, and a
+        \\result named by a bare local is read after they have run. In
+        \\`by_name` below the caller sees `99`; writing `return x + 0;`
+        \\materializes a temporary first and yields `1`. Do not assign in a
+        \\deferred statement to a local that the same scope returns by name.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\by_name  :: () -> int { x := 1; defer x = 99; return x; }
+        \\by_value :: () -> int { x := 1; defer x = 99; return x + 0; }
+        \\
+        \\main :: () { print("by_name=% by_value=%\n", by_name(), by_value()); }
+    );
+    code_block(21, "text", "by_name=99 by_value=1");
+    subheading(22, "`#try defer`");
+    paragraph(23, #string,oneline
+        \\`#try defer <statement>` registers an entry that runs only when the
+        \\scope is left along an error path. It is the rollback half of a
+        \\two-part cleanup: `defer` releases what was acquired either way, and
+        \\`#try defer` undoes work that only a successful completion should
+        \\keep.
+    );
+    paragraph(24, #string,oneline
+        \\An error path means propagation through postfix `?`, so the form
+        \\requires a boundary that `?` can return through. Without one it is
+        \\`error: #try defer requires a Try-returning function or an enclosing
+        \\#try block`. Propagation itself is covered in `Try`, `?`, and `#try`.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\step :: (fail: bool) -> string!int {
+        \\    if fail return .Err("step failed");
+        \\    return .Ok(1);
+        \\}
+        \\
+        \\run :: (fail: bool) -> string!int {
+        \\    print("  acquire\n");
+        \\    #try defer print("  rollback\n");
+        \\    defer print("  release\n");
+        \\    v := step(fail)?;
+        \\    print("  commit\n");
+        \\    return .Ok(v + 10);
+        \\}
+        \\
+        \\report :: (r: string!int) {
+        \\    if r == { case .Ok(v); print("  -> ok %\n", v); case .Err(e); print("  -> err %\n", e); }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("success path:\n");
+        \\    report(run(false));
+        \\    print("failure path:\n");
+        \\    report(run(true));
+        \\}
+    );
+    code_block(26, "text", #string
+        \\success path:
+        \\  acquire
+        \\  commit
+        \\  release
+        \\  -> ok 11
+        \\failure path:
+        \\  acquire
+        \\  release
+        \\  rollback
+        \\  -> err step failed
+    );
+    paragraph(27, #string,oneline
+        \\On the success path `run` reaches `commit`, the plain entry runs, and
+        \\the rollback is discarded unexecuted. On the failure path `step`
+        \\returns `.Err`, the `?` carries it out of `run` without reaching
+        \\`commit`, and both entries run. The order is worth reading: the
+        \\rollback was registered first, so it runs last.
+    );
+    paragraph(28, #string,oneline
+        \\Both kinds share one last-in, first-out list. An error-only entry is
+        \\skipped on the success path but keeps its position, so the interleaved
+        \\order of the two kinds is the reverse of the order they were written
+        \\in.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\step :: (fail: bool) -> string!int {
+        \\    if fail return .Err("boom");
+        \\    return .Ok(1);
+        \\}
+        \\
+        \\run :: (fail: bool) -> string!int {
+        \\    #try defer { print("  undo 1\n"); }
+        \\    defer print("  always 1\n");
+        \\    #try defer print("  undo 2\n");
+        \\    defer print("  always 2\n");
+        \\    v := step(fail)?;
+        \\    return .Ok(v);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("ok:\n");
+        \\    _ := run(false);
+        \\    print("err:\n");
+        \\    _ := run(true);
+        \\}
+    );
+    code_block(30, "text", #string
+        \\ok:
+        \\  always 2
+        \\  always 1
+        \\err:
+        \\  always 2
+        \\  undo 2
+        \\  always 1
+        \\  undo 1
+    );
+    note(31, #string,oneline
+        \\Only propagation through `?` counts as an error path. A hand-written
+        \\`return .Err(...);` is an ordinary return: the plain entries run and
+        \\the `#try defer` entries do not. A procedure that mixes explicit error
+        \\returns with `#try defer` rollback silently skips the rollback on
+        \\exactly the paths it was written for.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\run :: (fail: bool) -> string!int {
+        \\    #try defer print("  rollback\n");
+        \\    defer print("  release\n");
+        \\    if fail return .Err("explicit");
+        \\    return .Ok(1);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("explicit .Err:\n");
+        \\    _ := run(true);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\explicit .Err:
+        \\  release
+    );
+    paragraph(34, #string,oneline
+        \\The boundary may be any `Try`-returning result, including the option
+        \\type: in a procedure returning `?int`, a `?` applied to a `.None` runs
+        \\the error-only entries exactly as an `.Err` does.
+    );
+    paragraph(35, #string,oneline
+        \\The compiler's memory analysis follows only the successful
+        \\continuation of `?`, so a release performed by `#try defer` does not
+        \\discharge a release obligation. Combined with the previous rule this
+        \\produces a warning worth reading rather than silencing.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Fault :: enum { Bad; }
+        \\
+        \\work :: (fail: bool) -> Fault!int {
+        \\    p := alloc(64);
+        \\    #try defer free(p);
+        \\    if fail return .Err(.Bad);
+        \\    free(p);
+        \\    return .Ok(1);
+        \\}
+        \\
+        \\main :: () { _ := work(false); }
+    );
+    code_block(37, "text", #string
+        \\warning: resource must be released by 'free' before leaving scope
+        \\  --> work.glo:6:10
+        \\  |
+        \\6 |     p := alloc(64);
+        \\  |          ^^^^^
+        \\note: release obligation was created here
+        \\  --> work.glo:6:10
+        \\  |
+        \\6 |     p := alloc(64);
+        \\  |          ^^^^^
+    );
+    paragraph(38, #string,oneline
+        \\The warning is accurate here. `return .Err(.Bad);` is not a `?`
+        \\propagation, so `#try defer free(p)` never runs on that path and the
+        \\allocation really does leak. Replacing it with a plain
+        \\`defer free(p);` and dropping the later `free(p);` makes the procedure
+        \\correct and the warning disappear. Release obligations are covered in
+        \\Ownership and Release Obligations.
+    );
+    bullet(39, #string,oneline
+        \\`defer` accepts any statement, including a call, an assignment or a
+        \\block; the block form counts as one entry and its statements run in
+        \\written order.
+    );
+    bullet(40, #string,oneline
+        \\A deferred statement reads its operands at the moment it runs, so it
+        \\observes every mutation made after it was written.
+    );
+    bullet(41, #string,oneline
+        \\A `#try defer` written inside a nested block belongs to that block. It
+        \\is discarded when the block is left normally, so a failure that
+        \\happens after the block does not run it.
+    );
+}

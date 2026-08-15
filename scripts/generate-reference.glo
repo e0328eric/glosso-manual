@@ -9,88 +9,289 @@
 #import "Strings/Utf8";
 
 reference_json_field :: (
-    value: *Serialization_Value,
+    value: ?*Serialization_Value,
     name: string,
-) -> *Serialization_Value {
-    if value == null return null;
-    return serialization_field_value(value, name);
+) -> ?*Serialization_Value {
+    if #pattern .Some(present) = value return serialization_field_value(present, name);
+    return .None;
 }
 
 reference_json_text :: (
-    value: *Serialization_Value,
+    value: ?*Serialization_Value,
     name: string,
     fallback: string = "",
 ) -> string {
-    field := reference_json_field(value, name);
-    if field == null return fallback;
-    if #partial field.* == {
-        case .text; return field.*.text;
+    if #pattern .Some(field) = reference_json_field(value, name) {
+        if #partial field.* == {
+            case .text(text); return text;
+        }
     }
     return fallback;
 }
 
 reference_json_bool :: (
-    value: *Serialization_Value,
+    value: ?*Serialization_Value,
     name: string,
     fallback: bool = false,
 ) -> bool {
-    field := reference_json_field(value, name);
-    if field == null return fallback;
-    if #partial field.* == {
-        case .boolean; return field.*.boolean;
+    if #pattern .Some(field) = reference_json_field(value, name) {
+        if #partial field.* == {
+            case .boolean(boolean); return boolean;
+        }
     }
     return fallback;
 }
 
 reference_json_int :: (
-    value: *Serialization_Value,
+    value: ?*Serialization_Value,
     name: string,
     fallback: s64 = 0,
 ) -> s64 {
-    field := reference_json_field(value, name);
-    if field == null return fallback;
-    if #partial field.* == {
-        case .signed_integer; return cast(s64)field.*.signed_integer;
-        case .unsigned_integer; return cast(s64)field.*.unsigned_integer;
-        case .floating; return cast(s64)field.*.floating;
+    if #pattern .Some(field) = reference_json_field(value, name) {
+        if #partial field.* == {
+            case .signed_integer(signed); return cast(s64)signed;
+            case .unsigned_integer(unsigned); return cast(s64)unsigned;
+            case .floating(floating); return cast(s64)floating;
+        }
     }
     return fallback;
 }
 
 reference_json_array :: (
-    value: *Serialization_Value,
+    value: ?*Serialization_Value,
     name: string,
 ) -> []Serialization_Value {
     empty: []Serialization_Value;
-    field := reference_json_field(value, name);
-    if field == null return empty;
-    if #partial field.* == {
-        case .sequence; return array_view(field.*.sequence);
+    if #pattern .Some(field) = reference_json_field(value, name) {
+        if #partial field.* == {
+            case .sequence(sequence); return array_view(sequence);
+        }
     }
     return empty;
 }
 
-reference_existing_manual_json :: () -> string {
-    size := file_size("reference-index.js");
-    if !size {
-        report_error(size.Err);
+// The browser search index carries one [title, text] pair per manual chapter.
+// Both halves are read out of the manual's own sources, so the index cannot
+// drift from the chapters the way a preserved copy did: titles come from
+// src/section_catalog.glo, and the prose comes from the section files that
+// main.glo loads. Code blocks are skipped; a chapter is searched by what it
+// says, not by the programs it quotes.
+
+MANUAL_TEXT_CALLS :: .[
+    "paragraph(", "subheading(", "bullet(", "note(",
+    "table_header(", "table_row(",
+];
+
+reference_read_file_text :: (path: string) -> string {
+    size: s64;
+    if file_size(path) == {
+        case .Ok(measured); size = measured;
+        case .Err(reason);
+            report_error(reason);
+            return "";
+    }
+    if size < 0 return "";
+    if read_file(path, size + 1) == {
+        case .Ok(text); return text;
+        case .Err; return "";
+    }
+}
+
+reference_line_end :: (source: string, start: s64) -> s64 {
+    i := start;
+    while i < source.count && source[i] != #char "\n" i += 1;
+    return i;
+}
+
+reference_trim_line :: (value: string) -> string {
+    start: s64 = 0;
+    finish := value.count;
+    while start < finish &&
+        (value[start] == #char " " || value[start] == #char "\t") start += 1;
+    while finish > start && (value[finish - 1] == #char " " ||
+        value[finish - 1] == #char "\t" ||
+        value[finish - 1] == #char "\r") finish -= 1;
+    return value[start..finish];
+}
+
+reference_leading_number :: (value: string) -> s64 {
+    result: s64 = 0;
+    seen := false;
+    for i: 0..value.count {
+        byte := value[i];
+        if byte < #char "0" || byte > #char "9" break;
+        result = result * 10 + cast(s64)(byte - #char "0");
+        seen = true;
+    }
+    if !seen return -1;
+    return result;
+}
+
+// The text of a call written on one line, as in `table_row(3, "a | b");`.
+reference_quoted_argument :: (line: string) -> string {
+    open := index_of(line, "\"");
+    if open < 0 return "";
+    close := line.count - 1;
+    while close > open && line[close] != #char "\"" close -= 1;
+    if close <= open return "";
+    return line[open + 1..close];
+}
+
+// Chapter prose is Markdown-flavoured: backticks mark inline code and carry no
+// searchable text of their own. Escapes written for the literal are undone so
+// the index holds what a reader sees.
+reference_append_prose :: (out: *String_Builder, value: string) {
+    i: s64 = 0;
+    while i < value.count {
+        byte := value[i];
+        if byte == #char "`" { i += 1; continue; }
+        if byte == #char "\\" && i + 1 < value.count {
+            next := value[i + 1];
+            if next == #char "\"" || next == #char "\\" {
+                builder_write_byte(out, next);
+                i += 2;
+                continue;
+            }
+        }
+        builder_write_byte(out, byte);
+        i += 1;
+    }
+    builder_write_byte(out, #char " ");
+}
+
+reference_manual_titles :: () -> [..]string {
+    titles: [..]string;
+    source := reference_read_file_text("src/section_catalog.glo");
+    position: s64 = 0;
+    while position < source.count {
+        finish := reference_line_end(source, position);
+        line := reference_trim_line(source[position..finish]);
+        position = finish + 1;
+        if !starts_with(line, "case ") continue;
+        rest := line[5..line.count];
+        index := reference_leading_number(rest);
+        if index < 0 continue;
+        title := reference_quoted_argument(rest);
+        if title.count == 0 continue;
+        while titles.count <= index array_add(*titles, "");
+        titles[index] = clone(title);
+    }
+    return titles;
+}
+
+// main.glo is the list of chapter files, so the generator never needs its own
+// copy of it.
+reference_manual_section_files :: () -> [..]string {
+    files: [..]string;
+    source := reference_read_file_text("main.glo");
+    marker := "#load \"src/sections_";
+    position: s64 = 0;
+    while position < source.count {
+        finish := reference_line_end(source, position);
+        line := reference_trim_line(source[position..finish]);
+        position = finish + 1;
+        if !starts_with(line, marker) continue;
+        path := reference_quoted_argument(line);
+        if path.count != 0 array_add(*files, clone(path));
+    }
+    return files;
+}
+
+MANUAL_SCAN_IDLE :: 0;
+MANUAL_SCAN_PROSE :: 1;
+MANUAL_SCAN_CODE :: 2;
+
+reference_collect_manual_text :: (path: string, texts: *[..]string) {
+    source := reference_read_file_text(path);
+    out := builder_make_len_cap(0, 8 * 1024);
+    current: s64 = -1;
+    mode := MANUAL_SCAN_IDLE;
+    position: s64 = 0;
+    while position < source.count {
+        finish := reference_line_end(source, position);
+        line := reference_trim_line(source[position..finish]);
+        position = finish + 1;
+
+        if mode != MANUAL_SCAN_IDLE {
+            // A continuation line of a #string block starts with its marker;
+            // the call's own closing parenthesis is the only other shape.
+            if starts_with(line, ")") {
+                mode = MANUAL_SCAN_IDLE;
+            } else if mode == MANUAL_SCAN_PROSE && starts_with(line, "\\\\") {
+                reference_append_prose(*out, line[2..line.count]);
+            }
+            continue;
+        }
+
+        if starts_with(line, "render_section_") {
+            if current >= 0 && current < texts.*.count {
+                texts.*[current] = builder_into_string(out);
+                out = builder_make_len_cap(0, 8 * 1024);
+            }
+            current = reference_leading_number(line["render_section_".count..line.count]);
+            continue;
+        }
+        if current < 0 continue;
+
+        is_code := starts_with(line, "code_block(");
+        is_text := false;
+        for name: MANUAL_TEXT_CALLS {
+            if starts_with(line, name) { is_text = true; break; }
+        }
+        if !is_code && !is_text continue;
+
+        // A call closed on its own line carries an ordinary literal; anything
+        // else opens a #string block that runs to a lone closing parenthesis.
+        if !ends_with(line, ");") {
+            if is_code mode = MANUAL_SCAN_CODE;
+            else mode = MANUAL_SCAN_PROSE;
+            continue;
+        }
+        if is_text reference_append_prose(*out, reference_quoted_argument(line));
+    }
+    if current >= 0 && current < texts.*.count {
+        texts.*[current] = builder_into_string(out);
+    } else {
+        builder_free(*out);
+    }
+}
+
+reference_manual_json :: () -> string {
+    titles := reference_manual_titles();
+    defer array_free(*titles);
+    if titles.count == 0 {
+        print("src/section_catalog.glo yielded no section titles\n");
         return "";
     }
-    size := size.Ok;
-    if size < 0 return "";
-    
-    loaded := read_file("reference-index.js", size + 1);
-    if result_is_err(loaded) return "";
-    source := trim(loaded.Ok);
-    marker := ",\"manual\":";
-    start := index_of(source, marker);
-    if start < 0 return "";
-    start += marker.count;
-    end := source.count;
-    if end > start && source[end - 1] == #char ";" end -= 1;
-    while end > start && reference_is_space(source[end - 1]) end -= 1;
-    if end > start && source[end - 1] == #char "}" end -= 1;
-    return clone(source[start..end]);
+
+    texts: [..]string;
+    defer array_free(*texts);
+    while texts.count < titles.count array_add(*texts, "");
+
+    files := reference_manual_section_files();
+    defer array_free(*files);
+    if files.count == 0 {
+        print("main.glo lists no src/sections_*.glo chapter files\n");
+        return "";
+    }
+    for path: files reference_collect_manual_text(path, *texts);
+
+    empty: s64 = 0;
+    for text: texts if text.count == 0 empty += 1;
+    if empty != 0 print("manual index: % of % chapters have no prose\n", empty, titles.count);
+
+    out := builder_make_len_cap(0, 1024 * 1024);
+    builder_write_byte(*out, #char "[");
+    for i: 0..titles.count {
+        if i != 0 builder_write_byte(*out, #char ",");
+        builder_write_byte(*out, #char "[");
+        reference_write_escaped_string(*out, titles[i], false);
+        builder_write_byte(*out, #char ",");
+        reference_write_escaped_string(*out, reference_one_line(texts[i]), false);
+        builder_write_byte(*out, #char "]");
+    }
+    builder_write_byte(*out, #char "]");
+    return builder_into_string(out);
 }
 
 reference_is_space :: (byte: u8) -> bool {
@@ -148,7 +349,7 @@ reference_join_json_texts :: (
         text := reference_json_text(value, "");
         if text.count == 0 {
             if #partial value.* == {
-                case .text; text = value.*.text;
+                case .text(direct); text = direct;
             }
         }
         if text.count == 0 continue;
@@ -309,12 +510,12 @@ reference_stream_detail_row :: (
 }
 
 reference_stream_function_rows :: (
-    function: *Serialization_Value,
+    function: ?*Serialization_Value,
     details: *String_Builder,
     detail_count: *s64,
 ) -> (s64, s64, string, s64, s64) {
     first_parameter := detail_count.*;
-    if function == null
+    if !function
         return first_parameter, 0, "", detail_count.*, 0;
 
     parameters := reference_json_array(function, "parameters");
@@ -357,7 +558,7 @@ reference_stream_type_details :: (
     first := detail_count.*;
     kind := "";
     type_info := reference_json_field(symbol, "type_info");
-    if type_info == null return kind, first, 0;
+    if !type_info return kind, first, 0;
     type_kind := reference_json_text(type_info, "kind");
     if type_kind == "struct" {
         kind = "fields";
@@ -407,7 +608,7 @@ reference_stream_typeclass_members :: (
     minimal := "No methods are required.";
     explicit := false;
     typeclass := reference_json_field(symbol, "class_info");
-    if typeclass == null return minimal, explicit, first, 0, associated, methods;
+    if !typeclass return minimal, explicit, first, 0, associated, methods;
     raw_minimal := reference_json_text(typeclass, "minimal");
     if raw_minimal.count > 0 minimal = raw_minimal;
     explicit = reference_json_bool(typeclass, "minimal_explicit");
@@ -475,8 +676,10 @@ reference_flush_builder_to_file :: (
     builder: *String_Builder,
 ) -> bool {
     if builder_len(builder.*) == 0 return true;
-    wrote := write(file, to_string(builder.*));
-    if result_is_err(wrote) || wrote.Ok != builder_len(builder.*) return false;
+    if write(file, to_string(builder.*)) == {
+    case .Ok(written); if written != builder_len(builder.*) return false;
+    case .Err; return false;
+    }
     builder_reset(builder);
     return true;
 }
@@ -513,9 +716,10 @@ reference_generate_outputs :: (
     for i: 0..part_paths.count {
         initialized := write_file(part_paths[i], "");
         if result_is_err(initialized) return false;
-        opened := open_read_write(part_paths[i]);
-        if result_is_err(opened) return false;
-        part_files[i] = opened.Ok;
+        if open_read_write(part_paths[i]) == {
+        case .Ok(opened); part_files[i] = opened;
+        case .Err; return false;
+        }
     }
     symbol_count: s64 = 0;
     detail_count: s64 = 0;
@@ -743,32 +947,31 @@ reference_generate_outputs :: (
 }
 
 generate_reference :: (source_path: string) -> bool {
-    size := file_size(source_path);
-    if !size {
-        report_error(size.Err);
-        return false;
+    size: s64;
+    if file_size(source_path) == {
+        case .Ok(measured); size = measured;
+        case .Err(reason);
+            report_error(reason);
+            return false;
     }
-    size := size.Ok;
-    
+
     if size < 0 {
         print("could not determine generated reference source size: %\n", source_path);
         return false;
     }
-    loaded := read_file(source_path, size + 1);
     source: string;
-    if loaded == {
+    if read_file(source_path, size + 1) == {
         case .Err;
             print("could not read generated reference source %\n", source_path);
             return false;
-        case .Ok; source = loaded.Ok;
+        case .Ok(text); source = text;
     }
-    parsed := json_value_from_string(source, 256);
     root: Serialization_Value;
-    if parsed == {
-        case .Err;
-            print("reference JSON: % at %\n", parsed.Err.message, parsed.Err.offset);
+    if json_value_from_string(source, 256) == {
+        case .Err(failure);
+            print("reference JSON: % at %\n", failure.message, failure.offset);
             return false;
-        case .Ok; root = parsed.Ok;
+        case .Ok(value); root = value;
     }
     modules := reference_json_array(*root, "modules");
     instances := reference_json_array(*root, "instances");
@@ -785,9 +988,9 @@ generate_reference :: (source_path: string) -> bool {
         }
     }
     if !reference_generate_outputs(modules, instances) return false;
-    manual_json := reference_existing_manual_json();
+    manual_json := reference_manual_json();
     if manual_json.count == 0 {
-        print("could not preserve the manual search index from reference-index.js\n");
+        print("could not build the manual search index from the chapter sources\n");
         return false;
     }
     return result_is_ok(write_file("build/reference-manual.js.part", manual_json));

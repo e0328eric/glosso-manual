@@ -1,0 +1,1744 @@
+// Sections 6-15: lexical structure.
+
+render_section_6 :: () {
+    paragraph(0, #string,oneline
+        \\A source file is a sequence of bytes that the compiler reads as UTF-8
+        \\text, and nothing else is accepted. A root file whose bytes are not
+        \\valid UTF-8 is rejected before lexing begins, with `glosso: cannot
+        \\read` followed by the file name; a file reached through `#load` fails
+        \\with `could not read`, the path, and `stream did not contain valid
+        \\UTF-8`. An encoding mistake is therefore always a read failure, never a
+        \\stray token halfway down the file.
+    );
+    paragraph(1, #string,oneline
+        \\Past that point the scanner works on decoded code points rather than
+        \\bytes. The line, column and length recorded on every token are counted
+        \\in code points from the start of the line, which is what keeps a caret
+        \\span the same width as the token it underlines when the line holds
+        \\non-Latin text.
+    );
+    code_block(2, "glosso", #string
+        \\main :: () {
+        \\    안녕 := 1;
+        \\    λμν := 안녕 + oops;
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\That program fails with `error: unbound 'oops'`, reported at `3:17`.
+        \\Column 17 counts the sixteen code points before `oops`; a byte count
+        \\would have said 24, because `λ`, `μ` and `ν` occupy two bytes each and
+        \\`안` and `녕` occupy three.
+    );
+    subheading(4, "Whitespace");
+    paragraph(5, #string,oneline
+        \\Exactly four code points are skipped as whitespace. The scanner tests
+        \\for them before anything else, and only for them.
+    );
+    table_header(6, "Code point   —   How the scanner treats it");
+    table_row(7, "U+000A LF   |   Ends the line and advances the line counter.");
+    table_row(8, "U+000D CR   |   Skipped, which is why a CRLF file lexes exactly like an LF file.");
+    table_row(9, "U+0020 SP   |   Skipped.");
+    table_row(10, "U+0009 HT   |   Skipped, and counted as a single column.");
+    paragraph(11, #string,oneline
+        \\Nothing else is whitespace. Any other code point falls through to token
+        \\dispatch, and one that starts no token becomes a stray-character error
+        \\whose entire message is the offending character in single quotes. Three
+        \\invisible characters reach that path often enough to be worth naming.
+    );
+    table_header(12, "Character   —   Diagnostic   —   Usual source");
+    table_row(13, "U+FEFF   |   `error: ''`, with the byte-order mark itself between the quotes, so nothing is visible   |   Saving as UTF-8 with BOM");
+    table_row(14, "U+000C   |   `error: ''`, likewise empty-looking   |   A form feed used as a page break");
+    table_row(15, "U+00A0   |   `error: ' '`, which looks exactly like a space   |   Pasting from a web page");
+    note(16, #string,oneline
+        \\A byte-order mark sits at 1:1, so a BOM-prefixed file does not compile
+        \\at all: the first thing the scanner sees is a character it cannot use.
+        \\An editor that offers both `UTF-8 with BOM` and `UTF-8` produces a
+        \\working file only with the second.
+    );
+    paragraph(17, #string,oneline
+        \\Because a carriage return is whitespace, line endings do not matter to
+        \\the scanner. The one place the distinction survives is inside a
+        \\multi-line block, where the carriage return is part of the literal
+        \\text; that case is covered in `#string` Multi-Line Blocks.
+    );
+    subheading(18, "Line comments");
+    paragraph(19, #string,oneline
+        \\`//` begins a comment that runs to the next newline, or to the end of
+        \\input if there is none. Everything after it on that line is invisible
+        \\to the scanner, including quotes, `/*` and `*/`.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("%\n", 10 // 2 is never divided
+        \\    );
+        \\}
+    );
+    code_block(21, "text", #string
+        \\10
+    );
+    paragraph(22, #string,oneline
+        \\Comments are recognised before token dispatch, so a `/` immediately
+        \\followed by `/` or by `*` can never begin an operator. A library may
+        \\declare an operator named with those characters, but no use site can
+        \\ever spell it; see Reserved Operators and Operator Names.
+    );
+    subheading(23, "Block comments");
+    paragraph(24, #string,oneline
+        \\`/*` opens a comment that `*/` closes, and the pair nests. The scanner
+        \\keeps a depth counter rather than searching for the first `*/`, so a
+        \\region that already contains comments can be commented out as a whole.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\/* outer
+        \\   /* inner nested comment */
+        \\   still inside the outer comment
+        \\*/
+        \\
+        \\main :: () {
+        \\    x := 1 /* inline */ + /* /* nested */ */ 2;
+        \\    print("x = %\n", x);
+        \\    print("[%]\n", "http://example.com /* not a comment */");
+        \\}
+        \\/* an unterminated block comment at the end of the file
+    );
+    code_block(26, "text", #string
+        \\x = 3
+        \\[http://example.com /* not a comment */]
+    );
+    paragraph(27, #string,oneline
+        \\Two further facts are visible there. A newline inside a block comment
+        \\still advances the line counter, so diagnostics after a large
+        \\commented-out region report the right line. And an unterminated `/*` at
+        \\the end of the file is accepted silently: the scanner runs out of input
+        \\and emits the end-of-input token. There is no unterminated-comment
+        \\diagnostic.
+    );
+    note(28, #string,oneline
+        \\The depth counter reacts to `/*` and `*/` everywhere inside the
+        \\comment, including inside text that looks like a string literal. A
+        \\comment is scanned as characters, not as tokens, so nothing protects a
+        \\`*/` written between quotes.
+    );
+    code_block(29, "glosso", #string
+        \\main :: () {
+        \\    /* the pattern "*/" ends this comment early */
+        \\    x := 1;
+        \\}
+    );
+    paragraph(30, #string,oneline
+        \\The comment ends at the `*/` inside the quotes. What remains of the
+        \\line opens a string literal that no quote closes, and the file fails
+        \\with `error: unterminated string literal`, underlining from that quote
+        \\to the end of the line.
+    );
+    bullet(31, #string,oneline
+        \\A `/*` written inside a `//` comment opens nothing; the line comment
+        \\already owns the rest of the line.
+    );
+    bullet(32, #string,oneline
+        \\A `//` written inside a block comment does not close it, and neither
+        \\does a newline.
+    );
+    bullet(33, #string,oneline
+        \\A `/*` or `*/` written inside a string literal is ordinary text: the
+        \\scanner looks for comments only where a token could start.
+    );
+}
+
+render_section_7 :: () {
+    paragraph(0, #string,oneline
+        \\An identifier begins with `_` or an alphabetic code point, and
+        \\continues with `_` or an alphanumeric one. There is no length limit and
+        \\no restriction to ASCII.
+    );
+    paragraph(1, #string,oneline
+        \\The two classes come from Unicode tables generated into the compiler
+        \\and built to match CPython's single-character `str.isalpha` and
+        \\`str.isalnum`. Carrying the tables rather than borrowing the host
+        \\language's own predicates means the accepted identifier set does not
+        \\shift when the toolchain that built the compiler updates its Unicode
+        \\version.
+    );
+    table_header(2, "Position   —   Class   —   Also accepted");
+    table_row(3, "First character   |   Alphabetic, `isalpha`   |   `_`");
+    table_row(4, "Later characters   |   Alphanumeric, `isalnum`   |   `_`");
+    paragraph(5, #string,oneline
+        \\`isalnum` is the union of the alphabetic, decimal, digit and numeric
+        \\classes, so it is strictly wider than `isalpha`. Some code points can
+        \\therefore continue an identifier without being able to start one.
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    λ := 1;
+        \\    안녕 := 2;
+        \\    _x := 3;
+        \\    Ω_1 := 4;
+        \\    a² := 5;
+        \\    x9 := 6;
+        \\    ᵃ := 7;
+        \\    Δθ := 8;
+        \\    print("% % % % % % % %\n", λ, 안녕, _x, Ω_1, a², x9, ᵃ, Δθ);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\1 2 3 4 5 6 7 8
+    );
+    paragraph(8, #string,oneline
+        \\`λ`, `Ω` and `Δθ` are Greek letters and `안녕` is Hangul; all are
+        \\alphabetic and may start a name. `ᵃ` is a modifier letter, which is
+        \\alphabetic too. `a²` ends in a superscript two, which is a digit but
+        \\not a letter, so it may appear only after the first character.
+    );
+    subheading(9, "Marks, emoji, and superscripts");
+    paragraph(10, #string,oneline
+        \\A combining mark belongs to neither class. An identifier written in
+        \\decomposed form therefore ends at its base letter, and the mark that
+        \\follows becomes a stray character.
+    );
+    code_block(11, "glosso", #string
+        \\main :: () {
+        \\    café := 1;
+        \\}
+    );
+    paragraph(12, #string,oneline
+        \\With `é` written as `e` plus U+0301 that file fails, and the
+        \\stray-character message quotes the combining mark, which renders on top
+        \\of whatever precedes it. With `é` written precomposed as U+00E9 the
+        \\same source compiles: one alphabetic code point, one identifier. No
+        \\normalisation is performed in either direction, so the two spellings
+        \\are simply different source text.
+    );
+    paragraph(13, #string,oneline
+        \\Emoji are not alphabetic, and there is no separate rule for them.
+        \\`🙂 := 1;` fails with `error: '🙂'`, the ordinary stray-character
+        \\message.
+    );
+    paragraph(14, #string,oneline
+        \\Superscripts and other non-decimal digits satisfy `isalnum` but not
+        \\`isalpha`. Inside an identifier they are accepted; at the start they do
+        \\not produce an identifier at all, because the scanner dispatches on the
+        \\digit class and begins a number. A leading `²` therefore fails with
+        \\`error: number literals must use ASCII digits`.
+    );
+    note(15, #string,oneline
+        \\There is no diagnostic saying an identifier cannot start with a digit,
+        \\because no such rule exists at the token level. `2abc := 1;` lexes as
+        \\the integer `2` followed by the identifier `abc`, and the parser reads
+        \\it as an expression statement and then a declaration.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    2abc := 1;
+        \\    print("abc = %\n", abc);
+        \\}
+    );
+    code_block(17, "text", #string
+        \\abc = 1
+    );
+    subheading(18, "The keywords");
+    paragraph(19, #string,oneline
+        \\Nineteen words are reserved. The scanner reads a whole word first and
+        \\then looks it up, so a word is a keyword only when it is the entire
+        \\identifier.
+    );
+    table_header(20, "Group   —   Keywords");
+    table_row(21, "Conditions and loops   |   `if`, `ifx`, `else`, `while`, `for`, `case`");
+    table_row(22, "Leaving a body   |   `return`, `break`, `continue`");
+    table_row(23, "Aggregates   |   `struct`, `union`, `enum`");
+    table_row(24, "Modifiers   |   `using`, `defer`, `context`, `noalias`, `where`");
+    table_row(25, "Conversions   |   `cast`, `acast`");
+    paragraph(26, #string,oneline
+        \\Every one of them is rejected as a binding name, though the wording
+        \\depends on where the parser gives up: `if := 1;` is `error: unexpected
+        \\token ':='`, `struct := 1;` is `error: unexpected token 'struct'`, and
+        \\`cast := 1;` is `error: cast requires a type in parentheses; use acast
+        \\for contextual casts`.
+    );
+    paragraph(27, #string,oneline
+        \\Whole-word matching means a longer word that merely begins or ends with
+        \\a keyword is an ordinary identifier.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    iffy := 1;
+        \\    structure := 2;
+        \\    forward := 3;
+        \\    casing := 4;
+        \\    _if := 5;
+        \\    if_ := 6;
+        \\    print("% % % % % %\n", iffy, structure, forward, casing, _if, if_);
+        \\}
+    );
+    code_block(29, "text", #string
+        \\1 2 3 4 5 6
+    );
+    subheading(30, "Words that only look reserved");
+    paragraph(31, #string,oneline
+        \\`typeclass`, `instance`, `distinct`, `type`, `int` and `string` are
+        \\plain identifier tokens. Their meaning comes from the position they
+        \\appear in, which is why each of them can also be bound as a local.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    typeclass := 1;
+        \\    instance := 2;
+        \\    distinct := 3;
+        \\    type := 4;
+        \\    int := 5;
+        \\    string := 6;
+        \\    print("% % % % % %\n", typeclass, instance, distinct, type, int, string);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\1 2 3 4 5 6
+    );
+    paragraph(34, #string,oneline
+        \\`distinct` is the clearest case: it is recognised only directly after
+        \\`::` in type position, so one file can declare a nominal type and also
+        \\bind a local of that name.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Handle :: distinct u32;
+        \\
+        \\main :: () {
+        \\    distinct := 7;
+        \\    h : Handle = cast(Handle) 3;
+        \\    print("% %\n", distinct, cast(u32) h);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\7 3
+    );
+    note(37, #string,oneline
+        \\`true`, `false` and `null` are not keyword tokens either, but the
+        \\parser resolves those spellings to literals wherever an expression is
+        \\expected. A local named `true` can be declared and then never read: the
+        \\program below binds `false` to `2` and still prints the boolean, which
+        \\shows as `0`.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    true := 1;
+        \\    false := 2;
+        \\    print("% %\n", true, false);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\1 0
+    );
+    bullet(40, #string,oneline
+        \\`_` on its own is a legal identifier and binds like any other name. Its
+        \\separate role in patterns is described in The Pattern Vocabulary.
+    );
+    bullet(41, #string,oneline
+        \\Identifier comparison is exact: neither case folding nor Unicode
+        \\normalisation is applied to a name before it is looked up.
+    );
+}
+
+render_section_8 :: () {
+    paragraph(0, #string,oneline
+        \\A decimal integer literal is a run of ASCII digits with optional `_`
+        \\separators. The separators carry no meaning; they are removed before
+        \\the value is parsed.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := 12_345;
+        \\    b := 1_032_000;
+        \\    c := 1000000;
+        \\    print("% % %\n", a, b, c);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\12345 1032000 1000000
+    );
+    paragraph(3, #string,oneline
+        \\A run of digits may not be empty, may not begin or end with `_`, and
+        \\may not contain two adjacent separators. That rule is applied
+        \\independently to four different parts of a number, each with its own
+        \\message, so the diagnostic names the part that is malformed.
+    );
+    table_header(4, "Part   —   Diagnostic");
+    table_row(5, "Integer digits   |   `invalid '_' separator in number literal`");
+    table_row(6, "Fraction digits   |   `invalid '_' separator in fractional literal`");
+    table_row(7, "Exponent digits   |   `invalid '_' separator in scientific exponent`");
+    table_row(8, "Base digits   |   `invalid '_' separator in base integer literal`");
+    paragraph(9, #string,oneline
+        \\Because the parts are checked separately, a separator next to a `.` or
+        \\an `e` is legal on both sides: `1_0.2_5` and `1_000e1_0` are accepted.
+        \\A leading `_` is not a number error at all, since `_1` starts an
+        \\identifier; that spelling fails later with `error: unbound '_1'`.
+    );
+    subheading(10, "Explicit base");
+    paragraph(11, #string,oneline
+        \\A non-decimal integer is written as a base, a `#`, and digits. The base
+        \\is a decimal number between 2 and 36, and the digits are `0` to `9` and
+        \\`a` to `z` read case-insensitively. Both the base and the digits may
+        \\carry `_` separators.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    bin := 2#1011;
+        \\    oct := 8#777;
+        \\    hex := 16#ff;
+        \\    hexcase := 16#Ff;
+        \\    b36 := 36#Z;
+        \\    wide := 16#4865_316F_774F_6C64;
+        \\    print("% % % % % %\n", bin, oct, hex, hexcase, b36, wide);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\11 511 255 255 35 5216630098191412324
+    );
+    paragraph(14, #string,oneline
+        \\One spelling covers every radix, which is why there is no separate
+        \\hexadecimal or binary prefix to remember and why base 36 costs nothing
+        \\extra. The base is scanned as a number in its own right, so `1_6#ff` is
+        \\the same literal as `16#ff`.
+    );
+    table_header(15, "Written   —   Diagnostic");
+    table_row(16, "`1#1`   |   `integer literal base must be between 2 and 36, got 1`");
+    table_row(17, "`37#z`   |   `integer literal base must be between 2 and 36, got 37`");
+    table_row(18, "`2#102`   |   `digit '2' is not valid for base 2`");
+    table_row(19, "`16#`   |   `base-16 integer literal needs at least one digit`");
+    table_row(20, "`16 #ff`   |   `unexpected directive 'ff'`");
+    paragraph(21, #string,oneline
+        \\The last row is the one that surprises. The `#` is absorbed by the
+        \\number scanner only when it immediately follows the digits. With a
+        \\space in between, `16` is a complete integer literal and `#ff` is an
+        \\ordinary directive token, which the parser then rejects by name.
+    );
+    subheading(22, "A based literal is a bit pattern");
+    paragraph(23, #string,oneline
+        \\A based literal is recorded as a bit pattern rather than as a
+        \\magnitude, and the checker measures it against the width of the target
+        \\type instead of against that type's signed range. A mask is written for
+        \\its bits, so `16#ff` is a legal `s8` and denotes `-1` there.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a : s8  = -128;
+        \\    b : s8  = 16#80;
+        \\    c : s8  = 16#ff;
+        \\    d : u8  = 16#ff;
+        \\    e : s64 = 16#8000_0000_0000_0000;
+        \\    f : u64 = 18_446_744_073_709_551_615;
+        \\    g : s16 = 16#ffff;
+        \\    print("% % % % % % %\n", a, b, c, d, e, f, g);
+        \\}
+    );
+    code_block(25, "text", #string
+        \\-128 -128 -1 255 -9223372036854775808 18446744073709551615 -1
+    );
+    paragraph(26, #string,oneline
+        \\The relaxation is about width, not about range: a pattern wider than
+        \\the target is still rejected. `a : s8 = 16#1ff;` gives `error: 511 does
+        \\not fit s8, whose range is -128..=127` with the note `a based literal
+        \\is a bit pattern, so it may use every bit of s8 - this one is wider
+        \\than that`. A decimal `255` at `s8` is rejected as well, since it never
+        \\had the exemption.
+    );
+    paragraph(27, #string,oneline
+        \\A leading `-` withdraws the exemption, because writing a sign says the
+        \\literal is meant as a magnitude again. `a : s8 = -16#ff;` gives
+        \\`error: -255 does not fit s8, whose range is -128..=127`, while
+        \\`a : s8 = -16#7f;` is the ordinary `-127`.
+    );
+    subheading(28, "The 128-bit cap");
+    paragraph(29, #string,oneline
+        \\Magnitudes are parsed into 128 bits. Everything that fits is exact, in
+        \\both the decimal and the based form, and anything wider is a lexical
+        \\error rather than a silent truncation. An earlier compiler saturated
+        \\over-wide literals and produced wrong constants without saying so.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    smax : s128 = 170_141_183_460_469_231_731_687_303_715_884_105_727;
+        \\    smin : s128 = -170_141_183_460_469_231_731_687_303_715_884_105_728;
+        \\    umax : u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
+        \\    bits : u128 = 16#ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff;
+        \\    same : s128 = 16#ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff;
+        \\    print("%\n%\n%\n%\n%\n", smax, smin, umax, bits, same);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\170141183460469231731687303715884105727
+        \\-170141183460469231731687303715884105728
+        \\340282366920938463463374607431768211455
+        \\340282366920938463463374607431768211455
+        \\-1
+    );
+    paragraph(32, #string,oneline
+        \\One digit more and the file stops lexing. A decimal magnitude gives
+        \\`error: integer literal '340282366920938463463374607431768211456' does
+        \\not fit in 128 bits`, quoting the digits with the separators removed; a
+        \\based one gives `error: base-16 integer literal does not fit in 128
+        \\bits`.
+    );
+    note(33, #string,oneline
+        \\The cap belongs to the literal, not to the declaration. An annotation
+        \\is still needed to reach a 128-bit type, because an unannotated literal
+        \\defaults to `int`: binding the `s128` maximum with `:=` gives
+        \\`error: 170141183460469231731687303715884105727 does not fit int, whose
+        \\range is -9223372036854775808..=9223372036854775807`. Defaulting is
+        \\covered in Compile-Time Numbers and Literal Defaulting.
+    );
+    subheading(34, "Rejected spellings");
+    paragraph(35, #string,oneline
+        \\The C prefixes are not merely unsupported; they are detected and named,
+        \\so a constant copied out of a C header fails with an instruction rather
+        \\than with a confusing split into a zero and an identifier.
+    );
+    table_header(36, "Written   —   Diagnostic");
+    table_row(37, "`0xff`   |   `legacy '0x' integer literals are not supported; use '16#digits'`");
+    table_row(38, "`0B10`   |   `legacy '0b' integer literals are not supported; use '2#digits'`");
+    paragraph(39, #string,oneline
+        \\Both letter cases are caught, for both prefixes. There is no `0o` case,
+        \\so an octal constant in the C spelling does split: `0o7` lexes as the
+        \\integer `0` followed by the identifier `o7`, and fails with
+        \\`error: unbound 'o7'`.
+    );
+}
+
+render_section_9 :: () {
+    paragraph(0, #string,oneline
+        \\A number token becomes a float when either of two shapes appears, and
+        \\one literal may use both at once.
+    );
+    bullet(1, #string,oneline
+        \\A `.` followed by at least one digit, which opens the fraction:
+        \\`1.25`, `1_234.333_333`.
+    );
+    bullet(2, #string,oneline
+        \\An `e` or `E`, optionally followed by `+` or `-`, followed by at least
+        \\one digit: `1e3`, `1E10`, `1e+2`, `1.2e-3`.
+    );
+    paragraph(3, #string,oneline
+        \\The exponent is looked for whether or not a fraction was seen, so an
+        \\integer-looking literal with an exponent is still a float. `_`
+        \\separators are allowed in the integer part, the fraction and the
+        \\exponent digits, under the same rules and with the same per-part
+        \\diagnostics given in Integer Literals.
+    );
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := 1.25;
+        \\    b := 1_234.333_333;
+        \\    c := 1e3;
+        \\    d := 1.2e-3;
+        \\    e := 1E10;
+        \\    f := 1e+2;
+        \\    g := 2.5e-3;
+        \\    print("% % % % % % %\n", a, b, c, d, e, f, g);
+        \\}
+    );
+    code_block(5, "text", #string
+        \\1.25 1234.333333 1000 0.0012 10000000000 100 0.0025
+    );
+    paragraph(6, #string,oneline
+        \\Anything outside those two shapes is not a float literal. The four
+        \\spellings below all look like numbers and none of them is one.
+    );
+    table_header(7, "Written   —   Result");
+    table_row(8, "`.5`   |   A bare `.`, then `5`: `error: unexpected token '5'`");
+    table_row(9, "`1.`   |   `1`, then a bare `.`: `error: reserved operator token '.' (operator '.' cannot be overloaded)`");
+    table_row(10, "`1.e3`   |   `1`, then `.`, then the name `e3`: `error: member of non-struct`");
+    table_row(11, "`1.5e`   |   An exponent with no digits: `error: scientific number literal needs exponent digits after 'e' or 'E'`");
+    paragraph(12, #string,oneline
+        \\Requiring a digit on each side of the `.` is what keeps a dot next to a
+        \\number unambiguous. `.` is member access, `..` is a range and `.*` is a
+        \\dereference, so a fraction allowed to start or end with nothing would
+        \\collide with all three.
+    );
+    subheading(13, "Every float literal is an f64 at lex time");
+    paragraph(14, #string,oneline
+        \\The scanner strips the separators and parses the remaining text once,
+        \\at double precision. The token carries a single `f64` value, and a
+        \\literal with no annotation defaults to `f64`: `x := 1.5;` followed by
+        \\`y : string = x;` reports `error: got f64, expected string`.
+    );
+    paragraph(15, #string,oneline
+        \\A wider annotation changes where the value lands, not how it was read.
+        \\An `f80` or `f128` literal has already been rounded to double precision
+        \\by the time the type is known, so digits beyond roughly the seventeenth
+        \\are gone before the annotation is ever consulted.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a : f80  = 1.000_000_000_000_000_000_1;
+        \\    b : f80  = 1.0;
+        \\    c : f128 = 1.000_000_000_000_000_000_1;
+        \\    d : f128 = 1.0;
+        \\    print("f80  literal == 1.0: %\n", a == b);
+        \\    print("f128 literal == 1.0: %\n", c == d);
+        \\}
+    );
+    code_block(17, "text", #string
+        \\f80  literal == 1.0: 1
+        \\f128 literal == 1.0: 1
+    );
+    note(18, #string,oneline
+        \\Both comparisons are true. `f80` and `f128` are real storage widths
+        \\with real arithmetic; only the literal is limited, and a constant more
+        \\precise than a double cannot be written down as one token.
+    );
+    subheading(19, "Out-of-range literals");
+    paragraph(20, #string,oneline
+        \\There is no fitting check for floats. A literal too large for its type
+        \\becomes an infinity and one too small becomes zero, in both cases
+        \\silently. The integer diagnostic `does not fit` has no float
+        \\counterpart.
+    );
+    table_header(21, "Written   —   Stored");
+    table_row(22, "`x : f64 = 1e400;`   |   Positive infinity");
+    table_row(23, "`x : f64 = 1e-400;`   |   Zero");
+    table_row(24, "`x : f16 = 100000.0;`   |   Positive infinity, since `f16` stops at 65504");
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    big  : f64 = 1e400;
+        \\    tiny : f64 = 1e-400;
+        \\    over : f16 = 100000.0;
+        \\    print("% % %\n", big > 1.797_693_134_862_315_7e308, tiny == 0.0, cast(f64) over > 1000000.0);
+        \\}
+    );
+    code_block(26, "text", #string
+        \\1 1 1
+    );
+    paragraph(27, #string,oneline
+        \\The three comparisons confirm the three rows: `big` exceeds the largest
+        \\finite `f64`, `tiny` has collapsed to zero, and `over` has left the
+        \\`f16` range entirely.
+    );
+    note(28, #string,oneline
+        \\Those values do not print usefully on every target. Where the host C
+        \\runtime formatter is not used, `print` renders a float as an integer
+        \\part plus six fraction digits, so an infinity or any magnitude past the
+        \\64-bit range prints as a fixed piece of nonsense: `print("%\n",
+        \\6.02e23);` gives `9223372036854775809`. Formatting is covered in
+        \\`Show`, `FromString`, and `print` Formatting.
+    );
+    paragraph(29, #string,oneline
+        \\A float literal never reaches an integer target. `x : s64 = 1.5;` is
+        \\`error: cannot implicitly convert comptime_float to int`, and
+        \\`x : u8 = 1.0;` is `error: cannot implicitly convert comptime_float to
+        \\u8` even though the value is whole. That rule and its escape hatches
+        \\are in Conversions: What Is Implicit.
+    );
+}
+
+render_section_10 :: () {
+    paragraph(0, #string,oneline
+        \\A string literal is written between double quotes. The scanner walks
+        \\forward to the closing quote, stepping two characters over any
+        \\backslash pair so that an escaped quote does not end the literal, and
+        \\stores the raw source text found between the quotes.
+    );
+    paragraph(1, #string,oneline
+        \\Decoding is deferred. The stored text still holds the backslashes as
+        \\written, and escapes become characters later, when the literal turns
+        \\into a value. One consequence is worth stating up front: no escape
+        \\sequence is ever a lexical error, because the scanner never inspects
+        \\the character after a backslash.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    controls := "\a\b\f\n\r\t\v\0";
+        \\    print("count %\n", controls.count);
+        \\    print("% % % % % % % %\n",
+        \\        controls[0], controls[1], controls[2], controls[3],
+        \\        controls[4], controls[5], controls[6], controls[7]);
+        \\    print("[%]\n", "\\ \" \' \? \x41");
+        \\    print("[%]\n", "\q\e\s");
+        \\}
+    );
+    code_block(3, "text", #string
+        \\count 8
+        \\7 8 12 10 13 9 11 0
+        \\[\ " ' ? A]
+        \\[qes]
+    );
+    subheading(4, "The escape table");
+    table_header(5, "Escape   —   Result");
+    table_row(6, #string,oneline
+        \\`\a`   |   U+0007, alert
+    );
+    table_row(7, #string,oneline
+        \\`\b`   |   U+0008, backspace
+    );
+    table_row(8, #string,oneline
+        \\`\f`   |   U+000C, form feed
+    );
+    table_row(9, #string,oneline
+        \\`\n`   |   U+000A, line feed
+    );
+    table_row(10, #string,oneline
+        \\`\r`   |   U+000D, carriage return
+    );
+    table_row(11, #string,oneline
+        \\`\t`   |   U+0009, tab
+    );
+    table_row(12, #string,oneline
+        \\`\v`   |   U+000B, vertical tab
+    );
+    table_row(13, #string,oneline
+        \\`\0`   |   U+0000; it does not terminate the string
+    );
+    table_row(14, #string,oneline
+        \\`\\`   |   One backslash
+    );
+    table_row(15, #string,oneline
+        \\`\"`   |   A double quote
+    );
+    table_row(16, #string,oneline
+        \\`\'`   |   An apostrophe
+    );
+    table_row(17, #string,oneline
+        \\`\?`   |   A question mark
+    );
+    table_row(18, #string,oneline
+        \\`\xHH`   |   The code point U+00HH; exactly two hexadecimal digits
+    );
+    table_row(19, #string,oneline
+        \\`\%`   |   Nothing; the backslash and the per-cent sign both survive
+    );
+    table_row(20, #string,oneline
+        \\Anything else   |   The backslash is dropped and the character kept
+    );
+    paragraph(21, #string,oneline
+        \\The last row is why a typo is silent. `"\q\e\s"` decodes to `qes`, and
+        \\a malformed hexadecimal escape degrades the same way: `"\xZZ"` is `xZZ`
+        \\because `Z` is not a hexadecimal digit, and `"\xA"` is `xA` because one
+        \\digit is not two.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("[%]\n", "\q\e\s");
+        \\    print("[%]\n", "\xZZ");
+        \\    print("[%]\n", "\xA");
+        \\    print("[%]\n", "\x41\x42");
+        \\}
+    );
+    code_block(23, "text", #string
+        \\[qes]
+        \\[xZZ]
+        \\[xA]
+        \\[AB]
+    );
+    subheading(24, #string,oneline
+        \\`\xHH` writes a code point, not a byte
+    );
+    paragraph(25, #string,oneline
+        \\The two digits name a code point, not a storage byte. The character
+        \\they select is then stored in the string's UTF-8 encoding, so an escape
+        \\above `\x7f` occupies two bytes and `.count`, which counts bytes,
+        \\reports two.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    ascii := "\x41\x7f";
+        \\    high  := "\xff";
+        \\    print("ascii count % bytes % %\n", ascii.count, ascii[0], ascii[1]);
+        \\    print("high  count % bytes % %\n", high.count, high[0], high[1]);
+        \\}
+    );
+    code_block(27, "text", #string
+        \\ascii count 2 bytes 65 127
+        \\high  count 2 bytes 195 191
+    );
+    note(28, #string,oneline
+        \\`\xff` is U+00FF encoded as the two bytes 195 and 191, not the single
+        \\byte 255. A string literal always produces valid UTF-8, so there is no
+        \\literal spelling that yields an arbitrary byte; build such data as an
+        \\array of `u8` instead.
+    );
+    subheading(29, #string,oneline
+        \\`\%` and the runtime formatter
+    );
+    paragraph(30, #string,oneline
+        \\`%` is the placeholder in a format string, so a literal per-cent sign
+        \\written in a format is counted as a placeholder and the call fails.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("50% off\n");
+        \\}
+    );
+    code_block(32, "text", #string
+        \\error: print: format has 1 '%' placeholder(s) but 0 argument(s) given
+    );
+    paragraph(33, #string,oneline
+        \\`\%` is the answer, and it is the one escape the decoder deliberately
+        \\leaves alone: both characters survive into the stored value. What turns
+        \\them into a single `%` is the runtime formatter, which recognises `\%`
+        \\while scanning the format and emits a per-cent sign without consuming
+        \\an argument.
+    );
+    code_block(34, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("100\% done\n");
+        \\    print("[%]\n", "pct=\%");
+        \\}
+    );
+    code_block(35, "text", #string
+        \\100% done
+        \\[pct=\%]
+    );
+    paragraph(36, #string,oneline
+        \\The second line shows the division of labour. That `\%` sits in an
+        \\argument rather than in the format, nothing scans it as a format, and
+        \\both characters print.
+    );
+    subheading(37, "Line breaks and termination");
+    paragraph(38, #string,oneline
+        \\A literal may span physical lines. The newline is part of the text, and
+        \\the line counter is corrected afterwards so that later diagnostics
+        \\still report the right line. A backslash before a newline is not a line
+        \\continuation: it is consumed as an escape pair, the unknown-escape rule
+        \\drops the backslash, and the newline stays in the string.
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    plain := "a
+        \\b";
+        \\    slashed := "a\
+        \\b";
+        \\    print("% %\n", plain.count, slashed.count);
+        \\    print("% %\n", plain[1], slashed[1]);
+        \\}
+    );
+    code_block(40, "text", #string
+        \\3 3
+        \\10 10
+    );
+    paragraph(41, #string,oneline
+        \\Both strings are three bytes long and both carry a line feed, byte 10,
+        \\in the middle. A literal with no closing quote is an error rather than
+        \\a run to end of file: `s := "abc;` alone on its line gives
+        \\`error: unterminated string literal`, underlining from the opening
+        \\quote to the end of the line.
+    );
+    subheading(42, "The four string types");
+    paragraph(43, #string,oneline
+        \\One literal syntax serves all four built-in string types; the
+        \\annotation decides which is built, and whether a terminating NUL and a
+        \\UTF-16 re-encoding are added. `.count` is the element count in every
+        \\case and never includes a terminator.
+    );
+    code_block(44, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    plain : string    = "hello";
+        \\    c     : cstring   = "hello";
+        \\    wide  : string16  = "hello";
+        \\    cwide : cstring16 = "hello";
+        \\    print("% % % %\n", plain.count, c.count, wide.count, cwide.count);
+        \\}
+    );
+    code_block(45, "text", #string
+        \\5 5 5 5
+    );
+    paragraph(46, #string,oneline
+        \\A `cstring` exists to be handed to C and has no `Show` instance, so it
+        \\cannot be printed directly; the attempt reports error: variadic arg
+        \\type `cstring` does not implement `Show` in call `print`. The types
+        \\themselves are covered in Built-in Strings.
+    );
+}
+
+render_section_11 :: () {
+    paragraph(0, #string,oneline
+        \\`#string` builds a string literal out of a run of marked lines. Each
+        \\line of the block begins with the marker `\\`, and everything after
+        \\those two backslashes, to the end of that line, is captured.
+        \\The directive collects every consecutive marked line and joins them
+        \\into one literal.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\BANNER :: #string
+        \\\\alpha
+        \\\\beta
+        \\;
+        \\
+        \\main :: () {
+        \\    print("[%] count=%\n", BANNER, BANNER.count);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\[alpha
+        \\beta] count=10
+    );
+    paragraph(3, #string,oneline
+        \\The marker is a token in its own right, produced by the scanner
+        \\wherever two backslashes appear. A single backslash is not a token at
+        \\all: it is the stray-character error `error: '\'`. A marked line is
+        \\consumed only by `#string` and by the structured form of `#asm`,
+        \\described in the assembly chapter; anywhere else the parser reports the
+        \\captured text as the offending token, so a stray `bare := \\line one`
+        \\gives `error: unexpected token 'line one'`.
+    );
+
+    subheading(4, "What the marker captures");
+    paragraph(5, #string,oneline
+        \\Capture starts immediately after the second backslash and stops at the
+        \\newline, which is not part of the text. Whitespace before the marker is
+        \\ordinary whitespace and is discarded, so a block can be indented to
+        \\match its surroundings without changing its value. Whitespace after the
+        \\marker is text. Nothing inside the captured span is interpreted:
+        \\quotation marks, backslashes, `//` and `/* */` are all ordinary
+        \\characters.
+    );
+    bullet(6, #string,oneline
+        \\Indentation written before the marker positions the block in the
+        \\source and never reaches the string; indentation written after the
+        \\marker does reach it.
+    );
+    bullet(7, "A marked line with no text after the marker contributes an empty line.");
+    bullet(8, #string,oneline
+        \\Comments are removed before the directive sees the token stream, so a
+        \\`//` or `/* */` comment written between two marked lines does not
+        \\interrupt the run: the lines on either side still join into one
+        \\literal.
+    );
+    bullet(9, #string,oneline
+        \\No escape decoding runs unless `,escape` is given, so a `\t` written
+        \\after a marker is a backslash followed by the letter `t`, two
+        \\characters.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\INDENTED :: #string
+        \\    \\    four spaces survive
+        \\    \\next
+        \\;
+        \\
+        \\VERBATIM :: #string
+        \\\\he said "hi" // not a comment /* nor this */ \n \t \\
+        \\;
+        \\
+        \\WITH_BLANK :: #string
+        \\\\a
+        \\\\
+        \\\\b
+        \\;
+        \\
+        \\COMMENTED :: #string
+        \\\\alpha
+        \\// this comment never reaches the directive
+        \\\\beta
+        \\;
+        \\
+        \\main :: () {
+        \\    print("INDENTED   [%] count=%\n", INDENTED, INDENTED.count);
+        \\    print("VERBATIM   [%] count=%\n", VERBATIM, VERBATIM.count);
+        \\    print("WITH_BLANK [%] count=%\n", WITH_BLANK, WITH_BLANK.count);
+        \\    print("COMMENTED  [%] count=%\n", COMMENTED, COMMENTED.count);
+        \\}
+    );
+    code_block(11, "text", #string
+        \\INDENTED   [    four spaces survive
+        \\next] count=28
+        \\VERBATIM   [he said "hi" // not a comment /* nor this */ \n \t \\] count=53
+        \\WITH_BLANK [a
+        \\
+        \\b] count=4
+        \\COMMENTED  [alpha
+        \\beta] count=10
+    );
+    note(12, #string,oneline
+        \\Because capture runs to the end of the line, the semicolon that ends
+        \\the declaration must sit on a line of its own. `SAME :: #string \\text
+        \\;` is a legal declaration whose value is the six characters `text ;`,
+        \\not a two-word string.
+    );
+
+    subheading(13, "The joining rule");
+    paragraph(14, #string,oneline
+        \\The consecutive marked lines are collected in source order and joined
+        \\with a single separator: a newline by default, a single space under
+        \\`,oneline`. The separator goes between lines only, so a block never
+        \\ends with one. At least one marked line is required; `V :: #string;`
+        \\reports the error below.
+    );
+    code_block(15, "text", #string
+        \\error: #string expects one or more '\\' lines
+    );
+    paragraph(16, #string,oneline
+        \\`#string` is an expression, not only a declaration form, so a block may
+        \\appear anywhere a string is expected: a local initialiser, an argument,
+        \\a struct field.
+    );
+
+    subheading(17, "The two modifiers");
+    paragraph(18, #string,oneline
+        \\Two modifiers exist and no others. They are written as comma-separated
+        \\identifiers directly after the directive, may be given in either order,
+        \\and may each be given at most once. `,oneline` changes the separator
+        \\from a newline to a single space. `,escape` changes how the joined text
+        \\is stored: without it the text is already final and backslashes stay
+        \\literal, with it the ordinary escape table described in the chapter on
+        \\string literals is applied to the joined text.
+    );
+    table_header(19, "Form   —   Separator   —   Escape decoding");
+    table_row(20, "`#string`   |   newline   |   none: backslashes are literal");
+    table_row(21, "`#string,oneline`   |   one space   |   none: backslashes are literal");
+    table_row(22, "`#string,escape`   |   newline   |   the ordinary escape table");
+    table_row(23, "`#string,escape,oneline`   |   one space   |   the ordinary escape table");
+    paragraph(24, #string,oneline
+        \\The four forms differ on exactly two axes, so the same two marked lines
+        \\produce four different strings. This program reports each result by
+        \\length and by the byte codes at offsets three, four and five, which is
+        \\where the two axes show up.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\RAW :: #string
+        \\\\bar\t
+        \\\\foo
+        \\;
+        \\
+        \\ONELINE :: #string,oneline
+        \\\\bar\t
+        \\\\foo
+        \\;
+        \\
+        \\ESCAPED :: #string,escape
+        \\\\bar\t
+        \\\\foo
+        \\;
+        \\
+        \\BOTH :: #string,escape,oneline
+        \\\\bar\t
+        \\\\foo
+        \\;
+        \\
+        \\report :: (name: string, value: string) {
+        \\    print("% count=% bytes 3..5 = % % %\n", name, value.count,
+        \\        value[3], value[4], value[5]);
+        \\}
+        \\
+        \\main :: () {
+        \\    report("RAW                  ", RAW);
+        \\    report("ONELINE              ", ONELINE);
+        \\    report("ESCAPED              ", ESCAPED);
+        \\    report("ESCAPE + ONELINE     ", BOTH);
+        \\}
+    );
+    code_block(26, "text", #string
+        \\RAW                   count=9 bytes 3..5 = 92 116 10
+        \\ONELINE               count=9 bytes 3..5 = 92 116 32
+        \\ESCAPED               count=8 bytes 3..5 = 9 10 102
+        \\ESCAPE + ONELINE      count=8 bytes 3..5 = 9 32 102
+    );
+    paragraph(27, #string,oneline
+        \\Byte 3 is `92` and byte 4 is `116` in the two undecoded forms: a
+        \\backslash and a `t`, nine characters in all. Under `,escape` the pair
+        \\has become the single tab `9` and the string is one character shorter.
+        \\Byte 5 shows the separator: `10` is the newline of the default join,
+        \\`32` the space of `,oneline`.
+    );
+    bullet(28, #string,oneline
+        \\Under `,oneline` a blank marked line still contributes a segment, so
+        \\the three lines `a`, empty, `b` join as `a  b`, four characters with
+        \\two spaces.
+    );
+    bullet(29, #string,oneline
+        \\`,escape` decodes escapes written inside the captured text; it has no
+        \\effect on the marker, which is consumed by the scanner before any of
+        \\the text exists.
+    );
+    bullet(30, #string,oneline
+        \\`\%` survives escape decoding as the two characters `\` and `%`, in a
+        \\marked block exactly as in a quoted literal, because it is the runtime
+        \\formatter and not the lexer that turns it into a per-cent sign.
+    );
+    paragraph(31, #string,oneline
+        \\That last rule is why an undecoded block still works as a `print`
+        \\format. The block below carries a literal `\%` and a `%` placeholder,
+        \\and both behave as they would in a quoted format string.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\FORMAT_RAW :: #string
+        \\\\raw format: 100\% and a value %
+        \\;
+        \\
+        \\main :: () {
+        \\    print(FORMAT_RAW, 7);
+        \\    print("\n");
+        \\    inline_use := #string,oneline
+        \\        \\an expression, not only a declaration,
+        \\        \\joined across two marked lines
+        \\    ;
+        \\    print("[%]\n", inline_use);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\raw format: 100% and a value 7
+        \\[an expression, not only a declaration, joined across two marked lines]
+    );
+
+    subheading(34, "Modifier errors");
+    paragraph(35, #string,oneline
+        \\An identifier after the comma that is neither `oneline` nor `escape` is
+        \\rejected by name, and so is a repeat of either one. Both diagnostics
+        \\quote the modifier back.
+    );
+    code_block(36, "text", #string
+        \\V :: #string,wrapped
+        \\error: unknown #string modifier 'wrapped'; expected 'oneline' or 'escape'
+        \\
+        \\V :: #string,oneline,oneline
+        \\error: duplicate #string modifier 'oneline'
+        \\
+        \\V :: #string,escape,escape
+        \\error: duplicate #string modifier 'escape'
+    );
+    note(37, #string,oneline
+        \\Capture stops at the newline character, not at the line ending. In a
+        \\file saved with CRLF line endings every line of a block therefore keeps
+        \\a trailing carriage return. The two-line block `alpha` / `beta` has
+        \\`count == 10` saved with LF and `count == 12` saved with CRLF, and
+        \\nothing in the program says which one it got.
+    );
+}
+
+render_section_12 :: () {
+    paragraph(0, #string,oneline
+        \\`#char` writes a character as an integer literal. The scanner handles
+        \\it inside the directive scan and emits an integer token, so a `#char`
+        \\is not a directive the parser sees and not a value of some character
+        \\type. Glosso has no character type; a `#char` is a number that happens
+        \\to have been written as a glyph.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := #char "A";
+        \\    l := #char "λ";
+        \\    print("A      = % (%)\n", a, type_name(type_of(a)));
+        \\    print("lambda = % (%)\n", l, type_name(type_of(l)));
+        \\    print("A + 1  = %\n", a + 1);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\A      = 65 (u8)
+        \\lambda = 955 (u32)
+        \\A + 1  = 66
+    );
+    paragraph(3, #string,oneline
+        \\The form is the directive, then optional spaces and tabs, then a quoted
+        \\string holding exactly one character or one two-character escape. The
+        \\separator may be empty, so `#char"A"` is the same literal as `#char
+        \\"A"`. It may not contain a newline: a string on the following line is
+        \\`error: #char expects a string literal`.
+    );
+
+    subheading(4, "Why it is an integer and not a character");
+    paragraph(5, #string,oneline
+        \\Indexing a `string` yields a `u8`, and byte classification is written
+        \\as ordinary integer comparison. Making `#char` an integer literal is
+        \\what lets those comparisons be written with glyphs instead of numbers,
+        \\with no conversion and no character type to carry through the program.
+        \\The arithmetic is the underlying integer arithmetic, with the same
+        \\overflow rules as any other value of that width.
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\is_digit_byte :: (byte: u8) -> bool {
+        \\    return byte >= #char "0" && byte <= #char "9";
+        \\}
+        \\
+        \\main :: () {
+        \\    text : string = "h7";
+        \\    print("first is h: %\n", text[0] == #char "h");
+        \\    print("second is a digit: %\n", is_digit_byte(text[1]));
+        \\    print("A + 32 = %\n", #char "A" + 32);
+        \\    upper := text[0] - #char "a" + #char "A";
+        \\    print("upper h = %\n", upper);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\first is h: 1
+        \\second is a digit: 1
+        \\A + 32 = 97
+        \\upper h = 72
+    );
+
+    subheading(8, "The accepted escapes");
+    paragraph(9, #string,oneline
+        \\The scanner decodes the escape itself rather than deferring to the
+        \\string machinery, so `#char` has its own table. It is the C table
+        \\without the numeric forms.
+    );
+    table_header(10, "Escape   —   Value   —   Character");
+    table_row(11, "`\\a`   |   7   |   alert");
+    table_row(12, "`\\b`   |   8   |   backspace");
+    table_row(13, "`\\f`   |   12   |   form feed");
+    table_row(14, "`\\n`   |   10   |   line feed");
+    table_row(15, "`\\r`   |   13   |   carriage return");
+    table_row(16, "`\\t`   |   9   |   tab");
+    table_row(17, "`\\v`   |   11   |   vertical tab");
+    table_row(18, "`\\0`   |   0   |   NUL");
+    table_row(19, "`\\\\`   |   92   |   backslash");
+    table_row(20, "`\\\"`   |   34   |   quotation mark");
+    table_row(21, "`\\'`   |   39   |   apostrophe");
+    table_row(22, "`\\?`   |   63   |   question mark");
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("a=% b=% f=% n=% r=% t=% v=%\n",
+        \\        #char "\a", #char "\b", #char "\f", #char "\n",
+        \\        #char "\r", #char "\t", #char "\v");
+        \\    print("0=% backslash=% quote=% apostrophe=% question=%\n",
+        \\        #char "\0", #char "\\", #char "\"", #char "\'", #char "\?");
+        \\    print("unknown escape = %\n", #char "\q");
+        \\}
+    );
+    code_block(24, "text", #string
+        \\a=7 b=8 f=12 n=10 r=13 t=9 v=11
+        \\0=0 backslash=92 quote=34 apostrophe=39 question=63
+        \\unknown escape = 113
+    );
+    paragraph(25, #string,oneline
+        \\An escape outside the table yields the escaped character itself, which
+        \\is why `#char "\q"` is `113`, the code of `q`. The escaped character is
+        \\taken as a single byte, so escaping a character outside ASCII truncates
+        \\it: `#char "\λ"` is `187`, the low byte of `955`.
+    );
+    paragraph(26, #string,oneline
+        \\There is no `\xHH` form, and no `\u{...}` form either. The scan accepts
+        \\one character or one backslash-plus-character pair and nothing longer,
+        \\so a numeric escape trips the length check.
+    );
+    code_block(27, "text", #string
+        \\main :: () { c := #char "\x41"; }
+        \\error: #char string literal contains more than two characters
+        \\
+        \\main :: () { c := #char ""; }
+        \\error: #char expects one character
+        \\
+        \\main :: () { c := #char 5; }
+        \\error: #char expects a string literal
+        \\
+        \\main :: () { c := #char "a; }
+        \\error: unterminated #char string literal
+    );
+    paragraph(28, #string,oneline
+        \\A code point above ASCII is written directly instead: `#char "λ"` is
+        \\`955`, the whole code point, because the file is decoded to code points
+        \\before the scan and the literal takes one of them.
+    );
+
+    subheading(29, "The synthesised type");
+    paragraph(30, #string,oneline
+        \\Left alone, a `#char` synthesises as `u8` when its code point is at
+        \\most `0x7f` and as `u32` otherwise. The split is deliberate: an ASCII
+        \\literal is almost always about to meet a string byte, and a non-ASCII
+        \\one cannot fit in a byte at all. Given an expected type, the literal
+        \\accepts only the types that can hold what was written.
+    );
+    table_header(31, "Code point   —   Default type   —   Types it accepts");
+    table_row(32, "at most `0x7f`   |   `u8`   |   `u8`, `s8`, `u32`");
+    table_row(33, "above `0x7f`   |   `u32`   |   `u32`");
+    code_block(34, "text", #string
+        \\main :: () { c : s64 = #char "A"; }
+        \\error: ASCII #char literal can infer only as u8, s8, or u32, not int
+        \\
+        \\main :: () { c : u16 = #char "A"; }
+        \\error: ASCII #char literal can infer only as u8, s8, or u32, not u16
+        \\
+        \\main :: () { c : u8 = #char "λ"; }
+        \\error: non-ASCII #char literal can infer only as u32, not u8
+    );
+    note(35, #string,oneline
+        \\The list is closed, so `u16` is refused even though it is wide enough.
+        \\A `#char` at any other integer type has to go through a cast, and a
+        \\cast accepts it because at that point it is a number like any other:
+        \\`cast(u16) #char "A"` is `65`.
+    );
+}
+
+render_section_13 :: () {
+    paragraph(0, #string,oneline
+        \\The scanner produces tokens of a fixed set of kinds. Punctuation and
+        \\operators are drawn from the same eighteen characters, and which one a
+        \\run of those characters becomes is decided by a table of special cases
+        \\first and a maximal-munch rule afterwards. Every spelling in the
+        \\punctuation table below is a token kind of its own, which is why none
+        \\of them can be redeclared as an operator.
+    );
+
+    subheading(1, "The punctuation table");
+    paragraph(2, #string,oneline
+        \\The middle column names the token kind the scanner emits. Two of these
+        \\spellings, `.*` and `?`, are emitted as operator tokens rather than
+        \\dedicated kinds, but they are punctuation in practice and are listed
+        \\here with the rest.
+    );
+    table_header(3, "Spelling   —   Token   —   Meaning");
+    table_row(4, "`;`   |   Semicolon   |   statement terminator");
+    table_row(5, "`,`   |   Comma   |   separator in lists and literals");
+    table_row(6, "`,,`   |   CommaComma   |   nonlocal label, as in `main,,'entry`");
+    table_row(7, "`.`   |   Dot   |   member access");
+    table_row(8, "`.{` `.[`   |   DotBrace, DotBracket   |   aggregate literal, array literal");
+    table_row(9, "`.*`   |   Op   |   pointer dereference, written after the pointer");
+    table_row(10, "`..` `..=`   |   Range, RangeInclusive   |   exclusive and inclusive ranges");
+    table_row(11, "`...`   |   Ellipsis   |   variadic parameter and the rest pattern");
+    table_row(12, "`:`   |   Colon   |   type annotation");
+    table_row(13, "`::`   |   ColonColon   |   constant binding");
+    table_row(14, "`:=`   |   ColonEqual   |   variable binding");
+    table_row(15, "`::=`   |   ColonColonEqual   |   compile-time binding");
+    table_row(16, "`=`   |   Equal   |   assignment");
+    table_row(17, "`->`   |   Arrow   |   return type");
+    table_row(18, "`$`   |   Dollar   |   generic parameter introducer");
+    table_row(19, "`?`   |   Op   |   optional type former and the propagation suffix");
+    table_row(20, "`@`   |   Op   |   pattern binder, as in `whole @ subpattern`");
+    table_row(21, "`(` `)` `{` `}` `[` `]`   |   LParen through RBracket   |   grouping, blocks, brackets");
+    paragraph(22, #string,oneline
+        \\Two absences are worth naming. `.(`, which opens a tuple literal, is
+        \\not one token: it is `Dot` followed by `LParen`. And `x : := e` is not
+        \\a third form; the scanner emits `Colon` and then `ColonEqual`, and the
+        \\parser reads that pair as `::=`. The remaining token kinds carry text
+        \\rather than punctuation: `Ident`, `Int`, `Float`, `Str`, `MlStr`,
+        \\`Directive`, `Op`, `OpName`, `Backtick`, `DoubleBacktick` and `Label`,
+        \\each covered by the chapter that owns its construct.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct { x: int; y: int; }
+        \\
+        \\sum_all :: (values: ...int) -> int {
+        \\    total := 0;
+        \\    for v : values total += v;
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    K :: 10;                          // ::   constant binding
+        \\    n := 3;                           // :=   variable binding
+        \\    m ::= 6 * 7;                      // ::=  compile-time binding
+        \\    q : int = 5;                      // :    type annotation
+        \\    q = 6;                            // =    assignment
+        \\    p : Point = .{ .x = 1, .y = 2 };  // .{   aggregate literal
+        \\    a : [5]int = .[10, 20, 30, 40, 50];
+        \\    t := .(1, "two");                 // .(   Dot then LParen
+        \\    print("K=% n=% m=% q=% p=% a=% t=%\n", K, n, m, q, p.x, a[2], t.0);
+        \\    print("full=% tail=% head=% mid=%\n",
+        \\        a[..].count, a[2..].count, a[..2].count, a[1..=3].count);
+        \\    print("varargs=%\n", sum_all(1, 2, 3));
+        \\    r := *p;
+        \\    print("deref x=%\n", r.*.x);
+        \\}
+    );
+    code_block(24, "text", #string
+        \\K=10 n=3 m=42 q=6 p=1 a=30 t=1
+        \\full=5 tail=3 head=2 mid=3
+        \\varargs=6
+        \\deref x=1
+    );
+
+    subheading(25, "The operator character set");
+    paragraph(26, #string,oneline
+        \\Exactly eighteen ASCII characters may appear in an operator token. Any
+        \\run of them that is not caught by one of the special cases below is
+        \\scanned as a single operator token.
+    );
+    code_block(27, "text", #string
+        \\+  -  *  /  <  >  !  @  %  ^  &  |  ~  ?  .  ,  :  =
+    );
+    paragraph(28, #string,oneline
+        \\What is absent matters as much as what is present. `$`, `#`, `\`, `'`,
+        \\backtick, `"`, `;` and the six bracket characters are not operator
+        \\characters, so they always end an operator run. That is why `x: []int`
+        \\and `Err![]T` lex the way they read, and why an operator whose name
+        \\contains a bracket can only be written in the quoted form described in
+        \\the chapter on reserved operators.
+    );
+
+    subheading(29, "Maximal munch and its exceptions");
+    paragraph(30, #string,oneline
+        \\The scanner takes the longest run of operator characters it can, which
+        \\it must: a library may introduce any spelling, so the scanner cannot
+        \\know that `+|` is one operator and `+` `|` two without preferring the
+        \\longer read. Five characters carry extra rules on top of that. `?`
+        \\never continues an operator, so `*?T` is three tokens and a propagation
+        \\suffix composes with whatever follows it. A lone `@` is taken by
+        \\itself, but only when no operator character follows, which keeps `@=`
+        \\and `@>` available as user spellings. After `:` the scanner checks the
+        \\fixed forms `::=`, `::` and `:=` first, then falls into the general
+        \\scan unless the next character is `*`. After `=` it falls into the
+        \\general scan whenever another operator character follows. A trailing
+        \\`.` is handed back when the character after it could start a
+        \\non-operator token, which is what makes `p.*.b` parse; if a token still
+        \\ends in `.` it is `error: operator token cannot end with '.'`.
+    );
+    table_header(31, "Written   —   Lexes as   —   Result");
+    table_row(32, "`a = -1`   |   `=` `-` `1`   |   assignment of a negated literal");
+    table_row(33, "`a =-1`   |   `=-`   |   `error: unexpected token '=-'`");
+    table_row(34, "`1 ++2`   |   `++`   |   `error: unexpected token '++'`");
+    table_row(35, "`o: ?int`   |   `:` then `?int`   |   an optional annotation");
+    table_row(36, "`o:?int`   |   `:` alone   |   `error: reserved operator token ':'`");
+    table_row(37, "`p:*int`   |   `:` `*`   |   works, by the `*` exception");
+    table_row(38, "`Err! *int`   |   `!` `*`   |   a result of a pointer");
+    table_row(39, "`Err!*int`   |   `!*`   |   `error: unexpected token '!*'`");
+    table_row(40, "`2 * p.*.b`   |   `*` `.` `*` `.` `b`   |   works, by the trailing-dot rule");
+    table_row(41, "`2 *. 3`   |   `*.`   |   `error: operator token cannot end with '.'`");
+    note(42, #string,oneline
+        \\Whitespace between two operator characters is load-bearing. The two
+        \\pairs a program is most likely to write by accident are `x:?T`, which
+        \\loses the `?` and reports a reserved `:`, and `E!*T`, which glues `!`
+        \\and `*` into one unknown operator. Both read perfectly well and both
+        \\fail; a space fixes each.
+    );
+}
+
+render_section_14 :: () {
+    paragraph(0, #string,oneline
+        \\Fourteen operator spellings are reserved. The check lives in the
+        \\scanner and fires on the token, not on the declaration, so it catches a
+        \\reserved spelling written as a quoted operator name and a reserved
+        \\spelling that reaches operator position by accident with the same
+        \\message. The message always names the operator twice, once for the
+        \\token and once for the rule.
+    );
+    code_block(1, "glosso", #string
+        \\X :: '=';
+        \\main :: () {}
+    );
+    code_block(2, "text", #string
+        \\error: reserved operator token '=' (operator '=' cannot be overloaded)
+    );
+
+    subheading(3, "The reserved spellings");
+    paragraph(4, #string,oneline
+        \\Each of these carries syntax the parser must be able to recognise
+        \\without consulting any operator table, which is what makes it
+        \\unavailable for overloading.
+    );
+    table_header(5, "Spelling   —   What it is");
+    table_row(6, "`=`   |   assignment");
+    table_row(7, "`.`   |   member access");
+    table_row(8, "`,`   |   list separator");
+    table_row(9, "`,,`   |   nonlocal label constructor");
+    table_row(10, "`:=`   |   variable binding");
+    table_row(11, "`::`   |   constant binding");
+    table_row(12, "`:`   |   type annotation");
+    table_row(13, "`->`   |   return-type arrow");
+    table_row(14, "`::=`   |   compile-time binding");
+    table_row(15, "`.*`   |   pointer dereference");
+    table_row(16, "`...`   |   varargs and the rest pattern");
+    table_row(17, "`@`   |   pattern binder");
+    table_row(18, "backtick   |   hygiene escape");
+    table_row(19, "double backtick   |   code splice");
+    paragraph(20, #string,oneline
+        \\Because the check is on the token, a mistyped expression can produce
+        \\it. `x := 1.;` is not a float, so the trailing `.` reaches the operator
+        \\scanner and reports `error: reserved operator token '.' (operator '.'
+        \\cannot be overloaded)`. So does `. {`, written with a space, which is
+        \\why `.{` has to be spelled without one.
+    );
+
+    subheading(21, "Why `..`, `..=` and `?` are not on the list");
+    paragraph(22, #string,oneline
+        \\All three have dedicated token kinds and dedicated parser handling, so
+        \\they look like candidates for the list. They are absent on purpose. A
+        \\range and a propagation are both defined by typeclasses in the library
+        \\rather than built into the compiler, and a user type joins in by
+        \\writing an instance. Reserving the spellings would make that
+        \\impossible.
+    );
+    code_block(23, "glosso", #string
+        \\// std/Prelude/Primitive_Operators.glo
+        \\RangeExclusiveOp :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '..' :: (start: L, end: R) -> Output #operator(left, 2);
+        \\}
+        \\
+        \\// std/Typeclass/Try.glo
+        \\'?' :: (value: Carrier) -> Try_Branch(Output, Residual) #operator(suffix) {
+        \\    return branch(value);
+        \\}
+    );
+    paragraph(24, #string,oneline
+        \\The proof is in the diagnostic a competing declaration gets. Declaring
+        \\`'..'` in a new typeclass is not rejected as reserved; it is rejected
+        \\because the spelling already belongs to a class, which is the ordinary
+        \\rule for every operator.
+    );
+    code_block(25, "text", #string
+        \\MyRange :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '..' :: (a: L, b: R) -> Output #operator(left, 2);
+        \\}
+        \\error: operator '..' is already owned by typeclass 'RangeExclusiveOp'
+    );
+
+    subheading(26, "The quoted operator-name form");
+    paragraph(27, #string,oneline
+        \\An operator is named by writing its characters between single quotes.
+        \\After a quote the scanner looks ahead: if what follows is a letter or
+        \\`_` and the run is not closed by a second quote, the token is a label
+        \\such as `'again`; otherwise it scans to the next quote and produces an
+        \\operator name. So `'+'` names an operator and `'done` declares a label,
+        \\with no ambiguity between them.
+    );
+    paragraph(28, #string,oneline
+        \\The text between the quotes is taken as written. The scanner applies
+        \\only the reserved-spelling check and the trailing-dot check, so a name
+        \\may contain characters that could never be lexed as an operator run,
+        \\including letters and brackets. The declaration then succeeds even when
+        \\the name can never be written at a use site.
+    );
+    bullet(29, #string,oneline
+        \\A letters-only name such as `'plus'` declares cleanly, but at a use
+        \\site the letters lex as an identifier: `2 plus 3` is `error: unexpected
+        \\token 'plus'`.
+    );
+    bullet(30, #string,oneline
+        \\`''` is a legal empty name, and using it produces `error: unbound ''`.
+    );
+    bullet(31, #string,oneline
+        \\`'[]'` and `'[]='` are the indexing and index-assignment operators.
+        \\They are the only names allowed to contain a bracket; any other gives
+        \\`error: operator '<[>' cannot contain '[' or ']'` with the offending
+        \\name quoted back.
+    );
+    paragraph(32, #string,oneline
+        \\Beyond the spelling, the checker constrains what an operator
+        \\declaration may say. These rules are enforced when the declaration is
+        \\checked, not when it is scanned.
+    );
+    table_header(33, "Rule   —   Diagnostic");
+    table_row(34, "one to three parameters   |   `operator functions need one, two, or three parameters`");
+    table_row(35, "must belong to a typeclass   |   `operator '<~>' must be declared by a typeclass and implemented by its instances`");
+    table_row(36, "one owning class per spelling   |   `operator '+' is already owned by typeclass 'Add'`");
+    table_row(37, "`'[]'` takes exactly two   |   `operator '[]' must have arity 2`");
+    table_row(38, "an all-stars name is never prefix   |   `operator '**' cannot be overloaded as a prefix operator`");
+    note(39, #string,oneline
+        \\The all-stars rule exists because `*`, `**`, `***` and so on are the
+        \\pointer sigils in type position. A prefix instance of one of them would
+        \\make `**T` ambiguous between a pointer to a pointer and an application
+        \\of a user operator, so the prefix fixity is refused while the binary
+        \\one stays available.
+    );
+}
+
+render_section_15 :: () {
+    paragraph(0, #string,oneline
+        \\Before a file is parsed, its whole token vector is walked once by the
+        \\prescan, which looks for operator declarations and records their
+        \\fixity, precedence and associativity. Only then does parsing begin.
+    );
+    paragraph(1, #string,oneline
+        \\The prescan exists because Glosso lets a library introduce operator
+        \\spellings and precedences. Parsing cannot decide how `2 * 3 %% 4`
+        \\groups, or even whether `%%` is an operator at all, until every
+        \\`#operator` and `#precedence` declaration visible to the file has been
+        \\read. A single-pass parser would have to see the declaration first;
+        \\the prescan removes that ordering requirement by reading the
+        \\declarations out of the token stream before any of them is parsed.
+    );
+
+    subheading(2, "What the prescan recognises");
+    paragraph(3, #string,oneline
+        \\The pattern is narrow and purely lexical: an operator name, then `::`,
+        \\then an opening parenthesis. From the matching close parenthesis the
+        \\scan runs forward to the first `{` or `;`, which is to say across the
+        \\signature and its directives and no further, looking for `#operator` or
+        \\`#precedence`.
+    );
+    code_block(4, "glosso", #string
+        \\'%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\'~~' :: (value: T) -> Output #operator(prefix);
+        \\'!!' :: (value: T) -> Output #operator(suffix);
+    );
+    paragraph(5, #string,oneline
+        \\`#operator(mode)` and `#operator(mode, prec)` register a fixity and,
+        \\where the mode carries one, a precedence. `#precedence(mode, prec)`
+        \\registers precedence and associativity only, which is what a typeclass
+        \\method declaration usually wants.
+    );
+    table_header(6, "Mode   —   Registers   —   Meaning");
+    table_row(7, "`left`   |   precedence, left associativity   |   ordinary binary operator");
+    table_row(8, "`right`   |   precedence, right associativity   |   right-grouping binary operator");
+    table_row(9, "`assign`   |   precedence, right associativity   |   assignment-shaped operator");
+    table_row(10, "`prefix`   |   prefix fixity   |   written before its operand");
+    table_row(11, "`suffix`   |   suffix fixity   |   written after its operand");
+    paragraph(12, #string,oneline
+        \\A prefix or suffix mode carries no precedence, and `#precedence` with
+        \\one is rejected: `#precedence(prefix)` is `error: #precedence expects
+        \\left, right, or assign`. A name made only of asterisks is never
+        \\registered as prefix, because those spellings are the pointer sigils.
+    );
+
+    subheading(13, "An operator may be used before it is declared");
+    paragraph(14, #string,oneline
+        \\That is the whole visible consequence. The declaration below sits after
+        \\`main`, and `main` uses the operator anyway, at the precedence the
+        \\later declaration asks for.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("3 \%\% 4       = %\n", 3 %% 4);
+        \\    print("2 * 3 \%\% 4   = %\n", 2 * 3 %% 4);
+        \\}
+        \\
+        \\Mod :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\}
+        \\
+        \\(int, int) :: instance Mod {
+        \\    Output :: int;
+        \\    '%%' :: (a: int, b: int) -> Output { return a * 10 + b; }
+        \\}
+    );
+    code_block(16, "text", #string
+        \\3 %% 4       = 34
+        \\2 * 3 %% 4   = 68
+    );
+    paragraph(17, #string,oneline
+        \\Precedence 19 binds tighter than `*` at 18, so the second line is
+        \\`2 * (3 %% 4)`, which is `2 * 34`. Changing the one number in the
+        \\declaration changes how the expression above it groups: at 17 the
+        \\operator binds looser than `*` and the same source reads
+        \\`(2 * 3) %% 4`.
+    );
+    code_block(18, "text", #string
+        \\3 %% 4       = 34
+        \\2 * 3 %% 4   = 64
+    );
+    paragraph(19, #string,oneline
+        \\An operator with no `#operator` and no `#precedence` is registered by
+        \\nothing, so its spelling never becomes an operator and the use site
+        \\fails as an unknown token. The declaration is reported too, with the
+        \\directive it is missing.
+    );
+    code_block(20, "text", #string
+        \\error: unexpected token '%%'
+        \\error: binary operator '%%' needs #operator(left|right|assign, n)
+    );
+    note(21, #string,oneline
+        \\The precedence must be a written integer literal. The prescan reads it
+        \\straight out of the token stream, before any name means anything, so a
+        \\named constant cannot be used: `#precedence(left, P)` with `P :: 19;`
+        \\is `error: unexpected token 'P'`, reported at the constant, and the
+        \\operator is never registered.
+    );
+
+    subheading(22, "The operator table is per file");
+    paragraph(23, #string,oneline
+        \\Each source file is prescanned on its own, and the table it gets is the
+        \\Prelude's operators plus whatever that file itself declares. Nothing
+        \\else reaches it. A file loaded with `#load` is prescanned separately
+        \\from the file that loads it, so an operator declared in the loaded file
+        \\works inside that file and is an unknown token in the other.
+    );
+    code_block(24, "glosso", #string
+        \\// Mod2.glo: combine uses %% on its first line, before the declaration
+        \\combine :: (a: int, b: int) -> int { return a %% b; }
+        \\
+        \\Mod :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\}
+        \\
+        \\(int, int) :: instance Mod {
+        \\    Output :: int;
+        \\    '%%' :: (a: int, b: int) -> Output { return a * 10 + b; }
+        \\}
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\#load "Mod2.glo";
+        \\
+        \\main :: () {
+        \\    print("combine(3, 4) = %\n", combine(3, 4));   // fine
+        \\    print("%\n", 3 %% 4);                          // not fine
+        \\}
+    );
+    code_block(26, "text", #string
+        \\error: unexpected token '%%'
+    );
+    paragraph(27, #string,oneline
+        \\Removing the second `print` makes the program compile and print
+        \\`combine(3, 4) = 34`: the operator is real, its instance is real, and
+        \\the function that uses it is callable. Only the spelling failed to
+        \\cross the file boundary.
+    );
+    bullet(28, #string,oneline
+        \\`#import` behaves the same way. A module that introduces a new operator
+        \\spelling can use it throughout its own files, but the importing file
+        \\still cannot write it.
+    );
+    bullet(29, #string,oneline
+        \\The Prelude is prescanned before anything else and its table seeds
+        \\every file, which is why the arithmetic, comparison, bitwise and range
+        \\spellings are available with no import and no declaration.
+    );
+    bullet(30, #string,oneline
+        \\Within one standard module the files share an accumulating table, so a
+        \\spelling declared in one file of a module is usable in the module's
+        \\other files.
+    );
+    paragraph(31, #string,oneline
+        \\The practical rule that falls out of this is short: every operator a
+        \\file can write is either one the Prelude declares or one declared in
+        \\that same file, and within the file its position does not matter.
+    );
+}

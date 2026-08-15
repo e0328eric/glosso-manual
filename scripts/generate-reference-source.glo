@@ -161,7 +161,7 @@ reference_compare_paths :: (left: string, right: string) -> Ordering {
 reference_collect_paths :: (
     directory_path: string,
     paths: *[..]string,
-) -> Result(s64, Fs_Error) {
+) -> Fs_Error!s64 {
     entries := os_fs_directory_entries(directory_path);
     for child: entries {
         if os_fs_is_directory(child) {
@@ -170,7 +170,7 @@ reference_collect_paths :: (
             array_add(paths, reference_copy_string(child));
         }
     }
-    return Result.Ok(cast(s64)0);
+    return .Ok(cast(s64)0);
 }
 
 reference_module_name :: (std_directory: string, path: string) -> string {
@@ -890,25 +890,25 @@ reference_parse_file :: (
     all_instances: *[..]Reference_Instance,
     symbol_count: *s64,
 ) -> bool {
-    size := file_size(path);
-    if !size {
-        report_error(size.Err);
-        return false;
+    size: s64;
+    if file_size(path) == {
+        case .Ok(measured); size = measured;
+        case .Err(reason);
+            report_error(reason);
+            return false;
     }
-    size := size.Ok;
-    
+
     if size < 0 {
         print("could not determine file size for %\n", path);
         return false;
     }
-    loaded := read_file(path, size + 1);
     source: string;
-    if loaded == {
-        case .Err;
+    if read_file(path, size + 1) == {
+        case .Err(reason);
             print("could not read %: ", path);
-            report_error(loaded.Err);
+            report_error(reason);
             return false;
-        case .Ok; source = loaded.Ok;
+        case .Ok(text); source = text;
     }
     module_name := reference_module_name(std_directory, path);
     source_path := reference_source_path(std_directory, path);
@@ -1065,12 +1065,12 @@ reference_write_source :: (
     write_string(*out, "{\"modules\":[");
     for i: 0..modules.count {
         if i > 0 builder_write_byte(*out, #char ",");
-        encoded_module := json_serialize(modules[i]);
-        if result_is_err(encoded_module) {
+        if json_serialize(modules[i]) == {
+        case .Ok(encoded_module); write_string(*out, encoded_module);
+        case .Err;
             print("could not serialize reference module %\n", modules[i].name);
             return false;
         }
-        write_string(*out, encoded_module.Ok);
     }
     write_string(*out, "],\"instances\":[");
     for i: 0..instances.count {
@@ -1090,19 +1090,22 @@ reference_write_source :: (
         for j: 0..fields.count {
             if j > 0 {
                 builder_write_byte(*out, #char ",");
-                encoded_name := json_serialize(names[j]);
-                if result_is_err(encoded_name) return false;
-                write_string(*out, encoded_name.Ok);
+                if json_serialize(names[j]) == {
+                case .Ok(encoded_name); write_string(*out, encoded_name);
+                case .Err; return false;
+                }
                 builder_write_byte(*out, #char ":");
             }
-            encoded := json_serialize(fields[j]);
-            if result_is_err(encoded) return false;
-            write_string(*out, encoded.Ok);
+            if json_serialize(fields[j]) == {
+            case .Ok(encoded); write_string(*out, encoded);
+            case .Err; return false;
+            }
         }
         write_string(*out, ",\"source_path\":");
-        encoded_path := json_serialize(instance.source_path);
-        if result_is_err(encoded_path) return false;
-        write_string(*out, encoded_path.Ok);
+        if json_serialize(instance.source_path) == {
+        case .Ok(encoded_path); write_string(*out, encoded_path);
+        case .Err; return false;
+        }
         write_string(*out, ",\"source_line\":");
         write_string(*out, format_int(instance.source_line, 10));
         write_string(*out, ",\"negative\":");

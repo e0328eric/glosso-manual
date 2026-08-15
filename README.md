@@ -17,8 +17,12 @@ private Glosso repository or compile the project in GitHub Actions.
   `src/`.
 - `src/clay_bindings.glo` builds Clay and inserts its target-specific bindings.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
-- `src/section_catalog.glo` contains section state and titles.
-- `src/sections_*.glo` contains the manual chapters, grouped by topic.
+- `src/section_catalog.glo` contains section state and titles. It is the single
+  source of the chapter order; `SECTION_COUNT` and the titles must agree with the
+  `render_section_N` procedures that exist.
+- `src/sections_*.glo` contains the manual chapters, one file per topic group,
+  each holding a contiguous run of `render_section_N` procedures. The group
+  order matches `manualSidebarGroups` in `app.js`.
 - `src/generated/std_reference.glo` is the generated standard-library data
   rendered by Glosso and Clay.
 - `src/reference_ui.glo` contains reference, search-result, and browser-bridge
@@ -28,7 +32,11 @@ private Glosso repository or compile the project in GitHub Actions.
 - `scripts/generate-reference-source.glo` extracts public declarations directly
   from a supplied Glosso standard-library directory into an ignored JSON file.
 - `scripts/generate-reference.glo` converts that intermediate data into the
-  compact Glosso and browser reference files.
+  compact Glosso and browser reference files, and rebuilds the language-manual
+  half of the search index by reading the chapter sources: titles from
+  `src/section_catalog.glo`, prose from the `src/sections_*.glo` files that
+  `main.glo` loads. Code blocks are excluded, so a chapter is searched by what
+  it says rather than by the programs it quotes.
 - `scripts/tree_sitter.glo` embeds the Tree-sitter highlight query in the
   browser host.
 - `vendor/clay/clay.h` is the pinned Clay source used during compilation.
@@ -82,9 +90,17 @@ glosso first.glo -- build
 ```
 
 Review and commit the regenerated `src/generated/std_reference.glo`,
-`reference-index.js`, and staged files under `dist/`. The extractor preserves
-the existing language-manual search entries while rebuilding the modules,
-symbols, signatures, and typeclass instances directly from Glosso sources.
+`reference-index.js`, and staged files under `dist/`. The extractor rebuilds the
+modules, symbols, signatures, and typeclass instances directly from Glosso
+sources, and rebuilds the language-manual search entries from the chapter
+sources in the same pass. Run it after editing chapters as well as after editing
+`glosso/std/`; it reports how many chapters produced no prose, which is how a
+missing or misnamed `render_section_N` shows up.
+
+Adding or removing a chapter therefore means editing three things: the title and
+`SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in
+the matching `src/sections_*.glo`, and the section index lists in
+`manualSidebarGroups` in `app.js`. Everything else follows from those.
 
 ## Compile locally
 

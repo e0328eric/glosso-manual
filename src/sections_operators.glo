@@ -1,0 +1,864 @@
+// Sections 83-86: operators.
+
+render_section_83 :: () {
+    paragraph(0, #string,oneline
+        \\Every operator in Glosso is a typeclass method. There is no separate
+        \\operator-overloading feature and no free operator function: a
+        \\spelling is declared by exactly one typeclass, and the bodies that
+        \\give it meaning live in that class's instances. Writing an operator
+        \\at top level is rejected outright with `error: operator '<+>' must be
+        \\declared by a typeclass and implemented by its instances`.
+    );
+    paragraph(1, #string,oneline
+        \\The class declares the operator's signature, its fixity and, for a
+        \\binary operator, its precedence; each instance supplies a body for
+        \\one operand-type combination. Because instance heads are keyed on the
+        \\complete operand tuple, `(Vec2, f64)` and `(f64, Vec2)` are separate
+        \\instances and an asymmetric operator is expressible.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec2 :: struct { x: f64; y: f64; }
+        \\
+        \\Dot :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '<*>' :: (left: L, right: R) -> Output #operator(left, 19);
+        \\}
+        \\
+        \\(Vec2, Vec2) :: instance Dot {
+        \\    Output :: f64;
+        \\    '<*>' :: (a: Vec2, b: Vec2) -> f64 { return a.x * b.x + a.y * b.y; }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Vec2 = .{ .x = 1.0, .y = 2.0 };
+        \\    b: Vec2 = .{ .x = 3.0, .y = 4.0 };
+        \\    print("a <*> b     = %\n", a <*> b);
+        \\    print("a <*> b + 1 = %\n", a <*> b + 1.0);
+        \\}
+    );
+    code_block(3, "text", #string
+        \\a <*> b     = 11
+        \\a <*> b + 1 = 12
+    );
+    paragraph(4, #string,oneline
+        \\The `Output` associated type is the house pattern for an operator
+        \\class: it lets `<*>` return `f64` from two `Vec2` operands without
+        \\the class fixing a result type for everybody. Associated types are
+        \\covered in Associated Types; instance heads in Instances: Heads,
+        \\Bodies, and `where`.
+    );
+    subheading(5, "One owner per name");
+    paragraph(6, #string,oneline
+        \\Ownership is recorded when the class is declared, and a second claim
+        \\on the same operator is an error wherever it comes from. The check
+        \\also runs on instances, so an instance may only implement an
+        \\operator its own class declares.
+    );
+    code_block(7, "text", #string
+        \\error: operator '+' is already owned by typeclass 'Add'
+        \\error: operator '[]' is already owned by typeclass 'Indexable'
+        \\error: operator '<+>' has no owning typeclass
+        \\error: operator '<+>' declares conflicting precedence
+    );
+    paragraph(8, #string,oneline
+        \\The first two come from a class trying to redeclare a Prelude
+        \\spelling. The third comes from an instance whose class never
+        \\declared that operator. The fourth comes from an instance repeating
+        \\`#operator` with a level or associativity that disagrees with the
+        \\class.
+    );
+    code_block(9, "glosso", #string
+        \\'<+>' :: (a: s64, b: s64) -> s64 #operator(left, 17) { return a + b; }
+        \\main :: () {}
+    );
+    code_block(10, "text", #string
+        \\error: operator '<+>' must be declared by a typeclass and implemented by its instances
+    );
+    subheading(11, "Arity and fixity are part of the name");
+    paragraph(12, #string,oneline
+        \\The ownership key is the spelling together with its arity and its
+        \\fixity: `prefix` or `suffix` for a one-parameter operator, `infix`
+        \\for everything else. Two classes may therefore share a spelling as
+        \\long as they differ in fixity, which is exactly how the Prelude
+        \\gives `-` and `..` more than one meaning.
+    );
+    table_header(13, "Spelling   —   Fixity   —   Owning class");
+    table_row(14, "`-`   |   prefix   |   `Neg`");
+    table_row(15, "`-`   |   infix   |   `Sub`");
+    table_row(16, "`..`   |   prefix   |   `RangeToOp`");
+    table_row(17, "`..`   |   infix   |   `RangeExclusiveOp`");
+    table_row(18, "`..`   |   suffix   |   `RangeFromOp`");
+    paragraph(19, #string,oneline
+        \\A program can do the same with its own spellings. Two classes below
+        \\claim `~~` as a prefix operator and `~~~` as a suffix operator, and
+        \\one type implements both.
+    );
+    code_block(20, "glosso", #string
+        \\Norm :: typeclass (T: type) {
+        \\    Output :: type;
+        \\    '~~' :: (value: T) -> Output #operator(prefix);
+        \\}
+        \\
+        \\Total :: typeclass (T: type) {
+        \\    Output :: type;
+        \\    '~~~' :: (value: T) -> Output #operator(suffix);
+        \\}
+        \\
+        \\Vec2 :: instance Norm {
+        \\    Output :: f64;
+        \\    '~~' :: (v: Vec2) -> f64 { return v.x * v.x + v.y * v.y; }
+        \\}
+        \\
+        \\Vec2 :: instance Total {
+        \\    Output :: f64;
+        \\    '~~~' :: (v: Vec2) -> f64 #operator(suffix) { return v.x + v.y; }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Vec2 = .{ .x = 1.0, .y = 2.0 };
+        \\    print("~~a  = %\n", ~~a);
+        \\    print("a~~~ = %\n", a~~~);
+        \\}
+    );
+    code_block(21, "text", #string
+        \\~~a  = 5
+        \\a~~~ = 3
+    );
+    note(22, #string,oneline
+        \\A suffix instance method must repeat `#operator(suffix)`. Fixity is
+        \\part of the ownership key and defaults to `prefix`, so an instance
+        \\that omits the directive is looking for a prefix owner and reports
+        \\`error: operator '~~~' has no owning typeclass`. Prefix and infix
+        \\instances may omit the directive, because the class already settled
+        \\the fixity that its key matches.
+    );
+    subheading(23, "`#operator` and `#precedence`");
+    code_block(24, "text", #string
+        \\#operator( left | right | assign , level )
+        \\#operator( prefix | suffix )
+        \\#precedence( left | right | assign , level )
+    );
+    table_header(25, "Mode   —   Means   —   Level");
+    table_row(26, "`left`   |   infix, groups to the left   |   required");
+    table_row(27, "`right`   |   infix, groups to the right   |   required");
+    table_row(28, "`prefix`   |   unary, before its operand   |   rejected");
+    table_row(29, "`suffix`   |   unary, after its operand   |   rejected");
+    table_row(30, "`assign`   |   update assignment, arity 2   |   required");
+    paragraph(31, #string,oneline
+        \\`#precedence` is the same registration restricted to the binary and
+        \\assignment modes; `#operator` additionally accepts the two unary
+        \\ones. Levels are integers from 0 to 1000 and are placed on the 0-20
+        \\scale described in Operator Precedence and the 0-20 Scale. An
+        \\instance method may repeat the mode alone, as `#operator(left)`, and
+        \\inherit the level from its class.
+    );
+    bullet(32, #string,oneline
+        \\A binary or assignment operator with no level anywhere is
+        \\`error: binary operator '<+>' needs #operator(left|right|assign, n)`.
+        \\Bare `#operator(left)` on the class declaration counts as no level.
+    );
+    bullet(33, #string,oneline
+        \\A level on a unary mode does not parse: `#operator(prefix, 5)` is
+        \\`error: unexpected token ','`, and `#precedence(prefix)` is
+        \\`error: #precedence expects left, right, or assign`.
+    );
+    bullet(34, #string,oneline
+        \\An unknown mode is
+        \\`error: #operator expects left, right, prefix, suffix, or assign`,
+        \\and a level outside the range is
+        \\`error: operator precedence level must be between 0 and 1000`.
+    );
+    bullet(35, #string,oneline
+        \\An operator function takes one, two or three parameters; anything
+        \\else is `error: operator functions need one, two, or three
+        \\parameters`. `assign` additionally requires arity 2, and `[]` and
+        \\`[]=` are fixed at 2 and 3 and may not declare precedence at all.
+    );
+    subheading(36, "Claiming a spelling");
+    paragraph(37, #string,oneline
+        \\An operator name is written between single quotes, which is the only
+        \\way to get characters like `[` past the lexer, and its characters
+        \\must come from the eighteen-character operator set
+        \\`+ - * / < > ! @ % ^ & | ~ ? . , : =`. Fourteen spellings are
+        \\reserved and rejected at the token level; the full rules, including
+        \\why `?` can never appear inside a longer operator, are in Reserved
+        \\Operators and Operator Names.
+    );
+    bullet(38, #string,oneline
+        \\A name made only of letters can be declared but never written: at a
+        \\use site the letters lex as an identifier, so `2 plus 3` is
+        \\`error: unexpected token 'plus'`.
+    );
+    bullet(39, #string,oneline
+        \\`[` and `]` are refused except in the two fixed forms `[]` and
+        \\`[]=`: `error: operator '<[]>' cannot contain '[' or ']'`.
+        \\An all-stars name is reserved for pointer sigils in type position, so
+        \\`error: operator '**' cannot be overloaded as a prefix operator`.
+    );
+    note(40, #string,oneline
+        \\A new spelling is only parseable in the file that declares it. The
+        \\parser learns fixities and levels from a prescan of the file it is
+        \\about to parse, and that prescan runs before any `#import` or `#load`
+        \\is resolved. A module may export a class that owns `<%>` and export
+        \\functions that use it, but a file importing that module still gets
+        \\`error: unexpected token '<%>'` if it writes the operator itself.
+        \\The prescan is described in The Operator Prescan.
+    );
+}
+
+render_section_84 :: () {
+    paragraph(0, #string,oneline
+        \\An update assignment such as `x += y` is resolved through a typeclass
+        \\of its own, one per operator, named after the operation it updates.
+        \\Plain `=` is not one of them: it is a reserved token, it cannot be
+        \\overloaded, and the statement form is covered in Assignment and
+        \\Update Assignment.
+    );
+    paragraph(1, #string,oneline
+        \\Each class follows the same shape as any other binary operator
+        \\class, with `#operator(assign, 0)` in place of a normal precedence,
+        \\and each is paired in the Prelude with a blanket instance that
+        \\defines the compound form in terms of the plain one.
+    );
+    code_block(2, "glosso", #string
+        \\AddAssign :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '+=' :: (left: L, right: R) -> Output #operator(assign, 0);
+        \\}
+        \\
+        \\($L, $R) :: instance AddAssign where Add(L, R) {
+        \\    Output :: Add(L, R).Output;
+        \\    '+=' :: (left: L, right: R) -> Output { return left + right; }
+        \\}
+    );
+    paragraph(3, #string,oneline
+        \\The consequence is that `+=` starts working the moment `+` does. A
+        \\type that implements `Add` needs no further declaration, and a type
+        \\that wants a different compound behaviour writes its own instance,
+        \\which outranks the blanket one by ordinary overload scoring.
+    );
+    subheading(4, "The assignment classes");
+    table_header(5, "Classes   —   Operators   —   Blanket guard");
+    table_row(6, "`AddAssign` `SubAssign` `MulAssign` `DivAssign` `RemAssign`   |   `+=` `-=` `*=` `/=` `%=`   |   `Add` `Sub` `Mul` `Div` `Rem`");
+    table_row(7, "`WrapAddAssign` `WrapSubAssign` `WrapMulAssign`   |   `+%=` `-%=` `*%=`   |   `WrapAdd` `WrapSub` `WrapMul`");
+    table_row(8, "`SaturatingAddAssign` `SaturatingSubAssign` `SaturatingMulAssign`   |   `+|=` `-|=` `*|=`   |   `SaturatingAdd` `SaturatingSub` `SaturatingMul`");
+    table_row(9, "`ShiftLeftAssign` `ShiftRightAssign` `SaturatingShiftLeftAssign`   |   `<<=` `>>=` `<<|=`   |   `ShiftLeft` `ShiftRight` `SaturatingShiftLeft`");
+    table_row(10, "`BitAndAssign` `BitOrAssign` `BitXorAssign`   |   `&=` `|=` `^=`   |   `BitAnd` `BitOr` `BitXor`");
+    table_row(11, "`LogicalAndAssign` `LogicalOrAssign`   |   `&&=` `||=`   |   `LogicalAnd` `LogicalOr`");
+    paragraph(12, #string,oneline
+        \\Nineteen classes, nineteen blanket instances, and no others. There is
+        \\no compound form of a unary operator, and no class for `=`.
+    );
+    subheading(13, "Declaring a new assignment operator");
+    paragraph(14, #string,oneline
+        \\A new one is an ordinary operator class whose member carries
+        \\`#operator(assign, level)`. The level is mandatory; a non-zero level
+        \\compiles, but `0` is the tier the Prelude uses for the whole family
+        \\and is what an assignment operator should take.
+        \\`#operator(assign)` without a level is `error: binary operator '<<<='
+        \\needs #operator(left|right|assign, n)`, and arity 1 or 3 is
+        \\`error: assignment operator '<<<=' must have arity 2`.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Counter :: struct #derive(Show) { n: s64; }
+        \\
+        \\(Counter, Counter) :: instance Add {
+        \\    Output :: Counter;
+        \\    '+' :: (a: Counter, b: Counter) -> Counter { return .{ .n = a.n + b.n }; }
+        \\}
+        \\
+        \\Merge :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '<<<=' :: (left: L, right: R) -> Output #operator(assign, 0);
+        \\}
+        \\
+        \\(Counter, Counter) :: instance Merge {
+        \\    Output :: Counter;
+        \\    '<<<=' :: (a: Counter, b: Counter) -> Counter { return .{ .n = a.n * 10 + b.n }; }
+        \\}
+        \\
+        \\main :: () {
+        \\    c: Counter = .{ .n = 6 };
+        \\    d: Counter = .{ .n = 5 };
+        \\    c += d;
+        \\    print("c += d   -> %\n", show(c));
+        \\    c = .{ .n = 6 };
+        \\    c <<<= d;
+        \\    print("c <<<= d -> %\n", show(c));
+        \\}
+    );
+    code_block(16, "text", #string
+        \\c += d   -> {11}
+        \\c <<<= d -> {65}
+    );
+    paragraph(17, #string,oneline
+        \\`+=` here came from the blanket `AddAssign` instance over the
+        \\program's own `Add`; nothing in the program mentions `AddAssign`.
+        \\`<<<=` came from `Merge`, and it would work just as well written
+        \\above the `Merge` declaration, because the prescan registers the
+        \\spelling for the whole file before parsing begins.
+    );
+    subheading(18, "The right-hand side is coerced first");
+    paragraph(19, #string,oneline
+        \\A compound assignment is checked by coercing the right operand to the
+        \\type of the left one and only then resolving `op=`. Every compound
+        \\assignment is therefore homogeneous, whatever instances exist. A
+        \\heterogeneous `Add` gives a working `+` and an unreachable `+=`.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Counter :: struct #derive(Show) { n: s64; }
+        \\
+        \\(Counter, s64) :: instance Add {
+        \\    Output :: Counter;
+        \\    '+' :: (a: Counter, b: s64) -> Counter { return .{ .n = a.n + b }; }
+        \\}
+        \\
+        \\(Counter, s64) :: instance AddAssign {
+        \\    Output :: Counter;
+        \\    '+=' :: (a: Counter, b: s64) -> Counter { return .{ .n = a.n + b }; }
+        \\}
+        \\
+        \\main :: () {
+        \\    c: Counter = .{ .n = 6 };
+        \\    print("c + 5 -> %\n", show(c + 5));
+        \\    c += 5;
+        \\}
+    );
+    code_block(21, "text", #string
+        \\error: no operator '+=' for Counter, Counter
+    );
+    paragraph(22, #string,oneline
+        \\The diagnostic is the proof: the program wrote `c += 5`, and the
+        \\compiler reports `Counter, Counter`, because the literal `5` was
+        \\already coerced to the left type before any instance was consulted.
+        \\Adding the matching `(Counter, s64)` instance of `AddAssign` changes
+        \\nothing, since the resolution never asks for that pair.
+    );
+    bullet(23, #string,oneline
+        \\The fix is to write the expression form: `c = c + 5;` resolves
+        \\`(Counter, s64) :: instance Add` and compiles.
+    );
+    bullet(24, #string,oneline
+        \\The standard library hits this too. Pointer offsetting is
+        \\`([*]$T, int) :: instance Add`, so `p += 1` on a `[*]s64` is
+        \\`error: no operator '+=' for [*]int, [*]int`. Write `p = p + 1;`.
+    );
+    note(25, #string,oneline
+        \\This is the limitation to remember about the operator system: `+` and
+        \\`+=` are not interchangeable for mixed operand types. An API that
+        \\wants both scaled multiplication and `*=` must offer a same-type
+        \\`Mul` as well as the mixed one.
+    );
+    subheading(26, "The result type");
+    paragraph(27, #string,oneline
+        \\A compound assignment stores the operator's result back into the left
+        \\operand, so `Output` must be assignable to the left type. When it is
+        \\not, the failure is reported as a missing operator with a note naming
+        \\the real problem.
+    );
+    code_block(28, "text", #string
+        \\error: no operator '<<<=' for Counter, Counter
+        \\note: assign int to Counter
+    );
+    paragraph(29, #string,oneline
+        \\When the left operand is a subscript, both halves of the indexing
+        \\protocol run: `a[i] += 1` reads through `'[]'` and stores through
+        \\`'[]='`. Indexing and Slicing Operators shows the expansion.
+    );
+}
+
+render_section_85 :: () {
+    paragraph(0, #string,oneline
+        \\A subscript expression is an operator call like any other. Reading
+        \\`c[k]` dispatches on `Indexable`, storing `c[k] = v` dispatches on
+        \\`IndexSet`, and both classes are declared in the Prelude and
+        \\available without an import.
+    );
+    code_block(1, "glosso", #string
+        \\Indexable :: typeclass (Container: type, Key: type) {
+        \\    Output :: type;
+        \\    '[]' :: (container: Container, key: Key) -> Output;
+        \\}
+        \\
+        \\IndexSet :: typeclass (Container: type, Key: type, Value: type) {
+        \\    '[]=' :: (container: Container, key: Key, value: Value);
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`[]` and `[]=` are the only operator names allowed to contain
+        \\brackets, and they are special in two further ways: their arities are
+        \\fixed at 2 and 3, and they may not declare precedence, because the
+        \\subscript is parsed as syntax rather than as an infix operator. A
+        \\`#operator` or `#precedence` directive on either is
+        \\`error: operator '[]' is special syntax and cannot declare operator
+        \\precedence`.
+    );
+    subheading(3, "Declaring them for a container");
+    paragraph(4, #string,oneline
+        \\`Key` is an arbitrary type. A grid indexed by a coordinate struct
+        \\needs one `Indexable` instance for reading and one `IndexSet`
+        \\instance for storing; a third `Indexable` instance keyed on a range
+        \\type adds slicing.
+    );
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Coord :: struct #derive(Show) { row: s64; col: s64; }
+        \\Grid  :: struct { cells: []s64; }
+        \\
+        \\(Grid, Coord) :: instance Indexable {
+        \\    Output :: s64;
+        \\    '[]' :: (g: Grid, k: Coord) -> s64 { return g.cells[k.row * 3 + k.col]; }
+        \\}
+        \\
+        \\(Grid, Coord, s64) :: instance IndexSet {
+        \\    '[]=' :: (g: Grid, k: Coord, value: s64) { g.cells[k.row * 3 + k.col] = value; }
+        \\}
+        \\
+        \\(Grid, Range(s64)) :: instance Indexable {
+        \\    Output :: []s64;
+        \\    '[]' :: (g: Grid, k: Range(s64)) -> []s64 { return g.cells[k]; }
+        \\}
+        \\
+        \\main :: () {
+        \\    storage: [9]s64;
+        \\    g: Grid = .{ .cells = storage[..] };
+        \\    c: Coord = .{ .row = 1, .col = 2 };
+        \\    g[c] = 42;
+        \\    print("g[%] = %\n", c, g[c]);
+        \\    g[c] += 8;
+        \\    print("after += : %\n", g[c]);
+        \\    view := g[3..6];
+        \\    print("view.count = %, view[2] = %\n", view.count, view[2]);
+        \\}
+    );
+    code_block(6, "text", #string
+        \\g[{1, 2}] = 42
+        \\after += : 50
+        \\view.count = 3, view[2] = 50
+    );
+    paragraph(7, #string,oneline
+        \\`IndexSet` has no `Output`: a store is a statement, and the
+        \\requirement returns nothing. A read with no matching instance names
+        \\the exact tuple that failed to resolve, as in
+        \\`error: no operator '[]' for Bag, int`; a store with no matching
+        \\instance is the case the compiler still handles badly, described at
+        \\the end of this chapter.
+    );
+    subheading(8, "What a subscript lowers to");
+    paragraph(9, #string,oneline
+        \\`c[k]` becomes the call `'[]'(c, k)`, `c[k] = v` becomes
+        \\`'[]='(c, k, v)`, and a compound assignment to a subscript becomes
+        \\both: `c[k] += n` is `'[]='(c, k, '[]'(c, k) + n)`. Printing from the
+        \\two operator bodies makes the order visible.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Bag :: struct { cells: []s64; }
+        \\
+        \\(Bag, s64) :: instance Indexable {
+        \\    Output :: s64;
+        \\    '[]' :: (b: Bag, k: s64) -> s64 { print("  get %\n", k); return b.cells[k]; }
+        \\}
+        \\(Bag, s64, s64) :: instance IndexSet {
+        \\    '[]=' :: (b: Bag, k: s64, v: s64) { print("  set % = %\n", k, v); b.cells[k] = v; }
+        \\}
+        \\
+        \\main :: () {
+        \\    storage: [4]s64;
+        \\    b: Bag = .{ .cells = storage[..] };
+        \\    print("b[1] = 7:\n");
+        \\    b[1] = 7;
+        \\    print("read b[1]:\n");
+        \\    x := b[1];
+        \\    print("b[1] += 2:\n");
+        \\    b[1] += 2;
+        \\    print("final %\n", x);
+        \\}
+    );
+    code_block(11, "text", #string
+        \\b[1] = 7:
+        \\  set 1 = 7
+        \\read b[1]:
+        \\  get 1
+        \\b[1] += 2:
+        \\  get 1
+        \\  set 1 = 9
+        \\final 7
+    );
+    paragraph(12, #string,oneline
+        \\The quoted names are also callable directly. `'[]'(b, 1)` and
+        \\`'[]='(b, 1, 9)` are legal expressions that are rewritten into the
+        \\same subscript nodes, which is occasionally useful inside a macro
+        \\that is building an index expression by hand.
+    );
+    note(13, #string,oneline
+        \\`'[]='` receives the container by value. A container that owns its
+        \\elements inline, such as a struct holding a `[4]s64`, will appear to
+        \\accept a store and then read back the old element, because the
+        \\instance mutated a copy. Mutation has to travel through an interior
+        \\pointer or a view: hold a `[]s64` rather than a `[4]s64`.
+    );
+    subheading(14, "Index types");
+    paragraph(15, #string,oneline
+        \\The built-in containers coerce their index to `int` before resolving.
+        \\That covers strings, arrays, views and many-pointers, so `a[i]` on a
+        \\`[]s64` accepts a `u8` or an `s32` index. A user container does not
+        \\get that
+        \\conversion: the key is synthesised as written, given the default type
+        \\if it is a compile-time number, and matched against the instance
+        \\heads. With only `(Bag, s64) :: instance Indexable` in scope, `b[3]`
+        \\resolves and `b[i]` with `i: u8` is
+        \\`error: no operator '[]' for Bag, u8`.
+    );
+    paragraph(16, #string,oneline
+        \\The remedy is either a blanket instance,
+        \\`(Bag, $K) :: instance Indexable where Is_Integer(K)`, or a second
+        \\concrete instance for the key type in question. Instance selection
+        \\itself is described in How an Instance Is Chosen.
+    );
+    subheading(17, "Slicing");
+    paragraph(18, #string,oneline
+        \\Slicing is not a separate feature. A slice expression is a subscript
+        \\whose key is one of the six range values, so a container supports the
+        \\shapes it declares `Indexable` instances for and no others. The
+        \\Prelude supplies all six for `string`, `cstring`, `string16`,
+        \\`cstring16`, views in every const and volatile combination, and
+        \\dynamic arrays; a fixed array reaches them by coercing to a view.
+    );
+    table_header(19, "Written   —   Key type   —   Produced by");
+    table_row(20, "`c[a..b]`   |   `Range(s64)`   |   `RangeExclusiveOp`");
+    table_row(21, "`c[a..=b]`   |   `RangeInclusive(s64)`   |   `RangeInclusiveOp`");
+    table_row(22, "`c[a..]`   |   `RangeFrom(s64)`   |   `RangeFromOp`");
+    table_row(23, "`c[..b]`   |   `RangeTo(s64)`   |   `RangeToOp`");
+    table_row(24, "`c[..=b]`   |   `RangeToInclusive(s64)`   |   `RangeToInclusiveOp`");
+    table_row(25, "`c[..]`   |   `RangeFull(s64)`   |   the parser, not an operator");
+    paragraph(26, #string,oneline
+        \\The last row is the odd one. A bare `..` inside brackets is its own
+        \\syntax node, typed as `RangeFull(s64)` by the checker; there is no
+        \\class that produces a `RangeFull` value, and it cannot be written
+        \\anywhere else. Declaring `Indexable` on `RangeFull(s64)` is what
+        \\makes `c[..]` legal for a user container.
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Bag :: struct { cells: []s64; }
+        \\
+        \\(Bag, RangeFull(s64)) :: instance Indexable {
+        \\    Output :: []s64;
+        \\    '[]' :: (b: Bag, k: RangeFull(s64)) -> []s64 { return b.cells; }
+        \\}
+        \\
+        \\(Bag, RangeFrom(s64)) :: instance Indexable {
+        \\    Output :: []s64;
+        \\    '[]' :: (b: Bag, k: RangeFrom(s64)) -> []s64 { return b.cells[k]; }
+        \\}
+        \\
+        \\main :: () {
+        \\    xs: [4]s64;
+        \\    for i: 0 .. 4 xs[i] = i * 10;
+        \\    b: Bag = .{ .cells = xs[..] };
+        \\    all := b[..];
+        \\    tail := b[2..];
+        \\    print("b[..].count  = %\n", all.count);
+        \\    print("b[2..].count = % first = %\n", tail.count, tail[0]);
+        \\}
+    );
+    code_block(28, "text", #string
+        \\b[..].count  = 4
+        \\b[2..].count = 2 first = 20
+    );
+    note(29, #string,oneline
+        \\A container that is `Indexable` but has no `IndexSet` instance is not
+        \\rejected cleanly today. The class requirement itself matches the
+        \\three-argument call, so checking succeeds and the failure surfaces at
+        \\code generation as `error: internal error: 'op_lbrrbreq_Bag_int_int'
+        \\is called but was never lowered`. The same happens for `s[0] = 65` on
+        \\a `string`, which is deliberately read-only. Declare the `IndexSet`
+        \\instance, or do not write the store.
+    );
+    paragraph(30, #string,oneline
+        \\Range values, their fields, and the classes that build them are
+        \\covered in Iteration and Range Typeclasses; the slicing semantics of
+        \\the built-in collections are in Ranges and Slicing.
+    );
+}
+
+render_section_86 :: () {
+    paragraph(0, #string,oneline
+        \\A `for` loop over anything that is not a built-in collection goes
+        \\through `Iterable`. The class has a single requirement, and that
+        \\requirement is a macro: the loop body arrives as a `Code` value and
+        \\the instance decides what to do with it.
+    );
+    code_block(1, "glosso", #string
+        \\Iterable :: typeclass (T: type) {
+        \\    for_expansion :: (val: T, body: Code, flags: For_Flags) #expand;
+        \\}
+        \\
+        \\For_Flags :: enum_flags u32 {
+        \\    POINTER :: 16#1;
+        \\    REVERSE :: 16#2;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\`for x: container { ... }` becomes a call to `for_expansion` with the
+        \\container, the body wrapped as `Code`, and a flag set. The instance
+        \\declares the loop variables with the backtick escape so that they
+        \\land in the caller's scope rather than being renamed by macro
+        \\hygiene, and inserts the body wherever an iteration belongs.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Countdown :: struct { from: s64; }
+        \\
+        \\Countdown :: instance Iterable {
+        \\    for_expansion :: (value: Countdown, body: Code, flags: For_Flags) #expand {
+        \\        c := value;
+        \\        reverse := (flags & For_Flags.REVERSE) != cast(For_Flags)0;
+        \\        if reverse {
+        \\            `it := 1;
+        \\            `it_index := 0;
+        \\            while it <= c.from { #insert body; it = it + 1; it_index += 1; }
+        \\        } else {
+        \\            `it := c.from;
+        \\            `it_index := 0;
+        \\            while it > 0 { #insert body; it = it - 1; it_index += 1; }
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    c: Countdown = .{ .from = 4 };
+        \\    for c print("% (index %)\n", it, it_index);
+        \\    for x: c print("named %\n", x);
+        \\    for < c print("reversed %\n", it);
+        \\}
+    );
+    code_block(4, "text", #string
+        \\4 (index 0)
+        \\3 (index 1)
+        \\2 (index 2)
+        \\1 (index 3)
+        \\named 4
+        \\named 3
+        \\named 2
+        \\named 1
+        \\reversed 1
+        \\reversed 2
+        \\reversed 3
+        \\reversed 4
+    );
+    paragraph(5, #string,oneline
+        \\The names the body sees are `it` and `it_index`; the named form
+        \\`for x: c` is an alias the compiler inserts ahead of the body, so an
+        \\instance never has to know which spelling the caller used. An
+        \\instance that declares neither name still works for a body that
+        \\ignores them.
+    );
+    table_header(6, "Flag   —   Value   —   Set by");
+    table_row(7, "`For_Flags.POINTER`   |   `16#1`   |   nothing; declared but never produced");
+    table_row(8, "`For_Flags.REVERSE`   |   `16#2`   |   the `for <` spelling");
+    paragraph(9, #string,oneline
+        \\An instance is free to ignore `REVERSE`, in which case `for <` and
+        \\`for` iterate identically. `POINTER` is reserved: the loop statement
+        \\has no spelling that sets it, so today the flag word is either zero
+        \\or `REVERSE`. The loop statement itself, including `break`,
+        \\`continue` and the explicit `for :macro_name` form, is described in
+        \\`for` Loops and Custom Iteration with `for_expansion`.
+    );
+    subheading(10, "The range operators");
+    paragraph(11, #string,oneline
+        \\`..` and `..=` are ordinary user-visible operators with ordinary
+        \\classes. Five classes cover the five writable shapes, split by
+        \\fixity: two infix, two prefix, one suffix. The two infix ones sit at
+        \\precedence level 2, which binds looser than everything except
+        \\assignment, so `1 .. 1 + 3` is the range `1 .. 4`.
+    );
+    table_header(12, "Written   —   Class   —   Fixity");
+    table_row(13, "`a .. b`   |   `RangeExclusiveOp`   |   infix, `#operator(left, 2)`");
+    table_row(14, "`a ..= b`   |   `RangeInclusiveOp`   |   infix, `#operator(left, 2)`");
+    table_row(15, "`a ..`   |   `RangeFromOp`   |   `#operator(suffix)`");
+    table_row(16, "`.. b`   |   `RangeToOp`   |   `#operator(prefix)`");
+    table_row(17, "`..= b`   |   `RangeToInclusiveOp`   |   `#operator(prefix)`");
+    paragraph(18, #string,oneline
+        \\Each produces a plain struct. All six range types are ordinary
+        \\generic structs in the Prelude and their fields are readable like any
+        \\other; `RangeFull($T)` is the one with no operator behind it,
+        \\produced only by a bare `..` inside a subscript.
+    );
+    table_header(19, "Expression   —   Value type   —   Fields");
+    table_row(20, "`2 .. 5`   |   `Range(int)`   |   `start`, `end`");
+    table_row(21, "`2 ..= 5`   |   `RangeInclusive(int)`   |   `start`, `end`");
+    table_row(22, "`2 ..`   |   `RangeFrom(int)`   |   `start`");
+    table_row(23, "`.. 5`   |   `RangeTo(int)`   |   `end`");
+    table_row(24, "`..= 5`   |   `RangeToInclusive(int)`   |   `end`");
+    table_row(25, "`c[..]`   |   `RangeFull(int)`   |   none");
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\name_of :: (value: $T) -> string { return show(T); }
+        \\
+        \\main :: () {
+        \\    a := 2 .. 5;
+        \\    b := 2 ..= 5;
+        \\    c := 2 ..;
+        \\    d := ..5;
+        \\    e := ..=5;
+        \\    print("2 .. 5  -> %  start=% end=%\n", name_of(a), a.start, a.end);
+        \\    print("2 ..= 5 -> %\n", name_of(b));
+        \\    print("2 ..    -> %  start=%\n", name_of(c), c.start);
+        \\    print("..5     -> %  end=%\n", name_of(d), d.end);
+        \\    print("..=5    -> %\n", name_of(e));
+        \\}
+    );
+    code_block(27, "text", #string
+        \\2 .. 5  -> Range_int  start=2 end=5
+        \\2 ..= 5 -> RangeInclusive_int
+        \\2 ..    -> RangeFrom_int  start=2
+        \\..5     -> RangeTo_int  end=5
+        \\..=5    -> RangeToInclusive_int
+    );
+    subheading(28, "`Step` and `RangeOrigin`");
+    paragraph(29, #string,oneline
+        \\Nothing above is specific to integers. The Prelude's range-operator
+        \\instances are blanket instances guarded by two small classes, so a
+        \\type becomes rangeable by implementing them rather than by
+        \\implementing `..`.
+    );
+    code_block(30, "glosso", #string
+        \\Step :: typeclass (T: type) {
+        \\    next :: (value: T) -> T;
+        \\    prev :: (value: T) -> T;
+        \\}
+        \\
+        \\RangeOrigin :: typeclass (T: type) {
+        \\    range_origin :: (#empty: T) -> T;
+        \\}
+        \\
+        \\($T, T) :: instance RangeExclusiveOp where Step(T) {
+        \\    Output :: Range(T);
+        \\    '..' :: (start: T, end: T) -> Output #magic "range";
+        \\}
+        \\
+        \\$T :: instance RangeToOp where Step(T) where RangeOrigin(T) {
+        \\    Output :: RangeTo(T);
+        \\    '..' :: (end: T) -> Output #operator(prefix) #magic "range_to";
+        \\}
+    );
+    paragraph(31, #string,oneline
+        \\`Step` alone unlocks `a .. b`, `a ..= b` and `a ..`. The two
+        \\open-at-the-start forms `.. b` and `..= b` additionally need
+        \\`RangeOrigin`, which supplies the value the iteration begins at. To
+        \\iterate the resulting range the type also needs `PartialOrd`, because
+        \\the Prelude's `Iterable` instances for the range structs compare
+        \\`it` against the endpoint.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Tick :: struct #derive(Show) { n: s64; }
+        \\
+        \\Tick :: instance Step {
+        \\    next :: (value: Tick) -> Tick { return .{ .n = value.n + 1 }; }
+        \\    prev :: (value: Tick) -> Tick { return .{ .n = value.n - 1 }; }
+        \\}
+        \\
+        \\(Tick, Tick) :: instance PartialOrd {
+        \\    '<=>' :: (a: Tick, b: Tick) -> Ordering {
+        \\        if a.n < b.n return Ordering.Less;
+        \\        if a.n > b.n return Ordering.Greater;
+        \\        return Ordering.Equal;
+        \\    }
+        \\}
+        \\
+        \\Tick :: instance RangeOrigin {
+        \\    range_origin :: (#empty: Tick) -> Tick { return .{ .n = 0 }; }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Tick = .{ .n = 2 };
+        \\    b: Tick = .{ .n = 5 };
+        \\    for t: a .. b print("tick %\n", show(t));
+        \\    for t: ..b print("to %\n", show(t));
+        \\}
+    );
+    code_block(33, "text", #string
+        \\tick {2}
+        \\tick {3}
+        \\tick {4}
+        \\to {0}
+        \\to {1}
+        \\to {2}
+        \\to {3}
+        \\to {4}
+    );
+    paragraph(34, #string,oneline
+        \\Without `Step` the operator does not resolve at all:
+        \\`error: no operator '..' for Tick, Tick`. Without `RangeOrigin` the
+        \\prefix form fails on its own with
+        \\`error: no prefix operator '..' for Tick`, while `a .. b` keeps
+        \\working. A type with no `Iterable` instance at all is
+        \\`error: for-each needs an array, got Tick`.
+    );
+    subheading(35, "`ToPattern`");
+    paragraph(36, #string,oneline
+        \\`ToPattern` is what lets a range appear in a `case` arm. It is
+        \\compile-time only by construction: `to_pattern` takes a `#comptime`
+        \\value and returns a `pattern`, and `pattern` values cannot reach
+        \\lowering, so an instance is resolved during checking and erased
+        \\afterwards. The Prelude implements it for all six range shapes over
+        \\integers, each with an intrinsic body that normalises the shape to a
+        \\closed interval before the coverage analysis sees it.
+    );
+    code_block(37, "glosso", #string
+        \\ToPattern :: typeclass (T: type) {
+        \\    to_pattern :: (#comptime value: T) -> pattern;
+        \\}
+        \\
+        \\Range($T) :: instance ToPattern where Is_Integer(T) {
+        \\    to_pattern :: (#comptime value: Range(T)) -> pattern #magic "range_to_pattern";
+        \\}
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\
+        \\classify :: (n: s64) -> string {
+        \\    if n == {
+        \\        case ..=0;    return "non-positive";
+        \\        case 1..=9;   return "small";
+        \\        case 10..100; return "medium";
+        \\        case 100..;   return "large";
+        \\    }
+        \\    return "?";
+        \\}
+        \\
+        \\main :: () {
+        \\    for v: .[-5, 0, 3, 42, 1000] print("% -> %\n", v, classify(v));
+        \\}
+    );
+    code_block(39, "text", #string
+        \\-5 -> non-positive
+        \\0 -> non-positive
+        \\3 -> small
+        \\42 -> medium
+        \\1000 -> large
+    );
+    paragraph(40, #string,oneline
+        \\The ranges are exclusive where written exclusive: `10..100` does not
+        \\cover `100`, which is why the last arm starts there. Because the
+        \\class is keyed on `Is_Integer`, a user `Step` type does not get range
+        \\patterns for free. Ranges in Patterns and `ToPattern` covers the
+        \\matching side, and Exhaustiveness, Guards, and Reachability covers
+        \\what the normalised intervals are used for.
+    );
+}

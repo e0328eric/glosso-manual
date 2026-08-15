@@ -1,0 +1,2793 @@
+// Sections 56-67: functions and generics.
+
+render_section_56 :: () {
+    paragraph(0, #string,oneline
+        \\A procedure is declared the way every other compile-time constant is
+        \\declared: a name, `::`, and an initializer. What makes it a procedure is
+        \\that the initializer begins with a parenthesized parameter list. Nothing
+        \\about the declaration is a separate "function" statement, which is why a
+        \\procedure may appear anywhere a declaration may appear, including inside
+        \\another procedure's body.
+    );
+    code_block(1, "ebnf", #string
+        \\procedure := name "::" "(" [ parameters ] ")"
+        \\             [ "->" result-type ]
+        \\             { function-directive }
+        \\             { "where" comptime-bool-expression }
+        \\             ( block | ";" )
+        \\
+        \\result-type := type
+        \\             | "(" type { "," type } ")"
+        \\             | "(" name ":" type { "," name ":" type } ")"
+    );
+    paragraph(2, #string,oneline
+        \\The order of those five slots is fixed. The parser reads all function
+        \\directives in one loop and stops at the first `where`, so a directive
+        \\written after a constraint is no longer in the directive position and the
+        \\declaration is rejected: `f :: (a: int) where true #inline { }` gives
+        \\`error: function directives must appear before where clauses`. The
+        \\corrected spelling puts every directive first and every constraint after
+        \\them, as in `plain :: (a: int) -> int #inline where true { return a + 1; }`.
+    );
+    table_header(3, "Slot   —   Spelling   —   Rule");
+    table_row(4, "parameters   |   `( ... )`   |   required, even when empty");
+    table_row(5, "result type   |   `-> R`   |   optional; omitting it means `void`");
+    table_row(6, "directives   |   `#inline`, `#must`, ...   |   any number, before the first `where`");
+    table_row(7, "constraints   |   `where <expr>`   |   any number, after the last directive");
+    table_row(8, "body   |   `{ ... }`   |   required, except on `#magic` and `#foreign`");
+    paragraph(9, #string,oneline
+        \\The directive vocabulary is given in the chapter Function and Aggregate
+        \\Directives, and the constraint language in Constraints with `where`. This
+        \\chapter covers only the shape the two of them sit in.
+    );
+
+    subheading(10, "Result types");
+    paragraph(11, #string,oneline
+        \\A procedure with no `->` returns `void`. Writing `-> void` explicitly is
+        \\accepted and means the same thing. A result type that is not `void`
+        \\constrains every `return` expression in the body: returning a value from a
+        \\`void` procedure is `error: got int, expected void`, and returning the
+        \\wrong type is the ordinary conversion diagnostic, `error: got int, expected
+        \\string`.
+    );
+    code_block(12, "glosso", #string
+        \\hello :: () { print("hello\n"); }
+        \\nothing :: () -> void { print("nothing\n"); }
+        \\add :: (a: int, b: int) -> int { return a + b; }
+        \\add3 :: (a, b, c: int) -> int { return a + b + c; }
+    );
+    paragraph(13, #string,oneline
+        \\`add3` uses a shared type annotation: one type applies to every name in the
+        \\group. Shared annotations, defaults, and named arguments are the subject of
+        \\Default and Named Parameters.
+    );
+    note(14, #string,oneline
+        \\A procedure that declares a result type and never executes a `return` is
+        \\accepted, and the call yields the zero value of the result type. There is
+        \\no missing-return diagnostic, so a body whose only exit is a forgotten
+        \\branch fails silently rather than at compile time.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\no_return_stmt :: (a: int) -> int { }
+        \\
+        \\main :: () {
+        \\    print("no_return_stmt=%\n", no_return_stmt(5));
+        \\}
+    );
+    code_block(16, "text", #string
+        \\no_return_stmt=0
+    );
+
+    subheading(17, "Multiple and named results");
+    paragraph(18, #string,oneline
+        \\A parenthesized list after the arrow declares more than one result. There
+        \\are two spellings. A list of bare types produces a tuple result; a list in
+        \\which every element is written `name: type` produces named results.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\divmod :: (a: int, b: int) -> (int, int) { return a / b, a % b; }
+        \\
+        \\minmax :: (a: int, b: int) -> (lo: int, hi: int) {
+        \\    if a < b { lo = a; hi = b; return; }
+        \\    lo = b;
+        \\    hi = a;
+        \\}
+        \\
+        \\main :: () {
+        \\    q, r := divmod(7, 2);
+        \\    print("q=% r=%\n", q, r);
+        \\    t := divmod(7, 2);
+        \\    print("t.0=% t.1=%\n", t.0, t.1);
+        \\    lo, hi := minmax(9, 4);
+        \\    print("lo=% hi=%\n", lo, hi);
+        \\    _, only_r := divmod(9, 4);
+        \\    print("only_r=%\n", only_r);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\q=3 r=1
+        \\t.0=3 t.1=1
+        \\lo=4 hi=9
+        \\only_r=1
+    );
+    paragraph(21, #string,oneline
+        \\A named result list is rewritten by the parser before checking: each name
+        \\becomes a zero-initialized local at the top of the body, and an implicit
+        \\`return <names>;` is appended at the end. A bare `return;` inside such a
+        \\body is rewritten to return the names too. This is why `minmax` can assign
+        \\`lo` and `hi` and then leave, and why a named-result procedure with an
+        \\empty body returns zeroes rather than being rejected.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\split :: (a: int) -> (lo: int, hi: int) {
+        \\    lo = a - 1;
+        \\    hi = a + 1;
+        \\    return;
+        \\}
+        \\
+        \\overwrite :: (a: int) -> (lo: int, hi: int) {
+        \\    lo = 0;
+        \\    hi = 0;
+        \\    return a, a * 2;
+        \\}
+        \\
+        \\zeroes :: () -> (x: int, y: int) { }
+        \\
+        \\main :: () {
+        \\    a, b := split(10);
+        \\    print("a=% b=%\n", a, b);
+        \\    c, d := overwrite(3);
+        \\    print("c=% d=%\n", c, d);
+        \\    e, f := zeroes();
+        \\    print("e=% f=%\n", e, f);
+        \\}
+    );
+    code_block(23, "text", #string
+        \\a=9 b=11
+        \\c=3 d=6
+        \\e=0 f=0
+    );
+    bullet(24, #string,oneline
+        \\`q, r := divmod(7, 2);` destructures the result into two bindings.
+    );
+    bullet(25, #string,oneline
+        \\`t := divmod(7, 2);` binds the whole tuple; the elements are then `t.0` and
+        \\`t.1`.
+    );
+    bullet(26, #string,oneline
+        \\`_` in a destructuring position discards that result.
+    );
+    bullet(27, #string,oneline
+        \\`return e1, e2;` is a statement form only. A comma in value position
+        \\belongs to an argument list, so there is no comma expression that builds a
+        \\multiple-result value.
+    );
+    note(28, #string,oneline
+        \\A tuple result has no `Show` instance, so it cannot be handed to `print`
+        \\directly. `print("%\n", divmod(7, 2))` reports error: variadic arg type
+        \\`tuple` does not implement `Show` in call `print`. Destructure first, or
+        \\print the elements.
+    );
+
+    subheading(29, "Bodyless declarations");
+    paragraph(30, #string,oneline
+        \\A body is required except in three cases: the declaration carries `#magic`,
+        \\it carries `#foreign`, or it is a requirement inside a typeclass. In those
+        \\cases the declaration ends at a semicolon and the implementation comes from
+        \\the compiler, the linker, or an instance.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\libc :: #library,system "msvcrt";
+        \\
+        \\c_abs :: (v: s32) -> s32 #foreign libc "abs";
+        \\raw_add :: (a: s64, b: s64) -> s64 #magic "int_add";
+        \\
+        \\main :: () {
+        \\    print("c_abs=% raw_add=%\n", c_abs(-5), raw_add(2, 3));
+        \\}
+    );
+    code_block(32, "text", #string
+        \\c_abs=5 raw_add=5
+    );
+    paragraph(33, #string,oneline
+        \\The rule runs in both directions. An ordinary declaration ended with a
+        \\semicolon is `error: unexpected token ';'`, and a `#foreign` or `#magic`
+        \\declaration given a body is `error: bad decl name '{'`, because the parser
+        \\finished the declaration at the directive and read the brace as the start
+        \\of the next one.
+    );
+
+    subheading(34, "Nested procedures");
+    paragraph(35, #string,oneline
+        \\A `name :: (...)` declaration inside a body is parsed as a declaration and
+        \\then hoisted to file scope, leaving nothing behind at the point where it
+        \\was written. Struct, enum, union, and `distinct` declarations inside a body
+        \\are hoisted the same way. Nesting is therefore a matter of where the reader
+        \\finds the declaration, not of what can see it.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    nested :: (x: int) -> int { return x * 2; }
+        \\    print("nested=%\n", nested(21));
+        \\}
+        \\
+        \\elsewhere :: () -> int { return nested(3); }
+    );
+    code_block(37, "text", #string
+        \\nested=42
+    );
+    bullet(38, #string,oneline
+        \\`elsewhere` compiles: after hoisting, `nested` is an ordinary top-level
+        \\procedure.
+    );
+    bullet(39, #string,oneline
+        \\A nested procedure cannot read the enclosing locals. Referring to one is
+        \\`error: unbound 'base'`, because the body was moved out of that scope.
+    );
+    bullet(40, #string,oneline
+        \\Two nested procedures with the same name collide even when they sit in
+        \\different bodies: `error: function 'helper' is already declared`. Hoisting
+        \\puts them both in the same namespace.
+    );
+    bullet(41, #string,oneline
+        \\`name :: <expr>;` inside a body is not hoisted. Only the procedure and
+        \\aggregate forms are.
+    );
+}
+
+render_section_57 :: () {
+    paragraph(0, #string,oneline
+        \\A parameter may carry a default expression, and a call may select
+        \\parameters by name instead of by position. The two features are designed
+        \\together: a default is what makes a parameter skippable, and a named
+        \\argument is what makes a skipped parameter reachable again.
+    );
+    table_header(1, "Form   —   Meaning");
+    table_row(2, "`b: int = 3`   |   a default for `b`");
+    table_row(3, "`a, b: int = 3`   |   one shared type and one shared default, applied to both names");
+    table_row(4, "`factor := 2`   |   a default whose type is inferred from it; exactly one name");
+    table_row(5, "`f(x, .name = v)`   |   a named argument at the call site");
+    paragraph(6, #string,oneline
+        \\The default expression is written in the declaration and is evaluated at
+        \\the call, not stored with the procedure. Its type must convert to the
+        \\parameter's type under the ordinary rules.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\greet :: (name: string, greeting: string = "hello", punct: string = "!") {
+        \\    print("% %%\n", greeting, name, punct);
+        \\}
+        \\
+        \\main :: () {
+        \\    greet("world");
+        \\    greet("world", .punct = "?");
+        \\    greet("world", .greeting = "hi", .punct = "?");
+        \\}
+    );
+    code_block(8, "text", #string
+        \\hello world!
+        \\hello world?
+        \\hi world?
+    );
+
+    subheading(9, "Shared types and shared defaults");
+    paragraph(10, #string,oneline
+        \\A group of names separated by commas and ended with one `: type` gives
+        \\every name in the group that type. If the group also carries `= value`, the
+        \\default is shared as well; it is not attached only to the last name. This
+        \\follows from the grammar: the annotation and the default belong to the
+        \\parameter group, and the group is what the names were collected into.
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\shared :: (a, b: int = 3) -> int { return a * 10 + b; }
+        \\
+        \\main :: () {
+        \\    print("shared()=% shared(1)=% shared(1,2)=%\n",
+        \\          shared(), shared(1), shared(1, 2));
+        \\}
+    );
+    code_block(12, "text", #string
+        \\shared()=33 shared(1)=13 shared(1,2)=12
+    );
+
+    subheading(13, "Inferred-type defaults");
+    paragraph(14, #string,oneline
+        \\`name := value` in a parameter list declares a defaulted parameter whose
+        \\type is taken from the default expression, with no annotation written. The
+        \\`:=` form takes exactly one name, because there is no type annotation for a
+        \\group to share; `(a, b := 2)` is `error: unexpected token ','`.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\scaled :: (x: int, factor := 2) -> int { return x * factor; }
+        \\
+        \\main :: () {
+        \\    print("scaled=% scaled3=%\n", scaled(5), scaled(5, 3));
+        \\}
+    );
+    code_block(16, "text", #string
+        \\scaled=10 scaled3=15
+    );
+
+    subheading(17, "Defaults need not come last");
+    paragraph(18, #string,oneline
+        \\A defaulted parameter may precede a non-defaulted one. Nothing in the
+        \\declaration is rejected; the consequence lands at the call site, where the
+        \\later parameter can no longer be reached positionally and must be named.
+        \\Named arguments are what make this coherent, so the language does not need
+        \\the usual "defaults last" restriction.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\early :: (a: int = 1, b: int) -> int { return a * 100 + b; }
+        \\
+        \\main :: () {
+        \\    print("early=%\n", early(.b = 2));
+        \\    print("named-first=%\n", early(.b = 2, 9));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\early=102
+        \\named-first=902
+    );
+
+    subheading(21, "Named arguments");
+    paragraph(22, #string,oneline
+        \\A named argument is written `.name = value`. The leading dot is part of the
+        \\syntax and is not optional: `f(1, b = 3)` is `error: unexpected token '='`,
+        \\because without the dot the parser is reading an assignment expression in
+        \\an argument list. The dot spelling matches the one used for enum variants
+        \\and aggregate literal fields.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\box :: (w: int = 1, h: int = 1, d: int = 1) -> int { return w * h * d; }
+        \\
+        \\main :: () {
+        \\    print("box=% box2=%\n", box(.d = 2, .w = 3, .h = 4), box(3, .d = 2, .h = 4));
+        \\}
+    );
+    code_block(24, "text", #string
+        \\box=24 box2=24
+    );
+    bullet(25, #string,oneline
+        \\Named and positional arguments may be mixed in one call, as `box(3, .d = 2,
+        \\.h = 4)` does.
+    );
+    bullet(26, #string,oneline
+        \\A named argument may precede a positional one. In `early(.b = 2, 9)` the
+        \\`9` fills the first parameter that no name claimed, which is `a`, giving
+        \\`902`.
+    );
+    bullet(27, #string,oneline
+        \\A trailing comma is allowed after the last parameter in the declaration, so
+        \\a long defaulted parameter list can be written one parameter per line
+        \\without a ragged last entry.
+    );
+    paragraph(28, #string,oneline
+        \\A name that matches no parameter is not a separate diagnostic; it is
+        \\reported as a failed call, together with the signatures that were
+        \\considered. This is the same message a wrong argument count or a wrong
+        \\argument type produces.
+    );
+    code_block(29, "text", #string
+        \\error: no overload 'f' accepts these arguments
+        \\note: possible candidates for 'f':
+        \\candidate: f :: (a: int, b: int = ...) -> int
+    );
+
+    subheading(30, "When a default is evaluated");
+    paragraph(31, #string,oneline
+        \\The default is an expression, evaluated at each call that omits the
+        \\argument. It is not folded once at the declaration, so a default that calls
+        \\a procedure calls it again on every such call, and a default that reads a
+        \\mutable global reads its current value.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\counter := 0;
+        \\
+        \\bump :: () -> int { counter += 1; return counter; }
+        \\
+        \\with_call :: (x: int = bump()) -> int { return x; }
+        \\
+        \\main :: () {
+        \\    print("call1=% call2=% counter=%\n", with_call(), with_call(), counter);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\call1=1 call2=2 counter=2
+    );
+
+    subheading(34, "Defaults and overloading");
+    paragraph(35, #string,oneline
+        \\Glosso has no ad-hoc overloading: two ordinary procedures may not share a
+        \\name, and the second one is `error: function 'render' is already declared`.
+        \\The only overloading is typeclass method dispatch, described in Typeclasses:
+        \\Declaring a Contract and How an Instance Is Chosen. Defaults therefore never
+        \\participate in choosing between candidates by arity; the instance is chosen
+        \\by the argument types first, and the chosen method's defaults fill the rest.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Render :: typeclass (T: type) {
+        \\    render :: (value: T, width: int = 4) -> int;
+        \\}
+        \\
+        \\s64 :: instance Render {
+        \\    render :: (value: s64, width: int = 4) -> int { return value * width; }
+        \\}
+        \\
+        \\bool :: instance Render {
+        \\    render :: (value: bool, width: int = 9) -> int { if value return width; return 0; }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("int  = % / %\n", render(3), render(3, 10));
+        \\    print("bool = % / %\n", render(true), render(true, 2));
+        \\}
+    );
+    code_block(37, "text", #string
+        \\int  = 12 / 30
+        \\bool = 9 / 2
+    );
+    paragraph(38, #string,oneline
+        \\`render(true)` prints `9`, not `4`. The default that applies is the one
+        \\written on the instance method that was selected, not the one written on
+        \\the class requirement. A named argument works the same way at a typeclass
+        \\method call as anywhere else: `render(3, .width = 5)` gives `15`.
+    );
+    note(39, #string,oneline
+        \\An instance method must repeat the requirement's defaults. Declaring
+        \\`render :: (value: s64, width: int)` against a requirement that reads
+        \\`width: int = 4` no longer matches, and the instance is rejected with
+        \\`error: instance 's64 :: Render' does not satisfy the implicit minimal
+        \\definition; missing render`. The value of the default may differ; its
+        \\presence may not.
+    );
+}
+
+render_section_58 :: () {
+    paragraph(0, #string,oneline
+        \\A variadic parameter accepts any number of trailing arguments and presents
+        \\them to the body as one collection. It is spelled with `...` as a prefix on
+        \\the parameter's type, and what follows the `...` decides how much the body
+        \\knows about the elements.
+    );
+    table_header(1, "Spelling   —   Elements   —   The body sees");
+    table_row(2, "`xs: ...`   |   any types, mixed   |   `[]any`");
+    table_row(3, "`xs: ...int`   |   all `int`   |   `[]int`");
+    table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]T`");
+    table_row(5, "`xs: ...Show`   |   any type implementing `Show`   |   a pack whose elements keep their own types");
+    table_row(6, "`xs: ...(Show && PartialEq)`   |   any type implementing both   |   the same, with both constraints");
+    paragraph(7, #string,oneline
+        \\The `...` is a type prefix, not a suffix on the name, and it is three dots.
+        \\Two dots is the range operator, and the compiler says so: `xs: ..int` is
+        \\`error: variadic parameter uses '...T'; '..' is the range operator`. A
+        \\variadic parameter takes exactly one name (`variadic parameter must have one
+        \\name`) and cannot carry a default (`variadic parameter cannot have a default
+        \\value`), since the empty pack already is the default.
+    );
+
+    subheading(8, "The pack interface");
+    paragraph(9, #string,oneline
+        \\Every form supports the same three operations: `.count` gives the number of
+        \\arguments as an `s64`, `for` walks the elements with `it` and `it_index`,
+        \\and a constant index selects one element. A call that passes no variadic
+        \\arguments is legal and gives a pack of count zero.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\describe :: (xs: ...) {
+        \\    print("count=%\n", xs.count);
+        \\    for xs print("  %: %\n", it_index, it);
+        \\    if xs.count > 0 print("  first=%\n", xs[0]);
+        \\}
+        \\
+        \\main :: () {
+        \\    n: int = 7;
+        \\    describe(n, "hi", true);
+        \\    describe();
+        \\}
+    );
+    code_block(11, "text", #string
+        \\count=3
+        \\  0: 7
+        \\  1: hi
+        \\  2: 1
+        \\  first=7
+        \\count=0
+    );
+    paragraph(12, #string,oneline
+        \\For the untyped, homogeneous, and generic forms the parameter really is an
+        \\array view and can be bound as one: `view: []any = xs;` inside `describe`,
+        \\`view: []int = xs;` inside a `...int` procedure, and `view: []T = xs;`
+        \\inside a `...$T` procedure all compile.
+    );
+    note(13, #string,oneline
+        \\An untyped pack boxes each argument into `any`, and a bare integer literal
+        \\has no type to box. `count_all(1, 2)` against `count_all :: (xs: ...)`
+        \\reaches the backend undecided and fails late with `error: comptime_int
+        \\reached code generation without a decided type [opcode BoxAny] while
+        \\lowering 'main'`. Give the argument a type, or use a typed pack.
+    );
+
+    subheading(14, "Homogeneous and generic packs");
+    paragraph(15, #string,oneline
+        \\`...T` fixes the element type in the declaration; every argument must
+        \\convert to `T`. `...$T` leaves the element type open and captures it from
+        \\the call, so each call site is a separate instantiation but a single call
+        \\is still homogeneous.
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\sum :: (xs: ...int) -> int {
+        \\    total := 0;
+        \\    for xs total += it;
+        \\    return total;
+        \\}
+        \\
+        \\firstof :: (xs: ...$T) -> T { return xs[0]; }
+        \\
+        \\main :: () {
+        \\    print("sum=% sum0=%\n", sum(1, 2, 3, 4), sum());
+        \\    print("firstof=% firstofs=%\n", firstof(10, 20), firstof("a", "b"));
+        \\}
+    );
+    code_block(17, "text", #string
+        \\sum=10 sum0=0
+        \\firstof=10 firstofs=a
+    );
+    paragraph(18, #string,oneline
+        \\A wrong element type is reported per argument: `sum(1, "two")` is
+        \\`error: arg type string != int in call sum`. For a generic pack the first
+        \\argument decides, and the message names the type it decided on:
+        \\`firstof(1, "two")` is `error: arg type string != comptime_int in call
+        \\firstof`.
+    );
+
+    subheading(19, "Typeclass-constrained packs");
+    paragraph(20, #string,oneline
+        \\`...C`, where `C` is a typeclass, accepts arguments of different types so
+        \\long as each one has an instance of `C`. Several classes are combined with
+        \\`&&` inside parentheses. `&&` is the only connective; `...(Show ||
+        \\PartialEq)` is `error: unexpected token '||'`, and an empty list is
+        \\`error: constrained variadic parameter needs at least one typeclass`. This
+        \\is the form `print` itself uses, declared as
+        \\`print :: (#comptime fmt: string, args: ...Show)`.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\
+        \\both :: (v: ...(Show && PartialEq)) {
+        \\    for v print("[%]", it);
+        \\    print("\n");
+        \\}
+        \\
+        \\main :: () {
+        \\    both(1, "two", true);
+        \\}
+    );
+    code_block(22, "text", #string
+        \\[1][two][1]
+    );
+    paragraph(23, #string,oneline
+        \\A constrained pack is not an array of `any`. Each element keeps its own
+        \\static type, and the `for` over it is unrolled at compile time so that `it`
+        \\has a different type on each iteration. That is what allows the per-element
+        \\instance to be selected. It also means a body that is valid for one
+        \\argument list can be invalid for another.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\only_int :: (x: int) -> int { return x + 1; }
+        \\
+        \\f :: (values: ...Show) { for values print("%\n", only_int(it)); }
+        \\
+        \\main :: () { n: int = 1; f(n, "two"); }
+    );
+    code_block(25, "text", #string
+        \\error: arg type string != int in call only_int
+    );
+    paragraph(26, #string,oneline
+        \\The same body compiles and runs when both arguments are `int`. Indexing
+        \\follows the same rule in reverse: a constant index selects an element with
+        \\its own type, but an index the compiler cannot fold degrades the element to
+        \\`any`, giving `error: arg type any != int in call only_int`.
+    );
+
+    subheading(27, "Parameters after a variadic");
+    paragraph(28, #string,oneline
+        \\A variadic parameter does not have to be last, but every parameter after it
+        \\must have a default: otherwise there is no way to tell where the pack ends.
+        \\Writing one without a default is `error: parameters after a variadic
+        \\parameter must have default values`. The trailing parameters are then
+        \\supplied by name.
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\tagged :: (xs: ...int, tag: string = "sum") -> int {
+        \\    total := 0;
+        \\    for xs total += it;
+        \\    print("% = %\n", tag, total);
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    _ := tagged(1, 2, 3);
+        \\    _ := tagged(1, 2, .tag = "z");
+        \\}
+    );
+    code_block(30, "text", #string
+        \\sum = 6
+        \\z = 3
+    );
+
+    subheading(31, "Call-site expansion");
+    paragraph(32, #string,oneline
+        \\An existing array can be passed as the whole pack by suffixing the argument
+        \\with `...`. The source may be a fixed array, a view, or a dynamic array;
+        \\what the checker requires is an array type whose element matches the pack.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\sum :: (xs: ...int) -> int { t := 0; for xs t += it; return t; }
+        \\sum_plus :: (base: int, xs: ...int) -> int { return base + sum(xs...); }
+        \\
+        \\main :: () {
+        \\    fixed: [3]int = .[1, 2, 3];
+        \\    view: []int = fixed[..];
+        \\    print("fixed=% view=%\n", sum(fixed...), sum(view...));
+        \\    dyn: [..]int;
+        \\    array_add(*dyn, 10);
+        \\    array_add(*dyn, 20);
+        \\    print("dyn=%\n", sum(dyn...));
+        \\    array_free(*dyn);
+        \\    print("forward=%\n", sum_plus(100, 1, 2, 3));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\fixed=6 view=6
+        \\dyn=30
+        \\forward=106
+    );
+    paragraph(35, #string,oneline
+        \\`sum_plus` shows the other use of the suffix: a procedure forwards its own
+        \\pack to another variadic procedure by expanding it. An expansion must be
+        \\the only variadic argument in the call, so it can neither be preceded nor
+        \\followed by loose elements. Fixed parameters before the variadic are
+        \\unaffected, which is why `sum_plus(100, 1, 2, 3)` and `sum(xs...)` are both
+        \\fine.
+    );
+    bullet(36, #string,oneline
+        \\`sum(5, a...)` and `sum(a..., 5)` both report error: expanded argument must
+        \\be the final variadic argument in call `sum`.
+    );
+    bullet(37, #string,oneline
+        \\`sum(a..., b...)` reports error: call `sum` has more than one expanded
+        \\argument.
+    );
+    bullet(38, #string,oneline
+        \\Expanding something that is not an array reports error: expanded variadic
+        \\argument to `sum` must be an array. Expanding the wrong element type
+        \\reports error: expanded variadic arg type `[2]string` != `[]int` in call
+        \\`sum`.
+    );
+    note(39, #string,oneline
+        \\A bare `...` as the last parameter, with no name and no type, is a
+        \\different feature: it is the C varargs marker, legal only on `#foreign`
+        \\declarations and `#c_call` definitions. It is covered in Calling C from
+        \\Glosso.
+    );
+}
+
+render_section_59 :: () {
+    paragraph(0, #string,oneline
+        \\`noalias` is a keyword, not a directive, and it qualifies a parameter. It
+        \\states that for the duration of the call the storage reached through that
+        \\pointer is not reached through any other pointer the procedure can see. It
+        \\is written before the parameter name, alongside `using`, and before any
+        \\parameter directive.
+    );
+    code_block(1, "glosso", #string
+        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
+        \\
+        \\add_all :: (noalias out: [*]s64, noalias a: [*]s64, n: s64) {
+        \\    for i: 0..n out[i] = a[i] * 2;
+        \\}
+    );
+    paragraph(2, #string,oneline
+        \\The promise exists to be handed to the backend. Each qualified parameter
+        \\becomes an LLVM `noalias` attribute, on the definition and again on every
+        \\call, which is what lets the optimizer keep a loaded value in a register
+        \\across a store through the other pointer, and vectorize loops like
+        \\`add_all` that would otherwise have to assume overlap.
+    );
+    code_block(3, "text", #string
+        \\define void @glo_copy2(ptr noalias %0, ptr noalias %1) {
+        \\...
+        \\  call void @glo_copy2(ptr noalias %r5.load, ptr noalias %r7.load)
+    );
+
+    subheading(4, "Pointer types only");
+    paragraph(5, #string,oneline
+        \\`noalias` is refused on anything that is not pointer-like, because there is
+        \\nothing to make a promise about. The check runs on the resolved parameter
+        \\type, and the diagnostic reads `noalias parameter 'v' must have a pointer
+        \\type, got int`, with the resolved type in the last position.
+    );
+    table_header(6, "Parameter type   —   `noalias`   —   Reported type");
+    table_row(7, "`*T`, `*const T`   |   accepted   |   n/a");
+    table_row(8, "`[*]T`   |   accepted   |   n/a");
+    table_row(9, "a `#fn_ptr` type   |   accepted   |   n/a");
+    table_row(10, "`?*T`   |   refused   |   `Option__int`");
+    table_row(11, "`[]T`   |   refused   |   `[]int`");
+    table_row(12, "`string`   |   refused   |   `string`");
+    table_row(13, "any scalar or struct   |   refused   |   `int`, `Point`, ...");
+    note(14, #string,oneline
+        \\`?*T` is refused even though it holds a pointer at runtime. An optional
+        \\pointer is a niche union, and the checker sees the union type, which is why
+        \\the message reports `Option__int`. A procedure that wants both the null
+        \\niche and the aliasing promise has to unwrap the option and pass the bare
+        \\`*T` on.
+    );
+
+    subheading(15, "Where else it is refused");
+    paragraph(16, #string,oneline
+        \\Two parameter directives exclude it outright. `#comptime` and `#empty`
+        \\parameters carry no runtime pointer, so there is nothing for the attribute
+        \\to attach to. Outside a parameter list the keyword has no meaning at all.
+    );
+    table_header(17, "Written   —   Diagnostic");
+    table_row(18, "`(noalias noalias p: *int)`   |   `duplicate noalias parameter modifier`");
+    table_row(19, "`(noalias #comptime p: *int)`   |   `noalias cannot qualify a #comptime parameter`");
+    table_row(20, "`(noalias #empty: $T)`   |   `noalias cannot qualify a #empty parameter`");
+    table_row(21, "`(#comptime noalias p: *int)`   |   `unexpected token 'noalias'`");
+    table_row(22, "`(pair: (noalias *int, *int))`   |   `noalias is only valid on function parameters`");
+    paragraph(23, #string,oneline
+        \\The last row is the tuple type. A parenthesized list followed by `->` is a
+        \\function type, where `noalias` is meaningful; the same list without the
+        \\arrow is a tuple type, where it is not. Inside a function type the
+        \\parameters may be unnamed, and the diagnostic then numbers them:
+        \\`f :: (g: (noalias int) -> int)` is `error: noalias function parameter 1
+        \\must have a pointer type, got int`.
+    );
+
+    subheading(24, "Generic parameters");
+    paragraph(25, #string,oneline
+        \\When the parameter's type is a polymorph the check cannot run at the
+        \\declaration, so it is deferred to each instantiation. The same declaration
+        \\is therefore accepted or rejected depending on what it is called with.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\touch :: (noalias p: $T) -> int { return 1; }
+        \\
+        \\main :: () { print("%\n", touch(3)); }
+    );
+    code_block(27, "text", #string
+        \\error: noalias parameter 'p' instantiated with non-pointer type int
+    );
+    paragraph(28, #string,oneline
+        \\`touch(*a)` for an `a: int` compiles and runs. The error is reported at the
+        \\declaration rather than at the offending call, so a generic procedure used
+        \\from several places names none of them.
+    );
+
+    subheading(29, "Part of a function pointer's type");
+    paragraph(30, #string,oneline
+        \\`noalias` is recorded in a function-pointer type and compared when one is
+        \\assigned. It is not a subtyping relation in either direction: a procedure
+        \\without the promise does not satisfy a type that has it, and a procedure
+        \\with the promise does not satisfy a type that lacks it. The second
+        \\direction matters because the attribute is applied at the call site as well
+        \\as at the definition, so a caller that dropped the promise from the type
+        \\would still emit it.
+    );
+    code_block(31, "glosso", #string
+        \\Copy :: #fn_ptr(noalias dst: *int, noalias src: *const int);
+        \\
+        \\do_copy :: (dst: *int, src: *const int) { dst.* = src.*; }
+        \\
+        \\main :: () { c: Copy = do_copy; }
+    );
+    code_block(32, "text", #string
+        \\error: cannot implicitly convert fnptr to fnptr because their noalias parameter contracts differ
+    );
+    paragraph(33, #string,oneline
+        \\Adding `noalias` to `do_copy` makes it compile. Lambdas carry the qualifier
+        \\too, and are checked the same way: `|noalias p: *int| -> int { return p.*; }`
+        \\assigned where a plain `(p: *int) -> int` is expected gives
+        \\`error: lambda parameter 'p' is noalias, but the expected function parameter
+        \\is not`.
+    );
+
+    subheading(34, "What is proved and what is assumed");
+    paragraph(35, #string,oneline
+        \\Nothing is proved. `noalias` is an unchecked promise from the programmer to
+        \\the optimizer, outside the `#memory` contract system, and no analysis
+        \\verifies it. Passing the same pointer to two `noalias` parameters of one
+        \\call compiles clean at every `--borrow-check` setting.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
+        \\
+        \\main :: () {
+        \\    a: int = 1;
+        \\    b: int = 2;
+        \\    copy2(*a, *b);
+        \\    print("a=%\n", a);
+        \\    copy2(*a, *a);
+        \\    print("aliased a=%\n", a);
+        \\}
+    );
+    code_block(37, "text", #string
+        \\a=2
+        \\aliased a=2
+    );
+    note(38, #string,oneline
+        \\The aliased call above happens to produce the expected value at this
+        \\optimization level, which is exactly the danger: a false `noalias` is not a
+        \\diagnostic and not reliably a visible wrong answer. It changes what the
+        \\optimizer is allowed to assume, so the same source can behave differently at
+        \\a different `-O` level or after an unrelated edit. Add it only where the
+        \\non-overlap is a documented condition of the procedure.
+    );
+}
+
+render_section_60 :: () {
+    paragraph(0, #string,oneline
+        \\A parameter marked `#lazy` is not evaluated at the call. The argument
+        \\expression travels to the callee unevaluated, is evaluated the first
+        \\time the body reads the parameter, and the value produced by that
+        \\evaluation is reused for every later read. A `#lazy` parameter the
+        \\body never reads is never evaluated at all, so a call can discard an
+        \\expensive or failing computation without paying for it.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\evals: int = 0;
+        \\
+        \\probe :: (label: string) -> bool {
+        \\    evals += 1;
+        \\    print("  evaluated %\n", label);
+        \\    return true;
+        \\}
+        \\
+        \\ignore_it :: (#lazy v: bool) -> int { return 0; }
+        \\use_once  :: (#lazy v: bool) -> int { if v return 1; return 2; }
+        \\use_twice :: (#lazy v: bool) -> int { if v { if v return 3; } return 4; }
+        \\
+        \\main :: () {
+        \\    print("ignore_it:\n");
+        \\    r := ignore_it(probe("a"));
+        \\    print("  result=% evals=%\n", r, evals);
+        \\
+        \\    evals = 0;
+        \\    print("use_once:\n");
+        \\    r = use_once(probe("b"));
+        \\    print("  result=% evals=%\n", r, evals);
+        \\
+        \\    evals = 0;
+        \\    print("use_twice:\n");
+        \\    r = use_twice(probe("c"));
+        \\    print("  result=% evals=%\n", r, evals);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\ignore_it:
+        \\  result=0 evals=0
+        \\use_once:
+        \\  evaluated b
+        \\  result=1 evals=1
+        \\use_twice:
+        \\  evaluated c
+        \\  result=3 evals=1
+    );
+    paragraph(3, #string,oneline
+        \\Three calls pass the same side-effecting expression. `ignore_it` never
+        \\names `v`, and `probe` does not run. `use_once` and `use_twice` both
+        \\run it exactly once, whether the body reads the parameter one time or
+        \\two. The counter is the whole story: zero reads means zero
+        \\evaluations, and any positive number of reads means one.
+    );
+    subheading(4, "Evaluated at first use, not at the call");
+    paragraph(5, #string,oneline
+        \\The delay is observable, not merely an optimization. Because the
+        \\argument expression is evaluated inside the callee, it sees the state
+        \\the callee has already produced, not the state that existed at the
+        \\call.
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\counter: int = 1;
+        \\
+        \\delayed :: (#lazy v: int) -> int {
+        \\    counter = 100;
+        \\    return v;
+        \\}
+        \\
+        \\eager :: (v: int) -> int {
+        \\    counter = 100;
+        \\    return v;
+        \\}
+        \\
+        \\main :: () {
+        \\    counter = 1;
+        \\    a := delayed(counter);
+        \\    counter = 1;
+        \\    b := eager(counter);
+        \\    print("delayed=% eager=%\n", a, b);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\delayed=100 eager=1
+    );
+    paragraph(8, #string,oneline
+        \\`eager` receives the value `1` that `counter` held at the call.
+        \\`delayed` receives the expression `counter`, reads it after the
+        \\assignment, and gets `100`. A `#lazy` parameter is therefore a
+        \\deferred expression rather than a deferred value, and an argument with
+        \\a side effect changes when that side effect happens.
+    );
+    subheading(9, "Forwarding, and reads inside a loop");
+    paragraph(10, #string,oneline
+        \\Memoisation is per call, and it survives forwarding: passing a `#lazy`
+        \\parameter on to another `#lazy` parameter does not force it, and the
+        \\inner function's first read is the one evaluation the whole chain
+        \\gets.
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\n: int = 0;
+        \\tick :: () -> bool { n += 1; return true; }
+        \\
+        \\inner :: (#lazy v: bool) -> bool { if v return v; return false; }
+        \\outer :: (#lazy v: bool) -> bool { return inner(v); }
+        \\
+        \\main :: () {
+        \\    print("outer=% n=%\n", outer(tick()), n);
+        \\}
+    );
+    code_block(12, "text", #string
+        \\outer=1 n=1
+    );
+    paragraph(13, #string,oneline
+        \\A read inside a loop is still one evaluation. A body that writes
+        \\`while i < n` over a `#lazy` parameter `n` evaluates the bound once
+        \\and compares against the memoised value on every iteration.
+    );
+    note(14, #string,oneline
+        \\`#lazy` is not textual substitution. A macro would re-run the
+        \\expression at every occurrence; a `#lazy` parameter runs it at most
+        \\once and caches the result. If the intent is to re-evaluate, pass a
+        \\procedure or a lambda and call it, or use `#expand`, which is covered
+        \\in Macros with `#expand`.
+    );
+    subheading(15, "How `&&` and `||` are built on it");
+    paragraph(16, #string,oneline
+        \\`&&` and `||` are not built-in control flow. They are ordinary
+        \\operators owned by the Prelude typeclasses `LogicalAnd` and
+        \\`LogicalOr`, and short-circuiting is spelled out in the class
+        \\declaration as `#lazy` on the right operand.
+    );
+    code_block(17, "glosso", #string
+        \\LogicalAnd :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '&&' :: (left: L, #lazy right: R) -> Output #operator(left, 6);
+        \\}
+        \\
+        \\LogicalOr :: typeclass (L: type, R: type) {
+        \\    Output :: type;
+        \\    '||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
+        \\}
+        \\
+        \\(bool, bool) :: instance LogicalAnd {
+        \\    Output :: bool;
+        \\    '&&' :: (left: bool, #lazy right: bool) -> Output #magic "bool_and";
+        \\}
+    );
+    paragraph(18, #string,oneline
+        \\The checker marks a binary expression as short-circuiting exactly when
+        \\the second parameter of the instance it selected carries `#lazy`.
+        \\Short-circuiting is therefore a property of the chosen instance, not
+        \\of the spelling `&&`: the same source text is a short-circuit for one
+        \\operand type and a plain two-argument call for another.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\side :: (label: string, value: bool) -> bool {
+        \\    print("  eval %\n", label);
+        \\    return value;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("false && side:\n");
+        \\    a := side("L", false) && side("R", true);
+        \\    print("  = %\n", a);
+        \\
+        \\    print("true && side:\n");
+        \\    b := side("L", true) && side("R", false);
+        \\    print("  = %\n", b);
+        \\
+        \\    print("true || side:\n");
+        \\    c := side("L", true) || side("R", false);
+        \\    print("  = %\n", c);
+        \\
+        \\    print("false || side:\n");
+        \\    d := side("L", false) || side("R", true);
+        \\    print("  = %\n", d);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\false && side:
+        \\  eval L
+        \\  = 0
+        \\true && side:
+        \\  eval L
+        \\  eval R
+        \\  = 0
+        \\true || side:
+        \\  eval L
+        \\  = 1
+        \\false || side:
+        \\  eval L
+        \\  eval R
+        \\  = 1
+    );
+    paragraph(21, #string,oneline
+        \\`%` prints a `bool` as `1` or `0`. The right operand runs only when
+        \\the left one fails to decide the result, which is what makes the
+        \\ordinary guard idiom safe: the bounds test below never indexes out of
+        \\range, because `view[i]` is the unevaluated right operand of a `&&`
+        \\whose left operand is already false.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    xs: [3]s64 = .[1, 2, 3];
+        \\    view := xs[..];
+        \\    i: s64 = 5;
+        \\    if i < view.count && view[i] > 0 print("in range and positive\n");
+        \\    else print("guard held\n");
+        \\}
+    );
+    code_block(23, "text", #string
+        \\guard held
+    );
+    subheading(24, "A user type that short-circuits");
+    paragraph(25, #string,oneline
+        \\Writing an instance of `LogicalAnd` or `LogicalOr` gives a user type
+        \\the same behaviour, and unlike the Prelude's `bool` instance the body
+        \\is ordinary Glosso rather than a `#magic` intrinsic.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Flag :: struct { on: bool; }
+        \\
+        \\(Flag, Flag) :: instance LogicalAnd {
+        \\    Output :: Flag;
+        \\    '&&' :: (a: Flag, #lazy b: Flag) -> Flag { if !a.on return a; return b; }
+        \\}
+        \\
+        \\hits: int = 0;
+        \\mk :: (v: bool) -> Flag { hits += 1; return .{ .on = v }; }
+        \\
+        \\main :: () {
+        \\    x: Flag = .{ .on = false };
+        \\    r := x && mk(true);
+        \\    print("r=% hits=%\n", r.on, hits);
+        \\}
+    );
+    code_block(27, "text", #string
+        \\r=0 hits=0
+    );
+    paragraph(28, #string,oneline
+        \\The laziness of an instance method has to agree with the class it
+        \\implements, parameter for parameter. Dropping the `#lazy` from the
+        \\instance above is `error: operator '&&' must match the #lazy parameter
+        \\contract of typeclass 'LogicalAnd'`; the same check on a non-operator
+        \\method reads `error: function 'pick' must match the #lazy parameter
+        \\contract of typeclass 'Pick'`. Without it a caller could not tell from
+        \\the class whether its argument will run.
+    );
+    subheading(29, "The inlining requirement");
+    paragraph(30, #string,oneline
+        \\Deferring an expression into a callee means splicing the expression
+        \\into the callee's body, so a call that passes a `#lazy` argument is
+        \\always inlined and the callee gets no independent definition: a
+        \\program whose only lazy procedure is `pick` compiles to LLVM IR
+        \\containing no `glo_pick` symbol at all. Everything that would defeat
+        \\that splice is rejected.
+    );
+    table_header(31, "Rejected combination   —   Diagnostic");
+    table_row(32, "`#magic` body   |   `#lazy parameters on #magic function 'lazyf' require compiler-defined lazy semantics`");
+    table_row(33, "`#foreign` body   |   `#lazy parameters on 'puts2' are not part of a foreign ABI`");
+    table_row(34, "Direct or mutual recursion   |   `recursive call to lazy function 'a_fn' is not supported`");
+    table_row(35, "Assigned to a function pointer   |   `lazy function 'lz' cannot be used as an ordinary function pointer`");
+    table_row(36, "A variadic parameter   |   `#lazy cannot qualify a variadic parameter`");
+    table_row(37, "A `#empty` parameter   |   `#lazy cannot qualify a #empty parameter`");
+    table_row(38, "A lambda parameter   |   `error: unexpected token 'lazy'` from the parser");
+    table_row(39, "An instance that drops it   |   `must match the #lazy parameter contract of typeclass`");
+    paragraph(40, #string,oneline
+        \\The Prelude's own `&&` and `||` are the one exception to the
+        \\body requirement: they are `#magic "bool_and"` and `#magic "bool_or"`,
+        \\and the compiler knows their lazy semantics directly rather than by
+        \\inlining a Glosso body.
+    );
+    subheading(41, "Combining with `#comptime`");
+    paragraph(42, #string,oneline
+        \\`#lazy` and `#comptime` may qualify the same parameter, in either
+        \\order. The argument then has to be compile-time known, and it is still
+        \\only evaluated if the body reads it, which is how a compile-time call
+        \\can pass an expression that would fail to fold.
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\
+        \\comptime_ignore :: (#lazy #comptime value: s64) -> s64 { return 7; }
+        \\comptime_use    :: (#comptime #lazy value: s64) -> s64 { return value * 2; }
+        \\
+        \\UNUSED :: #comptime comptime_ignore(1 / 0);
+        \\USED   :: #comptime comptime_use(21);
+        \\
+        \\main :: () { print("UNUSED=% USED=%\n", UNUSED, USED); }
+    );
+    code_block(44, "text", #string
+        \\UNUSED=7 USED=42
+    );
+    paragraph(45, #string,oneline
+        \\`1 / 0` is never evaluated because `comptime_ignore` never names
+        \\`value`. `#comptime` parameters in general are covered in Compile-Time
+        \\and Type-Only Parameters, and the operator machinery behind `&&` in
+        \\The Operator System.
+    );
+}
+
+render_section_61 :: () {
+    paragraph(0, #string,oneline
+        \\Two parameter qualifiers move a parameter out of the runtime calling
+        \\convention entirely. `#comptime` keeps the parameter's value but
+        \\demands that the caller supply it as a compile-time constant;
+        \\`#empty:` keeps only a type and no value at all. Both occupy an
+        \\argument position at the call site, and neither appears in the
+        \\generated function's parameter list.
+    );
+    subheading(1, "`#comptime` parameters");
+    paragraph(2, #string,oneline
+        \\`#comptime` prefixes the parameter name. Inside the body the parameter
+        \\is a compile-time constant, so it may drive `#inline for`, `#if`,
+        \\`#assert`, an array length, or any other construct that needs a value
+        \\before the program runs.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\pow :: (#comptime n: int, x: int) -> int {
+        \\    r := 1;
+        \\    #inline for i: 0..n r *= x;
+        \\    return r;
+        \\}
+        \\
+        \\addc :: (#comptime a, b: int) -> int { return a + b; }
+        \\
+        \\main :: () {
+        \\    print("pow(3,2)=%\n", pow(3, 2));
+        \\    print("addc(4,5)=%\n", addc(4, 5));
+        \\    K :: 5;
+        \\    print("pow(K,2)=%\n", pow(K, 2));
+        \\}
+    );
+    code_block(4, "text", #string
+        \\pow(3,2)=8
+        \\addc(4,5)=9
+        \\pow(K,2)=32
+    );
+    paragraph(5, #string,oneline
+        \\One `#comptime` covers every name in a shared-type group, so
+        \\`(#comptime a, b: int)` makes both `a` and `b` compile-time. The
+        \\argument must be a constant the compile-time evaluator can reduce: a
+        \\literal, a `::` constant, or a compile-time call. A mutable local is
+        \\not one, and `k := 3; pow(k, 2)` is `error: argument for #comptime
+        \\parameter 'n' must be known at compile time` with `note: unknown const
+        \\k`.
+    );
+    paragraph(6, #string,oneline
+        \\A `#comptime` parameter is otherwise an ordinary parameter. It may
+        \\carry a default, and it may be supplied by name with the usual
+        \\`.name = value` spelling.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\banner :: (#comptime width: int = 4, ch: string) -> string {
+        \\    out := "";
+        \\    #inline for i: 0..width out = out + ch;
+        \\    return out;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("%\n", banner(.ch = "-"));
+        \\    print("%\n", banner(6, "="));
+        \\    print("%\n", banner(.width = 2, .ch = "*"));
+        \\}
+    );
+    code_block(8, "text", #string
+        \\----
+        \\======
+        \\**
+    );
+    subheading(9, "Erasure and specialization identity");
+    paragraph(10, #string,oneline
+        \\A `#comptime` argument is part of the identity of the specialization,
+        \\not part of its signature. Two calls with different constants compile
+        \\to two functions; each of them takes only the runtime parameters. The
+        \\program below has one `scale` in source and two in the object code.
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\scale :: (#comptime k: int, x: int) -> int { return k * x; }
+        \\zero_of :: (#empty: $T) -> T { d: T; return d; }
+        \\
+        \\main :: () {
+        \\    n := 10;
+        \\    print("%\n", scale(2, n));
+        \\    print("%\n", scale(3, n));
+        \\    print("%\n", zero_of(s16));
+        \\}
+    );
+    paragraph(12, #string,oneline
+        \\Compiled with `--backend llvm-ir`, the three definitions the file
+        \\produces are these.
+    );
+    code_block(13, "text", #string
+        \\define i64 @glo_scale__int_int__comptime_df69fa1c4e5525eb(i64 %0) {
+        \\define i64 @glo_scale__int_int__comptime_df6d1e1c4e5798ee(i64 %0) {
+        \\define i16 @glo_zero_of__s16() {
+    );
+    paragraph(14, #string,oneline
+        \\Each `scale` specialization takes one `i64`, the runtime `x`; the
+        \\constant `k` survives only in the mangled name and in the folded body.
+        \\`zero_of` takes nothing at all, because its only parameter is a
+        \\`#empty:` slot. A `#comptime` parameter is consequently a code-size
+        \\decision as much as a typing one: every distinct constant is another
+        \\copy of the body.
+    );
+    table_header(15, "Qualifier combination   —   Result");
+    table_row(16, "`#comptime` twice on one parameter   |   `duplicate #comptime parameter directive`");
+    table_row(17, "`noalias #comptime`   |   `noalias cannot qualify a #comptime parameter`");
+    table_row(18, "`using #comptime`   |   `using cannot qualify a #comptime parameter`");
+    table_row(19, "`#comptime` on a variadic   |   `error: unexpected token '...'` from the parser");
+    table_row(20, "`#comptime #lazy` or `#lazy #comptime`   |   Accepted, in either order");
+    subheading(21, "`#empty:` type-only parameters");
+    paragraph(22, #string,oneline
+        \\`#empty:` replaces the parameter name with the marker itself and
+        \\declares a slot that carries a type and no value. The caller writes a
+        \\type where the argument goes. This is how a procedure whose result
+        \\type cannot be inferred from any argument gets told which type to
+        \\produce.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\zero_of  :: (#empty: $T) -> T { d: T; return d; }
+        \\name_of  :: (#empty: $A, $B) -> string { return "two types"; }
+        \\parse_as :: (#empty: $T, text: string) -> T { d: T; return d; }
+        \\
+        \\main :: () {
+        \\    print("zero_of(int)=%\n", zero_of(int));
+        \\    print("zero_of(f64)=%\n", zero_of(f64));
+        \\    print("zero_of(bool)=%\n", zero_of(bool));
+        \\    print("name_of=%\n", name_of(int, string));
+        \\    print("parse_as=%\n", parse_as(s16, "x"));
+        \\}
+    );
+    code_block(24, "text", #string
+        \\zero_of(int)=0
+        \\zero_of(f64)=0
+        \\zero_of(bool)=0
+        \\name_of=two types
+        \\parse_as=0
+    );
+    paragraph(25, #string,oneline
+        \\One `#empty:` marker may list several types separated by commas, as
+        \\`name_of` does, and a signature may hold more than one marker at
+        \\different positions: `pair :: (#empty: $A, x: s64, #empty: $B)` is
+        \\called as `pair(s16, 1, s32)`. The types are matched positionally in
+        \\the order they are written, interleaved with the runtime arguments.
+    );
+    paragraph(26, #string,oneline
+        \\What the slot takes is the type of the expression written there, and
+        \\the expression itself is discarded rather than evaluated. Passing a
+        \\call in a `#empty:` position selects that call's return type and does
+        \\not run it.
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\hits: int = 0;
+        \\side :: () -> f64 { hits += 1; return 1.0; }
+        \\
+        \\zero_of :: (#empty: $T) -> T { d: T; return d; }
+        \\
+        \\main :: () {
+        \\    z := zero_of(side());
+        \\    print("z=% hits=%\n", z, hits);
+        \\}
+    );
+    code_block(28, "text", #string
+        \\z=0 hits=0
+    );
+    paragraph(29, #string,oneline
+        \\A type name such as `f64` is the normal spelling and the one to
+        \\prefer, because it says what is meant. A generic type application is
+        \\not an expression, so `zero_of(Box(s64))` fails with
+        \\`error: unknown function Box`; a `#empty:` slot cannot select a
+        \\partially applied generic carrier.
+    );
+    note(30, #string,oneline
+        \\`#empty:` parameters are anonymous. The compiler names them
+        \\`__empty0`, `__empty1`, and so on, which is what surfaces in an
+        \\overload note: calling `pair :: (#empty: $A, $B)` with one type gives
+        \\`error: no overload 'pair' accepts these arguments` and `candidate:
+        \\pair :: (__empty0: A, __empty1: B) -> s64`. They cannot be passed by
+        \\name, cannot take a default, and cannot be qualified with `using`,
+        \\`noalias`, or `#lazy`.
+    );
+    subheading(31, "Choosing an instance by its output type");
+    paragraph(32, #string,oneline
+        \\The standard library uses `#empty:` wherever a typeclass has to
+        \\dispatch on a type that appears only in the result. `FromString`
+        \\declares `from_string :: (#empty: T, text: string) -> ?T`, so the
+        \\destination type is an argument and instance selection has something
+        \\to match on.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a := from_string(s64, "-42");
+        \\    b := from_string(f64, "2.5");
+        \\    c := from_string(bool, "nope");
+        \\    print("a=% b=% c=%\n",
+        \\          option_unwrap_or(a, 0),
+        \\          option_unwrap_or(b, 0.0),
+        \\          option_is_none(c));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\a=-42 b=2.5 c=1
+    );
+    paragraph(35, #string,oneline
+        \\Without the witness the class parameter `To` would appear nowhere in
+        \\the argument list and no call could ever decide it. The same pattern
+        \\appears in `Try` (`from_output`, `from_residual`) and in `Propagate`;
+        \\see `Try`, `?`, and `#try`.
+    );
+    subheading(36, "The four ways to pass a type");
+    table_header(37, "Form   —   Call site   —   Runtime slot");
+    table_row(38, "`#comptime v: int`   |   A constant expression   |   None; folded into the body");
+    table_row(39, "`#comptime T: type`   |   A type name   |   None");
+    table_row(40, "`T: type`   |   A type name   |   None; promoted only if T is used in the signature");
+    table_row(41, "`#empty: $T`   |   A type name or any typed expression   |   None; the expression is discarded");
+    paragraph(42, #string,oneline
+        \\`T: type` and the `$T` capture form belong to Generic Functions, which
+        \\covers their ordering and defaulting rules. The `#empty:` marker also
+        \\exists on struct fields, where it declares a phantom type parameter;
+        \\that use is in `using`, `#empty`, and `#as`.
+    );
+}
+
+render_section_62 :: () {
+    paragraph(0, #string,oneline
+        \\A procedure is generic when its signature introduces a type variable.
+        \\There are two spellings. A `$` prefix on a name inside a parameter
+        \\annotation captures that name as a type parameter and infers it from
+        \\the argument; a parameter declared `T: type` names the type parameter
+        \\explicitly and is supplied by the caller. Both produce the same thing:
+        \\a template that is instantiated once per distinct set of type
+        \\arguments.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Box :: struct { value: $A; }
+        \\
+        \\idf   :: (x: $T) -> T { return x; }
+        \\wider :: (a: $T, b: T) -> T { if a > b return a; return b; }
+        \\first :: (xs: []$T) -> T { return xs[0]; }
+        \\deref :: (p: *$T) -> T { return p.*; }
+        \\unbox :: (b: Box($T)) -> T { return b.value; }
+        \\tag   :: (a: $A, b: $B) -> s64 { return size_of(A) * 100 + size_of(B); }
+        \\
+        \\main :: () {
+        \\    print("idf=% idf=%\n", idf(3), idf("hi"));
+        \\    print("wider=%\n", wider(4, 9));
+        \\    arr: [3]s64 = .[10, 20, 30];
+        \\    print("first=%\n", first(arr[..]));
+        \\    n: s64 = 7;
+        \\    print("deref=%\n", deref(*n));
+        \\    bx: Box(s64) = .{ .value = 41 };
+        \\    print("unbox=%\n", unbox(bx));
+        \\    print("tag=%\n", tag(cast(s16)1, cast(s8)2));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\idf=3 idf=hi
+        \\wider=9
+        \\first=10
+        \\deref=7
+        \\unbox=41
+        \\tag=201
+    );
+    paragraph(3, #string,oneline
+        \\The captured name is an ordinary type name inside the signature and
+        \\the body: `size_of(A)`, a local `d: T`, a `cast(T)`, and a `where`
+        \\clause all see it. Distinct captures in one signature are independent
+        \\type parameters, so `tag` is generic in two.
+    );
+    subheading(4, "Where a `$` capture may appear");
+    paragraph(5, #string,oneline
+        \\The capture does not have to be the whole annotation. It may sit at
+        \\any depth inside it, and the compiler matches the annotation's shape
+        \\against the argument's type to solve for it. That is what makes
+        \\`(xs: []$T)` mean "a view of anything" rather than "a view of a type
+        \\literally named T".
+    );
+    table_header(6, "Annotation   —   Binds T to");
+    table_row(7, "`x: $T`   |   The argument's own type");
+    table_row(8, "`xs: []$T`   |   The element type of a view");
+    table_row(9, "`xs: [..]$T`   |   The element type of a dynamic array");
+    table_row(10, "`p: *$T`   |   The pointee type");
+    table_row(11, "`p: [*]$T`   |   The pointee type of a many-pointer");
+    table_row(12, "`o: ?$T`   |   The payload of an option");
+    table_row(13, "`r: $E!$T`   |   Two parameters: the error type and the payload");
+    table_row(14, "`b: Box($T)`   |   The argument of a generic aggregate");
+    table_row(15, "`f: ($T) -> $R`   |   The parameter and result of a function type");
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\takes_opt  :: (o: ?$T) -> T { if #pattern .Some(v) = o return v; d: T; return d; }
+        \\takes_res  :: (r: $E!$T) -> T { if #pattern .Ok(v) = r return v; d: T; return d; }
+        \\takes_many :: (p: [*]$T) -> T { return p[0]; }
+        \\takes_fn   :: (f: ($T) -> $R, x: T) -> R { return f(x); }
+        \\
+        \\dbl :: (x: s64) -> s64 { return x * 2; }
+        \\
+        \\main :: () {
+        \\    o: ?s64 = .Some(9);
+        \\    print("opt=%\n", takes_opt(o));
+        \\    r: string!s64 = .Ok(4);
+        \\    print("res=%\n", takes_res(r));
+        \\    arr: [3]s64 = .[1,2,3];
+        \\    print("many=%\n", takes_many(arr.data));
+        \\    print("fn=%\n", takes_fn(dbl, 21));
+        \\}
+    );
+    code_block(17, "text", #string
+        \\opt=9
+        \\res=4
+        \\many=1
+        \\fn=42
+    );
+    paragraph(18, #string,oneline
+        \\Only types are captured. There is no capture for the length of a fixed
+        \\array: `xs: [$N]$T` is `error: bracket type expects [], [*], [..], or
+        \\[N]`. A procedure that has to work over fixed arrays of several
+        \\lengths takes a view instead, and reads `xs.count`.
+    );
+    subheading(19, "The rebinding rule");
+    paragraph(20, #string,oneline
+        \\A `$` prefix declares the parameter. Every later mention of the same
+        \\name, in the same signature, is written plain. Repeating the `$` is
+        \\`error: polymorph $T is already bound; use plain T after the first
+        \\$T`, and the rule applies at any depth: `(a: []$T, b: []$T)` is
+        \\rejected for the same reason `(a: $T, b: $T)` is.
+    );
+    code_block(21, "glosso", #string
+        \\zip_len :: (a: []$T, b: []T) -> s64 {
+        \\    if a.count < b.count return a.count;
+        \\    return b.count;
+        \\}
+    );
+    paragraph(22, #string,oneline
+        \\The reason is that a `$` name is a binder, not a wildcard. Two
+        \\independent element types are two names, `$A` and `$B`; one shared
+        \\element type is `$T` then `T`. Nothing about the annotation would
+        \\otherwise distinguish the two intentions.
+    );
+    subheading(23, "Passing a captured parameter explicitly");
+    paragraph(24, #string,oneline
+        \\Captured type parameters may also be supplied at the call, positionally
+        \\and before the runtime arguments. This matters when inference has
+        \\nothing to work from, which is the case for a type variable that
+        \\appears only in the return type: such a variable becomes a synthetic
+        \\type parameter appended after the ones bound by the parameter list.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\explicit :: (x: $T) -> T { return x; }
+        \\zero     :: () -> $R { d: R; return d; }
+        \\convert  :: (x: $T) -> $R { return cast(R) x; }
+        \\
+        \\main :: () {
+        \\    print("explicit=%\n", explicit(s16, 3));
+        \\    print("zero=%\n", zero(f64));
+        \\    print("convert=%\n", convert(int, f64, 3));
+        \\}
+    );
+    code_block(26, "text", #string
+        \\explicit=3
+        \\zero=0
+        \\convert=3
+    );
+    paragraph(27, #string,oneline
+        \\The order is the declaration order: parameter captures first, then
+        \\return-only captures. Supplying too few produces a diagnostic that
+        \\spells the order out, so `convert(f64, 3)` is `error: call convert
+        \\supplies 1 compact generic type(s), but unresolved order is (T, R)`.
+    );
+    subheading(28, "Explicit `type` parameters");
+    paragraph(29, #string,oneline
+        \\A parameter annotated `type` is a type-valued parameter. It is
+        \\promoted to a real type parameter when its name is used elsewhere in
+        \\the signature; if it is used only in the body it stays an ordinary
+        \\compile-time value of type `type`, which behaves the same at the call
+        \\site.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\make      :: (T: type, n: int) -> int { d: T; return n + size_of(T); }
+        \\idt       :: (T: type, x: T) -> T { return x; }
+        \\conv      :: (x: int, T := f64) -> T { return cast(T) x; }
+        \\defaulted :: (T: type = int, n: int = 3) -> int { d: T; return n + size_of(T); }
+        \\
+        \\main :: () {
+        \\    print("make=%\n", make(s16, 7));
+        \\    print("idt=%\n", idt(s64, 3));
+        \\    print("conv default=%\n", conv(3));
+        \\    print("conv f32=%\n", conv(3, f32));
+        \\    print("defaulted=%\n", defaulted());
+        \\    print("defaulted s8=%\n", defaulted(s8, 10));
+        \\}
+    );
+    code_block(31, "text", #string
+        \\make=9
+        \\idt=3
+        \\conv default=3
+        \\conv f32=3
+        \\defaulted=11
+        \\defaulted s8=11
+    );
+    table_header(32, "Rule   —   Effect");
+    table_row(33, "`T: type` before every runtime parameter   |   Accepted");
+    table_row(34, "`T: type` after a runtime parameter   |   `type parameter 'T' must appear before runtime parameters unless it has a default`");
+    table_row(35, "`T := <Type>` after a runtime parameter   |   Accepted; the name must start with an uppercase letter");
+    table_row(36, "`T: type` twice   |   `type parameter 'T' is already declared`");
+    table_row(37, "`(T: type, x: $T)`   |   `type parameter 'T' is already declared; use plain T after the declaration`");
+    note(38, #string,oneline
+        \\The trailing-position rule accepts only the inferred spelling. Writing
+        \\`f :: (x: int, T: type = f64)` still fails with `error: type parameter
+        \\'T' must appear before runtime parameters unless it has a default`,
+        \\even though the parameter has one; the accepted form is `T := f64`,
+        \\with no `: type` annotation and an uppercase initial letter.
+    );
+    subheading(39, "One specialization per distinct argument tuple");
+    paragraph(40, #string,oneline
+        \\Generics are monomorphised. The compiler instantiates the body once
+        \\for each distinct tuple of type arguments and reuses that
+        \\instantiation for every call that resolves to it. Four calls to one
+        \\generic procedure over three distinct types give three functions.
+    );
+    code_block(41, "glosso", #string
+        \\#import "Io";
+        \\
+        \\pick :: (a: $T, b: T) -> T { if a > b return a; return b; }
+        \\
+        \\main :: () {
+        \\    print("%\n", pick(cast(s64)1, cast(s64)2));
+        \\    print("%\n", pick(cast(s64)3, cast(s64)4));
+        \\    print("%\n", pick(cast(s16)5, cast(s16)6));
+        \\    print("%\n", pick(1.5, 2.5));
+        \\}
+    );
+    code_block(42, "text", #string
+        \\define i64 @glo_pick__int_int(i64 %0, i64 %1) {
+        \\define i16 @glo_pick__s16_s16(i16 %0, i16 %1) {
+        \\define double @glo_pick__f64_f64(double %0, double %1) {
+    );
+    paragraph(43, #string,oneline
+        \\The mangled name is the procedure name followed by the argument types,
+        \\which is exactly the specialization key; the two `s64` calls share
+        \\one definition. Because the key is the whole tuple, a procedure
+        \\generic in two parameters distinguishes the orders:
+        \\`tag :: (a: $A, b: $B)` yields `glo_tag__int_s16` and
+        \\`glo_tag__s16_int` as separate functions.
+    );
+    paragraph(44, #string,oneline
+        \\Instantiation is also where a generic body is really checked. Two
+        \\procedures may not share a name, so a generic procedure cannot be
+        \\split into per-type overloads: `f :: (x: $T) -> string where
+        \\Is_Integer(T)` next to `f :: (x: $T) -> string where Is_Float(T)` is
+        \\`error: function 'f' is already declared`. Selecting behaviour by type
+        \\is done with `#if` inside one body, or with typeclass instances; see
+        \\Static Branching with `#if` and How an Instance Is Chosen.
+    );
+    paragraph(45, #string,oneline
+        \\The guards that restrict which types may instantiate a generic
+        \\procedure are `where` clauses, covered in Constraints with `where`.
+    );
+}
+
+render_section_63 :: () {
+    paragraph(0, #string,oneline
+        \\A `where` clause is a compile-time boolean guard attached to a
+        \\declaration. It is evaluated at each call, after the call's type
+        \\arguments have been solved and before the candidate is accepted. A
+        \\clause that evaluates to false removes the declaration from
+        \\consideration; if nothing is left, the call fails.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\scaled :: (x: $T, k: T) -> T #inline where Is_Numeric(T) where !Is_Bool(T) {
+        \\    return x * k;
+        \\}
+        \\
+        \\rep :: (#comptime n: int, s: string) -> string where n > 0 {
+        \\    out := s;
+        \\    #inline for i: 1..n out = out + s;
+        \\    return out;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("scaled=%\n", scaled(6, 7));
+        \\    print("scaled=%\n", scaled(1.5, 2.0));
+        \\    print("rep=%\n", rep(3, "ab"));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\scaled=42
+        \\scaled=3
+        \\rep=ababab
+    );
+    subheading(3, "Placement and repetition");
+    paragraph(4, #string,oneline
+        \\The clauses come after the parameter list, after the return type, and
+        \\after every function directive, immediately before the body. The order
+        \\is fixed: `f :: (a: int) where true #inline { }` is `error: function
+        \\directives must appear before where clauses`.
+    );
+    paragraph(5, #string,oneline
+        \\A declaration may carry any number of `where` clauses. They are
+        \\conjoined, so repeating the keyword means "and". Writing
+        \\`where A where B` and `where A && B` are the same constraint; the
+        \\repeated form is usually easier to read when the predicates are long.
+    );
+    code_block(6, "glosso", #string
+        \\both :: (x: $T) -> T where is_int_like(T) where T != s32 { return x; }
+        \\conj :: (x: $T) -> T where Show(T) && PartialEq(T, T) { return x; }
+    );
+    subheading(7, "Compile-time predicates over type parameters");
+    paragraph(8, #string,oneline
+        \\Any expression the compile-time evaluator can reduce to a `bool` is a
+        \\legal clause, and a type parameter is an ordinary compile-time value
+        \\inside it. Type equality, `size_of`, and the `Is_*` reflection helpers
+        \\from `Meta` are all available; so is a user procedure taking a `type`.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\is_int_like :: (T: type) -> bool { return T == int || T == s64 || T == s32; }
+        \\
+        \\double  :: (x: $T) -> T where is_int_like(T) { return x + x; }
+        \\show_it :: (x: $T) -> string where Show(T) { return show(x); }
+        \\both    :: (x: $T) -> T where is_int_like(T) where T != s32 { return x; }
+        \\conj    :: (x: $T) -> T where Show(T) && PartialEq(T, T) { return x; }
+        \\
+        \\main :: () {
+        \\    print("double=%\n", double(21));
+        \\    print("show_it=%\n", show_it(1.5));
+        \\    print("both=%\n", both(cast(s64)3));
+        \\    print("conj=%\n", conj(7));
+        \\}
+    );
+    code_block(10, "text", #string
+        \\double=42
+        \\show_it=1.5
+        \\both=3
+        \\conj=7
+    );
+    paragraph(11, #string,oneline
+        \\A clause may also constrain a `#comptime` value parameter rather than
+        \\a type. `rep :: (#comptime n: int, s: string) -> string where n > 0`
+        \\accepts `rep(3, "ab")` and rejects `rep(0, "ab")`, because the guard
+        \\sees the constant the caller supplied.
+    );
+    subheading(12, "Typeclass predicates");
+    paragraph(13, #string,oneline
+        \\A class name applied to a type is an evidence query: `Show(T)` is a
+        \\compile-time `bool` meaning "does `T` have a `Show` instance?". This is
+        \\the form to reach for whenever the body calls a class method, because
+        \\it states the requirement the body actually has. Multi-parameter
+        \\classes are written with all their arguments, as in `PartialEq(T, T)`.
+    );
+    paragraph(14, #string,oneline
+        \\Evidence queries are not general expressions. The evaluator handles
+        \\a bare query and a conjunction of queries; anything else is
+        \\`error: non-constant function call` at the declaration.
+    );
+    table_header(15, "Clause   —   Accepted");
+    table_row(16, "`where Show(T)`   |   Yes");
+    table_row(17, "`where Show(T) && PartialEq(T, T)`   |   Yes");
+    table_row(18, "`where Show(T) || PartialEq(T, T)`   |   No: `non-constant function call`");
+    table_row(19, "`where !Show(T)`   |   No: `non-constant function call`");
+    table_row(20, "`where Show(T) == false`   |   No: `non-constant function call`");
+    table_row(21, "`where !Is_Bool(T)`   |   Yes: an ordinary predicate, not an evidence query");
+    paragraph(22, #string,oneline
+        \\The asymmetry is real and worth remembering: negation works on a
+        \\`(T: type) -> bool` procedure and does not work on a class name.
+        \\A body that has to branch on the absence of an instance uses `#if`
+        \\instead, which does accept `!Class(T)`.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\describe :: (x: $T) -> string {
+        \\    #if Show(T) return show(x);
+        \\    else return "opaque";
+        \\}
+        \\
+        \\Plain :: struct { v: int; }
+        \\
+        \\main :: () {
+        \\    p: Plain = .{ .v = 1 };
+        \\    print("% %\n", describe(7), describe(p));
+        \\}
+    );
+    code_block(24, "text", #string
+        \\7 opaque
+    );
+    subheading(25, "What a failed constraint looks like");
+    paragraph(26, #string,oneline
+        \\A call whose only candidate fails its guard reports the guard, not the
+        \\body: `double("hi")` for the `double` above is `error: constraint
+        \\failed for double`. The diagnostic names the declaration and points at
+        \\the call, and it does not say which clause failed, so a declaration
+        \\with several clauses is easier to diagnose when they are split across
+        \\repeated `where` keywords.
+    );
+    note(27, #string,oneline
+        \\A `where` clause naming something that does not exist is not reported
+        \\at the declaration. `f :: (x: $T) -> int where Show(U)`, with no `U`
+        \\anywhere, compiles; every call to `f` then fails with `error:
+        \\constraint failed for f`. A constraint that rejects every argument is
+        \\usually a misspelled type-parameter name.
+    );
+    subheading(28, "The definition-site pre-check");
+    paragraph(29, #string,oneline
+        \\A generic body is normally checked once per instantiation, which means
+        \\a mistake in it surfaces at a call site rather than at the
+        \\declaration. To narrow that gap the checker also runs the body once at
+        \\its definition with every type parameter bound to a skolem: an opaque
+        \\type that supports exactly the classes the declaration's `where`
+        \\clauses name, and nothing else. An operator or method used on a skolem
+        \\is resolved against that evidence set instead of against the global
+        \\instance table.
+    );
+    paragraph(30, #string,oneline
+        \\The pre-check is deliberately one-sided. It reports only what the
+        \\declared evidence provably cannot support, and it stays silent
+        \\everywhere a decision would need the concrete type. Literals do not
+        \\default against a skolem, class methods resolve abstractly with no
+        \\dictionary, and `#meaningful` probes are not run at all, because a
+        \\structural probe asks a question about a concrete type by
+        \\construction. What it finds it reports as a warning on the same
+        \\channel as the memory diagnostics, never as an error, so a program the
+        \\pre-check complains about still compiles and runs.
+    );
+    paragraph(31, #string,oneline
+        \\That one-sidedness is thorough enough that the pre-check is quiet in
+        \\practice. A body that adds two values of a type parameter whose
+        \\`where` clause names only `Show` draws no diagnostic at its
+        \\declaration; the missing `Add` is found at the first instantiation
+        \\that lacks it, and the diagnostic is anchored inside the body rather
+        \\than at the call.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\sum_two :: (a: $T, b: T) -> T where Show(T) { return a + b; }
+        \\
+        \\Point :: struct #derive(Show) { x: int; }
+        \\
+        \\main :: () {
+        \\    p: Point = .{ .x = 1 };
+        \\    print("%\n", sum_two(p, p));
+        \\}
+    );
+    code_block(33, "text", #string
+        \\error: no operator '+' for Point, Point
+        \\  --> sum.glo:3:56
+        \\  |
+        \\3 | sum_two :: (a: $T, b: T) -> T where Show(T) { return a + b; }
+        \\  |                                                        ^
+    );
+    paragraph(34, #string,oneline
+        \\The same file with the call removed compiles clean, which is the other
+        \\half of the picture: a generic procedure that is never instantiated is
+        \\not checked in any other way, and its body can name things that do not
+        \\exist.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\never_called :: (a: $T) -> T { print("%\n", totally_unbound_name); return a; }
+        \\
+        \\main :: () { print("x\n"); }
+    );
+    code_block(36, "text", #string
+        \\x
+    );
+    paragraph(37, #string,oneline
+        \\That program compiles and runs. Adding one call to `never_called` is
+        \\what turns `totally_unbound_name` into an error. The practical rule is
+        \\that a generic procedure is only as checked as its call sites make it,
+        \\so a library generic wants a test that instantiates it.
+    );
+    subheading(38, "Where else `where` appears");
+    paragraph(39, #string,oneline
+        \\The same clause syntax attaches to a typeclass declaration, where it
+        \\states a superclass requirement, and to an instance, where its clauses
+        \\are copied onto every method and associated type of that instance.
+        \\Those are covered in Typeclasses: Declaring a Contract and in
+        \\Instances: Heads, Bodies, and `where`.
+    );
+    paragraph(40, #string,oneline
+        \\A constraint that asks whether an operation typechecks at all, rather
+        \\than whether a named class is implemented, is written with
+        \\`#meaningful`; a predicate such as
+        \\`Addable :: (T: type) -> bool { return #meaningful { p, q: T; p + q; }; }`
+        \\is a legal `where` predicate and is the subject of Structural
+        \\Constraints with `#meaningful`.
+    );
+}
+
+render_section_64 :: () {
+    paragraph(0, #string,oneline
+        \\`#meaningful` asks the checker a question: would this code type-check?
+        \\It takes a block, checks every statement in it against the current
+        \\type environment, and folds to `true` if all of them passed and
+        \\`false` if any of them failed. The verdict is an ordinary
+        \\compile-time `bool`, so it can initialize a constant, guard a `#if`,
+        \\stand in a `where` clause, or be the condition of an `#assert`.
+    );
+    paragraph(1, #string,oneline
+        \\This is a structural constraint: it is satisfied by the shape of the
+        \\type rather than by a registered instance. A typeclass predicate asks
+        \\whether evidence was declared; `#meaningful` asks whether the
+        \\expression the generic body actually writes would resolve. Field
+        \\access, indexing, calls to ordinary generic procedures and operator
+        \\resolution all fall inside its reach, and none of them is a typeclass
+        \\query.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec   :: struct { x: s64; y: s64; }
+        \\Plain :: struct { a: s64; }
+        \\
+        \\(Vec, Vec) :: instance Add {
+        \\    Output :: Vec;
+        \\    '+' :: (a: Vec, b: Vec) -> Vec { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
+        \\}
+        \\
+        \\ADDS_VEC   :: #meaningful { p, q: Vec;   p + q; };
+        \\ADDS_PLAIN :: #meaningful { p, q: Plain; p + q; };
+        \\
+        \\main :: () {
+        \\    print("Vec=% Plain=%\n", ADDS_VEC, ADDS_PLAIN);
+        \\}
+    );
+    code_block(3, "text", #string
+        \\Vec=1 Plain=0
+    );
+    subheading(4, "The block is checked, never executed");
+    paragraph(5, #string,oneline
+        \\Statements inside the probe are type-checked and then discarded. They
+        \\are not lowered, not run at compile time, and not run at runtime, so a
+        \\call written inside a probe has no effect on the program. The
+        \\declarations a probe introduces are local to it and are gone when it
+        \\finishes.
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec :: struct { x: s64; }
+        \\
+        \\calls := 0;
+        \\count :: () -> s64 { calls += 1; return calls; }
+        \\
+        \\main :: () {
+        \\    ok := #meaningful { v: Vec; v.x; count(); };
+        \\    no := #meaningful { v: Vec; v.nope; };
+        \\    print("ok=% no=% calls=%\n", ok, no, calls);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\ok=1 no=0 calls=0
+    );
+    subheading(8, "The two spellings");
+    paragraph(9, #string,oneline
+        \\A brace after `#meaningful` starts a block, which runs to its closing
+        \\brace and may hold any number of statements. Without a brace the
+        \\directive takes exactly one unary expression and wraps it in a
+        \\single-statement block. The block form is the one to reach for by
+        \\default, because it can declare the values the probe needs.
+    );
+    table_header(10, "Form   —   Body   —   Ends at");
+    table_row(11, "`#meaningful { s1; s2; }`   |   any number of statements   |   the closing brace");
+    table_row(12, "`#meaningful <expr>`   |   one unary expression   |   the end of that unary expression");
+    note(13, #string,oneline
+        \\The braceless form binds only as far as a unary expression, so any
+        \\binary operator after it belongs to the enclosing expression.
+        \\`#meaningful v.left == 3` reads as `(#meaningful v.left) == 3` and
+        \\reports `error: no operator '==' for bool, int`. Write
+        \\`#meaningful { v.left == 3; }` when the probe should cover the
+        \\comparison.
+    );
+    subheading(14, "How it differs from a typeclass predicate");
+    paragraph(15, #string,oneline
+        \\`Class(T)` and `#meaningful` answer different questions, and they
+        \\disagree. The evidence query consults the instance table for the class
+        \\named; the probe re-runs the checker over the code written. A type can
+        \\satisfy one and fail the other in either direction.
+    );
+    table_header(16, "Query   —   Asks   —   Answers for");
+    table_row(17, "`Class(T)`   |   is there an instance of this class for `T`?   |   one named typeclass");
+    table_row(18, "`#meaningful { … }`   |   does this code type-check for these types?   |   whatever the block writes");
+    paragraph(19, #string,oneline
+        \\A `distinct` type shows the split plainly. `Meters :: distinct f64;`
+        \\declares no derive list, so it borrows no operators, yet the generic
+        \\`Show` instance for floats still covers it. The evidence query says
+        \\yes and the structural probe says no, and both are correct about the
+        \\question they were asked.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Meters :: distinct f64;
+        \\
+        \\SHOWS :: Show(Meters);
+        \\ADDS  :: #meaningful { p, q: Meters; p + q; };
+        \\
+        \\main :: () {
+        \\    m: Meters = cast(Meters) 3.5;
+        \\    print("Show=% adds=% show=%\n", SHOWS, ADDS, show(m));
+        \\}
+    );
+    code_block(21, "text", #string
+        \\Show=1 adds=0 show=3.5
+    );
+    bullet(22, #string,oneline
+        \\Only the probe can constrain an operation no typeclass owns: a field
+        \\by name, a member call, a call to an ordinary generic procedure.
+    );
+    bullet(23, #string,oneline
+        \\Only the evidence query can name a class that no single expression
+        \\exercises, and it is the form that participates in instance selection.
+        \\How an Instance Is Chosen covers that side.
+    );
+    subheading(24, "In a `where` clause");
+    paragraph(25, #string,oneline
+        \\A `where` clause accepts a `#meaningful` block directly; the clause
+        \\evaluator recognises the node before it tries constant folding. The
+        \\clause's environment is the candidate's binding environment, so the
+        \\parameter names of the signature are in scope inside the probe.
+    );
+    paragraph(26, #string,oneline
+        \\Wrapping the probe in a `(T: type) -> bool` procedure gives it a name
+        \\and, more usefully, makes it an ordinary compile-time boolean. Such a
+        \\predicate composes with `!`, `&&` and `||` in a `where` clause,
+        \\because the clause is then just a constant-foldable call.
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Left  :: struct { left: s64; }
+        \\Right :: struct { right: s64; }
+        \\
+        \\Has_Left  :: (T: type) -> bool { return #meaningful { v: T; v.left; }; }
+        \\Has_Right :: (T: type) -> bool { return #meaningful { v: T; v.right; }; }
+        \\
+        \\// A probe written straight into the clause.
+        \\read_left :: (v: $T) -> s64 where #meaningful { v.left; } { return v.left; }
+        \\
+        \\// A predicate composes with '!', '&&' and '||' like any other comptime bool.
+        \\only_left :: (v: $T) -> s64 where Has_Left(T) where !Has_Right(T) { return v.left; }
+        \\
+        \\either :: (v: $T) -> s64 where Has_Left(T) || Has_Right(T) {
+        \\    #if Has_Left(T) return v.left;
+        \\    else return v.right;
+        \\}
+        \\
+        \\main :: () {
+        \\    l: Left  = .{ .left = 1 };
+        \\    r: Right = .{ .right = 2 };
+        \\    print("read=% only=%\n", read_left(l), only_left(l));
+        \\    print("either=% %\n", either(l), either(r));
+        \\}
+    );
+    code_block(28, "text", #string
+        \\read=1 only=1
+        \\either=1 2
+    );
+    paragraph(29, #string,oneline
+        \\Calling `read_left` with a `Right` fails at the call site, with the
+        \\same message any unsatisfied `where` clause produces. The probe's own
+        \\reason is not attached here; `#assert` is the form that reports it.
+    );
+    code_block(30, "text", #string
+        \\error: constraint failed for read_left
+        \\   --> probe.glo:12:18
+        \\   |
+        \\12 |     print("%\n", read_left(r));
+        \\   |                  ^^^^^^^^^
+    );
+    paragraph(31, #string,oneline
+        \\A raw evidence query does not compose the same way. `where Class(T)`
+        \\and `where A(T) && B(T)` are the only shapes the clause evaluator
+        \\understands; `where Show(T) || PartialOrd(T, T)` is
+        \\`error: non-constant function call`. Routing the same question through
+        \\a `#meaningful` predicate is the way to get negation and disjunction.
+    );
+    subheading(32, "In `#assert`");
+    paragraph(33, #string,oneline
+        \\When a probe fails, the checker keeps the diagnostic that made it
+        \\fail. `#assert` prints that reason underneath the assertion message,
+        \\which turns an opaque "does not work" into the specific resolution
+        \\failure. This is the most useful place to spend a probe.
+    );
+    code_block(34, "glosso", #string
+        \\Vec :: struct { x: s64; }
+        \\
+        \\main :: () {
+        \\    #assert #meaningful { p, q: Vec; p + q; }, "Vec does not support +";
+        \\}
+    );
+    code_block(35, "text", #string
+        \\error: assertion failed: Vec does not support +
+        \\  --> probe.glo:4:5
+        \\  |
+        \\4 |     #assert #meaningful { p, q: Vec; p + q; }, "Vec does not support +";
+        \\  |     ^^^^^^^
+        \\note: constraint is not meaningful for these types
+        \\note: no operator '+' for Vec, Vec
+    );
+    subheading(36, "Probe hygiene and rollback");
+    paragraph(37, #string,oneline
+        \\A probe is a transaction. Nothing it caused survives it unless some
+        \\non-probe context asks for the same work: constants it forced are
+        \\restored to their previous state, source it generated is dropped, its
+        \\`#insert` expansions are unwound, and every generic instance it
+        \\triggered is marked speculative. A speculative instance is skipped
+        \\during lowering, so asking whether `sort_items(x)` would compile does
+        \\not put `sort_items` in the binary. A later real call clears the mark
+        \\and the instance is emitted normally.
+    );
+    paragraph(38, #string,oneline
+        \\Errors do not escape either, and that includes deliberate ones. A
+        \\`#compile_error` reached while checking a probe becomes the probe's
+        \\`false` answer rather than a compile failure, so a generic guarded by
+        \\`#compile_error` can still be asked about.
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\
+        \\strict :: (v: $T) -> s64 {
+        \\    #if !#meaningful { v.left; } #compile_error "needs a left field";
+        \\    return v.left;
+        \\}
+        \\
+        \\Left :: struct { left: s64; }
+        \\
+        \\PROBE :: #meaningful { n: s64; strict(n); };
+        \\
+        \\main :: () {
+        \\    l: Left = .{ .left = 4 };
+        \\    print("probe=% call=%\n", PROBE, strict(l));
+        \\}
+    );
+    code_block(40, "text", #string
+        \\probe=0 call=4
+    );
+    paragraph(41, #string,oneline
+        \\Probes nest, and each answers only for itself. The checker stashes the
+        \\enclosing failure reason before running an inner probe and puts it back
+        \\when that probe succeeds, so the reason cited against a constraint is
+        \\the one that constraint produced rather than whichever probe happened
+        \\to run last. An outer probe over a call whose own `where` clause failed
+        \\reports `constraint failed for take_left`, not the inner probe's
+        \\missing-field message.
+    );
+    paragraph(42, #string,oneline
+        \\The verdict is computed once per probe and cached on the expression
+        \\together with its reason. Consumers that run later, such as an
+        \\`#assert` diagnostic or overload resolution, read the cached answer
+        \\instead of re-running the block, which is why a failing probe can
+        \\still explain itself.
+    );
+    note(43, #string,oneline
+        \\A `where #meaningful` clause is part of a typeclass method's signature
+        \\key. An instance method must repeat an equivalent probe or the instance
+        \\fails its minimal check: probing `value.right` against a class that
+        \\probed `value.left` gives `error: instance 'Carrier :: Witness' does
+        \\not satisfy the implicit minimal definition; missing inspect`.
+        \\`#minimal` and Required Methods covers the comparison.
+    );
+}
+
+render_section_65 :: () {
+    paragraph(0, #string,oneline
+        \\A lambda is an anonymous procedure written inline. The parameter list
+        \\is delimited by `|` rather than parentheses, which is what keeps it
+        \\distinguishable from a parenthesised expression; `||` is the empty
+        \\parameter list, and `||->` is the empty list followed by a return
+        \\arrow. The lexer produces `||` and `||->` as single tokens and the
+        \\parser splits them.
+    );
+    paragraph(1, #string,oneline
+        \\A lambda's value is a function pointer. It can initialize a local,
+        \\be passed as an argument, sit in an array, and convert to any
+        \\`#fn_ptr` type with a matching signature. It cannot capture; that
+        \\restriction is what lets the value be a bare code pointer.
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\
+        \\apply :: (f: (int, int) -> int, a: int, b: int) -> int { return f(a, b); }
+        \\
+        \\main :: () {
+        \\    inc: (int) -> int = |x| x + 1;              // parameter type from the target type
+        \\    zero: () -> int = || 0;                     // empty parameter list
+        \\    dbl := |x: int| -> int { return x * 2; };   // annotated, block body
+        \\    z2  := ||->int { return 5; };               // no parameters, explicit return type
+        \\    add := |a, b| a + b;                        // parameters decided by the first call
+        \\    print("inc=% zero=% dbl=% z2=%\n", inc(4), zero(), dbl(21), z2());
+        \\    print("add=%\n", add(1, 2));
+        \\    print("apply=%\n", apply(|a, b| a * b, 6, 7));
+        \\}
+    );
+    code_block(3, "text", #string
+        \\inc=5 zero=0 dbl=42 z2=5
+        \\add=3
+        \\apply=42
+    );
+    subheading(4, "The spellings");
+    table_header(5, "Spelling   —   Parameters   —   Body");
+    table_row(6, "`|x| x + 1`   |   one, type from context   |   one expression, implicitly returned");
+    table_row(7, "`|x: int| x + 1`   |   one, annotated   |   one expression");
+    table_row(8, "`|x: int| -> int { … }`   |   one, annotated   |   block, return type written");
+    table_row(9, "`|a, b| a * b`   |   two, types from context   |   one expression");
+    table_row(10, "`|| 0`   |   none   |   one expression");
+    table_row(11, "`||->int { … }`   |   none   |   block, return type written");
+    table_row(12, "`|noalias p: *int| -> int { … }`   |   one, `noalias`   |   block");
+    paragraph(13, #string,oneline
+        \\An explicit return type requires a block. Without one the body is a
+        \\single expression that is wrapped in an implicit `return`, and there is
+        \\nowhere for the arrow to attach: `|x: int| -> int x * 2` is
+        \\`error: a lambda with an explicit return type requires a block`. A
+        \\block body without a return type is fine; the type comes from the body.
+    );
+    bullet(14, #string,oneline
+        \\Named results work in a lambda return type exactly as in a procedure:
+        \\`|v: s64| -> (lo: s64, hi: s64) { lo = v % 10; hi = v / 10; }` declares
+        \\both names and returns them.
+    );
+    bullet(15, #string,oneline
+        \\Repeating a parameter name is `error: duplicate lambda parameter 'x'`,
+        \\and omitting the separator is
+        \\`error: expected ',' or '|' after lambda parameter`.
+    );
+    subheading(16, "Where the parameter types come from");
+    paragraph(17, #string,oneline
+        \\An unannotated parameter has no type of its own. The checker gives the
+        \\lambda a signature of inference variables and defers it. Two things can
+        \\fill those variables in: an expected type at the point the lambda is
+        \\written, or the arguments of the first call made through it.
+    );
+    table_header(18, "Source   —   Example   —   When");
+    table_row(19, "the target type   |   `inc: (int) -> int = |x| x + 1;`   |   at the binding");
+    table_row(20, "the callee's parameter type   |   `apply(|a, b| a * b, 6, 7)`   |   at the argument position");
+    table_row(21, "the first call's arguments   |   `add := |a, b| a + b; add(1, 2);`   |   at that call");
+    paragraph(22, #string,oneline
+        \\The first call decides the parameters permanently, and a compile-time
+        \\number reaching a parameter takes its default type rather than staying
+        \\a literal, because a parameter is a runtime binding and needs a
+        \\representation. So `add := |a, b| a + b; add(1, 2); add(1.0, 2.0);`
+        \\fixes the parameters at `int` and then rejects the second call with
+        \\`error: callback argument comptime_float != int`.
+    );
+    paragraph(23, #string,oneline
+        \\A lambda with nothing at all to fix its parameters is rejected at the
+        \\binding rather than at some later use: a lone `f := |a| a + 1;` is
+        \\`error: cannot infer a type here; annotate it or give it a use that
+        \\fixes one`.
+    );
+    subheading(24, "The return type comes from the body");
+    paragraph(25, #string,oneline
+        \\Only the parameters have to be decided from outside. Once they are
+        \\concrete the body is checked and whatever it produces is the return
+        \\type, which is why an unannotated lambda can return a `string` built
+        \\from an `s64` parameter. When both an annotation and a target type are
+        \\present they must agree: `f: Op = |x: int| -> string { … };` against
+        \\`Op :: #fn_ptr(a: int) -> int;` is
+        \\`error: lambda return type is string, but the expected type is int`.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\find_if :: (values: []$T, predicate: (T) -> bool) -> s64 {
+        \\    for values { if predicate(it) return cast(s64) it_index; }
+        \\    return -1;
+        \\}
+        \\
+        \\main :: () {
+        \\    // The return type is whatever the body produces; nothing is annotated.
+        \\    render := |x: s64| show(x) + "!";
+        \\    print("%\n", render(7));
+        \\
+        \\    // A lambda as a callback: the parameter type comes from the callee's
+        \\    // signature after $T is bound.
+        \\    storage: [4]s64 = .[3, 9, 12, 5];
+        \\    print("index=%\n", find_if(storage[..], |v| v > 10));
+        \\}
+    );
+    code_block(27, "text", #string
+        \\7!
+        \\index=2
+    );
+    subheading(28, "Captures");
+    paragraph(29, #string,oneline
+        \\There are no closures. A lambda body may read anything with static
+        \\storage, which means globals, top-level constants and other
+        \\procedures, but reaching an enclosing local is rejected. A captured
+        \\local would have to be copied into an environment record and carried alongside
+        \\the code pointer, and a lambda is a bare code pointer.
+    );
+    code_block(30, "glosso", #string
+        \\main :: () {
+        \\    outer_total := 1;
+        \\    f := |x: int| -> int { return x + outer_total; };
+        \\    _ := f(1);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\error: lambda captures local 'outer_total', but captured closures are not supported
+        \\  --> capture.glo:3:39
+        \\  |
+        \\3 |     f := |x: int| -> int { return x + outer_total; };
+        \\  |                                       ^^^^^^^^^^^
+        \\help: pass the value as an explicit callback or context argument
+    );
+    paragraph(32, #string,oneline
+        \\The expression-body form reports the weaker
+        \\`error: unbound 'outer_total'`, because the name never resolves far
+        \\enough to be recognised as a capture. Either way the fix is the same:
+        \\pass the value as an extra parameter, or put it in the implicit
+        \\context.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\
+        \\SCALE :: 10;
+        \\offset := 3;
+        \\
+        \\Bin_Op :: #fn_ptr(a: s64, b: s64) -> s64;
+        \\C_Op   :: #fn_ptr(v: s64) -> s64 #c_call;
+        \\
+        \\main :: () {
+        \\    // Globals and constants are visible; enclosing locals are not.
+        \\    scaled := |x: s64| -> s64 { return x * SCALE + offset; };
+        \\    print("scaled=%\n", scaled(4));
+        \\
+        \\    // Named results in a lambda return type.
+        \\    split := |v: s64| -> (lo: s64, hi: s64) { lo = v % 10; hi = v / 10; };
+        \\    a, b := split(47);
+        \\    print("lo=% hi=%\n", a, b);
+        \\
+        \\    // noalias parameters.
+        \\    load := |noalias p: *s64| -> s64 { return p.*; };
+        \\    n: s64 = 8;
+        \\    print("load=%\n", load(*n));
+        \\
+        \\    // A lambda converts to a named function-pointer type, including a #c_call one.
+        \\    op: Bin_Op = |a: s64, b: s64| -> s64 { return a - b; };
+        \\    c: C_Op = |v: s64| -> s64 { return v + 1; };
+        \\    print("op=% c=%\n", op(9, 4), c(41));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\scaled=43
+        \\lo=7 hi=4
+        \\load=8
+        \\op=5 c=42
+    );
+    subheading(35, "Lambdas as values");
+    paragraph(36, #string,oneline
+        \\A lambda and a named procedure produce the same kind of value, so they
+        \\mix freely in a table of function pointers, and a block-bodied lambda
+        \\assigned to a `#fn_ptr` variable takes its parameter from the target
+        \\type and its result from the body.
+    );
+    code_block(37, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Op :: #fn_ptr(v: s64) -> s64;
+        \\
+        \\named :: (v: s64) -> s64 { return v + 1; }
+        \\
+        \\main :: () {
+        \\    f: Op = |v| { return v * 3; };
+        \\    print("f=%\n", f(4));
+        \\
+        \\    table: [3]Op = .[named, f, |v: s64| -> s64 { return -v; }];
+        \\    for table print("table[%]=%\n", it_index, it(6));
+        \\}
+    );
+    code_block(38, "text", #string
+        \\f=12
+        \\table[0]=7
+        \\table[1]=18
+        \\table[2]=-6
+    );
+    note(39, #string,oneline
+        \\A lambda cannot appear in a top-level initializer. Both
+        \\`bump: Op = |v: s64| -> s64 { return v + 1; };` and the constant form
+        \\`BUMP : Op : |v: s64| -> s64 { … };` fail with
+        \\`error: unknown const __glo_lambda_0`. Declare a named procedure at
+        \\file scope and assign that instead; the lambda forms are for use
+        \\inside a body.
+    );
+}
+
+render_section_66 :: () {
+    paragraph(0, #string,oneline
+        \\`#fn_ptr` declares a named function-pointer type. It is a top-level
+        \\declaration form, written after `::` like any other type declaration,
+        \\and it may not be spelled inline in a type position: writing
+        \\`f: #fn_ptr(v: s64) -> s64` as a parameter type is
+        \\`error: unexpected token 'fn_ptr'`. For an unnamed function type there
+        \\is a separate syntax, described below.
+    );
+    code_block(1, "glosso", #string
+        \\Bin_Op  :: #fn_ptr(a: s64, b: s64) -> s64;
+        \\Sink    :: #fn_ptr(v: s64);
+        \\Nullary :: #fn_ptr() -> s64;
+        \\Cb      :: #fn_ptr(v: s64) -> s64 #c_call;
+        \\Copy    :: #fn_ptr(noalias dst: *s64, noalias src: *const s64);
+        \\Varargs :: #fn_ptr(fmt: *const s8, ...) -> s32 #c_call;
+    );
+    paragraph(2, #string,oneline
+        \\Parameter names are mandatory here, even though they contribute
+        \\nothing to the type. The parser reads each parameter as `name: type`
+        \\and a bare type is a parse error: `#fn_ptr(s64, s64) -> s64` reports
+        \\`error: unexpected token ','` at the comma that follows the name it
+        \\thought it was reading. The arrow and return type are optional and
+        \\default to `void`.
+    );
+    subheading(3, "The suffixes");
+    paragraph(4, #string,oneline
+        \\Two directives may follow the return type, in either order.
+        \\`#c_call` is part of the type: a function must carry `#c_call` to be
+        \\assignable to a `#c_call` pointer, and must not carry it to be
+        \\assignable to a plain one. `#no_context` is accepted in the same
+        \\position but is discarded by the parser and never enters the type, so
+        \\it neither constrains an assignment nor changes a call.
+    );
+    table_header(5, "Suffix   —   On a `#fn_ptr` type   —   On a function declaration");
+    table_row(6, "`#c_call`   |   part of the type's identity   |   C calling convention, no implicit context");
+    table_row(7, "`#no_context`   |   accepted and ignored   |   suppresses the implicit context parameter");
+    paragraph(8, #string,oneline
+        \\A convention mismatch in either direction is
+        \\`error: got fnptr, expected fnptr`. The message repeats itself because
+        \\both sides print as `fnptr`; the difference is in the convention, not
+        \\in the parameters. A `#foreign` declaration does not carry `#c_call`
+        \\implicitly, so a foreign function assigns to a plain `#fn_ptr` type and
+        \\not to a `#c_call` one.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Bin_Op :: #fn_ptr(a: s64, b: s64) -> s64;
+        \\Sink   :: #fn_ptr(v: s64);
+        \\Cb     :: #fn_ptr(v: s64) -> s64 #c_call;
+        \\Bare   :: #fn_ptr(v: s64) -> s64 #no_context;
+        \\
+        \\add   :: (a: s64, b: s64) -> s64 { return a + b; }
+        \\shout :: (v: s64) { print("sink %\n", v); }
+        \\twice :: (v: s64) -> s64 #c_call { return v * 2; }
+        \\plain :: (v: s64) -> s64 #no_context { return v + 100; }
+        \\
+        \\main :: () {
+        \\    op: Bin_Op = add;
+        \\    s: Sink = shout;
+        \\    c: Cb = twice;
+        \\    b: Bare = plain;
+        \\    print("op=% c=% b=%\n", op(2, 3), c(21), b(1));
+        \\    s(7);
+        \\}
+    );
+    code_block(10, "text", #string
+        \\op=5 c=42 b=101
+        \\sink 7
+    );
+    bullet(11, #string,oneline
+        \\Parameter names are not part of the identity: a value of
+        \\`#fn_ptr(a: s64) -> s64` assigns to `#fn_ptr(different: s64) -> s64`.
+    );
+    bullet(12, #string,oneline
+        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const
+        \\s64);` rejects a procedure without both markers with
+        \\`error: cannot implicitly convert fnptr to fnptr because their noalias
+        \\parameter contracts differ`. `noalias` Pointer Parameters covers the
+        \\marker itself.
+    );
+    bullet(13, #string,oneline
+        \\Inside a `#no_context` or `#c_call` body, `context` is unreachable:
+        \\`error: cannot access 'context' in a #c_call / #no_context procedure`.
+    );
+    subheading(14, "C varargs in a function-pointer type");
+    paragraph(15, #string,oneline
+        \\A bare `...` may be the last parameter, with no name and no type. It
+        \\requires the C convention: without `#c_call` the declaration is
+        \\`error: C vararg function pointer 'Varargs' requires #c_call`. The
+        \\type then accepts a `#c_call` vararg function, including a `#foreign`
+        \\one.
+    );
+    note(16, #string,oneline
+        \\A call made through a vararg function pointer accepts only the fixed
+        \\parameters. `s: Summer = sum_s64;` is fine, but `s(3, 10, 20, 12)`
+        \\against `Summer :: #fn_ptr(count: s64, ...) -> s64 #c_call;` reports
+        \\`error: callback expects 1 argument(s), got 4`. Call the vararg
+        \\function by name when the extra arguments matter.
+    );
+    subheading(17, "The anonymous function type");
+    paragraph(18, #string,oneline
+        \\Any parenthesised type list followed by `->` is a function type. This
+        \\is the form to use in a parameter, a field, or anywhere else a type is
+        \\expected. Names and `noalias` are optional; the names are documentation
+        \\only.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\call0 :: (f: () -> s64) -> s64 { return f(); }
+        \\call1 :: (f: (s64) -> s64, v: s64) -> s64 { return f(v); }
+        \\call2 :: (f: (x: s64, y: s64) -> s64, v: s64) -> s64 { return f(v, v); }
+        \\callN :: (f: (noalias p: *s64) -> s64, p: *s64) -> s64 { return f(p); }
+        \\
+        \\five :: () -> s64 { return 5; }
+        \\add  :: (a: s64, b: s64) -> s64 { return a + b; }
+        \\load :: (noalias p: *s64) -> s64 { return p.*; }
+        \\
+        \\main :: () {
+        \\    k: s64 = 12;
+        \\    print("% % % %\n", call0(five), call1(|v: s64| -> s64 { return v + 1; }, 8),
+        \\          call2(add, 6), callN(load, *k));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\5 9 12 12
+    );
+    paragraph(21, #string,oneline
+        \\Without the arrow the same parentheses are a tuple type, and a single
+        \\unnamed element in parentheses is just that type. `(s64, string)` is a
+        \\two-element tuple; `(s64, string) -> bool` is a function type.
+        \\`noalias` outside a function type is
+        \\`error: noalias is only valid on function parameters`.
+    );
+    subheading(22, "Null and function pointers");
+    paragraph(23, #string,oneline
+        \\A `#fn_ptr` type excludes the zero address, in the same way `*T` and
+        \\`[*]T` do, because the optional form takes the null representation as
+        \\its niche. `?Op` is therefore the same size as `Op` on a 64-bit target
+        \\and costs nothing to carry. An absent callback is `.None`, and reading
+        \\it back goes through a pattern match like any other option payload.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Op :: #fn_ptr(v: s64) -> s64;
+        \\
+        \\Hook :: struct { procedure: ?Op; }
+        \\
+        \\twice :: (v: s64) -> s64 { return v * 2; }
+        \\
+        \\call_or :: (h: Hook, v: s64) -> s64 {
+        \\    if #pattern .Some(f) = h.procedure return f(v);
+        \\    return -1;
+        \\}
+        \\
+        \\main :: () {
+        \\    empty: Hook;
+        \\    print("none=%\n", call_or(empty, 5));
+        \\    filled: Hook = .{ .procedure = twice };
+        \\    print("some=%\n", call_or(filled, 5));
+        \\    print("Op=% ?Op=%\n", size_of(Op), size_of(?Op));
+        \\}
+    );
+    code_block(25, "text", #string
+        \\none=-1
+        \\some=10
+        \\Op=8 ?Op=8
+    );
+    paragraph(26, #string,oneline
+        \\This is the shape the standard library uses for every vtable slot.
+        \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }`
+        \\relies on `.None` being address zero, so a zero-initialized
+        \\`Allocator` is the "none installed" value without any extra tag.
+    );
+    paragraph(27, #string,oneline
+        \\Producing a function pointer from an address is a checked cast. At
+        \\`-O0` and `-O1` a zero address aborts with
+        \\`cast to fnptr of an address that is zero` and exit status 134, and
+        \\the check fires for a written literal too: `cast(Op) 0` builds and
+        \\then aborts rather than being rejected during checking. At `-O2` and
+        \\above the check is not emitted. Runtime Safety Checks and Panics
+        \\covers the family.
+    );
+    note(28, #string,oneline
+        \\`f: Op = null;` currently compiles and produces a value the program
+        \\must not call: at `-O0` the resulting binary traps, and at higher
+        \\levels the call is undefined. `null` denotes `.None` and belongs to an
+        \\optional type; write `?Op` when a slot may be empty.
+    );
+}
+
+render_section_67 :: () {
+    paragraph(0, #string,oneline
+        \\A directive is `#` followed by a run of letters, digits and
+        \\underscores. The lexer produces one token for any such spelling
+        \\without knowing which names exist, and every directive is then
+        \\dispatched by name at the point in the grammar where it appeared.
+        \\Position is therefore part of a directive's meaning: `#comptime`,
+        \\`#memory`, `#inline` and `#derive` all do different things depending
+        \\on what they are attached to.
+    );
+    paragraph(1, #string,oneline
+        \\There is no unknown-directive diagnostic. A name the parser does not
+        \\accept in that position simply fails to parse, and the error names the
+        \\token rather than the concept.
+    );
+    code_block(2, "glosso", #string
+        \\f :: () #bogus { }
+        \\main :: () {}
+    );
+    code_block(3, "text", #string
+        \\error: unexpected token 'bogus'
+        \\  --> directive.glo:1:9
+        \\  |
+        \\1 | f :: () #bogus { }
+        \\  |         ^^^^^^
+    );
+    subheading(4, "File and top-level directives");
+    table_header(5, "Directive   —   Form   —   Effect");
+    table_row(6, "`#enable` / `#disable`   |   `#enable(feature[, mode]);`   |   opens or closes a feature gate, sticky to the end of the file");
+    table_row(7, "`#import`   |   `#import[,only(…)] \"M\";`, or `,hide(…)`   |   loads a standard-library module, optionally under an alias");
+    table_row(8, "`#load`   |   `#load \"path\";`   |   splices a source file into this unit, optionally under an alias");
+    table_row(9, "`#library`   |   `N :: #library \"file\";` with `,system`, `,dyn` or `,static`   |   declares a foreign library handle for `#foreign`");
+    table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call];`   |   declares a function-pointer type");
+    table_row(11, "`#thread_local`   |   `#thread_local <global var decl>`   |   gives the variable thread-local storage");
+    table_row(12, "`#comptime`   |   `#comptime { … }` / `X :: #comptime e;`   |   runs during compilation");
+    table_row(13, "`#insert`   |   `#insert <string expr>;`   |   splices generated declarations into the file");
+    table_row(14, "`#memory`   |   `#memory <fn> { effects }`   |   attaches a contract to a function declared elsewhere");
+    note(15, #string,oneline
+        \\`#if` is not a top-level directive. `#if true { A :: 1; }` at file
+        \\scope is `error: bad decl name 'if'`, because the parser is reading a
+        \\declaration name at that point. Static `#if` is a statement and an
+        \\expression only. `#thread_local` is equally narrow: anything other than
+        \\a global variable after it is
+        \\`error: #thread_local can only prefix a global variable declaration`.
+    );
+    subheading(16, "Function directives");
+    paragraph(17, #string,oneline
+        \\Function directives are written after the return type and before the
+        \\`where` clauses. The order is fixed, and reversing it is diagnosed
+        \\rather than accepted, because the clause parser stops looking for
+        \\directives once a `where` has been seen.
+    );
+    code_block(18, "text", #string
+        \\error: function directives must appear before where clauses
+        \\  --> order.glo:1:26
+        \\  |
+        \\1 | f :: (a: s64) where true #inline { }
+        \\  |                          ^^^^^^^
+    );
+    table_header(19, "Directive   —   Argument   —   Meaning");
+    table_row(20, "`#operator`   |   one of `prefix`, `suffix`, `left`, `right`, `assign`, with an optional level   |   declares the operator's fixity, and its precedence for the binary modes");
+    table_row(21, "`#precedence`   |   one of `left`, `right`, `assign`, with an optional level   |   precedence and associativity only");
+    table_row(22, "`#expand`   |   none, or `,expression`   |   statement macro, or expression macro");
+    table_row(23, "`#magic`   |   `\"name\"`   |   compiler intrinsic; the declaration has no body");
+    table_row(24, "`#foreign`   |   a library handle or `\"file\"`, then an optional `\"symbol\"`   |   foreign function; no body");
+    table_row(25, "`#c_call`   |   none   |   C calling convention; no implicit context");
+    table_row(26, "`#no_context`   |   none   |   do not pass the implicit context");
+    table_row(27, "`#noreturn`   |   none   |   control never comes back from this call");
+    table_row(28, "`#returns_twice`   |   none   |   setjmp-style; the call may resume more than once");
+    table_row(29, "`#dump`   |   none   |   print this function's typed IR during compilation");
+    table_row(30, "`#must`   |   none   |   discarding the result is an error");
+    table_row(31, "`#inline`   |   none, or `,always` / `,never`   |   inlining hint, or a forced decision");
+    table_row(32, "`#modify`   |   an expression or a block   |   rewrites the type parameters before instantiation");
+    table_row(33, "`#memory`   |   one effect, or `(effect, …)`   |   memory and ownership contract");
+    paragraph(34, #string,oneline
+        \\`#inline,sometimes` is `error: #inline expects always or never after
+        \\','`, and `#expand,stmt` is `error: #expand expects expression after
+        \\','`. `#foreign` naming a handle that was never declared is
+        \\`error: #foreign refers to unknown library 'nolib' (declare it with
+        \\#library)`, and a `#library` modifier outside the three link kinds is
+        \\`error: #library modifier must be system, dyn, or static`.
+    );
+    paragraph(35, #string,oneline
+        \\`#must` is the one whose diagnostic a reader will meet by accident. It
+        \\fires on a call statement whose value is dropped, and the help names
+        \\the way to say the drop was deliberate.
+    );
+    code_block(36, "text", #string
+        \\error: discarded return value of #must function 'make'
+        \\  --> must.glo:3:14
+        \\  |
+        \\3 | main :: () { make(1); }
+        \\  |              ^^^^
+        \\help: bind it explicitly, for example `_ := make(...);`, if discarding is intentional
+    );
+    paragraph(37, #string,oneline
+        \\`#dump` writes to the compiler's own output, not the program's. The
+        \\dump is produced while the function is lowered, so a procedure nothing
+        \\calls is never lowered and prints nothing at all.
+    );
+    code_block(38, "glosso", #string
+        \\addd :: (a: s64, b: s64) -> s64 #dump { return a + b; }
+        \\main :: () { _ := addd(1, 2); }
+    );
+    code_block(39, "text", #string
+        \\; ---- #dump typed-ir addd(a: int, b: int) -> int  [4 ins] ----
+        \\   0  temp_mark v2
+        \\   1  magic v3 'int_add' [v0,v1]
+        \\   2  temp_restore v2
+        \\   3  ret v3
+        \\; ---- end addd ----
+    );
+    subheading(40, "Parameter directives");
+    paragraph(41, #string,oneline
+        \\Three directives may prefix a parameter, after the `using` and
+        \\`noalias` keywords and before the name. `#comptime` and `#lazy` may
+        \\appear together in either order; each may appear once.
+    );
+    table_header(42, "Directive   —   Form   —   Meaning");
+    table_row(43, "`#comptime`   |   `#comptime n: s64`   |   the argument must be compile-time known; the parameter has no runtime existence");
+    table_row(44, "`#lazy`   |   `#lazy v: bool`   |   the argument is evaluated at first use inside the callee, and at most once");
+    table_row(45, "`#empty`   |   `#empty: $T` or `#empty: $A, $B`   |   a type-only slot; the caller passes the type positionally");
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\
+        \\pow     :: (#comptime n: s64, x: s64) -> s64 { r: s64 = 1; #inline for i: 0..n r *= x; return r; }
+        \\zero_of :: (#empty: $T) -> T { d: T; return d; }
+        \\pick    :: (take: bool, #lazy value: s64, fallback: s64) -> s64 { if take return value; return fallback; }
+        \\
+        \\calls := 0;
+        \\costly :: () -> s64 { calls += 1; return 5; }
+        \\
+        \\main :: () {
+        \\    print("pow=% zero=%\n", pow(3, 2), zero_of(s64));
+        \\    print("lazy=% calls=%\n", pick(false, costly(), 1), calls);
+        \\}
+    );
+    code_block(47, "text", #string
+        \\pow=8 zero=0
+        \\lazy=1 calls=0
+    );
+    subheading(48, "Aggregate and field directives");
+    paragraph(49, #string,oneline
+        \\Aggregate directives sit between the `struct`, `union`, `typeclass` or
+        \\`distinct` keyword and the body. Each kind accepts a different set, and
+        \\`enum` and `enum_flags` accept none at all.
+    );
+    table_header(50, "Target   —   Accepted   —   Notes");
+    table_row(51, "`struct`   |   `#c_call` `#packed` `#modify` `#derive(…)` `#magic \"…\"`   |   `#c_call` and `#packed` both lock declaration order");
+    table_row(52, "`union`   |   `#raw` `#derive(…)` `#magic \"…\"`   |   `#raw` makes it a reinterpreting union with no tag");
+    table_row(53, "`enum`, `enum_flags`   |   none   |   `Color :: enum #derive(Show)` is `error: unexpected token 'derive'`");
+    table_row(54, "`typeclass`   |   `#derive(…)` `#minimal(…)`   |   `#derive` here names the class's own derive macro");
+    table_row(55, "`distinct`   |   `#derive(…)` `#derive,all`   |   selects which classes the nominal type borrows");
+    table_row(56, "struct field   |   `using` `#as` `#empty: T[, T…];`   |   written before the field name");
+    table_row(57, "union field   |   `#from`   |   generates a `Propagate` instance from the payload type");
+    paragraph(58, #string,oneline
+        \\`#magic` on an aggregate names a layout the compiler already knows,
+        \\the way `Context_Storage :: struct #magic
+        \\"jump_context_storage_struct" {}` does in `std/Jump.glo`. It is not an
+        \\extension point: a name the compiler does not recognise is
+        \\`error: unknown aggregate #magic "nope_struct"`.
+    );
+    paragraph(59, #string,oneline
+        \\`#c_call` and `#packed` both switch a struct off the default layout,
+        \\which sorts fields by alignment and then size. `#c_call` keeps
+        \\declaration order with normal padding, so a C header's layout is
+        \\reproduced; `#packed` keeps declaration order and removes the padding.
+        \\Struct Memory Layout covers the ordering rule itself.
+    );
+    code_block(60, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Reordered :: struct { a: u8; b: u64; c: u8; }
+        \\C_Layout  :: struct #c_call { a: u8; b: u64; c: u8; }
+        \\Packed    :: struct #packed { a: u8; b: u64; c: u8; }
+        \\
+        \\main :: () {
+        \\    print("reordered=% c_call=% packed=%\n",
+        \\          size_of(Reordered), size_of(C_Layout), size_of(Packed));
+        \\}
+    );
+    code_block(61, "text", #string
+        \\reordered=16 c_call=24 packed=10
+    );
+    subheading(62, "Statement, expression, and type positions");
+    paragraph(63, #string,oneline
+        \\The remaining directives are not attached to a declaration at all.
+        \\Several spellings appear in more than one of these positions and mean
+        \\something different in each; `#comptime` and `#inline` are the two that
+        \\catch readers out, and What Runs When and `#inline for` respectively
+        \\cover them.
+    );
+    table_header(64, "Position   —   Directives");
+    table_row(65, "statement   |   `#memory` overlay, `#bytes`, `#asm`, `#inline while`, `#inline for`, `#try defer`, `#push_context`, `#push_allocator`, `#comptime`, `#if`, `#assert`, `#compile_error`, `#insert`");
+    table_row(66, "expression   |   `#comptime`, `#try`, `#pattern`, `#meaningful`, `#undefined`, `#simd`, `#string`, `#inline for`, `#inline while`, `#code`, and a postfix `#memory(…)`");
+    table_row(67, "type   |   `#Context`, `#aos [..]T`, `#soa [..]T`");
+    table_row(68, "switch and case   |   `#partial` on the switch, `#falling` on a case");
+    paragraph(69, #string,oneline
+        \\`#inline` outside a loop is rejected by name:
+        \\`error: #inline can only prefix while or for`. `#Context` is the only
+        \\spelling of the built-in context type, and writing `Context` without
+        \\the `#` reports `error: the built-in Context type is written #Context`.
+    );
+    note(70, #string,oneline
+        \\`#char` is not a parser directive at all. The lexer recognises
+        \\`#char "A"` and produces the character literal `65` directly, which is
+        \\why its errors read `#char expects a string literal` and
+        \\`unterminated #char string literal` rather than mentioning a token.
+        \\`#char` Character Literals covers it.
+    );
+}

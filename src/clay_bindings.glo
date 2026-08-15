@@ -33,11 +33,13 @@ clay_bindings_source :: () -> string #memory returns_fresh {
     add_c_include_path(*c_options, "vendor/clay");
     add_c_compiler_arg(*c_options, "-ffreestanding");
     add_c_compiler_arg(*c_options, "-fno-builtin");
-    clay := compile_c_archive("clay", sources, c_options);
-    if result_is_err(clay) {
-        print("Clay compilation failed:\n");
-        report_error(clay.Err);
-        return "#compile_error \"Clay compilation failed\";";
+    clay_archive: Native_Compile_Output;
+    if compile_c_archive("clay", sources, c_options) == {
+        case .Ok(archive); clay_archive = archive;
+        case .Err(failure);
+            print("Clay compilation failed:\n");
+            report_error(failure);
+            return "#compile_error \"Clay compilation failed\";";
     }
 
     bindgen_options: Bindgen_Options;
@@ -48,15 +50,16 @@ clay_bindings_source :: () -> string #memory returns_fresh {
     add_bindgen_compiler_arg(*bindgen_options, "-ffreestanding");
     bindings := generate_source(
         header,
-        static_library("clay", clay.Ok.artifact),
+        static_library("clay", clay_archive.artifact),
         bindgen_options,
     );
-    if result_is_err(bindings) {
-        print("Clay Bindgen failed:\n");
-        report_error(bindings.Err);
-        return "#compile_error \"Clay Bindgen failed\";";
+    if bindings == {
+        case .Ok(source); return source;
+        case .Err(failure);
+            print("Clay Bindgen failed:\n");
+            report_error(failure);
+            return "#compile_error \"Clay Bindgen failed\";";
     }
-    return bindings.Ok;
 }
 
 #insert clay_bindings_source();
