@@ -23,8 +23,27 @@ search_result_count: s32 = 0;
 search_results: [MAX_SEARCH_RESULTS]Search_Result;
 reference_viewport_width: f32 = 1280.0;
 
+// The browser document owns scrolling, so navigation performed inside a frame
+// has to tell the host where the new page should start. 0 leaves the offset
+// alone, 1 asks for the top of the document, and 2 asks for the declaration
+// tagged with SYMBOL_ANCHOR_MARKER during this frame.
+SCROLL_REQUEST_NONE : s32 : 0;
+SCROLL_REQUEST_TOP : s32 : 1;
+SCROLL_REQUEST_ANCHOR : s32 : 2;
+
+scroll_request: s32 = SCROLL_REQUEST_NONE;
+scroll_symbol: s32 = -1;
+scroll_member: s32 = -1;
+
+clear_scroll_target :: () {
+    scroll_request = SCROLL_REQUEST_NONE;
+    scroll_symbol = -1;
+    scroll_member = -1;
+}
+
 manual_set_view :: (view: s32) #c_call {
     if view < APP_VIEW_MANUAL || view > APP_VIEW_SEARCH return;
+    clear_scroll_target();
     app_view = view;
     if view == APP_VIEW_STANDARD_LIBRARY {
         selected_module = -1;
@@ -36,11 +55,13 @@ manual_set_view :: (view: s32) #c_call {
 
 manual_select_section :: (section: s32) #c_call {
     if section < 0 || section >= SECTION_COUNT return;
+    clear_scroll_target();
     selected_section = section;
     app_view = APP_VIEW_MANUAL;
 }
 
 manual_select_module :: (module: s32) #c_call {
+    clear_scroll_target();
     app_view = APP_VIEW_STANDARD_LIBRARY;
     if module < 0 || module >= STD_MODULE_COUNT {
         selected_module = -1;
@@ -70,6 +91,8 @@ manual_set_search_results :: (data: [*]const s32, count: s32) #c_call
 manual_get_view :: () -> s32 #c_call { return app_view; }
 manual_get_section :: () -> s32 #c_call { return selected_section; }
 manual_get_module :: () -> s32 #c_call { return selected_module; }
+manual_get_scroll_request :: () -> s32 #c_call { return scroll_request; }
+manual_clear_scroll_request :: () #c_call { clear_scroll_target(); }
 
 // Freestanding executables keep only procedures reachable from main. The
 // browser asks wasm-ld to export these C-ABI procedures, so keep a runtime
@@ -84,6 +107,8 @@ manual_keep_browser_exports_reachable :: () {
     manual_get_view();
     manual_get_section();
     manual_get_module();
+    manual_get_scroll_request();
+    manual_clear_scroll_request();
 }
 
 clamp_page :: (page: s32, count: s32, page_size: s32) -> s32 {
@@ -177,6 +202,22 @@ render_standard_sidebar :: (height: f32) {
     close_element();
 }
 
+// The article column is 880px wide including 52px of padding on each side, so
+// a module path has 776px to live in. Clay never breaks inside a word, and the
+// deepest paths are half as wide again as that at the display size, so step the
+// size down for long names instead of letting one title widen the column.
+MODULE_TITLE_SIZE : s64 : 48;
+MODULE_TITLE_MINIMUM : s64 : 26;
+MODULE_TITLE_BUDGET : s64 : 1180;
+
+module_title_size :: (name: string) -> u16 {
+    if name.count <= 0 return cast(u16)MODULE_TITLE_SIZE;
+    limit := MODULE_TITLE_BUDGET / name.count;
+    if limit >= MODULE_TITLE_SIZE return cast(u16)MODULE_TITLE_SIZE;
+    if limit <= MODULE_TITLE_MINIMUM return cast(u16)MODULE_TITLE_MINIMUM;
+    return cast(u16)limit;
+}
+
 render_source_link :: (index: s32, path: string, line: s32) {
     label := path;
     if line > 0 label = tprint("%:% ↗", path, line);
@@ -187,7 +228,34 @@ render_count_badge :: (index: s32, value: s32) {
     render_small_badge(index, tprint("%", value));
 }
 
-render_signature_box :: (index: s32, value: string) {
+SIGNATURE_SIZE : s64 : 13;
+SIGNATURE_MINIMUM : s64 : 9;
+
+// The same word-breaking limit as module_title_size, applied to monospace. A
+// return type is one unbroken token inside a 300px column, so the longest ones
+// escape the article unless the box gives them a smaller size to sit in.
+mono_fit_size :: (value: string, budget: s64) -> u16 {
+    longest: s64 = 0;
+    run: s64 = 0;
+    i: s64 = 0;
+    while i <= value.count {
+        if i == value.count || value[i] == #char " " || value[i] == #char "\t" {
+            if run > longest longest = run;
+            run = 0;
+        } else {
+            run += 1;
+        }
+        i += 1;
+    }
+    if longest <= 0 return cast(u16)SIGNATURE_SIZE;
+    // The monospace faces the host asks for advance 0.6em per character.
+    limit := budget * 5 / (longest * 3);
+    if limit >= SIGNATURE_SIZE return cast(u16)SIGNATURE_SIZE;
+    if limit <= SIGNATURE_MINIMUM return cast(u16)SIGNATURE_MINIMUM;
+    return cast(u16)limit;
+}
+
+render_signature_box :: (index: s32, value: string, size: u16 = 13) {
     signature := column_box();
     signature.layout.padding = padding(13, 10);
     signature.backgroundColor = color(244, 241, 234);
@@ -196,7 +264,10 @@ render_signature_box :: (index: s32, value: string) {
     open_indexed("signature-box", index, signature);
     emit_text(
         value,
-        tagged_text_style(13, color(23, 50, 158), FONT_MONO, 22, CLAY_TEXT_WRAP_WORDS, 1),
+        tagged_text_style(
+            size, color(23, 50, 158), FONT_MONO, size + 9,
+            CLAY_TEXT_WRAP_WORDS, 1,
+        ),
     );
     close_element();
 }
@@ -386,7 +457,14 @@ render_standard_index :: () {
     }
 }
 
-render_symbol_header :: (index: s32, name: string, kind: string, path: string, line: s32) {
+render_symbol_header :: (
+    index: s32,
+    name: string,
+    kind: string,
+    path: string,
+    line: s32,
+    anchor: bool = false,
+) {
     header: Clay_ElementDeclaration;
     header.layout.sizing.width = grow_axis();
     header.layout.sizing.height = fit_axis();
@@ -399,7 +477,10 @@ render_symbol_header :: (index: s32, name: string, kind: string, path: string, l
     identity.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     identity.layout.childGap = 12;
     open_indexed("symbol-identity", index, identity);
-    emit_text(name, text_style(18, color(23, 50, 158), FONT_MONO_BOLD, 27));
+    name_style := text_style(18, color(23, 50, 158), FONT_MONO_BOLD, 27);
+    // The host scrolls the document to whichever name carries this marker.
+    if anchor name_style.userData = cast([*]void)SYMBOL_ANCHOR_MARKER.data;
+    emit_text(name, name_style);
     render_small_badge(220000 + index, kind);
     close_element();
     render_source_link(index, path, line);
@@ -442,7 +523,11 @@ render_function_details :: (
     }
     open_indexed("function-side", index, side);
     emit_text("RETURN TYPE", text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 18));
-    render_signature_box(320000 + index, return_type);
+    // 300px of column, or the full article width once the layout stacks, less
+    // the 13px the signature box pads with on each side.
+    return_budget: s64 = 274;
+    if reference_viewport_width < 1120.0 return_budget = 718;
+    render_signature_box(320000 + index, return_type, mono_fit_size(return_type, return_budget));
     memory := column_box(10);
     open_indexed("function-memory", index, memory);
     render_compact_section_heading(330000 + index, "#MEMORY CONTRACTS", memory_count);
@@ -479,7 +564,11 @@ render_typeclass_member :: (member_index: s32) {
     open_indexed("typeclass-member", member_index, card);
     badge := "required";
     if member.has_default badge = "default";
-    render_symbol_header(400000 + member_index, member.name, badge, member.source_path, member.source_line);
+    render_symbol_header(
+        400000 + member_index, member.name, badge,
+        member.source_path, member.source_line,
+        member_index == scroll_member,
+    );
     render_signature_box(410000 + member_index, member.signature);
     if member.summary.count > 0 emit_text(member.summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
     if member.kind == "method" {
@@ -582,7 +671,10 @@ render_symbol_card :: (index: s32) {
     card.border.color = color(216, 209, 197);
     card.border.width.bottom = 1;
     open_indexed("symbol-card", index, card);
-    render_symbol_header(index, symbol.name, symbol.kind, symbol.source_path, symbol.source_line);
+    render_symbol_header(
+        index, symbol.name, symbol.kind, symbol.source_path, symbol.source_line,
+        index == scroll_symbol && scroll_member < 0,
+    );
     render_signature_box(index, symbol.signature);
     if symbol.summary.count > 0 emit_text(symbol.summary, text_style(14, color(109, 107, 102), FONT_SANS, 24));
     if symbol.kind == "type" render_type_details(index, symbol);
@@ -621,21 +713,20 @@ module_kind_count :: (module: Std_Module_Doc, kind: string) -> s32 {
 
 render_standard_module :: () {
     module := STD_MODULE_DOCS[selected_module];
-    heading: Clay_ElementDeclaration;
-    heading.layout.sizing.width = grow_axis();
-    heading.layout.sizing.height = fit_axis();
-    heading.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-    heading.layout.childGap = 18;
+    // The path and its source link used to share one row. Word wrapping cannot
+    // break inside a path, so the pair was wider than the article column for
+    // every nested module and dragged the article under the status rail.
+    heading := column_box(10);
     heading.layout.padding = padding(0, 20);
     heading.border.color = color(216, 209, 197);
     heading.border.width.bottom = 1;
     open_element("module-heading", heading);
-    title := column_box(10);
-    title.layout.sizing.width = grow_axis();
-    open_element("module-heading-title", title);
     emit_text("STANDARD LIBRARY MODULE", text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
-    emit_text(module.name, text_style(48, color(23, 26, 31), FONT_SERIF_BOLD, 52));
-    close_element();
+    title_size := module_title_size(module.name);
+    emit_text(
+        module.name,
+        text_style(title_size, color(23, 26, 31), FONT_SERIF_BOLD, title_size + 4),
+    );
     render_source_link(9101, module.source_path, 0);
     close_element();
     paragraph(9100, module.summary);
@@ -788,6 +879,41 @@ handle_standard_navigation :: () {
     }
 }
 
+// A typeclass method has no card of its own; it is rendered inside the card of
+// the typeclass that declares it. Opening a method search result therefore has
+// to page to that typeclass and anchor on the member row. Returns the symbol
+// whose position decides the page and records the anchor in scroll_symbol and
+// scroll_member.
+resolve_search_symbol_target :: (symbol_index: s32) -> s32 {
+    symbol := STD_SYMBOL_DOCS[symbol_index];
+    scroll_symbol = symbol_index;
+    scroll_member = -1;
+    if symbol.kind != "method" return symbol_index;
+
+    module := STD_MODULE_DOCS[symbol.module_index];
+    relative: s32 = 0;
+    while relative < module.symbol_count {
+        owner_index := module.first_symbol + relative;
+        owner := STD_SYMBOL_DOCS[owner_index];
+        if owner.kind == "typeclass" {
+            offset: s32 = 0;
+            while offset < owner.member_count {
+                member_index := owner.first_member + offset;
+                member := STD_MEMBER_DOCS[member_index];
+                if member.kind == "method" && member.name == symbol.name &&
+                   member.source_line == symbol.source_line {
+                    scroll_symbol = owner_index;
+                    scroll_member = member_index;
+                    return owner_index;
+                }
+                offset = offset + 1;
+            }
+        }
+        relative = relative + 1;
+    }
+    return symbol_index;
+}
+
 handle_search_navigation :: () {
     start := search_page * SEARCH_RESULTS_PER_PAGE;
     i := start;
@@ -806,9 +932,12 @@ handle_search_navigation :: () {
             } else {
                 symbol := STD_SYMBOL_DOCS[result.index];
                 selected_module = symbol.module_index;
+                module_page = selected_module / MODULES_PER_PAGE;
                 module := STD_MODULE_DOCS[selected_module];
-                symbol_page = (result.index - module.first_symbol) / SYMBOLS_PER_PAGE;
+                target := resolve_search_symbol_target(result.index);
+                symbol_page = (target - module.first_symbol) / SYMBOLS_PER_PAGE;
                 app_view = APP_VIEW_STANDARD_LIBRARY;
+                scroll_request = SCROLL_REQUEST_ANCHOR;
             }
             return;
         }

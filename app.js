@@ -716,12 +716,13 @@ function renderCommands(arrayAddress) {
     const userData = data.getUint32(command + 60, true);
     const marker = markerAt(userData);
     const isSourceLink = type === 3 && marker.startsWith("source-link");
+    const isSymbolAnchor = type === 3 && marker.startsWith("symbol-anchor");
     const isCodeCopy = type === 3 && marker.startsWith("code-copy");
     const isCodeGlosso = type === 3 && marker.startsWith("code-glosso");
     const isGlossoSource = type === 3 && marker.startsWith("glosso-source") || isCodeGlosso;
     const isCodeSource = isCodeGlosso || type === 3 && marker.startsWith("code-source");
     const element = commandElement(
-      `${type === 3 ? "clay-text" : ""}${isSourceLink ? " clay-source-link" : ""}${isCodeCopy ? " clay-code-copy" : ""}`,
+      `${type === 3 ? "clay-text" : ""}${isSourceLink ? " clay-source-link" : ""}${isCodeCopy ? " clay-code-copy" : ""}${isSymbolAnchor ? " clay-symbol-anchor" : ""}`,
       isSourceLink ? "a" : isCodeCopy ? "button" : "div",
     );
     element.style.left = `${Math.round(x - current.x)}px`;
@@ -795,6 +796,21 @@ function renderCommands(arrayAddress) {
   const activeScrollbar = scene.querySelector(".clay-scrollbar");
   if (activeScrollbar) activeScrollbar.scrollTop = sidebarScrollTop;
   scene.style.height = `${Math.ceil(maximumY)}px`;
+  applyScrollRequest();
+}
+
+// Navigation decided inside the Wasm frame — a search result, a module card, a
+// pager — cannot move the document itself, so the model records where the new
+// article should start and the host applies it once the commands are in place.
+function applyScrollRequest() {
+  const request = instance.exports.glo_manual_get_scroll_request();
+  if (!request) return;
+  const anchor = request === 2 ? scene.querySelector(".clay-symbol-anchor") : null;
+  const top = anchor
+    ? anchor.getBoundingClientRect().top + window.scrollY - topbar.offsetHeight - 24
+    : 0;
+  window.scrollTo({ top: Math.max(0, top), behavior: "auto" });
+  instance.exports.glo_manual_clear_scroll_request();
 }
 
 function syncBrowserState() {

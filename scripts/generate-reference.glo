@@ -300,22 +300,48 @@ reference_is_space :: (byte: u8) -> bool {
         byte == 11 || byte == 12;
 }
 
+reference_is_rule_byte :: (byte: u8) -> bool {
+    return byte == #char "=" || byte == #char "-" || byte == #char "~" ||
+        byte == #char "_" || byte == #char "*" || byte == #char "#" ||
+        byte == #char "+";
+}
+
+// Documentation comments draw section rules out of repeated punctuation. The
+// rules carry no prose, and word wrapping cannot break a token that long, so
+// one of them widens the reference column past its maximum and pushes the
+// running text underneath the status rail. Drop them while flattening.
+reference_is_rule_token :: (value: string) -> bool {
+    if value.count < 4 return false;
+    first := value[0];
+    if !reference_is_rule_byte(first) return false;
+    i: s64 = 1;
+    while i < value.count {
+        if value[i] != first return false;
+        i += 1;
+    }
+    return true;
+}
+
 reference_one_line :: (value: string) -> string {
     out := builder_make_len_cap(0, value.count);
-    pending_space := false;
     wrote := false;
-    for i: 0..value.count {
-        byte := value[i];
-        if reference_is_space(byte) {
-            if wrote pending_space = true;
+    start: s64 = 0;
+    i: s64 = 0;
+    while i <= value.count {
+        if i < value.count && !reference_is_space(value[i]) {
+            i += 1;
             continue;
         }
-        if pending_space {
-            builder_write_byte(*out, #char " ");
-            pending_space = false;
+        if i > start {
+            token := value[start..i];
+            if !reference_is_rule_token(token) {
+                if wrote builder_write_byte(*out, #char " ");
+                write_string(*out, token);
+                wrote = true;
+            }
         }
-        builder_write_byte(*out, byte);
-        wrote = true;
+        start = i + 1;
+        i += 1;
     }
     return builder_into_string(out);
 }

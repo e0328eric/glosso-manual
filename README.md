@@ -29,8 +29,9 @@ private Glosso repository or compile the project in GitHub Actions.
   UI state.
 - `src/manual_ui.glo` contains section dispatch, navigation, layout, and the
   Wasm entry point.
-- `scripts/generate-reference-source.glo` extracts public declarations directly
-  from a supplied Glosso standard-library directory into an ignored JSON file.
+- `scripts/generate-reference-source.glo` extracts public declarations and their
+  documentation comments directly from a supplied Glosso standard-library
+  directory into an ignored JSON file.
 - `scripts/generate-reference.glo` converts that intermediate data into the
   compact Glosso and browser reference files, and rebuilds the language-manual
   half of the search index by reading the chapter sources: titles from
@@ -74,9 +75,35 @@ glosso first.glo -- gen-reference ../glosso/std
 `build` compiles `main.glo` and stages the complete site in `dist/`.
 `tree-sitter` updates the query embedded in `app.js` from
 `tree-sitter/highlights.scm`. `gen-reference <std-directory>` reads public
-standard-library declarations and comments from the supplied directory, then
-updates `src/generated/std_reference.glo` and `reference-index.js`. Its temporary
-`build/reference-source.json` input is ignored and is never checked in.
+standard-library declarations and their documentation comments from the supplied
+directory, then updates `src/generated/std_reference.glo` and
+`reference-index.js`. Its temporary `build/reference-source.json` input is
+ignored and is never checked in.
+
+## Document the standard library
+
+Only marked comments reach the reference. A `///` line documents the declaration
+written under it, and `//!` lines write the file's intro, which becomes the
+module summary. A plain `//` is an implementation note the reference never
+shows, and a further slash cancels the marker, which keeps the `////` rules
+drawn above a section out of the reference:
+
+```glosso
+//! ASCII classification, written in the block the file opens with.
+
+#import "Meta";
+
+/// Whether the byte is an ASCII digit.
+// A note about the implementation, which the reference never shows.
+is_ascii_digit :: (byte: u8) -> bool { ... }
+```
+
+A `///` block runs for as many lines as it needs, and an unmarked note inside it
+is stepped over rather than ending it. A blank line does end it: prose that far
+from a declaration documents whatever stands above the gap instead. The intro
+ends at the file's first line of code, so a `//!` written below that documents
+nothing. A module with no intro falls back to
+`Public declarations from <path>.`.
 
 ## Update the standard-library reference
 

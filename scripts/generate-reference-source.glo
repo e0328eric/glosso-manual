@@ -250,26 +250,46 @@ reference_brace_delta :: (line: string) -> s64 {
     return delta;
 }
 
+// Only marked comments are documentation: `///` describes the declaration
+// written under it and `//!` describes the file's module. A plain `//` is an
+// implementation note that stays out of the reference. A further slash cancels
+// the marker, so the `////` rules the std draws above a section read as plain
+// comments rather than as documentation for whatever follows them.
+REFERENCE_DOC_MARKER :: "///";
+REFERENCE_MODULE_DOC_MARKER :: "//!";
+
+reference_is_doc_line :: (line: string, marker: string) -> bool {
+    if !starts_with(line, marker) return false;
+    if line.count > marker.count && line[marker.count] == #char "/" return false;
+    return true;
+}
+
+reference_doc_line_text :: (line: string, marker: string) -> string {
+    return trim(line[marker.count..line.count]);
+}
+
+// The comment block above a declaration is read upwards for its `///` lines.
+// An unmarked note inside the block is stepped over rather than ending it, so a
+// declaration keeps its documentation however its author interleaves the two.
+// A blank line ends the block: prose that far from a declaration belongs to
+// whatever stands above the gap, not to the declaration under it.
 reference_previous_summary :: (source: string, declaration_start: s64) -> string {
     cursor := declaration_start;
     while cursor > 0 && (source[cursor - 1] == #char " " || source[cursor - 1] == #char "\t")
         cursor -= 1;
     if cursor > 0 && source[cursor - 1] == #char "\n" cursor -= 1;
     pieces: [..]string;
-    checked: s64 = 0;
-    while cursor > 0 && checked < 4 {
+    while cursor > 0 {
         end := cursor;
         if end > 0 && source[end - 1] == #char "\r" end -= 1;
         start := end;
         while start > 0 && source[start - 1] != #char "\n" start -= 1;
         line := trim(source[start..end]);
-        if starts_with(line, "//") {
-            text := trim(line[2..line.count]);
-            array_add(*pieces, text);
-        } else if line.count > 0 break;
+        if !starts_with(line, "//") break;
+        if reference_is_doc_line(line, REFERENCE_DOC_MARKER)
+            array_add(*pieces, reference_doc_line_text(line, REFERENCE_DOC_MARKER));
         cursor = start;
         if cursor > 0 cursor -= 1;
-        checked += 1;
     }
     out := builder_make_len_cap(0, pieces.count * 32);
     i := pieces.count;
@@ -282,21 +302,27 @@ reference_previous_summary :: (source: string, declaration_start: s64) -> string
     return reference_normalize_space(builder_into_string(out));
 }
 
-reference_leading_summary :: (source: string) -> string {
+// `//!` writes the intro of a std file: the summary of the module itself rather
+// than of any one declaration. The intro is the comment block the file opens
+// with, so reading stops at the first line of code. A licence header or a plain
+// note may share the block without changing what the summary says.
+reference_module_summary :: (source: string) -> string {
     out := builder_make_len_cap(0, 128);
     cursor: s64 = 0;
     while cursor < source.count {
         end := reference_line_end(source, cursor);
         line := trim(source[cursor..end]);
-        if !starts_with(line, "//") break;
-        text := trim(line[2..line.count]);
-        if text.count > 0 {
-            if builder_len(out) > 0 builder_write_byte(*out, #char " ");
-            write_string(*out, text);
+        if line.count > 0 && !starts_with(line, "//") break;
+        if reference_is_doc_line(line, REFERENCE_MODULE_DOC_MARKER) {
+            text := reference_doc_line_text(line, REFERENCE_MODULE_DOC_MARKER);
+            if text.count > 0 {
+                if builder_len(out) > 0 builder_write_byte(*out, #char " ");
+                write_string(*out, text);
+            }
         }
         cursor = end + 1;
     }
-    return builder_into_string(out);
+    return reference_normalize_space(builder_into_string(out));
 }
 
 reference_header_needs_space :: (out: String_Builder, byte: u8) -> bool {
@@ -916,7 +942,7 @@ reference_parse_file :: (
     if module_index < 0 {
         module: Reference_Module = .{
             .name = module_name,
-            .summary = reference_leading_summary(source),
+            .summary = reference_module_summary(source),
             .source_path = source_path,
         };
         if module.summary.count == 0 {
@@ -929,7 +955,7 @@ reference_parse_file :: (
         array_add(modules, module);
         module_index = modules.*.count - 1;
     } else if ends_with(source_path, "/module.glo") {
-        summary := reference_leading_summary(source);
+        summary := reference_module_summary(source);
         if summary.count > 0 modules.*[module_index].summary = summary;
         modules.*[module_index].source_path = source_path;
     }
