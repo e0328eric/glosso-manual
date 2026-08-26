@@ -36,7 +36,7 @@ render_section_142 :: () {
         \\is unknown. Both outcomes are hard errors.
     );
     code_block(7, "text", #string
-        \\error: cannot find module "Container" (looked for std/Container.glo or std/Container/module.glo)
+        \\error: cannot find module "Container" (searched: …\glosso\std)
         \\
         \\error: ambiguous module "Ascii": both …\mystd\Ascii.glo and …\mystd\Ascii\module.glo exist
     );
@@ -59,6 +59,7 @@ render_section_142 :: () {
         \\#import "Io";
         \\#import "Container/HashMap";
         \\#import "Strings/Utf8";
+        \\#import "String_Builder";
         \\
         \\main :: () {
         \\    counts := hash_map_with_seed(string, s64, 1, 2);
@@ -67,7 +68,9 @@ render_section_142 :: () {
         \\    case .Ok(r);      print("inserted, len = %\n", hash_map_len(counts));
         \\    case .Err(error); print("insert failed\n");
         \\    }
-        \\    print("upper = %\n", to_upper("glosso"));
+        \\    upper := to_upper("glosso");
+        \\    defer string_free(upper);
+        \\    print("upper = %\n", upper);
         \\}
     );
     code_block(12, "text", #string
@@ -324,9 +327,11 @@ render_section_143 :: () {
         \\library     = "#library" { "," ( "static" | "system" | "dyn" ) }
         \\              STRING [ ";" ] ;
         \\fnptr       = "#fn_ptr" "(" [ params ] ")" [ "->" type ]
-        \\              { "#c_call" | "#no_context" } [ ";" ] ;
-        \\distinct    = "distinct" type { derive } [ ";" ] ;
-        \\derive      = "#derive" ( "," "all" | "(" type { "," type } ")" ) ;
+        \\              { "#c_call" | "#no_context" | "#memory" effects }
+        \\              [ ";" ] ;
+        \\distinct    = "distinct" type { distderive } [ ";" ] ;
+        \\distderive  = "#derive" ( "," "all" | "(" type { "," type } ")" ) ;
+        \\derive      = "#derive" "(" IDENT { "," IDENT } ")" ;
     );
     paragraph(18, #string,oneline
         \\The trailing `;` is optional after every top-level form, because the
@@ -415,18 +420,33 @@ render_section_143 :: () {
         \\mode        = "left" | "right" | "assign" | "prefix" | "suffix" ;
         \\where       = "where" expression ;
         \\
-        \\effects     = effect | "(" effect { "," effect } ")" ;
-        \\effect      = ( "returns_fresh" | "returns_static" | "unknown" )
-        \\                             [ "(" qualname ")" ]
-        \\            | "returns_borrow" "(" [ qualname "," ] argref ")"
-        \\            | "released_by"    "(" [ qualname "," ] qualname ")"
-        \\            | "resource" "(" [ qualname "," ]
-        \\                             "released_by" ":" qualname ")"
-        \\            | "leak"
-        \\            | ( "kills" | "invalidates" | "noescape" | "escapes"
-        \\              | "reads" | "writes" ) "(" argref ")" ;
-        \\qualname    = IDENT { "." IDENT } ;
-        \\argref      = IDENT | "arg" "(" INT ")" ;
+        \\effects     = effect
+        \\            | "(" [ effect { "," effect } [ "," ] ] ")"
+        \\            | "{" [ effect { "," effect } [ "," ] ] "}" ;
+        \\effect      = ( "returns_fresh" | "returns_static" ) [ "(" places ")" ]
+        \\            | ( "returns_borrow" | "returns_unique_borrow" )
+        \\                             "(" [ place "," ] place ")"
+        \\            | "released_by" "(" ( labelled
+        \\                                | qualname { "," place } ) ")"
+        \\            | "unknown" [ "(" tagged { "," tagged } ")" ]
+        \\            | "leak" [ "(" qualname ")" ]
+        \\            | may ( "owns" | "escapes" )
+        \\                             "(" places [ "," "into" ":" place ] ")"
+        \\            | may "gives" "(" places
+        \\                             [ "," "released_by" ":" qualname ] ")"
+        \\            | may ( "kills" | "invalidates" | "reads" | "writes" )
+        \\                             "(" places ")"
+        \\            | "noescape" "(" places ")" ;
+        \\may         = [ "maybe_" ] ;   (* glued to the name, one IDENT *)
+        \\labelled    = labarg { "," labarg } [ "," ] ;
+        \\labarg      = "place" ":" place | "by" ":" qualname
+        \\            | "instance" ":" place ;
+        \\tagged      = "arg" ":" place | "result" ":" qualname
+        \\            | "reason" ":" STRING ;
+        \\places      = place { "," place } ;   (* stops before a "name:" *)
+        \\place       = ( IDENT | "arg" "(" INT ")" ) { "." step } ;
+        \\qualname    = IDENT { "." step } ;
+        \\step        = IDENT | INT ;   (* INT selects a tuple element *)
     );
     paragraph(26, #string,oneline
         \\The order is fixed and the parser enforces it: parameters, then the
@@ -540,7 +560,8 @@ render_section_143 :: () {
         \\the postfix loop has an arm for `.{` and none for `.[`, so `s64.[1,2]`
         \\is the type `s64` followed by a separate array literal, and
         \\`for v: s64.[1, 2]` reports
-        \\`error: for-each needs an array, got type`. And adjacent operator
+        \\`error: 'type' is not iterable; it needs an Iterable instance`. And
+        \\adjacent operator
         \\characters glue into one token, so `E!*T` lexes as the single operator
         \\`!*`; the result type of a pointer must be written `E! *T` or
         \\`E!(*T)`.
@@ -617,7 +638,7 @@ render_section_143 :: () {
         \\block       = "{" { statement } "}" ;
         \\body        = block | statement ;
         \\
-        \\statement   = "#memory" overlay
+        \\statement   = "#memory" ( trusted | overlay )
         \\            | name "::" ( procedure | struct | enum | union | distinct )
         \\            | block
         \\            | "#bytes" expression [ ";" ]
@@ -665,7 +686,8 @@ render_section_143 :: () {
         \\              expression [ ( ".." | "..=" ) expression ] body ;
         \\
         \\assignop    = OP | OPNAME ;   (* declared #operator(assign) *)
-        \\overlay     = qualname "{" effect { "," effect } "}" [ ";" ] ;
+        \\overlay     = qualname "{" effect { "," effect } [ "," ] "}" [ ";" ] ;
+        \\trusted     = "trusted" "(" STRING ")" block ;
         \\asmbody     = "{" MLSTR { MLSTR } { asmoperand }
         \\                  [ "clobber" ":" clobber { "," clobber } ";" ]
         \\              "}" [ ";" ]
@@ -778,7 +800,7 @@ render_section_143 :: () {
     table_row(54, "`#thread_local`   |   prefix of a global variable declaration");
     table_row(55, "`#comptime`   |   top-level declaration, statement, expression prefix, parameter modifier");
     table_row(56, "`#insert`   |   top-level declaration, statement, pattern element");
-    table_row(57, "`#memory`   |   top-level overlay, statement overlay, function directive, variable declaration, expression postfix");
+    table_row(57, "`#memory`   |   top-level overlay, statement overlay or `trusted` block, function and `#fn_ptr` directive, variable declaration, expression postfix");
     table_row(58, "`#if`, `#assert`, `#compile_error`, `#asm`, `#bytes`, `#push_context`, `#push_allocator`   |   statement position only");
     table_row(59, "`#inline`   |   before `while` or `for`, in statement or expression position, and as a function directive");
     table_row(60, "`#pattern`, `#partial`, `#falling`   |   pattern test or switch, after `if`, and at the end of a case arm");
@@ -981,12 +1003,12 @@ render_section_144 :: () {
     table_row(80, "`a zero-sized 'void' member inside a struct, tuple, or array is not supported yet; remove the member, or wrap it in a single-field struct`   |   A `void` field.");
     subheading(81, "Modules and feature gates");
     table_header(82, "Message   —   Produced by");
-    table_row(83, "`cannot find module \"NoSuchModule\" (looked for std/NoSuchModule.glo or std/NoSuchModule/module.glo)`   |   `#import` of a name that is neither file nor directory on the search path.");
+    table_row(83, "`cannot find module \"NoSuchModule\" (searched: …)`   |   `#import` of a name that is neither file nor directory on the search path. The message lists every root it looked in, the standard library first and then each `--module-path` directory.");
     table_row(84, "`ambiguous module \"X\": both … and … exist`   |   A module that is both `std/X.glo` and `std/X/module.glo`.");
     table_row(85, "`#load: cannot find file \"mod/nope.glo\" (looked for …)`   |   A `#load` path that does not resolve relative to the loading file.");
     table_row(86, "`#import,only names unknown public declaration 'no_such_thing' in module \"Io\"`   |   A selector naming something the module does not export; a `note` lists the public names.");
     table_row(87, "`#import modifier must be only or hide`   |   Any other modifier after `#import,`.");
-    table_row(88, "`unknown feature 'bogus_feature'`   |   `#enable` or `#disable` of a name outside the four gates. A bad mode gives `unknown feature '<feature>,<mode>'`.");
+    table_row(88, "`unknown feature 'bogus_feature'`   |   `#enable` or `#disable` of a name outside the five gates. A bad mode gives `unknown feature '<feature>,<mode>'`.");
     table_row(89, "`#library modifier must be system, dyn, or static`   |   Any other link kind. Two kinds at once give `#library accepts only one link-kind modifier`.");
     table_row(90, "`#foreign refers to unknown library 'nolib' (declare it with #library)`   |   A `#foreign` naming a library handle that was never declared.");
     subheading(91, "Names and resolution");
@@ -1027,7 +1049,7 @@ render_section_144 :: () {
     subheading(120, "Typeclasses and instances");
     table_header(121, "Message   —   Produced by");
     table_row(122, "`typeclass 'Show' is already declared`   |   Re-declaring a class name. Class names live in one global namespace.");
-    table_row(123, "`function 'show' is already owned by typeclass 'Show'`   |   Re-declaring a method name owned by a class, even in a user file.");
+    table_row(123, "`function 'show' is already owned by typeclass 'Show'`   |   A second typeclass claiming a method name another class already owns. A plain declaration of the same name in a user file gives `function 'show' is owned by typeclass 'Show' and cannot be redeclared` instead.");
     table_row(124, "`instance 'Dog :: Greet' does not satisfy #minimal(greet)`   |   An instance short of its minimal complete definition, with `note: minimal complete definition declared here`.");
     table_row(125, "`ambiguous typeclass operation 'greet' for these argument types`   |   Two instances scored equally. Coherence is checked at the use site, not at declaration.");
     table_row(126, "`associated type 'K.Elem' is ambiguous; provide type arguments`   |   An argument-free projection with more than one supplying instance.");
@@ -1046,12 +1068,12 @@ render_section_144 :: () {
     subheading(139, "Control flow, switches, and patterns");
     table_header(140, "Message   —   Produced by");
     table_row(141, "`break outside loop`   |   `break` at function level, and also inside `#inline while` or a genuinely unrolled `#inline for`, which have no loop to leave.");
-    table_row(142, "`for target is not iterable`   |   A `for` over a `string`; iterate the bytes another way.");
-    table_row(143, "`for-each needs an array, got P`   |   A `for` over a type with no `Iterable` instance and no `for_expansion` macro.");
-    table_row(144, "`switch is exhaustive by default; add else or #partial`   |   A tagged-union switch that leaves a variant uncovered.");
+    table_row(142, "`'for *x:' needs a PointerIterable instance for string`   |   A `for *x:` over a type that has an `Iterable` instance but no `PointerIterable` one. A `string` iterates by byte, but its elements cannot be borrowed.");
+    table_row(143, "`'P' is not iterable; it needs an Iterable instance`   |   A `for` over a type with no `Iterable` instance and no `for_expansion` macro.");
+    table_row(144, "`non-exhaustive switch`   |   A switch the coverage analysis cannot prove total, a tagged-union switch that leaves a variant uncovered included: `if s == { … }` is always a pattern switch. Up to six `note: missing case: …` witnesses follow, then `...and N more`, and last `note: cover them, or add 'else' or '#partial'`.");
     table_row(145, "`cannot switch on a raw union (it has no tag)`   |   `if u == { … }` on a `union #raw`.");
     table_row(146, "`tagged-union payload '.Circle' may only be bound by a pattern match`   |   Reading `value.Variant` directly, with a `note` naming `#enable(allow_union_unwrap)`.");
-    table_row(147, "`non-exhaustive #pattern switch`   |   A pattern switch the coverage analysis cannot prove total. Up to six `note: missing case: …` witnesses follow, then `…and N more`.");
+    table_row(147, "`'Triangle' is not a variant of union U`   |   A `case` label naming a variant the subject's union does not declare.");
     table_row(148, "`cannot decide a value: an 'ifx' needs an 'else' arm`   |   The conditional `ifx` without `else`. The switch forms give `cannot decide a value for this ifx` plus the missing cases.");
     table_row(149, "`an ifx arm must end in an expression`   |   An `ifx` arm whose last statement produces nothing.");
     table_row(150, "`a '#pattern' test cannot be negated`   |   `!(#pattern P = e)`, with a `note` pointing at the `#pattern P := e else { … }` form.");
@@ -1074,31 +1096,38 @@ render_section_144 :: () {
         \\malformed `#memory` clause is an error at every setting, because the
         \\analysis cannot run against a contract it cannot read. A failed
         \\contract also removes the declaration, so a second error usually
-        \\follows naming the now-unknown function.
+        \\follows naming the now-unknown function. Every message the memory
+        \\analysis itself emits carries a bracketed rule identifier ahead of
+        \\the text, `[memory.contract]` for a contract that does not hold
+        \\together and a name such as `[memory.leak]` or
+        \\`[memory.use_after_release]` for a temporal finding. The identifier
+        \\is part of the message line and is quoted with it below. What the
+        \\parser rejects while reading a `#memory` clause carries no prefix,
+        \\because it never reaches the analysis.
     );
     table_header(166, "Message   —   Produced by");
-    table_row(167, "`unknown #memory effect 'bogus'`   |   A clause name outside the effect vocabulary.");
-    table_row(168, "`#memory effect list cannot be empty`   |   `#memory()`. The overlay form has its own wording.");
-    table_row(169, "`#memory overlay names unknown function 'nope'`   |   An overlay whose target does not resolve.");
-    table_row(170, "`#memory names unknown releaser 'nonexistent'`   |   `released_by` naming something that is not a reachable function.");
-    table_row(171, "`#memory releaser 'notmem' must accept a memory-capable first parameter`   |   A releaser whose first parameter holds no storage.");
-    table_row(172, "`#memory noescape(p) conflicts with escapes(p)`   |   Two clauses that contradict each other on one parameter.");
-    table_row(173, "`#memory return place 'x' must start with contextual 'returned'`   |   A return place with the wrong root; when the signature has named results the message lists them.");
+    table_row(167, "`unknown #memory effect 'bogus'`   |   A clause name outside the effect vocabulary. The withdrawn `resource` clause has its own message, `#memory resource(...) was removed; use released_by(...) on the acquisition`, and a `maybe_` prefix on a clause that has no may-only form gives `#memory noescape has no may-only form`.");
+    table_row(168, "`#memory overlay effect list cannot be empty`   |   An overlay written `#memory f { }`. A contract's own list may be empty: `#memory()` and `#memory {}` are accepted and declare no effects.");
+    table_row(169, "`[memory.contract] #memory overlay names unknown function 'nope'`   |   An overlay whose target does not resolve.");
+    table_row(170, "`[memory.contract] #memory names unknown releaser 'nonexistent'`   |   `released_by` naming something that is not a reachable function.");
+    table_row(171, "`[memory.contract] #memory releaser 'notmem' must declare kills(...) or owns(...) on a memory-capable parameter`   |   A releaser that does not itself claim to release or take over a parameter holding storage.");
+    table_row(172, "`[memory.contract] #memory noescape(p) conflicts with escapes(p)`   |   Two clauses that contradict each other on one parameter.");
+    table_row(173, "`[memory.contract] #memory return place 'x' must start with contextual 'returned'`   |   A return place with the wrong root. When the signature has named results the message continues `or a named result root ('a', 'b')`.");
     paragraph(174, #string,oneline
         \\The temporal analysis is separate, and its findings are warnings by
         \\default. `--borrow-check error` promotes every one of them to an error
         \\and `--borrow-check off` silences them; the wording does not change.
     );
     table_header(175, "Message   —   Produced by");
-    table_row(176, "`resource must be released by 'free' before leaving scope`   |   An owned value alive at scope exit, with `note: release obligation was created here`.");
-    table_row(177, "`resource may not be released by 'free' on every path`   |   The same obligation surviving on some but not all paths out of a join.");
-    table_row(178, "`double release of resource`   |   A second release call, with `note: first release occurred here`.");
-    table_row(179, "`use after release while reading memory`   |   A read through a place that was released. The write and return forms have their own wording, as do the may-have-been variants at a join.");
-    table_row(180, "`pointer escapes into global 'g'`   |   Storing the address of a local into a global, with `note: local storage 'x' originates here`.");
-    table_row(181, "`resource requires release by 'my_free', but this operation requires 'array_free'`   |   An operation whose built-in releaser disagrees with the contract the value was acquired under.");
-    table_row(182, "`pointer to local storage escapes through return`   |   Returning the address of a local, with `note: local storage was created here`.");
-    table_row(183, "`lifetime of memory returned by opaque foreign call 'grab' is unknown`   |   A `#foreign` result with no lifetime clause; the `note` lists the four clauses that would settle it.");
-    table_row(184, "`body of 'f' contradicts #memory noescape(p)`   |   A body that stores or returns a parameter its contract promised not to retain.");
+    table_row(176, "`[memory.leak] resource must be released by 'free' before leaving scope`   |   An owned value alive at scope exit, with `note: release obligation was created here`.");
+    table_row(177, "`[memory.maybe_leak] resource may not be released by 'free' on every path`   |   The same obligation surviving on some but not all paths out of a join.");
+    table_row(178, "`[memory.double_release] double release of resource`   |   A second release call, with `note: first release occurred here`.");
+    table_row(179, "`[memory.use_after_release] use after release while reading memory`   |   A read through a place that was released. The write and return forms have their own wording, as do the may-have-been variants at a join.");
+    table_row(180, "`[memory.escape] pointer escapes into global 'g'`   |   Storing the address of a local into a global, with `note: local storage 'x' originates here`.");
+    table_row(181, "`[memory.wrong_releaser] resource requires release by 'my_free', but this operation requires 'array_free'`   |   An operation whose built-in releaser disagrees with the contract the value was acquired under. Calling the wrong named releaser gives `resource requires release by 'my_free', but 'array_free' was called`.");
+    table_row(182, "`[memory.dangling_return] pointer to local storage escapes through return`   |   Returning the address of a local, with `note: local storage was created here`.");
+    table_row(183, "`[memory.unknown_lifetime] lifetime of memory returned by opaque foreign call 'grab' is unknown`   |   A `#foreign` result with no lifetime clause; the `note` names the clauses that would settle it.");
+    table_row(184, "`[memory.contract] body of 'f' contradicts #memory noescape(p)`   |   A body that stores or returns a parameter its contract promised not to retain, with `note: the parameter is returned or stored where it can outlive the call`.");
     subheading(185, "Warnings");
     paragraph(186, #string,oneline
         \\Warnings use the identical layout with `warning:` in place of
@@ -1231,7 +1260,7 @@ render_section_145 :: () {
         \\    table: *Slot_Table,
         \\    count: s64,
         \\    label: string = "reserve",
-        \\) -> s64 #memory(writes(table), noescape(table)) {
+        \\) -> s64 #memory{reads(table), writes(table), noescape(table)} {
         \\    table.*.used += count;
         \\    return table.*.used;
         \\}
@@ -1323,7 +1352,7 @@ render_section_145 :: () {
         \\rely on.
     );
     bullet(38, "Every `#foreign` declaration, because there is no body to infer from. Without a lifetime clause the caller gets a warning at each call site.");
-    bullet(39, "Every procedure that hands ownership out or takes it back: `returns_fresh` with `released_by` on the acquiring side, `kills` on the releasing side.");
+    bullet(39, "Every procedure that hands ownership out or takes it back: `returns_fresh` with `released_by` on the acquiring side, `kills` on the releasing side, and `owns(value, into: container)` where a call takes a caller's value over rather than releasing it. `gives` is the mirror, for a call that hands a resource back out through a parameter.");
     bullet(40, "Every generic procedure whose behaviour matters, because a template body is not analysed at all until it is instantiated.");
     bullet(41, "Any pointer parameter the callee does not retain, with `noescape`, so a caller may pass the address of a local without a warning.");
     bullet(42, "A `#magic` intrinsic, which has no body by construction.");
@@ -1342,20 +1371,22 @@ render_section_145 :: () {
         \\}
         \\
         \\buffer_push :: (buffer: *Buffer, value: s64)
-        \\    #memory(writes(buffer), noescape(buffer))
+        \\    #memory{reads(buffer), writes(buffer), noescape(buffer)}
         \\{
         \\    array_add(*buffer.*.values, value);
         \\}
         \\
         \\buffer_sum :: (buffer: *Buffer) -> s64
-        \\    #memory(reads(buffer), noescape(buffer))
+        \\    #memory{reads(buffer), noescape(buffer)}
         \\{
         \\    total: s64 = 0;
         \\    for v: buffer.*.values total += v;
         \\    return total;
         \\}
         \\
-        \\buffer_free :: (buffer: *Buffer) #memory(kills(buffer), noescape(buffer)) {
+        \\buffer_free :: (buffer: *Buffer)
+        \\    #memory{reads(buffer), kills(buffer), noescape(buffer)}
+        \\{
         \\    array_free(*buffer.*.values);
         \\}
         \\
@@ -1437,6 +1468,8 @@ render_section_145 :: () {
     );
     code_block(58, "glosso", #string
         \\#import "Io";
+        \\#import "Typeclass";
+        \\#import "Typeclass/Error";
         \\
         \\Parse_Error :: struct { text: string; }
         \\
@@ -1477,19 +1510,24 @@ render_section_145 :: () {
     subheading(61, "Comments");
     paragraph(62, #string,oneline
         \\The library comments the contract, not the mechanism. A file header
-        \\states what the module is for and what a caller must guarantee; a
-        \\declaration comment states the invariant a reader could not derive
-        \\from the signature. Line comments inside a body are rare, and section
-        \\rules divide long files.
+        \\is a `//!` block stating what the module is for and what a caller
+        \\must guarantee; a declaration carries a `///` block stating the
+        \\invariant a reader could not derive from the signature, under `#`
+        \\headings of which `# Errors`, `# Ownership` and `# Invalidation` are
+        \\the common three. Line comments inside a body are rare, and `// ----`
+        \\section rules divide long files.
     );
     code_block(63, "glosso", #string
-        \\// std/Container/HashSet.glo - hash set implemented as HashMap(T, u8).
-        \\//
-        \\// HashSet(T) has the same shallow single-owner and Eq/Hash requirements
-        \\// as HashMap.  Iteration order is arbitrary, and structural mutation
-        \\// invalidates pointers and iterators.
+        \\//! std/Container/HashSet.glo - hash set implemented as HashMap(T, u8).
+        \\//!
+        \\//! HashSet(T) has the same shallow single-owner and Eq/Hash requirements
+        \\//! as HashMap.  Iteration order is arbitrary, and structural mutation
+        \\//! invalidates pointers and iterators.
         \\
-        \\// ---- construction ---------------------------------------------------
+        \\/// Creates a set with the explicit key `(k0, k1)`, presized for `capacity`.
+        \\///
+        \\/// # Ownership
+        \\/// The returned set owns its table; release it with `hash_set_deinit`.
     );
     bullet(64, "Say what a caller must guarantee, not what the next statement does.");
     bullet(65, "Put the ownership story in the header: who allocates, who releases, what invalidates what.");

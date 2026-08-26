@@ -601,20 +601,22 @@ render_section_86 :: () {
     );
     code_block(1, "glosso", #string
         \\Iterable :: typeclass (T: type) {
-        \\    for_expansion :: (val: T, body: Code, flags: For_Flags) #expand;
+        \\    for_expansion :: (val: T, body: Code, reverse: bool) #expand;
         \\}
         \\
-        \\For_Flags :: enum_flags u32 {
-        \\    POINTER :: 16#1;
-        \\    REVERSE :: 16#2;
+        \\PointerIterable :: typeclass (T: type) where Iterable(T) {
+        \\    for_pointer_expansion :: (val: *T, body: Code, reverse: bool) #expand
+        \\        #memory{unknown(arg: val,
+        \\                reason: "PointerIterable instance defines expanded access")};
         \\}
     );
     paragraph(2, #string,oneline
         \\`for x: container { ... }` becomes a call to `for_expansion` with the
-        \\container, the body wrapped as `Code`, and a flag set. The instance
-        \\declares the loop variables with the backtick escape so that they
-        \\land in the caller's scope rather than being renamed by macro
-        \\hygiene, and inserts the body wherever an iteration belongs.
+        \\container, the body wrapped as `Code`, and the direction as a literal
+        \\`true` or `false`. The instance declares the loop variables with the
+        \\backtick escape so that they land in the caller's scope rather than
+        \\being renamed by macro hygiene, and inserts the body wherever an
+        \\iteration belongs.
     );
     code_block(3, "glosso", #string
         \\#import "Io";
@@ -622,9 +624,8 @@ render_section_86 :: () {
         \\Countdown :: struct { from: s64; }
         \\
         \\Countdown :: instance Iterable {
-        \\    for_expansion :: (value: Countdown, body: Code, flags: For_Flags) #expand {
+        \\    for_expansion :: (value: Countdown, body: Code, reverse: bool) #expand {
         \\        c := value;
-        \\        reverse := (flags & For_Flags.REVERSE) != cast(For_Flags)0;
         \\        if reverse {
         \\            `it := 1;
         \\            `it_index := 0;
@@ -665,16 +666,20 @@ render_section_86 :: () {
         \\instance that declares neither name still works for a body that
         \\ignores them.
     );
-    table_header(6, "Flag   —   Value   —   Set by");
-    table_row(7, "`For_Flags.POINTER`   |   `16#1`   |   nothing; declared but never produced");
-    table_row(8, "`For_Flags.REVERSE`   |   `16#2`   |   the `for <` spelling");
+    table_header(6, "Loop spelling   —   Class   —   Arguments");
+    table_row(7, "`for x: c` and `for < c`   |   `Iterable`   |   the container by value; `reverse` is `false`, then `true`");
+    table_row(8, "`for *x: c`   |   `PointerIterable`   |   the container by pointer, plus the same `reverse`");
     paragraph(9, #string,oneline
-        \\An instance is free to ignore `REVERSE`, in which case `for <` and
-        \\`for` iterate identically. `POINTER` is reserved: the loop statement
-        \\has no spelling that sets it, so today the flag word is either zero
-        \\or `REVERSE`. The loop statement itself, including `break`,
-        \\`continue` and the explicit `for :macro_name` form, is described in
-        \\`for` Loops and Custom Iteration with `for_expansion`.
+        \\An instance is free to ignore `reverse`, in which case `for <` and
+        \\`for` iterate identically. The argument arrives as a literal, so
+        \\`#if reverse` folds at expansion time and an expansion pays nothing
+        \\for the direction it was not called with. Binding by pointer is a
+        \\separate class rather than a flag: `for *x: c` on a type with only an
+        \\`Iterable` instance is
+        \\`error: 'for *x:' needs a PointerIterable instance for Countdown`. The
+        \\loop statement itself, including `break`, `continue` and the explicit
+        \\`for :macro_name` form, is described in `for` Loops and Custom
+        \\Iteration with `for_expansion`.
     );
     subheading(10, "The range operators");
     paragraph(11, #string,oneline

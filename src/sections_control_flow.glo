@@ -139,7 +139,7 @@ render_section_87 :: () {
         \\label is recognised before an expression for the same reason.
     );
     table_header(25, "Form   —   What it is");
-    table_row(26, "`#memory ...`   |   A memory-contract overlay.");
+    table_row(26, "`#memory ...`   |   A memory-contract overlay, or a `#memory trusted(\"why\") { … }` block.");
     table_row(27, "`name :: (...)`, `name :: struct`, `name :: enum`, `name :: union`, `name :: distinct`   |   A nested declaration, hoisted to file scope.");
     table_row(28, "`{ ... }`   |   A bare block, which introduces a scope.");
     table_row(29, "`'name;`   |   A label.");
@@ -182,6 +182,7 @@ render_section_87 :: () {
     code_block(50, "glosso", #string
         \\#import "Io";
         \\#import "Memory";
+        \\#import "Context";
         \\
         \\Point :: struct { x: int; y: int; }
         \\
@@ -708,6 +709,7 @@ render_section_90 :: () {
     );
     code_block(19, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\main :: () {
         \\    b := true;
@@ -1806,7 +1808,7 @@ render_section_95 :: () {
         \\    }
         \\
         \\    word := "yes";
-        \\    if word == {
+        \\    if #partial word == {
         \\    case "y", "yes", "true";  print("affirmative\n");
         \\    case "n", "no", "false";  print("negative\n");
         \\    }
@@ -3156,13 +3158,12 @@ render_section_101 :: () {
     code_block(1, "glosso", #string
         \\// std/Prelude/Primitive_Typeclasses.glo
         \\Iterable :: typeclass (T: type) {
-        \\    for_expansion :: (val: T, body: Code, flags: For_Flags) #expand;
+        \\    for_expansion :: (val: T, body: Code, reverse: bool) #expand;
         \\}
         \\
-        \\// std/Prelude/Primitive_Operators.glo
-        \\For_Flags :: enum_flags u32 {
-        \\    POINTER :: 16#1;
-        \\    REVERSE :: 16#2;
+        \\PointerIterable :: typeclass (T: type) where Iterable(T) {
+        \\    for_pointer_expansion :: (val: *T, body: Code, reverse: bool) #expand
+        \\        #memory{unknown(arg: val, reason: "PointerIterable instance defines expanded access")};
         \\}
     );
     paragraph(2, #string,oneline
@@ -3198,7 +3199,7 @@ render_section_101 :: () {
         \\List :: struct { head: ?*Node; }
         \\
         \\List :: instance Iterable {
-        \\    for_expansion :: (list: List, body: Code, flags: For_Flags) #expand {
+        \\    for_expansion :: (list: List, body: Code, reverse: bool) #expand {
         \\        cursor := list.head;
         \\        step := 0;
         \\        while #pattern .Some(node) = cursor {
@@ -3240,20 +3241,24 @@ render_section_101 :: () {
         \\loop.
     );
 
-    subheading(11, "The flags");
+    subheading(11, "The direction parameter");
     paragraph(12, #string,oneline
         \\The third parameter carries what the loop header asked for. The
-        \\compiler builds it from the header alone: `For_Flags.REVERSE` when the
-        \\header wrote `<`, and a cast zero otherwise.
+        \\compiler builds it from the header alone, and it is a macro parameter,
+        \\so `#if reverse` selects a branch at expansion time. Walking by
+        \\pointer is not a flag on this class: `for *x: c` selects
+        \\`PointerIterable.for_pointer_expansion`, which receives the container
+        \\by pointer and binds `it` to each element's address.
     );
-    table_header(13, "Flag   —   Value   —   Set when");
-    table_row(14, "`REVERSE`   |   `16#2`   |   the header is `for <`");
-    table_row(15, "`POINTER`   |   `16#1`   |   never; the compiler does not set it");
+    table_header(13, "Header   —   `reverse`");
+    table_row(14, "`for x: c`   |   `false`");
+    table_row(15, "`for < x: c`   |   `true`");
     paragraph(16, #string,oneline
-        \\An expansion that ignores `REVERSE` silently iterates forward, which is
-        \\what the built-in array loop does. Honouring it is a matter of reading
-        \\the bit and choosing a direction; the prelude's own `Range` instance
-        \\does exactly this.
+        \\An expansion that ignores `reverse` silently iterates forward.
+        \\Honouring it is a matter of reading the parameter and choosing a
+        \\direction; the prelude's own instances all do, arrays and ranges
+        \\included, which is why `for <` over an array walks backwards without
+        \\the compiler lowering the loop itself.
     );
     code_block(17, "glosso", #string
         \\#import "Io";
@@ -3266,8 +3271,7 @@ render_section_101 :: () {
         \\}
         \\
         \\Ring :: instance Iterable {
-        \\    for_expansion :: (r: Ring, body: Code, flags: For_Flags) #expand {
-        \\        reverse := (flags & For_Flags.REVERSE) != cast(For_Flags)0;
+        \\    for_expansion :: (r: Ring, body: Code, reverse: bool) #expand {
         \\        step := 0;
         \\        while step < r.count {
         \\            offset := ifx reverse r.count - 1 - step else step;
@@ -3329,15 +3333,15 @@ render_section_101 :: () {
     paragraph(24, #string,oneline
         \\`for :name` selects an expansion by name instead of by type. The named
         \\procedure need not be a typeclass method: any `#expand` macro with the
-        \\value, `Code` and `For_Flags` parameters will do, which is the way to
-        \\give one type several iteration orders.
+        \\value, `Code` and `bool` parameters will do, which is the way to give
+        \\one type several iteration orders.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
         \\
         \\Span :: struct { start: s64; count: s64; }
         \\
-        \\stepping :: (s: Span, body: Code, flags: For_Flags) #expand {
+        \\stepping :: (s: Span, body: Code, reverse: bool) #expand {
         \\    step := 0;
         \\    while step < s.count {
         \\        `it := s.start + step * 2;
@@ -3733,7 +3737,7 @@ render_section_103 :: () {
         \\    value: any = false,
         \\    return_code: s32 = 1,
         \\) #noreturn #magic "jump_goto"
-        \\  #memory unknown;
+        \\  #memory{reads(ctx, value), writes(ctx), noescape(ctx, value)};
         \\
         \\label_is_valid :: (target: label) -> bool #magic "label_is_valid";
         \\label_is_local :: (target: label) -> bool #magic "label_is_local";
@@ -3768,10 +3772,12 @@ render_section_103 :: () {
     );
     paragraph(11, #string,oneline
         \\`goto` is `#noreturn`, which is why `print("skipped\n")` above is
-        \\never reached and never lowered. Its `#memory unknown` contract tells
-        \\the memory analysis that a transfer may do anything to reachable
-        \\storage, which is the honest description of a jump that can land in
-        \\another frame.
+        \\never reached and never lowered. Its contract,
+        \\`#memory{reads(ctx, value), writes(ctx), noescape(ctx, value)}`, says
+        \\only that the context and the carried value are read, that the context
+        \\is written, and that neither escapes. A transfer releases nothing and
+        \\the analysis models no other effect for it, so a lifetime that has to
+        \\survive a jump into another frame is entirely the caller's obligation.
     );
     subheading(12, "The label pre-pass");
     paragraph(13, #string,oneline
@@ -4030,14 +4036,14 @@ render_section_104 :: () {
     code_block(6, "glosso", #string
         \\context_save :: (ctx: *Execution_Context) -> s32
         \\    #returns_twice #magic "jump_context_save"
-        \\    #memory(writes(ctx), noescape(ctx));
+        \\    #memory{writes(ctx), noescape(ctx)};
         \\
         \\context_prepare :: (
         \\    ctx: *Execution_Context,
         \\    stack: []u8,
         \\    local: ?*Execution_Local = .None,
         \\) #magic "jump_context_prepare"
-        \\  #memory(writes(ctx), escapes(stack), escapes(local));
+        \\  #memory{writes(ctx), escapes(stack, local)};
     );
     code_block(7, "glosso", #string
         \\#import "Io";
@@ -4342,8 +4348,21 @@ render_section_104 :: () {
         \\ready=7
         \\done=1
     );
-    subheading(47, "Nonlocal entry and the payload");
-    paragraph(48, #string,oneline
+    note(47, #string,oneline
+        \\That build is not clean at the default `--borrow-check warning`. The
+        \\scheduler and the awaitable are `main`'s locals whose addresses reach
+        \\the coroutine, so the analysis reports `[memory.escape]` twice on
+        \\`scheduler_run(*scheduler)` and once on
+        \\`awaitable_complete(*awaitable, 7)`, and
+        \\`[memory.X5] write while an external alias may access the resource` on
+        \\the second resume, which writes through one of them. `co_await`
+        \\returns an `any` whose ownership no contract describes, which is
+        \\`[memory.leak]` inside `waiter`. Nothing here is released twice or
+        \\used after release; the findings are the analysis declining to prove
+        \\the lifetimes the example arranges by hand.
+    );
+    subheading(48, "Nonlocal entry and the payload");
+    paragraph(49, #string,oneline
         \\Entering a `,,` label bypasses the calling sequence, so arguments
         \\cannot ride in registers. `long_goto` is an `#expand` macro that
         \\handles both cases: when `label_is_local` says the target is in the
@@ -4352,7 +4371,7 @@ render_section_104 :: () {
         \\and then jumps. The destination reads it with `payload()` or the
         \\typed `payload_get(T, i)` and calls `clear_payload()`.
     );
-    code_block(49, "glosso", #string
+    code_block(50, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
         \\
@@ -4379,13 +4398,13 @@ render_section_104 :: () {
         \\    exit(0);
         \\}
     );
-    code_block(50, "text", #string
+    code_block(51, "text", #string
         \\local: 0 valid: 1
         \\arrived with 2 arguments
         \\n=40 flag=1
         \\back with returning
     );
-    paragraph(51, #string,oneline
+    paragraph(52, #string,oneline
         \\`payload_get` checks the recorded type name before it reads, so a
         \\mismatched index or type yields `.None` rather than a
         \\reinterpretation. A procedure entered this way has no caller to
@@ -4393,7 +4412,7 @@ render_section_104 :: () {
         \\with `exit(0)` instead of running off the end of a frame that was
         \\never entered normally.
     );
-    note(52, #string,oneline
+    note(53, #string,oneline
         \\Restoring a context is the one part of the library that is not
         \\available everywhere. A plain local `goto` lowers on every target; a
         \\computed `goto` needs an indirect jump; a `context_save` restore

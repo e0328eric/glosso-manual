@@ -31,6 +31,7 @@
   "#thread_local"
   "#library"
   "#fn_ptr"
+  "#c_ptr"
   "#as"
   "#empty"
   "#raw"
@@ -260,13 +261,19 @@
 (minimal_method (identifier) @function)
 (memory_simple_effect) @attribute
 (memory_parameter_effect_kind) @attribute
-(memory_borrow_place_effect "returns_borrow" @attribute)
+(memory_leak_place_effect "leak" @attribute)
+(memory_return_place_effect ["returns_fresh" "returns_static"] @attribute)
+(memory_borrow_place_effect ["returns_borrow" "returns_unique_borrow"] @attribute)
+(memory_destination_effect ["owns" "maybe_owns" "escapes" "maybe_escapes" "into"] @attribute)
+(memory_give_effect ["gives" "maybe_gives" "released_by"] @attribute)
 (memory_release_effect "released_by" @attribute)
-(memory_resource_effect ["resource" "released_by"] @attribute)
+(memory_release_argument ["place" "by" "instance"] @attribute)
+(memory_unknown_effect "unknown" @attribute)
+(memory_unknown_argument ["arg" "result" "reason"] @attribute)
+(memory_trusted_statement "trusted" @attribute)
 (asm_operand_direction) @keyword
 (structured_asm_constraint_kind) @constant.builtin
 (structured_asm_operand_flag) @attribute
 (structured_asm_clobber_kind) @constant.builtin
 (import_selector mode: _ @attribute)
 (expand_directive mode: (identifier) @attribute)
-(distinct_derive_directive mode: _ @attribute)

@@ -21,38 +21,44 @@ FRAME_TEXT_CAPACITY : s64 : 2 * 1024 * 1024;
 frame_text_storage: [FRAME_TEXT_CAPACITY]u8;
 frame_text_cursor: s64 = 0;
 content_table_open: bool = false;
+// Kept here because content tables are emitted by the shared primitives,
+// before the manual and reference views split into their own modules.
+document_viewport_width: f32 = 1280.0;
 
 frame_string_from_raw_parts :: (
     data: [*]u8,
     count: s64,
     capacity: s64,
 ) -> string #magic "string_from_raw_parts"
-    #memory(returns_static, reads(data), noescape(data));
+    #memory{returns_static, reads(data), noescape(data)};
 
 reset_frame_text_storage :: () {
     frame_text_cursor = 0;
 }
 
-frame_text_copy :: (value: string) -> string #memory returns_static {
+frame_text_copy :: (value: string) -> string
+    #memory{returns_static, reads(value), noescape(value)} {
     if value.count <= 0 return "";
     if frame_text_cursor + value.count > FRAME_TEXT_CAPACITY return "";
 
     start := frame_text_cursor;
+    storage := cast([*]u8)*frame_text_storage;
     index: s64 = 0;
     while index < value.count {
-        frame_text_storage[start + index] = value[index];
+        storage[start + index] = value[index];
         index += 1;
     }
     frame_text_cursor += value.count;
 
     return frame_string_from_raw_parts(
-        cast([*]u8)*frame_text_storage + start,
+        storage + start,
         value.count,
         value.count,
     );
 }
 
-clay_string :: (value: string) -> Clay_String #memory returns_borrow(value) {
+clay_string :: (value: string) -> Clay_String
+    #memory{returns_borrow(value), reads(value), noescape(value)} {
     result: Clay_String;
     // Glosso strings can come from frame-local formatting as well as literals.
     // Hash the contents so Clay's text cache never treats reused temporary
@@ -314,6 +320,29 @@ note :: (index: s32, value: string) {
 TABLE_HEADER_SEPARATOR :: "   —   ";
 TABLE_ROW_SEPARATOR :: "   |   ";
 
+content_table_column_width :: (columns: s32, column_index: s32) -> f32 {
+    // The first column contains the form, spelling, or other code sample. It
+    // needs enough room for a useful fragment rather than wrapping after a few
+    // characters. Scale the fixed columns down only on genuinely narrow views
+    // so the remaining columns retain usable text width.
+    if columns == 2 && column_index == 0 {
+        if document_viewport_width < 520.0 return 136;
+        if document_viewport_width < 720.0 return 184;
+        return 224;
+    }
+    if columns == 3 && column_index == 0 {
+        if document_viewport_width < 520.0 return 104;
+        if document_viewport_width < 720.0 return 148;
+        return 176;
+    }
+    if columns == 3 && column_index == 2 {
+        if document_viewport_width < 520.0 return 112;
+        if document_viewport_width < 720.0 return 144;
+        return 168;
+    }
+    return 0;
+}
+
 table_trim :: (value: string) -> string {
     start: s64 = 0;
     finish := value.count;
@@ -329,9 +358,10 @@ table_trim :: (value: string) -> string {
 }
 
 table_display_text :: (value: string, uppercase: bool) -> string
-    #memory returns_static {
+    #memory{returns_static, reads(value), noescape(value)} {
     if frame_text_cursor + value.count > FRAME_TEXT_CAPACITY return "";
     start := frame_text_cursor;
+    storage := cast([*]u8)*frame_text_storage;
     source: s64 = 0;
     while source < value.count {
         byte := value[source];
@@ -340,13 +370,13 @@ table_display_text :: (value: string, uppercase: bool) -> string
         if byte != #char "`" {
             if uppercase && byte >= #char "a" && byte <= #char "z"
                 byte = byte - 32;
-            frame_text_storage[frame_text_cursor] = byte;
+            storage[frame_text_cursor] = byte;
             frame_text_cursor += 1;
         }
         source += 1;
     }
     return frame_string_from_raw_parts(
-        cast([*]u8)*frame_text_storage + start,
+        storage + start,
         frame_text_cursor - start,
         frame_text_cursor - start,
     );
@@ -360,12 +390,9 @@ render_table_cell :: (
     header: bool,
 ) {
     cell := column_box();
-    if columns == 3 && column_index == 0 {
-        cell.layout.sizing.width = fixed_axis(112);
-    } else if columns == 3 && column_index == 2 {
-        cell.layout.sizing.width = fixed_axis(168);
-    } else if columns == 2 && column_index == 0 {
-        cell.layout.sizing.width = fixed_axis(128);
+    fixed_width := content_table_column_width(columns, column_index);
+    if fixed_width > 0 {
+        cell.layout.sizing.width = fixed_axis(fixed_width);
     } else {
         cell.layout.sizing.width = grow_axis(72);
     }

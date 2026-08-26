@@ -62,10 +62,17 @@ render_section_56 :: () {
         \\Default and Named Parameters.
     );
     note(14, #string,oneline
-        \\A procedure that declares a result type and never executes a `return` is
-        \\accepted, and the call yields the zero value of the result type. There is
-        \\no missing-return diagnostic, so a body whose only exit is a forgotten
-        \\branch fails silently rather than at compile time.
+        \\A procedure whose result type is neither `void` nor a union, and whose
+        \\body can reach its closing brace without executing a `return`, is
+        \\rejected at the declaration: `error: function 'no_return_stmt' can
+        \\reach the end of its body without returning a value`, framed on the
+        \\name. The check is on the control flow, not on the presence of the
+        \\keyword, so a body whose only exit is a forgotten branch is caught
+        \\too. Three shapes are exempt: a `void` procedure needs no `return`; a
+        \\union result, `E!T` and `?T` included, still yields its zero value,
+        \\because reaching the end of an `E!void` body is that type's success
+        \\path; and the named-result form below has its `return` appended by the
+        \\parser.
     );
     code_block(15, "glosso", #string
         \\#import "Io";
@@ -77,7 +84,11 @@ render_section_56 :: () {
         \\}
     );
     code_block(16, "text", #string
-        \\no_return_stmt=0
+        \\error: function 'no_return_stmt' can reach the end of its body without returning a value
+        \\  --> ret.glo:3:1
+        \\  |
+        \\3 | no_return_stmt :: (a: int) -> int { }
+        \\  | ^^^^^^^^^^^^^^
     );
 
     subheading(17, "Multiple and named results");
@@ -828,10 +839,18 @@ render_section_59 :: () {
 
     subheading(34, "What is proved and what is assumed");
     paragraph(35, #string,oneline
-        \\Nothing is proved. `noalias` is an unchecked promise from the programmer to
-        \\the optimizer, outside the `#memory` contract system, and no analysis
-        \\verifies it. Passing the same pointer to two `noalias` parameters of one
-        \\call compiles clean at every `--borrow-check` setting.
+        \\The attribute itself proves nothing: `noalias` is a promise to the
+        \\optimizer, and no analysis establishes that the storage really is
+        \\disjoint. The memory analysis does check the two shapes it can see. A
+        \\call that hands the same storage to two `noalias` parameters, or hands
+        \\one a pointer that another live reference still names, is
+        \\`warning: [memory.X1] noalias argument overlaps another live reference`,
+        \\framed on the call. A body that lets a `noalias` parameter be retained
+        \\by something it calls is `warning: [memory.X3] noalias parameter 'v' is
+        \\retained by this call`, with `note: a noalias parameter may not escape;
+        \\take a plain '*T' instead, or do not retain it`. Both follow
+        \\`--borrow-check`, so `--borrow-check error` makes them fatal and
+        \\`--borrow-check off` silences them.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
@@ -852,12 +871,14 @@ render_section_59 :: () {
         \\aliased a=2
     );
     note(38, #string,oneline
-        \\The aliased call above happens to produce the expected value at this
-        \\optimization level, which is exactly the danger: a false `noalias` is not a
-        \\diagnostic and not reliably a visible wrong answer. It changes what the
-        \\optimizer is allowed to assume, so the same source can behave differently at
-        \\a different `-O` level or after an unrelated edit. Add it only where the
-        \\non-overlap is a documented condition of the procedure.
+        \\The aliased call above still produces the expected value at this
+        \\optimization level, which is why the diagnostic matters: a false
+        \\`noalias` is not reliably a visible wrong answer. It changes what the
+        \\optimizer is allowed to assume, so the same source can behave
+        \\differently at a different `-O` level or after an unrelated edit, and
+        \\`[memory.X1]` only catches an overlap it can see inside one procedure.
+        \\Add it only where the non-overlap is a documented condition of the
+        \\procedure.
     );
 }
 
@@ -1423,6 +1444,7 @@ render_section_62 :: () {
     );
     code_block(1, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Box :: struct { value: $A; }
         \\
@@ -1571,6 +1593,7 @@ render_section_62 :: () {
     );
     code_block(30, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\make      :: (T: type, n: int) -> int { d: T; return n + size_of(T); }
         \\idt       :: (T: type, x: T) -> T { return x; }
@@ -1664,6 +1687,7 @@ render_section_63 :: () {
     );
     code_block(1, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\scaled :: (x: $T, k: T) -> T #inline where Is_Numeric(T) where !Is_Bool(T) {
         \\    return x * k;
@@ -1822,12 +1846,16 @@ render_section_63 :: () {
         \\pre-check complains about still compiles and runs.
     );
     paragraph(31, #string,oneline
-        \\That one-sidedness is thorough enough that the pre-check is quiet in
-        \\practice. A body that adds two values of a type parameter whose
-        \\`where` clause names only `Show` draws no diagnostic at its
-        \\declaration; the missing `Add` is found at the first instantiation
-        \\that lacks it, and the diagnostic is anchored inside the body rather
-        \\than at the call.
+        \\An operator the declared evidence cannot supply is exactly what the
+        \\pre-check reports. A body that adds two values of a type parameter
+        \\whose `where` clause names only `Show` draws
+        \\`warning: no '+' for <T>: the where-clause only provides Show` at the
+        \\declaration, with `note: reported at the definition; add the class to
+        \\the 'where' clause`. The error itself is raised by the first
+        \\instantiation that lacks the instance, and it is anchored inside the
+        \\body rather than at the call; that error aborts the compilation, so
+        \\the program below reports it alone and the warning is not printed
+        \\beside it.
     );
     code_block(32, "glosso", #string
         \\#import "Io";
@@ -2413,17 +2441,21 @@ render_section_66 :: () {
     );
     subheading(3, "The suffixes");
     paragraph(4, #string,oneline
-        \\Two directives may follow the return type, in either order.
+        \\Three directives may follow the return type, in any order.
         \\`#c_call` is part of the type: a function must carry `#c_call` to be
         \\assignable to a `#c_call` pointer, and must not carry it to be
         \\assignable to a plain one. `#no_context` is accepted in the same
         \\position but is discarded by the parser and never enters the type, so
-        \\it neither constrains an assignment nor changes a call.
+        \\it neither constrains an assignment nor changes a call. `#memory`
+        \\attaches a contract that the memory analysis applies to every call
+        \\made through the pointer; it is not part of the type's identity, so a
+        \\procedure with no contract of its own still assigns to it.
     );
     table_header(5, "Suffix   —   On a `#fn_ptr` type   —   On a function declaration");
     table_row(6, "`#c_call`   |   part of the type's identity   |   C calling convention, no implicit context");
     table_row(7, "`#no_context`   |   accepted and ignored   |   suppresses the implicit context parameter");
-    paragraph(8, #string,oneline
+    table_row(8, "`#memory`   |   applied to every indirect call; not part of the identity   |   the procedure's own contract");
+    paragraph(9, #string,oneline
         \\A convention mismatch in either direction is
         \\`error: got fnptr, expected fnptr`. The message repeats itself because
         \\both sides print as `fnptr`; the difference is in the convention, not
@@ -2431,7 +2463,7 @@ render_section_66 :: () {
         \\implicitly, so a foreign function assigns to a plain `#fn_ptr` type and
         \\not to a `#c_call` one.
     );
-    code_block(9, "glosso", #string
+    code_block(10, "glosso", #string
         \\#import "Io";
         \\
         \\Bin_Op :: #fn_ptr(a: s64, b: s64) -> s64;
@@ -2453,48 +2485,48 @@ render_section_66 :: () {
         \\    s(7);
         \\}
     );
-    code_block(10, "text", #string
+    code_block(11, "text", #string
         \\op=5 c=42 b=101
         \\sink 7
     );
-    bullet(11, #string,oneline
+    bullet(12, #string,oneline
         \\Parameter names are not part of the identity: a value of
         \\`#fn_ptr(a: s64) -> s64` assigns to `#fn_ptr(different: s64) -> s64`.
     );
-    bullet(12, #string,oneline
+    bullet(13, #string,oneline
         \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const
         \\s64);` rejects a procedure without both markers with
         \\`error: cannot implicitly convert fnptr to fnptr because their noalias
         \\parameter contracts differ`. `noalias` Pointer Parameters covers the
         \\marker itself.
     );
-    bullet(13, #string,oneline
+    bullet(14, #string,oneline
         \\Inside a `#no_context` or `#c_call` body, `context` is unreachable:
         \\`error: cannot access 'context' in a #c_call / #no_context procedure`.
     );
-    subheading(14, "C varargs in a function-pointer type");
-    paragraph(15, #string,oneline
+    subheading(15, "C varargs in a function-pointer type");
+    paragraph(16, #string,oneline
         \\A bare `...` may be the last parameter, with no name and no type. It
         \\requires the C convention: without `#c_call` the declaration is
         \\`error: C vararg function pointer 'Varargs' requires #c_call`. The
         \\type then accepts a `#c_call` vararg function, including a `#foreign`
         \\one.
     );
-    note(16, #string,oneline
+    note(17, #string,oneline
         \\A call made through a vararg function pointer accepts only the fixed
         \\parameters. `s: Summer = sum_s64;` is fine, but `s(3, 10, 20, 12)`
         \\against `Summer :: #fn_ptr(count: s64, ...) -> s64 #c_call;` reports
         \\`error: callback expects 1 argument(s), got 4`. Call the vararg
         \\function by name when the extra arguments matter.
     );
-    subheading(17, "The anonymous function type");
-    paragraph(18, #string,oneline
+    subheading(18, "The anonymous function type");
+    paragraph(19, #string,oneline
         \\Any parenthesised type list followed by `->` is a function type. This
         \\is the form to use in a parameter, a field, or anywhere else a type is
         \\expected. Names and `noalias` are optional; the names are documentation
         \\only.
     );
-    code_block(19, "glosso", #string
+    code_block(20, "glosso", #string
         \\#import "Io";
         \\
         \\call0 :: (f: () -> s64) -> s64 { return f(); }
@@ -2512,26 +2544,27 @@ render_section_66 :: () {
         \\          call2(add, 6), callN(load, *k));
         \\}
     );
-    code_block(20, "text", #string
+    code_block(21, "text", #string
         \\5 9 12 12
     );
-    paragraph(21, #string,oneline
+    paragraph(22, #string,oneline
         \\Without the arrow the same parentheses are a tuple type, and a single
         \\unnamed element in parentheses is just that type. `(s64, string)` is a
         \\two-element tuple; `(s64, string) -> bool` is a function type.
         \\`noalias` outside a function type is
         \\`error: noalias is only valid on function parameters`.
     );
-    subheading(22, "Null and function pointers");
-    paragraph(23, #string,oneline
+    subheading(23, "Null and function pointers");
+    paragraph(24, #string,oneline
         \\A `#fn_ptr` type excludes the zero address, in the same way `*T` and
         \\`[*]T` do, because the optional form takes the null representation as
         \\its niche. `?Op` is therefore the same size as `Op` on a 64-bit target
         \\and costs nothing to carry. An absent callback is `.None`, and reading
         \\it back goes through a pattern match like any other option payload.
     );
-    code_block(24, "glosso", #string
+    code_block(25, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Op :: #fn_ptr(v: s64) -> s64;
         \\
@@ -2552,18 +2585,18 @@ render_section_66 :: () {
         \\    print("Op=% ?Op=%\n", size_of(Op), size_of(?Op));
         \\}
     );
-    code_block(25, "text", #string
+    code_block(26, "text", #string
         \\none=-1
         \\some=10
         \\Op=8 ?Op=8
     );
-    paragraph(26, #string,oneline
+    paragraph(27, #string,oneline
         \\This is the shape the standard library uses for every vtable slot.
         \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }`
         \\relies on `.None` being address zero, so a zero-initialized
         \\`Allocator` is the "none installed" value without any extra tag.
     );
-    paragraph(27, #string,oneline
+    paragraph(28, #string,oneline
         \\Producing a function pointer from an address is a checked cast. At
         \\`-O0` and `-O1` a zero address aborts with
         \\`cast to fnptr of an address that is zero` and exit status 134, and
@@ -2572,7 +2605,7 @@ render_section_66 :: () {
         \\above the check is not emitted. Runtime Safety Checks and Panics
         \\covers the family.
     );
-    note(28, #string,oneline
+    note(29, #string,oneline
         \\`f: Op = null;` currently compiles and produces a value the program
         \\must not call: at `-O0` the resulting binary traps, and at higher
         \\levels the call is undefined. `null` denotes `.None` and belongs to an
@@ -2612,7 +2645,7 @@ render_section_67 :: () {
     table_row(7, "`#import`   |   `#import[,only(…)] \"M\";`, or `,hide(…)`   |   loads a standard-library module, optionally under an alias");
     table_row(8, "`#load`   |   `#load \"path\";`   |   splices a source file into this unit, optionally under an alias");
     table_row(9, "`#library`   |   `N :: #library \"file\";` with `,system`, `,dyn` or `,static`   |   declares a foreign library handle for `#foreign`");
-    table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call];`   |   declares a function-pointer type");
+    table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call] [#no_context] [#memory …];`   |   declares a function-pointer type");
     table_row(11, "`#thread_local`   |   `#thread_local <global var decl>`   |   gives the variable thread-local storage");
     table_row(12, "`#comptime`   |   `#comptime { … }` / `X :: #comptime e;`   |   runs during compilation");
     table_row(13, "`#insert`   |   `#insert <string expr>;`   |   splices generated declarations into the file");
@@ -2653,7 +2686,7 @@ render_section_67 :: () {
     table_row(30, "`#must`   |   none   |   discarding the result is an error");
     table_row(31, "`#inline`   |   none, or `,always` / `,never`   |   inlining hint, or a forced decision");
     table_row(32, "`#modify`   |   an expression or a block   |   rewrites the type parameters before instantiation");
-    table_row(33, "`#memory`   |   one effect, or `(effect, …)`   |   memory and ownership contract");
+    table_row(33, "`#memory`   |   one effect, `(effect, …)`, or `{ effect, … }`   |   memory and ownership contract");
     paragraph(34, #string,oneline
         \\`#inline,sometimes` is `error: #inline expects always or never after
         \\','`, and `#expand,stmt` is `error: #expand expects expression after
@@ -2751,6 +2784,7 @@ render_section_67 :: () {
     );
     code_block(60, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Reordered :: struct { a: u8; b: u64; c: u8; }
         \\C_Layout  :: struct #c_call { a: u8; b: u64; c: u8; }
@@ -2773,8 +2807,8 @@ render_section_67 :: () {
         \\cover them.
     );
     table_header(64, "Position   —   Directives");
-    table_row(65, "statement   |   `#memory` overlay, `#bytes`, `#asm`, `#inline while`, `#inline for`, `#try defer`, `#push_context`, `#push_allocator`, `#comptime`, `#if`, `#assert`, `#compile_error`, `#insert`");
-    table_row(66, "expression   |   `#comptime`, `#try`, `#pattern`, `#meaningful`, `#undefined`, `#simd`, `#string`, `#inline for`, `#inline while`, `#code`, and a postfix `#memory(…)`");
+    table_row(65, "statement   |   `#memory` overlay, `#memory trusted(\"why\") { … }`, `#bytes`, `#asm`, `#inline while`, `#inline for`, `#try defer`, `#push_context`, `#push_allocator`, `#comptime`, `#if`, `#assert`, `#compile_error`, `#insert`");
+    table_row(66, "expression   |   `#comptime`, `#try`, `#pattern`, `#meaningful`, `#undefined`, `#simd`, `#string`, `#inline for`, `#inline while`, `#code`, and a postfix `#memory(…)` or `#memory{…}`");
     table_row(67, "type   |   `#Context`, `#aos [..]T`, `#soa [..]T`");
     table_row(68, "switch and case   |   `#partial` on the switch, `#falling` on a case");
     paragraph(69, #string,oneline
