@@ -833,8 +833,9 @@ render_section_119 :: () {
         \\before `exit`, before a failed `#assert` aborts and before an explicit
         \\process abort, so a program that stops deliberately still says what it
         \\was holding. It does not run on the safety-check path: a bounds or
-        \\overflow failure at `-O0` terminates with status 134 and prints
-        \\nothing, as Runtime Safety Checks and Panics describes.
+        \\overflow failure at `-O0` prints its runtime-check category and then
+        \\terminates without running the allocator report, as Runtime Safety
+        \\Checks and Panics describes.
     );
     paragraph(28, #string,oneline
         \\`debug_allocator_report_leaks()` forces it early. Because of the
@@ -904,7 +905,7 @@ render_section_120 :: () {
     table_row(3, "`#memory` contract validation   |   before any analysis   |   always an error");
     table_row(4, "temporal analysis   |   after type checking, before lowering   |   set by `--borrow-check`, warning by default");
     table_row(5, "static semantics   |   during type checking   |   always an error, relaxed only by `#enable`");
-    table_row(6, "runtime safety checks   |   in the program, at `-O0` and `-O1`   |   abort with exit status 134");
+    table_row(6, "runtime safety checks   |   in the program, at `-O0` and `-O1`   |   report a category, then take the target's abort path (134 on hosted Windows and Linux x86-64; 125 on WASI)");
     table_row(7, "debug allocator   |   in the program, at `-O0`   |   report on stderr, the program continues");
 
     subheading(8, "Contract validation");
@@ -1020,7 +1021,8 @@ render_section_120 :: () {
         \\Runtime safety checks are instructions in the emitted program: array
         \\bounds, integer overflow, a `cast(*T)` of a zero address, and the gated
         \\union unwrap. They are emitted only when the optimization level is 0 or
-        \\1, and every failure ends the process with status 134. The chapter on
+        \\1, and every failure reports its category before taking the target's
+        \\abort path. The chapter on
         \\runtime safety checks and panics lists the full family.
     );
     paragraph(26, #string,oneline
@@ -2789,9 +2791,9 @@ render_section_126 :: () {
         \\`--borrow-check off` still silences everything. Library findings are
         \\printed among the program's own and sorted with them by path and
         \\position. The flag is for working on the library rather than on a
-        \\program that uses it: the library currently reports a hundred and
-        \\fifty findings, a hundred and fifteen of them contract-versus-body
-        \\mismatches like the first one.
+        \\program that uses it. The exact count changes as standard-library
+        \\contracts and bodies evolve; contract-versus-body mismatches like the
+        \\first one normally make up a substantial part of the listing.
     );
     code_block(34, "text", #string
         \\warning: [memory.I5] body of 'io_read_exact' has undeclared reads effect on 'destination'
@@ -2821,10 +2823,9 @@ render_section_126 :: () {
         \\c_malloc :: #memory(released_by(returned.Some, c_free), returns_fresh(returned.Some), unknown(arg: n), unknown(reason: "inferred unknown behavior"))
     );
     paragraph(42, #string,oneline
-        \\Those are eight consecutive lines of an axiom listing that runs to a
-        \\hundred and sixty-five for a program importing `Io`, whose signature
-        \\listing runs to nine hundred and forty-six. Both cover the whole
-        \\program including the standard library, and the names are sorted,
+        \\Those are eight consecutive lines of an axiom listing. Both listings
+        \\cover the whole program including the standard library, so their exact
+        \\length changes with the imported graph; the names are sorted,
         \\which makes the output diffable between builds. `--memory-report` is
         \\the summary form, with the columns `MODULE`, `DECLS`, `CONTRACTED`,
         \\`AXIOM_PRECISE`, `AXIOM_UNKNOWN`, `AXIOM_GRANULAR`, `MISSING`,
@@ -2997,9 +2998,9 @@ render_section_127 :: () {
     );
     paragraph(32, #string,oneline
         \\`pointer_punning` relaxes the pointee check and the distinction
-        \\between a single pointer and a many-pointer. Both assignments below
-        \\are rejected without it, with `error: got *int, expected [*]int` and
-        \\`error: got *int, expected *u8`; with it, both are accepted and the
+        \\between a single pointer and a many-pointer. The two assignments below
+        \\are rejected without it: `error: got *isize, expected [*]isize` and
+        \\`error: got *isize, expected *u8`. With it, both are accepted and the
         \\program prints `65 65`.
     );
     code_block(33, "glosso", #string
@@ -3019,8 +3020,8 @@ render_section_127 :: () {
         \\What it does not relax is const. The gate is tested inside the
         \\branch that has already established the qualifier direction is
         \\legal, so discarding `const` remains an error under the gate:
-        \\`writable: *s64 = readonly;` with `readonly: *const s64` is `error:
-        \\got *const int, expected *int`.
+        \\`writable: *s64 = readonly;` with `readonly: *const s64` reports
+        \\`error: got *const isize, expected *isize`.
     );
     subheading(35, "The gate that tightens");
     paragraph(36, #string,oneline
@@ -3113,7 +3114,8 @@ render_section_127 :: () {
         \\read, as the second half of the transcript shows. The tag check
         \\belongs to the runtime-check family described in the chapter on
         \\runtime safety checks and panics, which is enabled at `-O0` and
-        \\`-O1` only; the size modes disable it too.
+        \\`-O1` only. The current LLVM 23 backend cannot complete a size-mode
+        \\build, so use `-O2` or `-O3` when this check must be absent.
     );
     note(50, #string,oneline
         \\A gate is not a promise that the compiler will stop looking. If the

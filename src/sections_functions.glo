@@ -24,17 +24,17 @@ render_section_56 :: () {
         \\The order of those five slots is fixed. The parser reads all function
         \\directives in one loop and stops at the first `where`, so a directive
         \\written after a constraint is no longer in the directive position and the
-        \\declaration is rejected: `f :: (a: int) where true #inline { }` gives
+        \\declaration is rejected: `f :: (a: isize) where true #inline { }` gives
         \\`error: function directives must appear before where clauses`. The
         \\corrected spelling puts every directive first and every constraint after
-        \\them, as in `plain :: (a: int) -> int #inline where true { return a + 1; }`.
+        \\them, as in `plain :: (a: isize) -> isize #inline where true { return a + 1; }`.
     );
     table_header(3, "Slot   —   Spelling   —   Rule");
     table_row(4, "parameters   |   `( ... )`   |   required, even when empty");
     table_row(5, "result type   |   `-> R`   |   optional; omitting it means `void`");
     table_row(6, "directives   |   `#inline`, `#must`, ...   |   any number, before the first `where`");
     table_row(7, "constraints   |   `where <expr>`   |   any number, after the last directive");
-    table_row(8, "body   |   `{ ... }`   |   required, except on `#magic` and `#foreign`");
+    table_row(8, "body   |   `{ ... }`   |   required, except on `#magic`, `#foreign`, and signature-only typeclass requirements");
     paragraph(9, #string,oneline
         \\The directive vocabulary is given in the chapter Function and Aggregate
         \\Directives, and the constraint language in Constraints with `where`. This
@@ -46,15 +46,15 @@ render_section_56 :: () {
         \\A procedure with no `->` returns `void`. Writing `-> void` explicitly is
         \\accepted and means the same thing. A result type that is not `void`
         \\constrains every `return` expression in the body: returning a value from a
-        \\`void` procedure is `error: got int, expected void`, and returning the
-        \\wrong type is the ordinary conversion diagnostic, `error: got int, expected
+        \\`void` procedure is `error: got isize, expected void`, and returning the
+        \\wrong type is the ordinary conversion diagnostic, `error: got isize, expected
         \\string`.
     );
     code_block(12, "glosso", #string
         \\hello :: () { print("hello\n"); }
         \\nothing :: () -> void { print("nothing\n"); }
-        \\add :: (a: int, b: int) -> int { return a + b; }
-        \\add3 :: (a, b, c: int) -> int { return a + b + c; }
+        \\add :: (a: isize, b: isize) -> isize { return a + b; }
+        \\add3 :: (a, b, c: isize) -> isize { return a + b + c; }
     );
     paragraph(13, #string,oneline
         \\`add3` uses a shared type annotation: one type applies to every name in the
@@ -77,7 +77,7 @@ render_section_56 :: () {
     code_block(15, "glosso", #string
         \\#import "Io";
         \\
-        \\no_return_stmt :: (a: int) -> int { }
+        \\no_return_stmt :: (a: isize) -> isize { }
         \\
         \\main :: () {
         \\    print("no_return_stmt=%\n", no_return_stmt(5));
@@ -87,7 +87,7 @@ render_section_56 :: () {
         \\error: function 'no_return_stmt' can reach the end of its body without returning a value
         \\  --> ret.glo:3:1
         \\  |
-        \\3 | no_return_stmt :: (a: int) -> int { }
+        \\3 | no_return_stmt :: (a: isize) -> isize { }
         \\  | ^^^^^^^^^^^^^^
     );
 
@@ -100,9 +100,9 @@ render_section_56 :: () {
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
-        \\divmod :: (a: int, b: int) -> (int, int) { return a / b, a % b; }
+        \\divmod :: (a: isize, b: isize) -> (isize, isize) { return a / b, a % b; }
         \\
-        \\minmax :: (a: int, b: int) -> (lo: int, hi: int) {
+        \\minmax :: (a: isize, b: isize) -> (lo: isize, hi: isize) {
         \\    if a < b { lo = a; hi = b; return; }
         \\    lo = b;
         \\    hi = a;
@@ -136,19 +136,19 @@ render_section_56 :: () {
     code_block(22, "glosso", #string
         \\#import "Io";
         \\
-        \\split :: (a: int) -> (lo: int, hi: int) {
+        \\split :: (a: isize) -> (lo: isize, hi: isize) {
         \\    lo = a - 1;
         \\    hi = a + 1;
         \\    return;
         \\}
         \\
-        \\overwrite :: (a: int) -> (lo: int, hi: int) {
+        \\overwrite :: (a: isize) -> (lo: isize, hi: isize) {
         \\    lo = 0;
         \\    hi = 0;
         \\    return a, a * 2;
         \\}
         \\
-        \\zeroes :: () -> (x: int, y: int) { }
+        \\zeroes :: () -> (x: isize, y: isize) { }
         \\
         \\main :: () {
         \\    a, b := split(10);
@@ -209,11 +209,19 @@ render_section_56 :: () {
         \\c_abs=5 raw_add=5
     );
     paragraph(33, #string,oneline
-        \\The rule runs in both directions. An ordinary declaration ended with a
-        \\semicolon is `error: unexpected token ';'`, and a `#foreign` or `#magic`
-        \\declaration given a body is `error: bad decl name '{'`, because the parser
-        \\finished the declaration at the directive and read the brace as the start
-        \\of the next one.
+        \\The rule runs in both directions. An ordinary signature ended with a
+        \\semicolon instead of a body is `error: unexpected token ';'`. At file
+        \\scope, a `#foreign` or `#magic` declaration must itself end
+        \\with `;`: putting a body directly after the directive first gives
+        \\`error: declaration must end with ';'`, while putting the required
+        \\semicolon before that body leaves `{` to be read as the next
+        \\declaration. It gives `error: bad decl name '{'`. Conversely, a
+        \\procedure that has a body already ended at its
+        \\`}`. At file scope, following it with `;` is `error: expected a
+        \\declaration, found ';'`; inside another body the stray token is the
+        \\ordinary `error: unexpected token ';'`. The nested-declaration parser
+        \\currently accepts an omitted terminator on a bodyless `#foreign` or
+        \\`#magic` signature; that narrow exception does not apply at file scope.
     );
 
     subheading(34, "Nested procedures");
@@ -228,11 +236,11 @@ render_section_56 :: () {
         \\#import "Io";
         \\
         \\main :: () {
-        \\    nested :: (x: int) -> int { return x * 2; }
+        \\    nested :: (x: isize) -> isize { return x * 2; }
         \\    print("nested=%\n", nested(21));
         \\}
         \\
-        \\elsewhere :: () -> int { return nested(3); }
+        \\elsewhere :: () -> isize { return nested(3); }
     );
     code_block(37, "text", #string
         \\nested=42
@@ -264,8 +272,8 @@ render_section_57 :: () {
         \\argument is what makes a skipped parameter reachable again.
     );
     table_header(1, "Form   —   Meaning");
-    table_row(2, "`b: int = 3`   |   a default for `b`");
-    table_row(3, "`a, b: int = 3`   |   one shared type and one shared default, applied to both names");
+    table_row(2, "`b: isize = 3`   |   a default for `b`");
+    table_row(3, "`a, b: isize = 3`   |   one shared type and one shared default, applied to both names");
     table_row(4, "`factor := 2`   |   a default whose type is inferred from it; exactly one name");
     table_row(5, "`f(x, .name = v)`   |   a named argument at the call site");
     paragraph(6, #string,oneline
@@ -303,7 +311,7 @@ render_section_57 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\shared :: (a, b: int = 3) -> int { return a * 10 + b; }
+        \\shared :: (a, b: isize = 3) -> isize { return a * 10 + b; }
         \\
         \\main :: () {
         \\    print("shared()=% shared(1)=% shared(1,2)=%\n",
@@ -324,7 +332,7 @@ render_section_57 :: () {
     code_block(15, "glosso", #string
         \\#import "Io";
         \\
-        \\scaled :: (x: int, factor := 2) -> int { return x * factor; }
+        \\scaled :: (x: isize, factor := 2) -> isize { return x * factor; }
         \\
         \\main :: () {
         \\    print("scaled=% scaled3=%\n", scaled(5), scaled(5, 3));
@@ -345,7 +353,7 @@ render_section_57 :: () {
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
-        \\early :: (a: int = 1, b: int) -> int { return a * 100 + b; }
+        \\early :: (a: isize = 1, b: isize) -> isize { return a * 100 + b; }
         \\
         \\main :: () {
         \\    print("early=%\n", early(.b = 2));
@@ -368,7 +376,7 @@ render_section_57 :: () {
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
-        \\box :: (w: int = 1, h: int = 1, d: int = 1) -> int { return w * h * d; }
+        \\box :: (w: isize = 1, h: isize = 1, d: isize = 1) -> isize { return w * h * d; }
         \\
         \\main :: () {
         \\    print("box=% box2=%\n", box(.d = 2, .w = 3, .h = 4), box(3, .d = 2, .h = 4));
@@ -400,7 +408,7 @@ render_section_57 :: () {
     code_block(29, "text", #string
         \\error: no overload 'f' accepts these arguments
         \\note: possible candidates for 'f':
-        \\candidate: f :: (a: int, b: int = ...) -> int
+        \\candidate: f :: (a: isize, b: isize = ...) -> isize
     );
 
     subheading(30, "When a default is evaluated");
@@ -415,9 +423,9 @@ render_section_57 :: () {
         \\
         \\counter := 0;
         \\
-        \\bump :: () -> int { counter += 1; return counter; }
+        \\bump :: () -> isize { counter += 1; return counter; }
         \\
-        \\with_call :: (x: int = bump()) -> int { return x; }
+        \\with_call :: (x: isize = bump()) -> isize { return x; }
         \\
         \\main :: () {
         \\    print("call1=% call2=% counter=%\n", with_call(), with_call(), counter);
@@ -440,24 +448,24 @@ render_section_57 :: () {
         \\#import "Io";
         \\
         \\Render :: typeclass (T: type) {
-        \\    render :: (value: T, width: int = 4) -> int;
+        \\    render :: (value: T, width: isize = 4) -> isize;
         \\}
         \\
-        \\s64 :: instance Render {
-        \\    render :: (value: s64, width: int = 4) -> int { return value * width; }
+        \\s64 ::: instance Render {
+        \\    render :: (value: s64, width: isize = 4) -> isize { return value * width; }
         \\}
         \\
-        \\bool :: instance Render {
-        \\    render :: (value: bool, width: int = 9) -> int { if value return width; return 0; }
+        \\bool ::: instance Render {
+        \\    render :: (value: bool, width: isize = 9) -> isize { if value return width; return 0; }
         \\}
         \\
         \\main :: () {
-        \\    print("int  = % / %\n", render(3), render(3, 10));
+        \\    print("isize  = % / %\n", render(3), render(3, 10));
         \\    print("bool = % / %\n", render(true), render(true, 2));
         \\}
     );
     code_block(37, "text", #string
-        \\int  = 12 / 30
+        \\isize  = 12 / 30
         \\bool = 9 / 2
     );
     paragraph(38, #string,oneline
@@ -468,8 +476,8 @@ render_section_57 :: () {
     );
     note(39, #string,oneline
         \\An instance method must repeat the requirement's defaults. Declaring
-        \\`render :: (value: s64, width: int)` against a requirement that reads
-        \\`width: int = 4` no longer matches, and the instance is rejected with
+        \\`render :: (value: s64, width: isize)` against a requirement that reads
+        \\`width: isize = 4` no longer matches, and the instance is rejected with
         \\`error: instance 's64 :: Render' does not satisfy the implicit minimal
         \\definition; missing render`. The value of the default may differ; its
         \\presence may not.
@@ -485,13 +493,13 @@ render_section_58 :: () {
     );
     table_header(1, "Spelling   —   Elements   —   The body sees");
     table_row(2, "`xs: ...`   |   any types, mixed   |   `[]any`");
-    table_row(3, "`xs: ...int`   |   all `int`   |   `[]int`");
+    table_row(3, "`xs: ...isize`   |   all `isize`   |   `[]isize`");
     table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]T`");
     table_row(5, "`xs: ...Show`   |   any type implementing `Show`   |   a pack whose elements keep their own types");
     table_row(6, "`xs: ...(Show && PartialEq)`   |   any type implementing both   |   the same, with both constraints");
     paragraph(7, #string,oneline
         \\The `...` is a type prefix, not a suffix on the name, and it is three dots.
-        \\Two dots is the range operator, and the compiler says so: `xs: ..int` is
+        \\Two dots is the range operator, and the compiler says so: `xs: ..isize` is
         \\`error: variadic parameter uses '...T'; '..' is the range operator`. A
         \\variadic parameter takes exactly one name (`variadic parameter must have one
         \\name`) and cannot carry a default (`variadic parameter cannot have a default
@@ -515,7 +523,7 @@ render_section_58 :: () {
         \\}
         \\
         \\main :: () {
-        \\    n: int = 7;
+        \\    n: isize = 7;
         \\    describe(n, "hi", true);
         \\    describe();
         \\}
@@ -531,7 +539,7 @@ render_section_58 :: () {
     paragraph(12, #string,oneline
         \\For the untyped, homogeneous, and generic forms the parameter really is an
         \\array view and can be bound as one: `view: []any = xs;` inside `describe`,
-        \\`view: []int = xs;` inside a `...int` procedure, and `view: []T = xs;`
+        \\`view: []isize = xs;` inside a `...isize` procedure, and `view: []T = xs;`
         \\inside a `...$T` procedure all compile.
     );
     note(13, #string,oneline
@@ -552,7 +560,7 @@ render_section_58 :: () {
     code_block(16, "glosso", #string
         \\#import "Io";
         \\
-        \\sum :: (xs: ...int) -> int {
+        \\sum :: (xs: ...isize) -> isize {
         \\    total := 0;
         \\    for xs total += it;
         \\    return total;
@@ -571,7 +579,7 @@ render_section_58 :: () {
     );
     paragraph(18, #string,oneline
         \\A wrong element type is reported per argument: `sum(1, "two")` is
-        \\`error: arg type string != int in call sum`. For a generic pack the first
+        \\`error: arg type string != isize in call sum`. For a generic pack the first
         \\argument decides, and the message names the type it decided on:
         \\`firstof(1, "two")` is `error: arg type string != comptime_int in call
         \\firstof`.
@@ -612,20 +620,20 @@ render_section_58 :: () {
     code_block(24, "glosso", #string
         \\#import "Io";
         \\
-        \\only_int :: (x: int) -> int { return x + 1; }
+        \\only_int :: (x: isize) -> isize { return x + 1; }
         \\
         \\f :: (values: ...Show) { for values print("%\n", only_int(it)); }
         \\
-        \\main :: () { n: int = 1; f(n, "two"); }
+        \\main :: () { n: isize = 1; f(n, "two"); }
     );
     code_block(25, "text", #string
-        \\error: arg type string != int in call only_int
+        \\error: arg type string != isize in call only_int
     );
     paragraph(26, #string,oneline
-        \\The same body compiles and runs when both arguments are `int`. Indexing
+        \\The same body compiles and runs when both arguments are `isize`. Indexing
         \\follows the same rule in reverse: a constant index selects an element with
         \\its own type, but an index the compiler cannot fold degrades the element to
-        \\`any`, giving `error: arg type any != int in call only_int`.
+        \\`any`, giving `error: arg type any != isize in call only_int`.
     );
 
     subheading(27, "Parameters after a variadic");
@@ -639,7 +647,7 @@ render_section_58 :: () {
     code_block(29, "glosso", #string
         \\#import "Io";
         \\
-        \\tagged :: (xs: ...int, tag: string = "sum") -> int {
+        \\tagged :: (xs: ...isize, tag: string = "sum") -> isize {
         \\    total := 0;
         \\    for xs total += it;
         \\    print("% = %\n", tag, total);
@@ -665,14 +673,14 @@ render_section_58 :: () {
     code_block(33, "glosso", #string
         \\#import "Io";
         \\
-        \\sum :: (xs: ...int) -> int { t := 0; for xs t += it; return t; }
-        \\sum_plus :: (base: int, xs: ...int) -> int { return base + sum(xs...); }
+        \\sum :: (xs: ...isize) -> isize { t := 0; for xs t += it; return t; }
+        \\sum_plus :: (base: isize, xs: ...isize) -> isize { return base + sum(xs...); }
         \\
         \\main :: () {
-        \\    fixed: [3]int = .[1, 2, 3];
-        \\    view: []int = fixed[..];
+        \\    fixed: [3]isize = .[1, 2, 3];
+        \\    view: []isize = fixed[..];
         \\    print("fixed=% view=%\n", sum(fixed...), sum(view...));
-        \\    dyn: [..]int;
+        \\    dyn: [..]isize;
         \\    array_add(*dyn, 10);
         \\    array_add(*dyn, 20);
         \\    print("dyn=%\n", sum(dyn...));
@@ -704,7 +712,7 @@ render_section_58 :: () {
     bullet(38, #string,oneline
         \\Expanding something that is not an array reports error: expanded variadic
         \\argument to `sum` must be an array. Expanding the wrong element type
-        \\reports error: expanded variadic arg type `[2]string` != `[]int` in call
+        \\reports error: expanded variadic arg type `[2]string` != `[]isize` in call
         \\`sum`.
     );
     note(39, #string,oneline
@@ -724,7 +732,7 @@ render_section_59 :: () {
         \\parameter directive.
     );
     code_block(1, "glosso", #string
-        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
+        \\copy2 :: (noalias dst: *isize, noalias src: *const isize) { dst.* = src.*; }
         \\
         \\add_all :: (noalias out: [*]s64, noalias a: [*]s64, n: s64) {
         \\    for i: 0..n out[i] = a[i] * 2;
@@ -748,20 +756,20 @@ render_section_59 :: () {
         \\`noalias` is refused on anything that is not pointer-like, because there is
         \\nothing to make a promise about. The check runs on the resolved parameter
         \\type, and the diagnostic reads `noalias parameter 'v' must have a pointer
-        \\type, got int`, with the resolved type in the last position.
+        \\type, got isize`, with the resolved type in the last position.
     );
     table_header(6, "Parameter type   —   `noalias`   —   Reported type");
     table_row(7, "`*T`, `*const T`   |   accepted   |   n/a");
     table_row(8, "`[*]T`   |   accepted   |   n/a");
     table_row(9, "a `#fn_ptr` type   |   accepted   |   n/a");
-    table_row(10, "`?*T`   |   refused   |   `Option__int`");
-    table_row(11, "`[]T`   |   refused   |   `[]int`");
+    table_row(10, "`?*T`   |   refused   |   `Option__isize`");
+    table_row(11, "`[]T`   |   refused   |   `[]isize`");
     table_row(12, "`string`   |   refused   |   `string`");
-    table_row(13, "any scalar or struct   |   refused   |   `int`, `Point`, ...");
+    table_row(13, "any scalar or struct   |   refused   |   `isize`, `Point`, ...");
     note(14, #string,oneline
         \\`?*T` is refused even though it holds a pointer at runtime. An optional
         \\pointer is a niche union, and the checker sees the union type, which is why
-        \\the message reports `Option__int`. A procedure that wants both the null
+        \\the message reports `Option__isize`. A procedure that wants both the null
         \\niche and the aliasing promise has to unwrap the option and pass the bare
         \\`*T` on.
     );
@@ -773,18 +781,18 @@ render_section_59 :: () {
         \\to attach to. Outside a parameter list the keyword has no meaning at all.
     );
     table_header(17, "Written   —   Diagnostic");
-    table_row(18, "`(noalias noalias p: *int)`   |   `duplicate noalias parameter modifier`");
-    table_row(19, "`(noalias #comptime p: *int)`   |   `noalias cannot qualify a #comptime parameter`");
+    table_row(18, "`(noalias noalias p: *isize)`   |   `duplicate noalias parameter modifier`");
+    table_row(19, "`(noalias #comptime p: *isize)`   |   `noalias cannot qualify a #comptime parameter`");
     table_row(20, "`(noalias #empty: $T)`   |   `noalias cannot qualify a #empty parameter`");
-    table_row(21, "`(#comptime noalias p: *int)`   |   `unexpected token 'noalias'`");
-    table_row(22, "`(pair: (noalias *int, *int))`   |   `noalias is only valid on function parameters`");
+    table_row(21, "`(#comptime noalias p: *isize)`   |   `unexpected token 'noalias'`");
+    table_row(22, "`(pair: (noalias *isize, *isize))`   |   `noalias is only valid on function parameters`");
     paragraph(23, #string,oneline
         \\The last row is the tuple type. A parenthesized list followed by `->` is a
         \\function type, where `noalias` is meaningful; the same list without the
         \\arrow is a tuple type, where it is not. Inside a function type the
         \\parameters may be unnamed, and the diagnostic then numbers them:
-        \\`f :: (g: (noalias int) -> int)` is `error: noalias function parameter 1
-        \\must have a pointer type, got int`.
+        \\`f :: (g: (noalias isize) -> isize)` is `error: noalias function parameter 1
+        \\must have a pointer type, got isize`.
     );
 
     subheading(24, "Generic parameters");
@@ -796,15 +804,15 @@ render_section_59 :: () {
     code_block(26, "glosso", #string
         \\#import "Io";
         \\
-        \\touch :: (noalias p: $T) -> int { return 1; }
+        \\touch :: (noalias p: $T) -> isize { return 1; }
         \\
         \\main :: () { print("%\n", touch(3)); }
     );
     code_block(27, "text", #string
-        \\error: noalias parameter 'p' instantiated with non-pointer type int
+        \\error: noalias parameter 'p' instantiated with non-pointer type isize
     );
     paragraph(28, #string,oneline
-        \\`touch(*a)` for an `a: int` compiles and runs. The error is reported at the
+        \\`touch(*a)` for an `a: isize` compiles and runs. The error is reported at the
         \\declaration rather than at the offending call, so a generic procedure used
         \\from several places names none of them.
     );
@@ -820,9 +828,9 @@ render_section_59 :: () {
         \\would still emit it.
     );
     code_block(31, "glosso", #string
-        \\Copy :: #fn_ptr(noalias dst: *int, noalias src: *const int);
+        \\Copy :: #fn_ptr(noalias dst: *isize, noalias src: *const isize);
         \\
-        \\do_copy :: (dst: *int, src: *const int) { dst.* = src.*; }
+        \\do_copy :: (dst: *isize, src: *const isize) { dst.* = src.*; }
         \\
         \\main :: () { c: Copy = do_copy; }
     );
@@ -831,8 +839,8 @@ render_section_59 :: () {
     );
     paragraph(33, #string,oneline
         \\Adding `noalias` to `do_copy` makes it compile. Lambdas carry the qualifier
-        \\too, and are checked the same way: `|noalias p: *int| -> int { return p.*; }`
-        \\assigned where a plain `(p: *int) -> int` is expected gives
+        \\too, and are checked the same way: `|noalias p: *isize| -> isize { return p.*; }`
+        \\assigned where a plain `(p: *isize) -> isize` is expected gives
         \\`error: lambda parameter 'p' is noalias, but the expected function parameter
         \\is not`.
     );
@@ -855,11 +863,11 @@ render_section_59 :: () {
     code_block(36, "glosso", #string
         \\#import "Io";
         \\
-        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
+        \\copy2 :: (noalias dst: *isize, noalias src: *const isize) { dst.* = src.*; }
         \\
         \\main :: () {
-        \\    a: int = 1;
-        \\    b: int = 2;
+        \\    a: isize = 1;
+        \\    b: isize = 2;
         \\    copy2(*a, *b);
         \\    print("a=%\n", a);
         \\    copy2(*a, *a);
@@ -894,7 +902,7 @@ render_section_60 :: () {
     code_block(1, "glosso", #string
         \\#import "Io";
         \\
-        \\evals: int = 0;
+        \\evals: isize = 0;
         \\
         \\probe :: (label: string) -> bool {
         \\    evals += 1;
@@ -902,9 +910,9 @@ render_section_60 :: () {
         \\    return true;
         \\}
         \\
-        \\ignore_it :: (#lazy v: bool) -> int { return 0; }
-        \\use_once  :: (#lazy v: bool) -> int { if v return 1; return 2; }
-        \\use_twice :: (#lazy v: bool) -> int { if v { if v return 3; } return 4; }
+        \\ignore_it :: (#lazy v: bool) -> isize { return 0; }
+        \\use_once  :: (#lazy v: bool) -> isize { if v return 1; return 2; }
+        \\use_twice :: (#lazy v: bool) -> isize { if v { if v return 3; } return 4; }
         \\
         \\main :: () {
         \\    print("ignore_it:\n");
@@ -949,14 +957,14 @@ render_section_60 :: () {
     code_block(6, "glosso", #string
         \\#import "Io";
         \\
-        \\counter: int = 1;
+        \\counter: isize = 1;
         \\
-        \\delayed :: (#lazy v: int) -> int {
+        \\delayed :: (#lazy v: isize) -> isize {
         \\    counter = 100;
         \\    return v;
         \\}
         \\
-        \\eager :: (v: int) -> int {
+        \\eager :: (v: isize) -> isize {
         \\    counter = 100;
         \\    return v;
         \\}
@@ -989,7 +997,7 @@ render_section_60 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\n: int = 0;
+        \\n: isize = 0;
         \\tick :: () -> bool { n += 1; return true; }
         \\
         \\inner :: (#lazy v: bool) -> bool { if v return v; return false; }
@@ -1032,7 +1040,7 @@ render_section_60 :: () {
         \\    '||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
         \\}
         \\
-        \\(bool, bool) :: instance LogicalAnd {
+        \\(bool, bool) ::: instance LogicalAnd {
         \\    Output :: bool;
         \\    '&&' :: (left: bool, #lazy right: bool) -> Output #magic "bool_and";
         \\}
@@ -1118,12 +1126,12 @@ render_section_60 :: () {
         \\
         \\Flag :: struct { on: bool; }
         \\
-        \\(Flag, Flag) :: instance LogicalAnd {
+        \\(Flag, Flag) ::: instance LogicalAnd {
         \\    Output :: Flag;
         \\    '&&' :: (a: Flag, #lazy b: Flag) -> Flag { if !a.on return a; return b; }
         \\}
         \\
-        \\hits: int = 0;
+        \\hits: isize = 0;
         \\mk :: (v: bool) -> Flag { hits += 1; return .{ .on = v }; }
         \\
         \\main :: () {
@@ -1216,13 +1224,13 @@ render_section_61 :: () {
     code_block(3, "glosso", #string
         \\#import "Io";
         \\
-        \\pow :: (#comptime n: int, x: int) -> int {
+        \\pow :: (#comptime n: isize, x: isize) -> isize {
         \\    r := 1;
         \\    #inline for i: 0..n r *= x;
         \\    return r;
         \\}
         \\
-        \\addc :: (#comptime a, b: int) -> int { return a + b; }
+        \\addc :: (#comptime a, b: isize) -> isize { return a + b; }
         \\
         \\main :: () {
         \\    print("pow(3,2)=%\n", pow(3, 2));
@@ -1238,7 +1246,7 @@ render_section_61 :: () {
     );
     paragraph(5, #string,oneline
         \\One `#comptime` covers every name in a shared-type group, so
-        \\`(#comptime a, b: int)` makes both `a` and `b` compile-time. The
+        \\`(#comptime a, b: isize)` makes both `a` and `b` compile-time. The
         \\argument must be a constant the compile-time evaluator can reduce: a
         \\literal, a `::` constant, or a compile-time call. A mutable local is
         \\not one, and `k := 3; pow(k, 2)` is `error: argument for #comptime
@@ -1253,7 +1261,7 @@ render_section_61 :: () {
     code_block(7, "glosso", #string
         \\#import "Io";
         \\
-        \\banner :: (#comptime width: int = 4, ch: string) -> string {
+        \\banner :: (#comptime width: isize = 4, ch: string) -> string {
         \\    out := "";
         \\    #inline for i: 0..width out = out + ch;
         \\    return out;
@@ -1280,7 +1288,7 @@ render_section_61 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\scale :: (#comptime k: int, x: int) -> int { return k * x; }
+        \\scale :: (#comptime k: isize, x: isize) -> isize { return k * x; }
         \\zero_of :: (#empty: $T) -> T { d: T; return d; }
         \\
         \\main :: () {
@@ -1295,8 +1303,8 @@ render_section_61 :: () {
         \\produces are these.
     );
     code_block(13, "text", #string
-        \\define i64 @glo_scale__int_int__comptime_df69fa1c4e5525eb(i64 %0) {
-        \\define i64 @glo_scale__int_int__comptime_df6d1e1c4e5798ee(i64 %0) {
+        \\define i64 @glo_scale__isize_isize__comptime_df69fa1c4e5525eb(i64 %0) {
+        \\define i64 @glo_scale__isize_isize__comptime_df6d1e1c4e5798ee(i64 %0) {
         \\define i16 @glo_zero_of__s16() {
     );
     paragraph(14, #string,oneline
@@ -1329,15 +1337,15 @@ render_section_61 :: () {
         \\parse_as :: (#empty: $T, text: string) -> T { d: T; return d; }
         \\
         \\main :: () {
-        \\    print("zero_of(int)=%\n", zero_of(int));
+        \\    print("zero_of(isize)=%\n", zero_of(isize));
         \\    print("zero_of(f64)=%\n", zero_of(f64));
         \\    print("zero_of(bool)=%\n", zero_of(bool));
-        \\    print("name_of=%\n", name_of(int, string));
+        \\    print("name_of=%\n", name_of(isize, string));
         \\    print("parse_as=%\n", parse_as(s16, "x"));
         \\}
     );
     code_block(24, "text", #string
-        \\zero_of(int)=0
+        \\zero_of(isize)=0
         \\zero_of(f64)=0
         \\zero_of(bool)=0
         \\name_of=two types
@@ -1359,7 +1367,7 @@ render_section_61 :: () {
     code_block(27, "glosso", #string
         \\#import "Io";
         \\
-        \\hits: int = 0;
+        \\hits: isize = 0;
         \\side :: () -> f64 { hits += 1; return 1.0; }
         \\
         \\zero_of :: (#empty: $T) -> T { d: T; return d; }
@@ -1420,7 +1428,7 @@ render_section_61 :: () {
     );
     subheading(36, "The four ways to pass a type");
     table_header(37, "Form   —   Call site   —   Runtime slot");
-    table_row(38, "`#comptime v: int`   |   A constant expression   |   None; folded into the body");
+    table_row(38, "`#comptime v: isize`   |   A constant expression   |   None; folded into the body");
     table_row(39, "`#comptime T: type`   |   A type name   |   None");
     table_row(40, "`T: type`   |   A type name   |   None; promoted only if T is used in the signature");
     table_row(41, "`#empty: $T`   |   A type name or any typed expression   |   None; the expression is discarded");
@@ -1569,7 +1577,7 @@ render_section_62 :: () {
         \\main :: () {
         \\    print("explicit=%\n", explicit(s16, 3));
         \\    print("zero=%\n", zero(f64));
-        \\    print("convert=%\n", convert(int, f64, 3));
+        \\    print("convert=%\n", convert(isize, f64, 3));
         \\}
     );
     code_block(26, "text", #string
@@ -1595,10 +1603,10 @@ render_section_62 :: () {
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\make      :: (T: type, n: int) -> int { d: T; return n + size_of(T); }
+        \\make      :: (T: type, n: isize) -> isize { d: T; return n + size_of(T); }
         \\idt       :: (T: type, x: T) -> T { return x; }
-        \\conv      :: (x: int, T := f64) -> T { return cast(T) x; }
-        \\defaulted :: (T: type = int, n: int = 3) -> int { d: T; return n + size_of(T); }
+        \\conv      :: (x: isize, T := f64) -> T { return cast(T) x; }
+        \\defaulted :: (T: type = isize, n: isize = 3) -> isize { d: T; return n + size_of(T); }
         \\
         \\main :: () {
         \\    print("make=%\n", make(s16, 7));
@@ -1625,7 +1633,7 @@ render_section_62 :: () {
     table_row(37, "`(T: type, x: $T)`   |   `type parameter 'T' is already declared; use plain T after the declaration`");
     note(38, #string,oneline
         \\The trailing-position rule accepts only the inferred spelling. Writing
-        \\`f :: (x: int, T: type = f64)` still fails with `error: type parameter
+        \\`f :: (x: isize, T: type = f64)` still fails with `error: type parameter
         \\'T' must appear before runtime parameters unless it has a default`,
         \\even though the parameter has one; the accepted form is `T := f64`,
         \\with no `: type` annotation and an uppercase initial letter.
@@ -1650,7 +1658,7 @@ render_section_62 :: () {
         \\}
     );
     code_block(42, "text", #string
-        \\define i64 @glo_pick__int_int(i64 %0, i64 %1) {
+        \\define i64 @glo_pick__isize_isize(i64 %0, i64 %1) {
         \\define i16 @glo_pick__s16_s16(i16 %0, i16 %1) {
         \\define double @glo_pick__f64_f64(double %0, double %1) {
     );
@@ -1659,8 +1667,8 @@ render_section_62 :: () {
         \\which is exactly the specialization key; the two `s64` calls share
         \\one definition. Because the key is the whole tuple, a procedure
         \\generic in two parameters distinguishes the orders:
-        \\`tag :: (a: $A, b: $B)` yields `glo_tag__int_s16` and
-        \\`glo_tag__s16_int` as separate functions.
+        \\`tag :: (a: $A, b: $B)` yields `glo_tag__isize_s16` and
+        \\`glo_tag__s16_isize` as separate functions.
     );
     paragraph(44, #string,oneline
         \\Instantiation is also where a generic body is really checked. Two
@@ -1693,7 +1701,7 @@ render_section_63 :: () {
         \\    return x * k;
         \\}
         \\
-        \\rep :: (#comptime n: int, s: string) -> string where n > 0 {
+        \\rep :: (#comptime n: isize, s: string) -> string where n > 0 {
         \\    out := s;
         \\    #inline for i: 1..n out = out + s;
         \\    return out;
@@ -1714,7 +1722,7 @@ render_section_63 :: () {
     paragraph(4, #string,oneline
         \\The clauses come after the parameter list, after the return type, and
         \\after every function directive, immediately before the body. The order
-        \\is fixed: `f :: (a: int) where true #inline { }` is `error: function
+        \\is fixed: `f :: (a: isize) where true #inline { }` is `error: function
         \\directives must appear before where clauses`.
     );
     paragraph(5, #string,oneline
@@ -1737,7 +1745,7 @@ render_section_63 :: () {
     code_block(9, "glosso", #string
         \\#import "Io";
         \\
-        \\is_int_like :: (T: type) -> bool { return T == int || T == s64 || T == s32; }
+        \\is_int_like :: (T: type) -> bool { return T == isize || T == s64 || T == s32; }
         \\
         \\double  :: (x: $T) -> T where is_int_like(T) { return x + x; }
         \\show_it :: (x: $T) -> string where Show(T) { return show(x); }
@@ -1759,7 +1767,7 @@ render_section_63 :: () {
     );
     paragraph(11, #string,oneline
         \\A clause may also constrain a `#comptime` value parameter rather than
-        \\a type. `rep :: (#comptime n: int, s: string) -> string where n > 0`
+        \\a type. `rep :: (#comptime n: isize, s: string) -> string where n > 0`
         \\accepts `rep(3, "ab")` and rejects `rep(0, "ab")`, because the guard
         \\sees the constant the caller supplied.
     );
@@ -1797,7 +1805,7 @@ render_section_63 :: () {
         \\    else return "opaque";
         \\}
         \\
-        \\Plain :: struct { v: int; }
+        \\Plain :: struct { v: isize; }
         \\
         \\main :: () {
         \\    p: Plain = .{ .v = 1 };
@@ -1818,7 +1826,7 @@ render_section_63 :: () {
     );
     note(27, #string,oneline
         \\A `where` clause naming something that does not exist is not reported
-        \\at the declaration. `f :: (x: $T) -> int where Show(U)`, with no `U`
+        \\at the declaration. `f :: (x: $T) -> isize where Show(U)`, with no `U`
         \\anywhere, compiles; every call to `f` then fails with `error:
         \\constraint failed for f`. A constraint that rejects every argument is
         \\usually a misspelled type-parameter name.
@@ -1862,7 +1870,7 @@ render_section_63 :: () {
         \\
         \\sum_two :: (a: $T, b: T) -> T where Show(T) { return a + b; }
         \\
-        \\Point :: struct #derive(Show) { x: int; }
+        \\Point :: struct #derive(Show) { x: isize; }
         \\
         \\main :: () {
         \\    p: Point = .{ .x = 1 };
@@ -1940,7 +1948,7 @@ render_section_64 :: () {
         \\Vec   :: struct { x: s64; y: s64; }
         \\Plain :: struct { a: s64; }
         \\
-        \\(Vec, Vec) :: instance Add {
+        \\(Vec, Vec) ::: instance Add {
         \\    Output :: Vec;
         \\    '+' :: (a: Vec, b: Vec) -> Vec { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
         \\}
@@ -1995,7 +2003,7 @@ render_section_64 :: () {
         \\The braceless form binds only as far as a unary expression, so any
         \\binary operator after it belongs to the enclosing expression.
         \\`#meaningful v.left == 3` reads as `(#meaningful v.left) == 3` and
-        \\reports `error: no operator '==' for bool, int`. Write
+        \\reports `error: no operator '==' for bool, isize`. Write
         \\`#meaningful { v.left == 3; }` when the probe should cover the
         \\comparison.
     );
@@ -2208,13 +2216,13 @@ render_section_65 :: () {
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
-        \\apply :: (f: (int, int) -> int, a: int, b: int) -> int { return f(a, b); }
+        \\apply :: (f: (isize, isize) -> isize, a: isize, b: isize) -> isize { return f(a, b); }
         \\
         \\main :: () {
-        \\    inc: (int) -> int = |x| x + 1;              // parameter type from the target type
-        \\    zero: () -> int = || 0;                     // empty parameter list
-        \\    dbl := |x: int| -> int { return x * 2; };   // annotated, block body
-        \\    z2  := ||->int { return 5; };               // no parameters, explicit return type
+        \\    inc: (isize) -> isize = |x| x + 1;              // parameter type from the target type
+        \\    zero: () -> isize = || 0;                     // empty parameter list
+        \\    dbl := |x: isize| -> isize { return x * 2; };   // annotated, block body
+        \\    z2  := ||->isize { return 5; };               // no parameters, explicit return type
         \\    add := |a, b| a + b;                        // parameters decided by the first call
         \\    print("inc=% zero=% dbl=% z2=%\n", inc(4), zero(), dbl(21), z2());
         \\    print("add=%\n", add(1, 2));
@@ -2229,16 +2237,16 @@ render_section_65 :: () {
     subheading(4, "The spellings");
     table_header(5, "Spelling   —   Parameters   —   Body");
     table_row(6, "`|x| x + 1`   |   one, type from context   |   one expression, implicitly returned");
-    table_row(7, "`|x: int| x + 1`   |   one, annotated   |   one expression");
-    table_row(8, "`|x: int| -> int { … }`   |   one, annotated   |   block, return type written");
+    table_row(7, "`|x: isize| x + 1`   |   one, annotated   |   one expression");
+    table_row(8, "`|x: isize| -> isize { … }`   |   one, annotated   |   block, return type written");
     table_row(9, "`|a, b| a * b`   |   two, types from context   |   one expression");
     table_row(10, "`|| 0`   |   none   |   one expression");
-    table_row(11, "`||->int { … }`   |   none   |   block, return type written");
-    table_row(12, "`|noalias p: *int| -> int { … }`   |   one, `noalias`   |   block");
+    table_row(11, "`||->isize { … }`   |   none   |   block, return type written");
+    table_row(12, "`|noalias p: *isize| -> isize { … }`   |   one, `noalias`   |   block");
     paragraph(13, #string,oneline
         \\An explicit return type requires a block. Without one the body is a
         \\single expression that is wrapped in an implicit `return`, and there is
-        \\nowhere for the arrow to attach: `|x: int| -> int x * 2` is
+        \\nowhere for the arrow to attach: `|x: isize| -> isize x * 2` is
         \\`error: a lambda with an explicit return type requires a block`. A
         \\block body without a return type is fine; the type comes from the body.
     );
@@ -2260,7 +2268,7 @@ render_section_65 :: () {
         \\written, or the arguments of the first call made through it.
     );
     table_header(18, "Source   —   Example   —   When");
-    table_row(19, "the target type   |   `inc: (int) -> int = |x| x + 1;`   |   at the binding");
+    table_row(19, "the target type   |   `inc: (isize) -> isize = |x| x + 1;`   |   at the binding");
     table_row(20, "the callee's parameter type   |   `apply(|a, b| a * b, 6, 7)`   |   at the argument position");
     table_row(21, "the first call's arguments   |   `add := |a, b| a + b; add(1, 2);`   |   at that call");
     paragraph(22, #string,oneline
@@ -2268,8 +2276,8 @@ render_section_65 :: () {
         \\number reaching a parameter takes its default type rather than staying
         \\a literal, because a parameter is a runtime binding and needs a
         \\representation. So `add := |a, b| a + b; add(1, 2); add(1.0, 2.0);`
-        \\fixes the parameters at `int` and then rejects the second call with
-        \\`error: callback argument comptime_float != int`.
+        \\fixes the parameters at `isize` and then rejects the second call with
+        \\`error: callback argument comptime_float != isize`.
     );
     paragraph(23, #string,oneline
         \\A lambda with nothing at all to fix its parameters is rejected at the
@@ -2283,9 +2291,9 @@ render_section_65 :: () {
         \\concrete the body is checked and whatever it produces is the return
         \\type, which is why an unannotated lambda can return a `string` built
         \\from an `s64` parameter. When both an annotation and a target type are
-        \\present they must agree: `f: Op = |x: int| -> string { … };` against
-        \\`Op :: #fn_ptr(a: int) -> int;` is
-        \\`error: lambda return type is string, but the expected type is int`.
+        \\present they must agree: `f: Op = |x: isize| -> string { … };` against
+        \\`Op :: #fn_ptr(a: isize) -> isize;` is
+        \\`error: lambda return type is string, but the expected type is isize`.
     );
     code_block(26, "glosso", #string
         \\#import "Io";
@@ -2321,7 +2329,7 @@ render_section_65 :: () {
     code_block(30, "glosso", #string
         \\main :: () {
         \\    outer_total := 1;
-        \\    f := |x: int| -> int { return x + outer_total; };
+        \\    f := |x: isize| -> isize { return x + outer_total; };
         \\    _ := f(1);
         \\}
     );
@@ -2329,7 +2337,7 @@ render_section_65 :: () {
         \\error: lambda captures local 'outer_total', but captured closures are not supported
         \\  --> capture.glo:3:39
         \\  |
-        \\3 |     f := |x: int| -> int { return x + outer_total; };
+        \\3 |     f := |x: isize| -> isize { return x + outer_total; };
         \\  |                                       ^^^^^^^^^^^
         \\help: pass the value as an explicit callback or context argument
     );
@@ -2599,8 +2607,9 @@ render_section_66 :: () {
     paragraph(28, #string,oneline
         \\Producing a function pointer from an address is a checked cast. At
         \\`-O0` and `-O1` a zero address aborts with
-        \\`cast to fnptr of an address that is zero` and exit status 134, and
-        \\the check fires for a written literal too: `cast(Op) 0` builds and
+        \\`cast to fnptr of an address that is zero`. Hosted Windows and Linux
+        \\x86-64 use exit status 134; WASI uses 125. The check fires for a
+        \\written literal too: `cast(Op) 0` builds and
         \\then aborts rather than being rejected during checking. At `-O2` and
         \\above the check is not emitted. Runtime Safety Checks and Panics
         \\covers the family.
@@ -2675,7 +2684,7 @@ render_section_67 :: () {
     table_header(19, "Directive   —   Argument   —   Meaning");
     table_row(20, "`#operator`   |   one of `prefix`, `suffix`, `left`, `right`, `assign`, with an optional level   |   declares the operator's fixity, and its precedence for the binary modes");
     table_row(21, "`#precedence`   |   one of `left`, `right`, `assign`, with an optional level   |   precedence and associativity only");
-    table_row(22, "`#expand`   |   none, or `,expression`   |   statement macro, or expression macro");
+    table_row(22, "`#expand`   |   none, or `,expression`   |   macro; an explicit non-`void` return type also makes it value-producing");
     table_row(23, "`#magic`   |   `\"name\"`   |   compiler intrinsic; the declaration has no body");
     table_row(24, "`#foreign`   |   a library handle or `\"file\"`, then an optional `\"symbol\"`   |   foreign function; no body");
     table_row(25, "`#c_call`   |   none   |   C calling convention; no implicit context");
@@ -2694,6 +2703,12 @@ render_section_67 :: () {
         \\`error: #foreign refers to unknown library 'nolib' (declare it with
         \\#library)`, and a `#library` modifier outside the three link kinds is
         \\`error: #library modifier must be system, dyn, or static`.
+    );
+    paragraph(71, #string,oneline
+        \\`#expand,expression` is the concise inferred expression form. A macro
+        \\with an explicit non-`void` return type is also an expression macro even
+        \\without that modifier; it may use a statement body and multiple `return`
+        \\sites, but every reachable path must return a value.
     );
     paragraph(35, #string,oneline
         \\`#must` is the one whose diagnostic a reader will meet by accident. It
@@ -2718,7 +2733,7 @@ render_section_67 :: () {
         \\main :: () { _ := addd(1, 2); }
     );
     code_block(39, "text", #string
-        \\; ---- #dump typed-ir addd(a: int, b: int) -> int  [4 ins] ----
+        \\; ---- #dump typed-ir addd(a: isize, b: isize) -> isize  [4 ins] ----
         \\   0  temp_mark v2
         \\   1  magic v3 'int_add' [v0,v1]
         \\   2  temp_restore v2

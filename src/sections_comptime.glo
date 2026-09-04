@@ -135,15 +135,15 @@ render_section_105 :: () {
         \\top-level `#comptime` block simply runs to completion.
     );
 
-    subheading(23, "Where the machine falls short");
+    subheading(23, "Where the machine still falls short");
     paragraph(24, #string,oneline
-        \\Mutation through a pointer is the weak spot. The constant evaluator
-        \\special-cases the standard library's mutating intrinsics; the machine
-        \\implements some of them and silently drops others.
-        \\`String_Builder` is the one that matters, because `sb_append`
-        \\writes through a pointer to the builder: in the machine it returns a
-        \\fresh string and discards it, so the builder stays empty and no error
-        \\is reported.
+        \\Mutation through a pointer remains a boundary between the two engines.
+        \\The constant evaluator implements the standard library's compile-time
+        \\`String_Builder` intrinsics, including `sb_append(*sb, ...)`. The
+        \\register machine used by a top-level `#comptime` block has builder
+        \\support too, and `sb_new` succeeds, but the complete variadic pointer
+        \\call is not yet usable end to end: it currently panics with `value is
+        \\not a string` instead of appending or producing an empty builder.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
@@ -158,23 +158,20 @@ render_section_105 :: () {
         \\
         \\TEXT :: #comptime build_text();
         \\
-        \\#comptime { print("[vm] build_text = <%>\n", build_text()); }
-        \\
-        \\main :: () { print("[ceval] build_text = <%>\n", TEXT); }
+        \\main :: () { print("build_text = <%>\n", TEXT); }
     );
     code_block(26, "text", #string
         \\glosso: compile program.glo (target=x86_64-pc-windows-msvc)
-        \\[vm] build_text = <>
         \\glosso: link program.exe (target=x86_64-pc-windows-msvc, -O1)
         \\glosso: done program.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
-        \\[ceval] build_text = <hello builder>
+        \\build_text = <hello builder>
     );
     note(27, #string,oneline
-        \\Inside a top-level `#comptime` block, compose strings with `str_cat`
-        \\and `str_repeat`, which behave identically in both engines. Dynamic
-        \\arrays are safe as well: `array_add` is implemented on both sides, so
-        \\a `[..]T` accumulated at compile time gives the same answer whichever
-        \\engine runs it.
+        \\Keep `sb_append` source construction in a `#comptime` expression for
+        \\now. Inside a top-level `#comptime` block, compose strings with
+        \\`str_cat` and `str_repeat`, which behave identically in both engines.
+        \\Ordinary dynamic arrays are safe as well: `array_add` is implemented
+        \\on both sides, so this limitation is specific to the builder call.
     );
 
     subheading(28, "What both engines refuse");
@@ -296,7 +293,7 @@ render_section_106 :: () {
     );
     code_block(11, "text", #string
         \\Inline_Expr=256 Table_Size=256 local=42
-        \\Table_Size: int (8 bytes)
+        \\Table_Size: isize (8 bytes)
         \\Byte_Limit: u8 (1 bytes)
         \\Squares = 0 1 4 9
     );
@@ -304,7 +301,7 @@ render_section_106 :: () {
     subheading(12, "`-> T` and the type of the result");
     paragraph(13, #string,oneline
         \\Without the annotation the constant is typed by inference, and an
-        \\integer literal returned from a block defaults to `int`, which is eight
+        \\integer literal returned from a block defaults to `isize`, which is eight
         \\bytes. `#comptime -> u8 { return 200; }` is one byte instead. The
         \\annotation is checked rather than coerced, so it also refuses a value
         \\that does not belong: `#comptime -> u8 { return 500; }` is
@@ -334,7 +331,7 @@ render_section_106 :: () {
         \\main :: () { d := seed(); }
     );
     code_block(17, "text", #string
-        \\; ---- #dump typed-ir seed() -> int  [4 ins] ----
+        \\; ---- #dump typed-ir seed() -> isize  [4 ins] ----
         \\   0  temp_mark v0
         \\   1  const v1 =6765
         \\   2  temp_restore v0
@@ -521,7 +518,7 @@ render_section_107 :: () {
     );
     code_block(12, "text", #string
         \\A=10 B=20 C=30 D=40
-        \\types: comptime_int comptime_int int int
+        \\types: comptime_int comptime_int isize isize
         \\all four are compile-time values
     );
 
@@ -617,23 +614,42 @@ render_section_107 :: () {
         \\`error: unknown const G`. Use `::` for a file-scope constant.
     );
 
-    subheading(26, "Compile-time-only types");
+    subheading(26, "Compile-time meta-types");
     paragraph(27, #string,oneline
-        \\`type`, `Code`, and `pattern` have no runtime representation at all. A
-        \\value of one of them exists only inside the compiler, so it cannot be
-        \\given storage and cannot be bound with `:=`. The compiler says that
-        \\directly instead of reporting a size or layout failure.
+        \\`Code`, `Pattern`, `Namespace`, and `Library` describe values that
+        \\exist only while the compiler is building the program. Their layouts
+        \\are zero-sized and the checker rejects a runtime local immediately.
+        \\The capitalisation is part of the language: the former lower-case
+        \\`pattern` spelling is now an ordinary identifier, not a type.
     );
-    table_header(28, "Type   —   Produced by   —   Bound with `:=`");
-    table_row(29, "`type`   |   A type name, `type_of`, `field_type`   |   `error: unknown const T`, at the use");
-    table_row(30, "`Code`   |   `#code { … }`   |   `error: a 'Code' value is compile-time only; bind it with '::' rather than ':='`");
-    table_row(31, "`pattern`   |   `#pattern P` with no subject   |   `error: a 'pattern' value is compile-time only; bind it with '::' rather than ':='`");
+    table_header(28, "Type or annotation form   —   Role");
+    table_row(29, "`Code`   |   Type of a `#code` quotation.");
+    table_row(30, "`Pattern`   |   Type of `#pattern P` with no subject.");
+    table_row(31, "`Namespace`   |   Type produced by `#import` and `#load`.");
+    table_row(36, "`Library`   |   Type produced by `#library`.");
+    table_row(37, "`Typeclass(T, …)`   |   Explicit annotation for a typeclass declaration with those type parameters.");
+    table_row(38, "`Macro(signature)`   |   Explicit annotation for a `#expand` declaration with that function signature.");
     paragraph(32, #string,oneline
-        \\The `type` row reads differently because `T := s32;` is accepted by the
-        \\parser and only fails where the name is used, with the diagnostic
-        \\pointing at the use rather than the binding. Bound with `::`, all three
-        \\work at file scope and inside a body, and a `::` type constant is an
-        \\ordinary type alias.
+        \\Bind one of these values with `::`, or state its meta-type in the new
+        \\typed-definition form. `:=` asks for runtime storage and reports, for
+        \\example, `a 'Pattern' value is compile-time only; bind it with '::'
+        \\rather than ':='`. The older `type` value is also zero-sized, but it
+        \\does not receive that immediate storage diagnostic; use `::` when the
+        \\name must be available to compile-time operations.
+    );
+    note(40, #string,oneline
+        \\`Typeclass(...)` and `Macro(...)` are accepted as explicit declaration
+        \\annotations. They are not general type-value expressions or callable
+        \\constructors.
+    );
+    code_block(39, "glosso", #string
+        \\IO : Namespace : #import "Io";
+        \\C_Runtime : Library : #library,system "c";
+        \\Predicate : Typeclass(type) : typeclass(T: type) {}
+        \\twice : Macro((isize) -> isize) :
+        \\    (value: isize) -> isize #expand { return value + value; }
+        \\
+        \\main :: () { IO.print("%\n", twice(21)); }
     );
     code_block(33, "glosso", #string
         \\#import "Io";
@@ -662,11 +678,10 @@ render_section_107 :: () {
         \\number
     );
     paragraph(35, #string,oneline
-        \\This is also why a procedure that takes a type takes it as a
-        \\compile-time parameter rather than as an argument: there is no value to
-        \\pass. Compile-Time and Type-Only Parameters covers those parameters,
-        \\Code Values: `#code` and Backticks covers `Code`, and Patterns as
-        \\Compile-Time Values covers `pattern`.
+        \\A procedure that needs a type for reflection normally takes it as a
+        \\compile-time parameter. Compile-Time and Type-Only Parameters covers
+        \\those parameters, Code Values: `#code` and Backticks covers `Code`, and
+        \\Patterns as Compile-Time Values covers `Pattern`.
     );
 }
 
@@ -689,7 +704,7 @@ render_section_108 :: () {
     table_row(3, "Evaluates to `true`   |   Nothing is emitted.");
     table_row(4, "Evaluates to `false`   |   `error: assertion failed`, or `error: assertion failed: <message>`.");
     table_row(5, "Cannot be evaluated   |   A runtime check is compiled in.");
-    table_row(6, "Is not a `bool`   |   `#assert 5;` is `error: got int, expected bool`.");
+    table_row(6, "Is not a `bool`   |   `#assert 5;` is `error: got isize, expected bool`.");
 
     subheading(7, "The compile-time assertion");
     paragraph(8, #string,oneline
@@ -774,10 +789,10 @@ render_section_108 :: () {
         \\main :: () { d := static_ok(1) + dynamic_check(2); }
     );
     code_block(21, "text", #string
-        \\; ---- #dump typed-ir dynamic_check(x: int) -> int  [9 ins] ----
+        \\; ---- #dump typed-ir dynamic_check(x: isize) -> isize  [9 ins] ----
         \\   0  temp_mark v1
         \\   1  const v2 =0
-        \\   2  call v3 'op_gt_int_int' [v0,v2]
+        \\   2  call v3 'op_gt_isize_isize' [v0,v2]
         \\   3  jnz v3 'L1'
         \\   4  const v4 ="…\program.glo:7:5: assertion failed: x must be positive
         \\"
@@ -786,7 +801,7 @@ render_section_108 :: () {
         \\   7  temp_restore v1
         \\   8  ret v0
         \\; ---- end dynamic_check ----
-        \\; ---- #dump typed-ir static_ok(x: int) -> int  [3 ins] ----
+        \\; ---- #dump typed-ir static_ok(x: isize) -> isize  [3 ins] ----
         \\   0  temp_mark v1
         \\   1  temp_restore v1
         \\   2  ret v0
@@ -951,731 +966,506 @@ render_section_108 :: () {
 
 render_section_109 :: () {
     paragraph(0, #string,oneline
-        \\`#code` followed by a block quotes the statements inside it and yields a
-        \\value of the built-in type `Code`. The block is parsed where it is
-        \\written and checked where it is spliced, which is what lets a program
-        \\carry a fragment of itself around at compile time and decide later, and
-        \\in a different scope, what the fragment means.
+        \\`#code` quotes Glosso syntax and produces a value of the built-in
+        \\compile-time type `Code`. A quotation is parsed where it is written,
+        \\but names and types inside it are resolved when `#insert` places it
+        \\into a program. The same value can therefore be inserted more than
+        \\once and can acquire a different meaning in each insertion scope.
     );
-    code_block(1, "glosso", #string
+    subheading(1, "Block, statement, and expression quotations");
+    table_header(2, "Form   —   Contents");
+    table_row(3, "`#code { statements }`   |   A statement list, including nested declarations.");
+    table_row(4, "`#code statement`   |   One statement; the surrounding semicolon terminates both the quotation and its use.");
+    table_row(5, "`#code (expression)`   |   One expression, ready for expression `#insert`.");
+    code_block(6, "glosso", #string
         \\#import "Io";
         \\
-        \\GREET :: #code { print("hello from a Code value\n"); };
+        \\GREET :: #code { print("hello from Code\n"); };
+        \\STEP  :: #code count += 1;
         \\
         \\main :: () {
-        \\    #insert GREET;
-        \\    #insert GREET;
-        \\    STEP :: #code { count += 1; };
         \\    count := 0;
+        \\    #insert GREET;
         \\    #insert STEP;
         \\    #insert STEP;
-        \\    print("count = %\n", count);
+        \\
+        \\    comparison :: #code (count == 2);
+        \\    print("count=% equal=%\n", count, #insert comparison);
         \\}
     );
-    code_block(2, "text", #string
-        \\hello from a Code value
-        \\hello from a Code value
-        \\count = 2
+    code_block(7, "text", #string
+        \\hello from Code
+        \\count=2 equal=1
     );
-    paragraph(3, #string,oneline
-        \\`STEP` quotes an assignment to `count` and is written before `count`
-        \\exists. That is legal precisely because a quote is not checked at the
-        \\quote site; the two `#insert STEP;` statements are checked, and by then
-        \\`count` is in scope. One `Code` value may be spliced any number of
-        \\times, and each splice is an independent copy of the statements.
-        \\`#insert` has its own chapter.
-    );
-    paragraph(4, #string,oneline
-        \\`Code` is a compiler built-in name and needs no import. It is a
-        \\compile-time-only type with no runtime representation: `type_name(Code)`
-        \\is `Code`, `size_of(Code)` is `0`, and `type_kind(Code)` is `0`, the
-        \\`Void` tag. A `Code` value is therefore bound with `::`, never with
-        \\`:=`, and it has to be consumed by `#insert` rather than reaching
-        \\generated code.
-    );
-    note(5, #string,oneline
-        \\`body := #code { ... };` reports `a 'Code' value is compile-time only;
-        \\bind it with '::' rather than ':='`. Handing one to an ordinary
-        \\procedure reports `a #code value is compile-time only; it must be
-        \\consumed by #insert, not used at run time`; only a `#expand` macro may
-        \\take a `Code` parameter, which Macros with `#expand` covers.
-    );
-    paragraph(6, #string,oneline
-        \\`#code` must be followed by a block. `#code 1 + 2` is `unexpected token
-        \\'1'`, because the body is parsed with the statement grammar and an
-        \\expression is not a statement. A `Code` value quotes statements and
-        \\nothing else.
-    );
-    subheading(7, "Splicing with a double backtick");
     paragraph(8, #string,oneline
-        \\Two backticks before a name mark a splice. While the compiler
-        \\materialises a `Code` value it looks the name up in the compile-time
-        \\environment and substitutes what it finds. What the substitution looks
-        \\like depends on what the name is bound to.
+        \\The single form is new shorthand for the common one-statement or
+        \\one-expression case. `#code print("x")` and `#code (a < b)` need no
+        \\braces. A block remains necessary when order or several declarations
+        \\are part of the quotation.
     );
-    table_header(9, "Bound to   —   Splices as");
-    table_row(10, "`Code`   |   the quoted code, inlined at the splice");
-    table_row(11, "`string`   |   an identifier: a field name, a callee name, a variant name");
-    table_row(12, "`type`   |   that type's own spelling");
-    table_row(13, "`label`   |   the label's name");
-    paragraph(14, #string,oneline
-        \\A splice is accepted in expression position, after a `.` as a field
-        \\name, in a type annotation, and as the callee of a call. The four
-        \\positions appear together below.
+    subheading(9, "A `Code` value is compiler-only");
+    paragraph(10, #string,oneline
+        \\`Code` needs no import, has size zero, and never reaches generated
+        \\machine code. Bind a quotation with `::` or pass it directly to a
+        \\`#expand` macro. `body := #code print("x");` is rejected with
+        \\`a 'Code' value is compile-time only; bind it with '::' rather than
+        \\':='`, and an ordinary runtime procedure cannot consume one.
     );
-    code_block(15, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\Vec2 :: struct { x: s32 = 0; y: s32 = 0; }
-        \\
-        \\double :: (n: s64) -> s64 { return n + n; }
-        \\
-        \\main :: () {
-        \\    FIELD :: "x";
-        \\    WIDTH :: s32;
-        \\    CALL  :: "double";
-        \\    BODY  :: #code { print("spliced body\n"); };
-        \\
-        \\    v: Vec2 = .{ .x = 7, .y = 9 };
-        \\    #insert #code {
-        \\        w: ``WIDTH = v.``FIELD;
-        \\        print("% holds % of type %\n", FIELD, w, type_name(type_of(w)));
-        \\        print("callee splice %\n", ``CALL(21));
-        \\        ``BODY
-        \\    };
-        \\}
+    paragraph(11, #string,oneline
+        \\The contents are syntax, not a closure. `STEP` above names `count`
+        \\before any such local exists; only the insertion sites are checked,
+        \\and both have a `count` in scope. Inserting a quote into a scope where
+        \\one of its names is absent reports the error at that insertion.
     );
-    code_block(16, "text", #string
-        \\x holds 7 of type s32
-        \\callee splice 42
-        \\spliced body
+    subheading(12, "Double-backtick substitution");
+    paragraph(13, #string,oneline
+        \\Inside a quotation, two backticks ask the compiler to substitute a
+        \\compile-time binding while it materialises the syntax. A `string` can
+        \\supply an identifier, a `type` can supply a type spelling, and another
+        \\`Code` value can supply syntax. This is distinct from the single
+        \\backtick used by macros to name the caller's scope.
     );
-    paragraph(17, #string,oneline
-        \\The names are bound as local `::` constants inside the procedure, and
-        \\that placement is load-bearing. A field splice and a type splice consult
-        \\only the local compile-time environment, which holds the enclosing
-        \\body's `::` and `::=` bindings and the `#comptime` parameters of the
-        \\enclosing procedure. A file-scope constant is not in it.
-    );
-    note(18, #string,oneline
-        \\Moving `FIELD :: "x";` to file scope makes the same program `unknown
-        \\code splice 'FIELD'`, and moving `WIDTH :: s32;` there makes it `unknown
-        \\type code splice 'WIDTH'`. A file-scope `Code` constant is different: it
-        \\is reached by naming it in `#insert`, as `GREET` is above, which is the
-        \\ordinary way to use one.
-    );
-    paragraph(19, #string,oneline
-        \\The other source of a splice binding is a `#comptime` parameter. Its
-        \\argument is const-evaluated at the call site and the value is entered
-        \\into the callee's compile-time environment, so the callee may splice it.
-        \\This is the idiom that turns a name into generated field access.
-    );
-    code_block(20, "glosso", #string
+    code_block(14, "glosso", #string
         \\#import "Io";
         \\
         \\Vec2 :: struct { x: s32 = 0; y: s32 = 0; }
         \\
         \\show_field :: (v: Vec2, #comptime name: string) {
-        \\    #insert #code { print("field % = %\n", name, v.``name); };
+        \\    #insert #code print("field % = %\n", name, v.``name);
         \\}
         \\
         \\main :: () {
-        \\    v: Vec2 = .{ .x = 7, .y = 9 };
-        \\    show_field(v, "x");
-        \\    show_field(v, "y");
+        \\    value: Vec2 = .{ .x = 7, .y = 9 };
+        \\    show_field(value, "x");
+        \\    show_field(value, "y");
         \\}
     );
-    code_block(21, "text", #string
+    code_block(15, "text", #string
         \\field x = 7
         \\field y = 9
     );
-    paragraph(22, #string,oneline
-        \\`name` appears twice in the quoted block and means two different things.
-        \\Plain `name` is an ordinary use of the parameter and prints as a string;
-        \\the spliced `v.``name` is replaced by the characters of that string
-        \\before the member access is checked, so the two calls generate `v.x` and
-        \\`v.y`. Passing a runtime value is refused: `argument for #comptime
-        \\parameter 'name' must be known at compile time`.
+    paragraph(16, #string,oneline
+        \\The plain `name` in the format call remains the string parameter.
+        \\The spliced `v.``name` becomes `v.x` or `v.y` before member lookup.
+        \\The argument of a `#comptime` parameter must be known at compile time,
+        \\so a runtime string cannot be used to synthesize an identifier.
     );
-    subheading(23, "The single backtick: escaping hygiene");
-    paragraph(24, #string,oneline
-        \\One backtick before a declared name marks it non-hygienic. It matters
-        \\only inside a `#expand` macro, whose body is cloned into the call site
-        \\with every local it declares renamed to `__m<N>_<name>` so that the
-        \\macro cannot capture or be captured by the caller's names. A backticked
-        \\declaration is exempt from that renaming and therefore leaks into the
-        \\caller's scope on purpose.
+    subheading(17, "What quotations can carry");
+    paragraph(18, #string,oneline
+        \\A block quotation uses the statement grammar. Besides executable
+        \\statements it can carry a nested procedure, type, macro, or typeclass
+        \\instance declaration, and it can carry quoted `case` fragments for
+        \\insertion into a switch. A quotation is still not source text: it is
+        \\already parsed, retains hygiene marks, and is never written to the
+        \\generated-source cache.
     );
-    code_block(25, "glosso", #string
-        \\#import "Io";
-        \\
-        \\with_value :: (body: Code) #expand {
-        \\    `value_from_macro := 42;
-        \\    scratch := 1;
-        \\    #insert body;
-        \\}
-        \\
-        \\main :: () {
-        \\    scratch := 999;
-        \\    with_value(#code { print("leaked = %\n", value_from_macro); });
-        \\    print("caller scratch = %\n", scratch);
-        \\}
+    bullet(19, #string,oneline
+        \\Use `Code` when the generated shape can be expressed as parsed Glosso
+        \\syntax and only names need to vary.
     );
-    code_block(26, "text", #string
-        \\leaked = 42
-        \\caller scratch = 999
-    );
-    paragraph(27, #string,oneline
-        \\`value_from_macro` is visible to the code the caller supplied, which is
-        \\the whole point: a loop macro publishes its cursor this way. `scratch`
-        \\is renamed and the caller's `scratch` is untouched. Labels declared in a
-        \\macro are renamed by the same rule; Macros with `#expand` gives the
-        \\consequences.
-    );
-    subheading(28, "What a `Code` value can carry");
-    paragraph(29, #string,oneline
-        \\The body is parsed as statements, so what a `Code` value can hold is
-        \\exactly what may appear in a body. Spliced at top level, the statement
-        \\forms that also declare something reach the program: a procedure
-        \\declaration and a type declaration both become globals.
-    );
-    code_block(30, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\#insert #code {
-        \\    greet :: () { print("a procedure from a Code value\n"); }
-        \\    Point :: struct { x: s32 = 0; y: s32 = 0; }
-        \\};
-        \\
-        \\main :: () {
-        \\    greet();
-        \\    p: Point = .{ .x = 1, .y = 2 };
-        \\    print("Point has % fields, first %\n", field_count(Point), p.x);
-        \\}
-    );
-    code_block(31, "text", #string
-        \\a procedure from a Code value
-        \\Point has 2 fields, first 1
-    );
-    note(32, #string,oneline
-        \\A constant does not survive the same route. `#insert #code { LIMIT ::
-        \\99; };` at top level compiles, but `LIMIT` is a local binding of the
-        \\spliced statement list and never becomes a global, so a later use is
-        \\`unbound 'LIMIT'`. A string-valued `#insert` takes a different path
-        \\through the parser and does introduce the constant; `#insert` explains
-        \\which path is taken when.
-    );
-    bullet(33, #string,oneline
-        \\A `Code` value carries syntax, not a checked program. Two splices of one
-        \\value into two different scopes produce two different meanings, and each
-        \\is diagnosed at its own splice site.
-    );
-    bullet(34, #string,oneline
-        \\Splicing a `Code` value leaves no artifact on disk. Only the string form
-        \\of `#insert` writes a generated source file.
+    bullet(20, #string,oneline
+        \\Use a `string` insertion when the generator must construct tokens or
+        \\whole declarations that cannot be represented by one fixed quotation.
     );
 }
 
 render_section_110 :: () {
     paragraph(0, #string,oneline
-        \\`#insert <expr>` const-evaluates `expr` and requires the result to be a
-        \\`Code` value or a `string`, then splices it into the program at the
-        \\point of the directive. It is the only way a `Code` value or a generated
-        \\string becomes part of the compilation.
+        \\`#insert` evaluates its operand at compile time and replaces itself
+        \\with the resulting syntax. Its position selects both the accepted
+        \\source and the grammar applied to that source.
     );
-    table_header(1, "Position   —   Splices");
-    table_row(2, "statement   |   statements into the enclosing body");
-    table_row(3, "top-level declaration   |   declarations into the program");
-    table_row(4, "pattern   |   a `pattern` value into the surrounding pattern");
-    paragraph(5, #string,oneline
-        \\The position decides the grammar the generated text is parsed with, not
-        \\merely where the result lands. Text spliced at statement position is
-        \\parsed as statements; text spliced at top level is parsed as
-        \\declarations. That is why a constant reaches the program from a
-        \\top-level string `#insert` and not from a top-level `Code` splice, whose
-        \\body was already parsed as statements when it was quoted.
-    );
-    code_block(6, "glosso", #string
+    table_header(1, "Position and form   —   Requirement   —   Result");
+    table_row(2, "Statement `#insert source;`   |   `Code` or `string`   |   Statements in the surrounding body.");
+    table_row(3, "Top-level `#insert source;`   |   `Code` or `string`   |   Program declarations.");
+    table_row(4, "Expression `#insert code`   |   `Code` containing exactly one expression   |   That expression and its type.");
+    table_row(5, "Scoped `#insert,scope() code`   |   One-expression `Code`   |   An expression resolved after macro-local hygiene.");
+    table_row(6, "Pattern `#insert value`   |   `Pattern`   |   A pattern element.");
+    subheading(7, "Statement and expression insertion");
+    code_block(8, "glosso", #string
         \\#import "Io";
-        \\#import "Meta";
-        \\#import "String_Builder";
         \\
-        \\#insert "LIMIT :: 99;\ngen_add :: (a: s64, b: s64) -> s64 { return a + b; }";
+        \\repeat_three_times :: (body: Code) #expand {
+        \\    #insert body;
+        \\    #insert body;
+        \\    #insert body;
+        \\}
         \\
-        \\Vec2 :: struct { x: s32 = 0; y: s32 = 0; }
+        \\scoped_less :: (comparison: Code) -> bool #expand {
+        \\    a := 1;
+        \\    b := 2;
+        \\    return (#insert,scope() comparison);
+        \\}
         \\
-        \\sum_source :: (T: type, i: s64) -> string {
-        \\    if i >= field_count(T) return "";
-        \\    return str_cat(" + v.", str_cat(field_name(T, i), sum_source(T, i + 1)));
+        \\insert_in_caller :: (body: Code) #expand {
+        \\    #insert body;
         \\}
         \\
         \\main :: () {
-        \\    print("LIMIT = %  gen_add = %\n", LIMIT, gen_add(3, 4));
+        \\    total := 0;
+        \\    repeat_three_times(#code total += 14);
+        \\    print("repeated=%\n", total);
         \\
-        \\    n := 0;
-        \\    #insert "n = n + 5; n = n + 37;";
-        \\    print("string statements: %\n", n);
-        \\
-        \\    v: Vec2 = .{ .x = 10, .y = 32 };
-        \\    total: s32 = 0;
-        \\    #insert str_cat("total = total", str_cat(sum_source(Vec2, 0), ";"));
-        \\    print("generated field sum: %\n", total);
+        \\    message := "quotation scope";
+        \\    insert_in_caller(#code print("%\n", message));
+        \\    print("scoped=%\n", scoped_less(#code (a < b)));
         \\}
     );
-    code_block(7, "text", #string
-        \\LIMIT = 99  gen_add = 7
-        \\string statements: 42
-        \\generated field sum: 42
+    code_block(9, "text", #string
+        \\repeated=42
+        \\quotation scope
+        \\scoped=1
     );
-    paragraph(8, #string,oneline
-        \\`sum_source` walks `Vec2` with the reflection intrinsics and returns the
-        \\text `" + v.x + v.y"`, which becomes the statement `total = total + v.x
-        \\+ v.y;`. Generated code is checked exactly like written code and gets no
-        \\relaxations: `total` is declared `s32` because the fields are `s32`, and
-        \\declaring it `total := 0` instead makes the generated assignment `assign
-        \\int to s32`.
+    paragraph(10, #string,oneline
+        \\A statement insertion accepts either a quotation or generated text.
+        \\An expression insertion is intentionally narrower: it accepts only
+        \\`Code` with one expression statement. A string, a block with two
+        \\statements, or a quotation whose only item is a declaration is
+        \\rejected rather than guessed into an expression.
     );
-    subheading(9, "String sources and `Code` sources");
-    table_header(10, "Source   —   Reparsed   —   Materialised on disk");
-    table_row(11, "`string`   |   yes, with the grammar of the position   |   yes");
-    table_row(12, "`Code`   |   no, it is already parsed   |   no");
+    paragraph(11, #string,oneline
+        \\`scope()` matters inside a macro. It makes the inserted quotation see
+        \\the hygienically renamed locals established by that expansion. In
+        \\`scoped_less`, the caller writes names `a` and `b` that do not exist at
+        \\the call site; the scoped insertion resolves them as the macro's two
+        \\locals and produces a `bool`.
+    );
+    subheading(12, "Generated text and a typed insertion block");
     paragraph(13, #string,oneline
-        \\A string source is the more capable of the two and the more expensive.
-        \\It can produce anything the grammar of its position accepts, including
-        \\declarations that a `Code` value cannot introduce, and it costs a lex
-        \\and a parse. A `Code` value costs neither, and keeps the splices and
-        \\hygiene marks its quote carried. Code Values covers what a quote can
-        \\hold.
+        \\A `string` operand is lexed and parsed at the insertion position.
+        \\Instead of calling a separate generator, `#insert -> string { ... }`
+        \\runs the block in the constant evaluator and checks its returned value
+        \\against the stated type before parsing it.
     );
-    subheading(14, "Generating declarations");
-    paragraph(15, #string,oneline
-        \\A whole type is generated by building its text and splicing it at top
-        \\level. The generator is an ordinary procedure; it runs in the constant
-        \\evaluator, where `String_Builder` and the string intrinsics are
-        \\available.
-    );
-    code_block(16, "glosso", #string
+    code_block(14, "glosso", #string
         \\#import "Io";
-        \\#import "Meta";
+        \\
+        \\ANSWER_SOURCE :: "ANSWER :: 40 + 2;";
+        \\#insert ANSWER_SOURCE;
+        \\
+        \\main :: () {
+        \\    #insert "print(\"plain source %\\n\", ANSWER);";
+        \\
+        \\    #insert -> string {
+        \\        prefix := "typed source";
+        \\        return "print(\"typed source %\\n\", ANSWER);";
+        \\    }
+        \\}
+    );
+    code_block(15, "text", #string
+        \\plain source 42
+        \\typed source 42
+    );
+    paragraph(16, #string,oneline
+        \\The annotation after `->` is the compile-time block's result type, not
+        \\the type of the generated expression. A statement or top-level
+        \\insertion still ultimately requires `Code` or `string`. The typed form
+        \\is especially useful when a generator has local control flow and a
+        \\mistyped return should be diagnosed before parsing generated source.
+    );
+    subheading(17, "Top-level declarations");
+    paragraph(18, #string,oneline
+        \\At top level, text is parsed as declarations. That is the general way
+        \\to synthesize a constant, an aggregate with a computed field list, or
+        \\several related overloads. A `Code` block can also carry already-parsed
+        \\procedure, aggregate, macro, and instance declarations.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
         \\#import "String_Builder";
         \\
-        \\struct_source :: (name: string, n: s64) -> string {
-        \\    sb := sb_new();
-        \\    sb_append(*sb, name);
-        \\    sb_append(*sb, " :: struct {\n");
+        \\struct_source :: (name: string, fields: isize) -> string {
+        \\    builder := sb_new();
+        \\    sb_append(*builder, name);
+        \\    sb_append(*builder, " :: struct {\n");
         \\    i := 0;
-        \\    while i < n {
-        \\        sb_append(*sb, "    f");
-        \\        sb_append(*sb, show(i));
-        \\        sb_append(*sb, ": s32 = 0;\n");
+        \\    while i < fields {
+        \\        sb_append(*builder, "    f");
+        \\        sb_append(*builder, show(i));
+        \\        sb_append(*builder, ": s32 = 0;\n");
         \\        i += 1;
         \\    }
-        \\    sb_append(*sb, "}\n");
-        \\    return sb_to_string(sb);
+        \\    sb_append(*builder, "}\n");
+        \\    return sb_to_string(builder);
         \\}
         \\
-        \\#insert struct_source("Gen", 3);
+        \\#insert struct_source("Generated", 2);
         \\
         \\main :: () {
-        \\    g: Gen = .{ .f0 = 1, .f1 = 2, .f2 = 3 };
-        \\    print("% % %\n", g.f0, g.f1, g.f2);
-        \\    print("% has % fields\n", type_name(Gen), field_count(Gen));
+        \\    value: Generated = .{ .f0 = 20, .f1 = 22 };
+        \\    print("%\n", value.f0 + value.f1);
         \\}
     );
-    code_block(17, "text", #string
-        \\1 2 3
-        \\Gen has 3 fields
+    code_block(20, "text", #string
+        \\42
     );
-    paragraph(18, #string,oneline
-        \\`#insert` is not allowed inside a struct body: `Gen :: struct { #insert
-        \\"x: s32 = 0;"; }` is `unexpected token 'insert'`. A struct whose fields
-        \\are computed is generated whole, as above, rather than filled in from
-        \\the inside.
+    subheading(21, "Pattern insertion");
+    paragraph(22, #string,oneline
+        \\A subjectless `#pattern P` quotation produces a compiler-only
+        \\`Pattern` value. In pattern position, `#insert` accepts that value and
+        \\clones its pattern at every use. `#insert A | #insert B` is an
+        \\or-pattern because insertion binds tighter than `|`.
     );
-    note(19, #string,oneline
-        \\Build the text for a top-level `#insert` with a loop, not with
-        \\recursion. A helper whose recursive call sits inside another call, as in
-        \\`return str_cat("A :: 1;", decls(n - 1));`, overflows the compiler's
-        \\stack when it feeds a declaration-position `#insert`, even at depth one,
-        \\and the compiler dies without a diagnostic. Statement-position `#insert`
-        \\has no such restriction, and the recursive generator in the first
-        \\example above is the normal shape there.
-    );
-    subheading(20, "The generated-source cache");
-    paragraph(21, #string,oneline
-        \\Every string-valued `#insert` is written to a file before it is parsed,
-        \\so that a diagnostic inside generated code has a real location to point
-        \\at instead of an invented one. The file is named by the SHA-256 of the
-        \\text, so two `#insert` sites that generate the same source share one
-        \\entry and a rebuild finds that entry already written.
-    );
-    table_header(22, "Aspect   —   Behaviour");
-    table_row(23, "path   |   `<cache>/generated/insert/v1/<sha256>.glo`");
-    table_row(24, "writing   |   a private temporary file, then a rename");
-    table_row(25, "lifetime   |   never collected by the compiler");
-    table_row(26, "cache unavailable   |   a virtual path `<generated:#insert/<hash>.glo>` and a warning");
-    paragraph(27, #string,oneline
-        \\`--print-cache-dir` reports the cache root and `--cache-dir <dir>`
-        \\overrides it; the override must be absolute, and a relative one is
-        \\`glosso: --cache-dir: cache directory override must be an absolute
-        \\path`. `--show-generated` prints one `glosso: generated source <path>`
-        \\line per materialised source. Running the generator above under it
-        \\writes a file holding exactly the generated declaration.
-    );
-    code_block(28, "text", #string
-        \\Gen :: struct {
-        \\    f0: s32 = 0;
-        \\    f1: s32 = 0;
-        \\    f2: s32 = 0;
-        \\}
-    );
-    subheading(29, "Diagnostics inside generated code");
-    paragraph(30, #string,oneline
-        \\A failure in generated source is reported twice: once at the `#insert`
-        \\that produced it, and once inside the materialised file. Declaring
-        \\`total := 0` in the first example gives `error: assign int to s32`
-        \\pointing at the `#insert` statement, followed by `note: generated source
-        \\failed here` pointing at column 9 of line 1 of the cache file, whose
-        \\text is `total = total + v.x + v.y;`.
-    );
-    paragraph(31, #string,oneline
-        \\A parse failure is wrapped rather than reported raw, so the message says
-        \\where the text came from: `#insert "n = n + );"` is `#insert generated
-        \\invalid source: parse error line 1: unexpected token ')'`, with the same
-        \\`note: generated source failed here` pointing into the cache file. At
-        \\top level the wrapper is spelled `top-level #insert generated invalid
-        \\source: <parse error>`.
-    );
-    subheading(32, "Patterns");
-    paragraph(33, #string,oneline
-        \\`#pattern P` with no subject is a pattern quote whose value has the
-        \\compile-time-only type `pattern`, and `#insert` in pattern position
-        \\splices such a value back into a pattern. This is how a match arm is
-        \\named once and reused, in a `case` list, in a bind-or-diverge, or as an
-        \\alternative of an or-pattern; `#insert` binds tighter than `|`, so
-        \\`#insert A | #insert B` is an or-pattern of two splices.
-    );
-    code_block(34, "glosso", #string
+    code_block(23, "glosso", #string
         \\#import "Io";
         \\
         \\Token :: union { Number: f64; Name: string; Eof: void; }
-        \\
         \\NUMBER :: #pattern Token.Number(n);
         \\NAME   :: #pattern Token.Name(text);
-        \\ANY_VALUE :: #pattern Token.Number(_) | Token.Name(_);
         \\
-        \\classify :: (t: Token) -> string {
-        \\    if #pattern t == {
+        \\classify :: (token: Token) -> string {
+        \\    if #pattern token == {
         \\    case #insert NUMBER; return "number";
         \\    case #insert NAME;   return "name";
-        \\    else;                return "end of input";
+        \\    else;                return "end";
         \\    }
         \\}
         \\
-        \\has_value :: (t: Token) -> bool {
-        \\    if #pattern (#insert ANY_VALUE) = t return true;
-        \\    return false;
-        \\}
-        \\
-        \\main :: () {
-        \\    print("% / % / %\n",
-        \\        classify(.Number(2.5)), classify(.Name("x")), classify(.Eof));
-        \\    print("% % %\n",
-        \\        has_value(.Number(1.0)), has_value(.Name("y")), has_value(.Eof));
-        \\}
+        \\main :: () { print("%\n", classify(.Number(2.5))); }
     );
-    code_block(35, "text", #string
-        \\number / name / end of input
-        \\1 1 0
+    code_block(24, "text", #string
+        \\number
     );
-    paragraph(36, #string,oneline
-        \\Patterns as Compile-Time Values covers the quote itself and Pattern
-        \\Reflection covers what can be asked about one.
+    subheading(25, "Generated-source files and diagnostics");
+    paragraph(26, #string,oneline
+        \\Every string insertion is materialised under
+        \\`<cache>/generated/insert/v1/<sha256>.glo` before parsing. Equal text
+        \\shares a cache entry. `--show-generated` prints those paths, while
+        \\`--cache-dir` selects the cache root. `Code` and `Pattern` insertion
+        \\uses syntax trees directly and creates no file.
     );
-    subheading(37, "Refusals and limits");
-    table_header(38, "Written   —   Diagnostic");
-    table_row(39, "`#insert 42;` in a body   |   `#insert expects Code or string source`");
-    table_row(40, "`#insert 42;` at top level   |   `top-level #insert expects Code or string source`");
-    table_row(41, "`#insert` inside a struct body   |   `unexpected token 'insert'`");
-    table_row(42, "`return #insert f();`   |   `unexpected directive 'insert'`");
-    paragraph(43, #string,oneline
-        \\`#insert` is a statement and a declaration, never an expression, which
-        \\is why a generator that must produce a value produces the `return`
-        \\statement as well. Expansion is bounded in two directions: nesting stops
-        \\at 16 and the total number of expansions stops at 16384, both reported
-        \\as `#insert expansion limit exceeded`. The diagnostic carries one `note:
-        \\generated by this #insert` per enclosing level, so the whole chain from
-        \\the written source to the failing text is printed.
+    paragraph(27, #string,oneline
+        \\A generated parse or type error points both to the written `#insert`
+        \\and to the generated file. Nested insertion adds one
+        \\`generated by this #insert` note per level, preserving the expansion
+        \\chain instead of flattening it into one location.
+    );
+    subheading(28, "Refusals and bounds");
+    table_header(29, "Written   —   Diagnostic");
+    table_row(30, "`#insert 42;` in a body   |   `#insert expects Code or string source`");
+    table_row(31, "`#insert 42;` at top level   |   `top-level #insert expects Code or string source`");
+    table_row(32, "Expression insertion of a string   |   `expression #insert expects Code`");
+    table_row(33, "Expression insertion of several statements   |   `expression #insert expects Code containing exactly one expression`");
+    table_row(34, "`#insert` inside a struct body   |   `unexpected token 'insert'`");
+    paragraph(35, #string,oneline
+        \\Recursive insertion is bounded: nesting stops at 16 and the total
+        \\number of expansions at 16384. Crossing either boundary reports
+        \\`#insert expansion limit exceeded`.
     );
 }
 
 render_section_111 :: () {
     paragraph(0, #string,oneline
-        \\`#expand` on a procedure declaration makes it a macro: an invocation is
-        \\not a call, it clones the body into the call site with the argument
-        \\expressions substituted for the parameter names. Nothing is passed and
-        \\nothing returns, so a macro can assign to its caller's locals, take a
-        \\block of the caller's code as an argument, and `return` from the
-        \\procedure that invoked it.
+        \\`#expand` declares a macro. The checker selects it using the argument
+        \\types, substitutes argument syntax for parameters, gives declarations
+        \\fresh hygienic names, and checks the expanded result in the caller.
+        \\A macro with no value return is invoked as a statement; a macro with an
+        \\explicit non-`void` return type is a value macro and can contain a full
+        \\statement body.
     );
-    table_header(1, "Declared   —   Invoked as");
-    table_row(2, "`f :: (...) #expand { ... }`   |   a statement");
-    table_row(3, "`f :: (...) -> T #expand, expression { return e; }`   |   an expression");
-    paragraph(4, #string,oneline
-        \\The two flavours are separate: overload selection filters candidates on
-        \\whether the invocation is in expression context, so a statement macro
-        \\used as an expression is `no macro overload of 'f' matches this
-        \\invocation`. An expression macro's body must be exactly one `return
-        \\<expr>;` and anything else is `expression macro 'f' must contain exactly
-        \\return <expr>;`, because the body has to become a single expression at
-        \\the invocation. `#expand` accepts only that one modifier: `#expand,
-        \\statement` is `#expand expects expression after ','`.
+    table_header(1, "Declaration   —   Use");
+    table_row(2, "`f :: (...) #expand { ... }`   |   Statement macro.");
+    table_row(3, "`f :: (...) -> T #expand { ... }`   |   Typed value macro; every reachable path must return `T`.");
+    table_row(4, "`f :: (...) #expand,expression { return e; }`   |   Legacy inferred one-expression macro.");
+    subheading(5, "Typed value macros");
+    paragraph(6, #string,oneline
+        \\The return annotation now selects value context by itself; writing
+        \\`#expand,expression` is unnecessary when `-> T` is present. Unlike the
+        \\legacy inferred form, a typed value macro may use ordinary control
+        \\flow, local declarations, several returns, and `defer`. Its expansion
+        \\is checked as a value-producing block and may not fall through.
     );
-    code_block(5, "glosso", #string
+    code_block(7, "glosso", #string
         \\#import "Io";
         \\
-        \\swap :: (a: $T, b: T) #expand {
-        \\    tmp := a;
-        \\    a = b;
-        \\    b = tmp;
+        \\maximum :: (a: isize, b: isize) -> isize #expand {
+        \\    if a > b return a;
+        \\    return b;
         \\}
         \\
-        \\double_it :: (x: s64) -> s64 #expand, expression { return x + x; }
+        \\decision :: () -> isize #expand {
+        \\    if `lower < `upper return 0;
+        \\    defer print("defer inside decision\n");
+        \\    return 1;
+        \\}
         \\
         \\main :: () {
-        \\    x := 1;
-        \\    y := 2;
-        \\    tmp := 999;
-        \\    swap(x, y);
-        \\    print("swap: % %  caller tmp: %\n", x, y, tmp);
-        \\    print("expression macro: %\n", double_it(21) + 0);
+        \\    lower := 7;
+        \\    upper := 3;
+        \\    print("maximum=%\n", maximum(lower, upper));
+        \\    print("decision=%\n", decision());
         \\}
     );
-    code_block(6, "text", #string
-        \\swap: 2 1  caller tmp: 999
-        \\expression macro: 42
+    code_block(8, "text", #string
+        \\maximum=7
+        \\defer inside decision
+        \\decision=1
     );
-    paragraph(7, #string,oneline
-        \\`swap` needs no pointers. Its parameters are replaced by the caller's
-        \\`x` and `y` themselves, so `a = b` is an assignment to `x`. A procedure
-        \\could not do this without taking `*T` arguments, and that is the reason
-        \\to reach for a macro rather than a generic procedure.
-    );
-    subheading(8, "Hygiene and the backtick escape");
     paragraph(9, #string,oneline
-        \\Every local a macro body declares is renamed to `__m<N>_<name>` with a
-        \\fresh `N` per expansion. Without that, the `tmp` in `swap` would collide
-        \\with the caller's `tmp` and the macro would be usable only in bodies
-        \\that happen not to use the name. A declaration written with a leading
-        \\backtick opts out and leaks into the caller's scope, which is how a
-        \\macro deliberately publishes a name.
+        \\The unquoted parameters of `maximum` are substituted with the caller's
+        \\expressions. `decision` instead uses single-backtick identifiers to
+        \\look up `lower` and `upper` directly in the caller. Its ordinary
+        \\`defer` belongs to the value-macro block and runs before that block
+        \\hands its result back.
     );
-    code_block(10, "glosso", #string
+    subheading(10, "Hygiene and caller escapes");
+    paragraph(11, #string,oneline
+        \\An unquoted local declared by a macro is renamed for each expansion,
+        \\so it cannot collide with a same-named caller local. A single backtick
+        \\opts an identifier or control-flow keyword into the caller's scope.
+        \\That supports caller-variable access, deliberately published
+        \\declarations, caller returns, and caller-scoped defers.
+    );
+    code_block(12, "glosso", #string
         \\#import "Io";
         \\
-        \\count_up :: (n: s64, body: Code) #expand {
-        \\    limit := n;
-        \\    `it := 0;
-        \\    while it < limit {
-        \\        #insert body;
-        \\        it += 1;
-        \\    }
+        \\bump_caller :: () #expand {
+        \\    number := 1000;
+        \\    _ := number;
+        \\    `number += 10;
+        \\}
+        \\
+        \\leave_caller :: () -> isize #expand {
+        \\    defer print("macro defer\n");
+        \\    if `stop `return 42;
+        \\    return 0;
+        \\}
+        \\
+        \\caller_defer :: () #expand {
+        \\    `defer print("caller defer\n");
+        \\    print("registered\n");
+        \\}
+        \\
+        \\escaped :: () -> isize {
+        \\    stop := true;
+        \\    _ := leave_caller();
+        \\    return -1;
         \\}
         \\
         \\main :: () {
-        \\    limit := 100;
-        \\    it := -1;
-        \\    total := 0;
-        \\    count_up(4, #code { total += it; });
-        \\    print("total % / caller limit % / caller it %\n", total, limit, it);
+        \\    number := 0;
+        \\    bump_caller();
+        \\    print("number=% escaped=%\n", number, escaped());
+        \\    caller_defer();
+        \\    print("after registration\n");
         \\}
     );
-    code_block(11, "text", #string
-        \\total 6 / caller limit 100 / caller it 4
+    code_block(13, "text", #string
+        \\macro defer
+        \\number=10 escaped=42
+        \\registered
+        \\after registration
+        \\caller defer
     );
-    paragraph(12, #string,oneline
-        \\`limit` is renamed, so the caller's `limit` is still `100`. `it` is not,
-        \\so the body the caller supplied can name it and the caller's own `it`
-        \\ends up holding the cursor's final value. This is exactly the contract
-        \\the `Iterable` typeclass asks of a `for_expansion` macro, which must
-        \\publish `it` and `it_index` the same way; Custom Iteration with
-        \\`for_expansion` covers that.
+    paragraph(14, #string,oneline
+        \\Putting a backtick before `return 42` leaves `escaped`, the procedure
+        \\surrounding the expansion; the value is checked against that caller's
+        \\return type. The ordinary defer in `leave_caller` still runs while the
+        \\expansion unwinds. A backtick before `defer` is different: it registers
+        \\with the caller, so its action runs only when `main` leaves.
     );
-    note(13, #string,oneline
-        \\Labels are renamed by the same rule, and a macro's labels are collected
-        \\before expansion rather than after. A backward `goto` to a label the
-        \\macro declared works; a forward one is `no label '__m0_past' in this
-        \\procedure`, naming the renamed label. Place the label before the `goto`
-        \\that names it, or keep the jump out of the macro.
+    note(15, #string,oneline
+        \\A backticked declaration can intentionally publish a name to inserted
+        \\caller code, as when the macro writes a backtick before
+        \\`it := 0;`, then `#insert body;`. Use that narrowly: ordinary macro
+        \\locals are hygienic for a reason.
     );
-    subheading(14, "`Code` parameters");
-    paragraph(15, #string,oneline
-        \\A parameter of type `Code` receives a quoted block from the caller,
-        \\which the body splices with `#insert`. Only a macro may have one: the
-        \\same call to an ordinary procedure is `a #code value is compile-time
-        \\only; it must be consumed by #insert, not used at run time`. A `Code`
-        \\parameter may be spliced more than once, or not at all, which is what
-        \\lets a macro implement a loop, a conditional, or a scoped wrapper over
-        \\code it did not write.
-    );
-    subheading(16, "Arguments are syntax, not compile-time values");
+    subheading(16, "Nested and recursive macros");
     paragraph(17, #string,oneline
-        \\A macro argument is substituted into the body as an expression tree. It
-        \\is not entered into the compile-time environment, so a double-backtick
-        \\splice cannot see it and `#insert #code { v.``name }` inside a macro is
-        \\`unknown code splice 'name'` however `name` is declared. Marking the
-        \\parameter `#comptime` does not change this; that qualifier binds a value
-        \\for an ordinary procedure's body, and a macro has no body of its own to
-        \\bind it in.
+        \\Macros may be declared inside procedures and inside other macros. A
+        \\nested macro participates in the surrounding expansion and can use the
+        \\names established there. Recursive value macros are also supported
+        \\when static branching makes the expansion terminate.
     );
-    paragraph(18, #string,oneline
-        \\The way through is to make the substituted argument a compile-time
-        \\constant in the expansion, and to keep hygiene from hiding it. A plain
-        \\`N :: name;` is renamed to `__m0_N` and the splice still fails; a
-        \\backticked one keeps its name and resolves.
-    );
-    code_block(19, "glosso", #string
+    code_block(18, "glosso", #string
         \\#import "Io";
         \\
-        \\Vec2 :: struct { x: s32 = 0; y: s32 = 0; }
+        \\outer_message :: () #expand {
+        \\    inner_message :: () #expand { print("nested macro\n"); }
+        \\    inner_message();
+        \\}
         \\
-        \\emit_field_print :: (v: Vec2, name: string) #expand {
-        \\    `N :: name;
-        \\    #insert #code { print("field % = %\n", N, v.``N); };
+        \\factorial :: (n: isize) -> isize #expand {
+        \\    #if n <= 1 return 1;
+        \\    else { return n * factorial(n - 1); }
         \\}
         \\
         \\main :: () {
-        \\    v: Vec2 = .{ .x = 1, .y = 2 };
-        \\    emit_field_print(v, "x");
-        \\    emit_field_print(v, "y");
+        \\    outer_message();
+        \\    print("factorial=%\n", factorial(5));
         \\}
     );
-    code_block(20, "text", #string
-        \\field x = 1
-        \\field y = 2
+    code_block(19, "text", #string
+        \\nested macro
+        \\factorial=120
     );
-    subheading(21, "Control flow, defaults and generics");
+    paragraph(20, #string,oneline
+        \\`#if` is essential in `factorial`: it is selected during expansion, so
+        \\the recursive call disappears at the base case. Ordinary `if` would
+        \\remain runtime control flow and would not by itself stop compile-time
+        \\macro expansion.
+    );
+    subheading(21, "`Code` parameters");
     paragraph(22, #string,oneline
-        \\Because the body is cloned rather than called, `return` inside a
-        \\statement macro returns from the procedure that invoked it. Parameter
-        \\defaults work as they do for a procedure, and `$T` binds a type from the
-        \\argument as it does for a generic procedure.
+        \\A macro may take `Code` from its caller and insert it zero, one, or many
+        \\times. This is the basis of loop, conditional, and resource-wrapper
+        \\macros. Use `#insert,scope()` when a one-expression quote must resolve
+        \\against the macro's hygienic locals; use ordinary `#insert` when caller
+        \\code should remain in caller scope.
     );
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
-        \\bail_if :: (cond: bool) #expand {
-        \\    if cond {
-        \\        print("bailing out\n");
-        \\        return;
-        \\    }
-        \\}
-        \\
-        \\with_default :: (tag: string, n: s64 = 3) #expand {
-        \\    print("% -> %\n", tag, n);
-        \\}
-        \\
-        \\run :: (flag: bool) {
-        \\    bail_if(flag);
-        \\    print("reached the end\n");
+        \\with_value :: (body: Code) #expand {
+        \\    `value_from_macro := 42;
+        \\    #insert body;
         \\}
         \\
         \\main :: () {
-        \\    run(true);
-        \\    run(false);
-        \\    with_default("explicit", 9);
-        \\    with_default("defaulted");
+        \\    with_value(#code print("value=%\n", value_from_macro));
         \\}
     );
     code_block(24, "text", #string
-        \\bailing out
-        \\reached the end
-        \\explicit -> 9
-        \\defaulted -> 3
+        \\value=42
     );
-    paragraph(25, #string,oneline
-        \\`run(true)` prints only `bailing out`, because the `return` the macro
-        \\contributed belongs to `run`. That is the point of an early-exit macro
-        \\and it is also its hazard: a reader of `run` sees a call and has to know
-        \\that `bail_if` is a macro to know the procedure can end there.
+    subheading(25, "Selection, defaults, and `#modify`");
+    paragraph(26, #string,oneline
+        \\Macro parameters may be concrete or generic and may have defaults.
+        \\Candidate selection uses their inferred argument types and any `where`
+        \\clauses. A `#modify` block runs after generic variables are inferred
+        \\and may rewrite those variables before the expanded body is checked.
     );
-    subheading(26, "`#modify`");
-    paragraph(27, #string,oneline
-        \\`#modify` runs a compile-time block after a candidate's type variables
-        \\have been inferred and before its body is checked. The block may assign
-        \\to those variables, rewriting the instantiation, and it returns `bool`
-        \\to accept or reject the candidate. It is written either as a block or as
-        \\a single expression.
-    );
-    code_block(28, "glosso", #string
+    code_block(27, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\force_int :: (a: $T) -> T
-        \\#modify { T = s64; return true; }
-        \\{ return a; }
-        \\
-        \\widen_small :: (x: $T) -> $R
+        \\widen_small :: (value: $T) -> $R
         \\#modify {
         \\    R = T;
-        \\    if Is_Integer(T) {
-        \\        if T == u8 { R = u32; }
-        \\        if T == s8 { R = s32; }
-        \\    }
+        \\    if T == u8 { R = u32; }
+        \\    if T == s8 { R = s32; }
         \\    return true;
         \\}
-        \\{ return x; }
-        \\
-        \\print_x :: (v: $T) #modify Is_Struct(T) { print("x = %\n", v.x); }
-        \\
-        \\Vec2 :: struct { x: s32 = 0; y: s32 = 0; }
+        \\{ return value; }
         \\
         \\main :: () {
-        \\    small: s8 = 12;
-        \\    forced := force_int(small);
-        \\    print("force_int: % %\n", forced, type_name(type_of(forced)));
-        \\    tiny: u8 = 200;
-        \\    widened := widen_small(tiny);
-        \\    print("widen_small: % %\n", widened, type_name(type_of(widened)));
-        \\    print_x(Vec2.{ .x = 4, .y = 5 });
+        \\    small: u8 = 200;
+        \\    widened := widen_small(small);
+        \\    print("% %\n", widened, type_name(type_of(widened)));
         \\}
     );
-    code_block(29, "text", #string
-        \\force_int: 12 int
-        \\widen_small: 200 u32
-        \\x = 4
+    code_block(28, "text", #string
+        \\200 u32
     );
-    paragraph(30, #string,oneline
-        \\`force_int` is called with an `s8` and returns an `int`, because the
-        \\block reassigned `T` before the signature was fixed. `widen_small`
-        \\computes a second variable `R` that appears only in the return type,
-        \\which is the shape to use when a result type is a function of an
-        \\argument type. `print_x` uses the expression form and only accepts
-        \\structs. `#modify` is also accepted on a struct declaration, where it
-        \\rewrites the type parameters of the aggregate.
+    bullet(29, #string,oneline
+        \\A macro name still cannot be redeclared at file scope, even for a
+        \\different parameter type or a different statement/value form.
     );
-    note(31, #string,oneline
-        \\A `#modify` that returns `false` rejects the candidate rather than
-        \\reporting a message of its own: `print_x(5)` is `constraint failed for
-        \\print_x` with `note: the #modify constraint fails here: #modify returned
-        \\false`. Use `where` for a plain predicate and `#modify` when the types
-        \\themselves have to change; Constraints with `where` covers the former.
-    );
-    bullet(32, #string,oneline
-        \\A macro name cannot be overloaded at file scope. Declaring a statement
-        \\macro and an expression macro under one name is `function 'twice' is
-        \\already declared`, and so is declaring one macro over `s64` and another
-        \\over `$T`.
-    );
-    bullet(33, #string,oneline
-        \\`#derive` macros are `#expand` procedures with a fixed signature, and
-        \\typeclass methods may be macros too; Writing a Derive Macro and Custom
-        \\Iteration with `for_expansion` cover those two shapes.
+    bullet(30, #string,oneline
+        \\`#derive` procedures and typeclass expansion methods use the same macro
+        \\machinery with signatures fixed by their protocols.
     );
 }
-
 render_section_112 :: () {
     paragraph(0, #string,oneline
         \\Reflection is the set of compile-time intrinsics that answer questions
@@ -1720,7 +1510,7 @@ render_section_112 :: () {
         \\fields 3: x y z
         \\field 0 type f32
         \\members 3: Red=0 Green=5 Blue=6
-        \\variants 3: circle:s32 box:int empty:void
+        \\variants 3: circle:s32 box:isize empty:void
     );
     subheading(3, "`Type_Info`");
     paragraph(4, #string,oneline
@@ -1897,8 +1687,8 @@ render_section_112 :: () {
         \\they are written.
     );
     bullet(46, #string,oneline
-        \\`int` and `s64` are one type value, so `variant_type` on a `box: s64`
-        \\variant reports `int`. A tuple has tag `Tuple` but `field_count` of a
+        \\`isize` and `s64` are one type value, so `variant_type` on a `box: s64`
+        \\variant reports `isize`. A tuple has tag `Tuple` but `field_count` of a
         \\tuple type is `0`; its components are not reachable through the field
         \\intrinsics.
     );
@@ -1967,14 +1757,14 @@ render_section_113 :: () {
     paragraph(0, #string,oneline
         \\A `#pattern` written with no `= subject` and no `==` switch after it
         \\is a quote: it produces a value instead of performing a match. The
-        \\value has the built-in type `pattern`, and it can be stored in a
+        \\value has the built-in type `Pattern`, and it can be stored in a
         \\constant, passed to a procedure, returned from one, and spliced back
         \\into pattern position with `#insert`. Splicing is covered in Patterns
         \\as Compile-Time Values; this chapter covers the intrinsics that ask a
         \\quote questions.
     );
     paragraph(1, #string,oneline
-        \\`pattern` is a compiler built-in name and needs no import, as `type`
+        \\`Pattern` is a compiler built-in name and needs no import, as `type`
         \\and `Code` do. The six intrinsics that read a quote are declared in
         \\`std/Meta/Utilities.glo` and need `#import "Meta";`. Every one of them
         \\is compile-time only: the checker folds the call to a constant while
@@ -2007,10 +1797,10 @@ render_section_113 :: () {
     );
     paragraph(4, #string,oneline
         \\A quote has no runtime representation, so it must be bound with `::`
-        \\rather than `:=`. `P := #pattern 1;` is `error: a 'pattern' value is
+        \\rather than `:=`. `P := #pattern 1;` is `error: a 'Pattern' value is
         \\compile-time only; bind it with '::' rather than ':='`. The same rule
-        \\governs `type` and `Code`, and it is why the pattern parameters of the
-        \\intrinsics are declared `#comptime`.
+        \\governs `Code` and the other compiler-only meta-values, and it is why
+        \\the pattern parameters of the intrinsics are declared `#comptime`.
     );
     subheading(5, "The intrinsics");
     table_header(6, "Call   —   Result");
@@ -2026,9 +1816,9 @@ render_section_113 :: () {
         \\not of the pattern alone: `.Some(v)` binds an `s32` against `?s32` and
         \\a `string` against `?string`, and a member name is a union variant for
         \\one subject and an enum constant for another. `Ps` is an ordinary
-        \\`[]pattern` view, so a set of arms can be declared once as
-        \\`ARMS : []pattern : .[A, B, C];` and reused; an untyped `.[A, B]`
-        \\constant has type `[2]pattern` and does not convert on its own.
+        \\`[]Pattern` view, so a set of arms can be declared once as
+        \\`ARMS : []Pattern : .[A, B, C];` and reused; an untyped `.[A, B]`
+        \\constant has type `[2]Pattern` and does not convert on its own.
     );
     subheading(14, "A quote carries no type until it is asked about one");
     paragraph(15, #string,oneline
@@ -2208,7 +1998,7 @@ render_section_113 :: () {
         \\exactly "`Q` would be a dead arm after `Ps`", which is also "`Ps`
         \\subsumes `Q`". Two patterns are equivalent when neither is useful
         \\against the other. That relation is what a reader usually means by
-        \\pattern equality, and it is why `pattern` has no `==`: whether
+        \\pattern equality, and it is why `Pattern` has no `==`: whether
         \\`A | B` equals `B | A`, or whether `_` equals a binder, has no
         \\structural answer, while mutual non-usefulness has one.
     );
@@ -2223,10 +2013,10 @@ render_section_113 :: () {
         \\C :: #pattern Shape.Circle(r);
         \\W :: #pattern _;
         \\
-        \\equivalent :: (T: type, #comptime P: pattern, #comptime Q: pattern) -> bool {
+        \\equivalent :: (T: type, #comptime P: Pattern, #comptime Q: Pattern) -> bool {
         \\    return !pattern_is_useful(T, .[P], Q) && !pattern_is_useful(T, .[Q], P);
         \\}
-        \\subsumes :: (T: type, #comptime P: pattern, #comptime Q: pattern) -> bool {
+        \\subsumes :: (T: type, #comptime P: Pattern, #comptime Q: Pattern) -> bool {
         \\    return !pattern_is_useful(T, .[P], Q);
         \\}
         \\
@@ -2266,9 +2056,9 @@ render_section_113 :: () {
         \\
         \\NUMBER :: #pattern Token.Number(n);
         \\NAME   :: #pattern Token.Name(text);
-        \\ARMS : []pattern : .[NUMBER, NAME];
+        \\ARMS : []Pattern : .[NUMBER, NAME];
         \\
-        \\witness_list :: (T: type, Ps: []pattern, i: s64) -> string {
+        \\witness_list :: (T: type, Ps: []Pattern, i: s64) -> string {
         \\    if i >= pattern_missing_count(T, Ps) return "";
         \\    tail := witness_list(T, Ps, i + 1);
         \\    if tail == "" return pattern_missing(T, Ps, i);
@@ -2305,7 +2095,7 @@ render_section_113 :: () {
         \\NUMBER :: #pattern Token.Number(n);
         \\NAME   :: #pattern Token.Name(text);
         \\EOF    :: #pattern Token.Eof;
-        \\ARMS : []pattern : .[NUMBER, NAME, EOF];
+        \\ARMS : []Pattern : .[NUMBER, NAME, EOF];
         \\
         \\classify :: (t: Token) -> string {
         \\    #assert #comptime pattern_missing_count(Token, ARMS) == 0, "classify is not total";
@@ -2439,15 +2229,21 @@ render_section_114 :: () {
         \\`Very_Debug`: it passes no optimization flag at all, and the child then
         \\applies its own default, which is `-O1`.
     );
-    table_header(25, "Member   —   Value   —   Child flag");
-    table_row(26, "`Debug`   |   0   |   `-O0`");
-    table_row(27, "`Very_Debug`   |   1   |   `-O1`");
-    table_row(28, "`Optimized`   |   2   |   `-O2`");
-    table_row(29, "`Very_Optimized`   |   3   |   `-O3`");
-    table_row(30, "`Optimized_Small`   |   4   |   `-Os`");
-    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`");
-    table_row(32, "`Optimized_Tiny`   |   6   |   `-Ozz`");
-    table_row(33, "`Default`   |   7   |   none");
+    table_header(25, "Member   —   Value   —   Child flag and current result");
+    table_row(26, "`Debug`   |   0   |   `-O0`; builds");
+    table_row(27, "`Very_Debug`   |   1   |   `-O1`; builds");
+    table_row(28, "`Optimized`   |   2   |   `-O2`; builds");
+    table_row(29, "`Very_Optimized`   |   3   |   `-O3`; builds");
+    table_row(30, "`Optimized_Small`   |   4   |   `-Os`; rejected by the LLVM 23 LTO pipeline");
+    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`; rejected by the LLVM 23 LTO pipeline");
+    table_row(32, "`Optimized_Tiny`   |   6   |   `-Ozz`; reaches the same unsupported size pipeline");
+    table_row(33, "`Default`   |   7   |   none; child defaults to working `-O1`");
+    note(68, #string,oneline
+        \\The size members remain ABI values and still produce their child flags,
+        \\but a linked child does not finish. Use `Optimized` (`-O2`) until the
+        \\backend maps size requests to LLVM 23's `optsize` and `minsize`
+        \\attributes.
+    );
     subheading(34, "Workspaces and `Build_Options`");
     paragraph(35, #string,oneline
         \\`Compile_Options` describes one call. `Build_Options` describes a
@@ -2473,7 +2269,7 @@ render_section_114 :: () {
         \\    space := compiler_create_workspace("tool");
         \\    options := get_build_options(space);
         \\    options.output_executable_name = "tool.exe";
-        \\    set_build_optimization(*options, .Optimized_Small);
+        \\    set_build_optimization(*options, .Optimized);
         \\    set_build_options(options, space);
         \\
         \\    if add_build_file("hello.glo", space) == {
@@ -2489,8 +2285,8 @@ render_section_114 :: () {
         \\output_type=1 backend=0 optimization=7 do_output=1
         \\[ws] built:
         \\glosso: compile hello.glo (target=x86_64-pc-windows-msvc)
-        \\glosso: link tool.exe (target=x86_64-pc-windows-msvc, -Os)
-        \\glosso: done tool.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -Os)
+        \\glosso: link tool.exe (target=x86_64-pc-windows-msvc, -O2)
+        \\glosso: done tool.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O2)
     );
     paragraph(38, #string,oneline
         \\Enum values print as their numbers, so the defaults read as

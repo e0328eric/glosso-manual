@@ -57,9 +57,9 @@ render_section_6 :: () {
     );
     paragraph(17, #string,oneline
         \\Because a carriage return is whitespace, line endings do not matter to
-        \\the scanner. The one place the distinction survives is inside a
-        \\multi-line block, where the carriage return is part of the literal
-        \\text; that case is covered in `#string` Multi-Line Blocks.
+        \\ordinary tokens. Marked multi-line-string lines follow the same rule:
+        \\their scanner removes a trailing carriage return before storing the
+        \\line, so LF and CRLF source files produce the same literal text.
     );
     subheading(18, "Line comments");
     paragraph(19, #string,oneline
@@ -103,7 +103,6 @@ render_section_6 :: () {
         \\    print("x = %\n", x);
         \\    print("[%]\n", "http://example.com /* not a comment */");
         \\}
-        \\/* an unterminated block comment at the end of the file
     );
     code_block(26, "text", #string
         \\x = 3
@@ -112,10 +111,9 @@ render_section_6 :: () {
     paragraph(27, #string,oneline
         \\Two further facts are visible there. A newline inside a block comment
         \\still advances the line counter, so diagnostics after a large
-        \\commented-out region report the right line. And an unterminated `/*` at
-        \\the end of the file is accepted silently: the scanner runs out of input
-        \\and emits the end-of-input token. There is no unterminated-comment
-        \\diagnostic.
+        \\commented-out region report the right line. An unterminated `/*` is a
+        \\lexical error instead: the scanner reports `error: unterminated block
+        \\comment` at the opening delimiter rather than emitting end-of-input.
     );
     note(28, #string,oneline
         \\The depth counter reacts to `/*` and `*/` everywhere inside the
@@ -229,8 +227,9 @@ render_section_7 :: () {
     note(15, #string,oneline
         \\There is no diagnostic saying an identifier cannot start with a digit,
         \\because no such rule exists at the token level. `2abc := 1;` lexes as
-        \\the integer `2` followed by the identifier `abc`, and the parser reads
-        \\it as an expression statement and then a declaration.
+        \\the integer `2` followed by the identifier `abc`. The parser reads `2`
+        \\as the start of an expression statement, then requires its `;` and
+        \\reports `error: unexpected token 'abc'` immediately.
     );
     code_block(16, "glosso", #string
         \\#import "Io";
@@ -241,7 +240,11 @@ render_section_7 :: () {
         \\}
     );
     code_block(17, "text", #string
-        \\abc = 1
+        \\error: unexpected token 'abc'
+        \\  --> digit-name.glo:4:6
+        \\  |
+        \\4 |     2abc := 1;
+        \\  |      ^^^
     );
     subheading(18, "The keywords");
     paragraph(19, #string,oneline
@@ -284,7 +287,7 @@ render_section_7 :: () {
     );
     subheading(30, "Words that only look reserved");
     paragraph(31, #string,oneline
-        \\`typeclass`, `instance`, `distinct`, `type`, `int` and `string` are
+        \\`typeclass`, `instance`, `distinct`, `type`, `isize` and `string` are
         \\plain identifier tokens. Their meaning comes from the position they
         \\appear in, which is why each of them can also be bound as a local.
     );
@@ -296,9 +299,9 @@ render_section_7 :: () {
         \\    instance := 2;
         \\    distinct := 3;
         \\    type := 4;
-        \\    int := 5;
+        \\    isize := 5;
         \\    string := 6;
-        \\    print("% % % % % %\n", typeclass, instance, distinct, type, int, string);
+        \\    print("% % % % % %\n", typeclass, instance, distinct, type, isize, string);
         \\}
     );
     code_block(33, "text", #string
@@ -467,46 +470,50 @@ render_section_8 :: () {
         \\`error: -255 does not fit s8, whose range is -128..=127`, while
         \\`a : s8 = -16#7f;` is the ordinary `-127`.
     );
-    subheading(28, "The 128-bit cap");
+    subheading(28, "Decimal integers have arbitrary precision");
     paragraph(29, #string,oneline
-        \\Magnitudes are parsed into 128 bits. Everything that fits is exact, in
-        \\both the decimal and the based form, and anything wider is a lexical
-        \\error rather than a silent truncation. An earlier compiler saturated
-        \\over-wide literals and produced wrong constants without saying so.
+        \\A decimal integer token has no 128-bit ceiling. While its type is still
+        \\undecided it is a `comptime_int`; if its magnitude is too large for the
+        \\token's 128-bit payload, the lexer keeps the separator-free digits and
+        \\the checker materialises the exact value as a `BigInt`. A destination
+        \\such as `u129` can therefore receive a decimal value above `u128` with
+        \\no truncation.
     );
     code_block(30, "glosso", #string
         \\#import "Io";
         \\
+        \\id :: (x: u129) -> u129 { return x; }
+        \\FOLD :: #comptime id(340_282_366_920_938_463_463_374_607_431_768_211_455) + 1;
+        \\
         \\main :: () {
-        \\    smax : s128 = 170_141_183_460_469_231_731_687_303_715_884_105_727;
-        \\    smin : s128 = -170_141_183_460_469_231_731_687_303_715_884_105_728;
-        \\    umax : u128 = 340_282_366_920_938_463_463_374_607_431_768_211_455;
-        \\    bits : u128 = 16#ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff;
-        \\    same : s128 = 16#ffff_ffff_ffff_ffff_ffff_ffff_ffff_ffff;
-        \\    print("%\n%\n%\n%\n%\n", smax, smin, umax, bits, same);
+        \\    a: [1]u129 = .[340_282_366_920_938_463_463_374_607_431_768_211_455];
+        \\    direct: u129 = 340_282_366_920_938_463_463_374_607_431_768_211_456;
+        \\    print("% % %\n", a[0] + 1, FOLD, direct);
         \\}
     );
     code_block(31, "text", #string
-        \\170141183460469231731687303715884105727
-        \\-170141183460469231731687303715884105728
-        \\340282366920938463463374607431768211455
-        \\340282366920938463463374607431768211455
-        \\-1
+        \\340282366920938463463374607431768211456 340282366920938463463374607431768211456 340282366920938463463374607431768211456
     );
     paragraph(32, #string,oneline
-        \\One digit more and the file stops lexing. A decimal magnitude gives
-        \\`error: integer literal '340282366920938463463374607431768211456' does
-        \\not fit in 128 bits`, quoting the digits with the separators removed; a
-        \\based one gives `error: base-16 integer literal does not fit in 128
-        \\bits`.
+        \\Context still performs the ordinary exact fitting check. A decimal
+        \\value that is outside its destination reports `does not fit T, whose
+        \\range is ...`; it is not a lexical error. For example, changing
+        \\`direct` above to `u128` reports that its exact value does not fit the
+        \\`u128` range. Based literals are different:
+        \\they are stored as bit patterns, and that representation remains
+        \\limited to 128 bits. For example,
+        \\`16#1_0000_0000_0000_0000_0000_0000_0000_0000` reports
+        \\`error: base-16 integer literal does not fit in 128 bits`, even with a
+        \\`u129` destination. Write the value in decimal when more than 128 bits
+        \\are required.
     );
     note(33, #string,oneline
-        \\The cap belongs to the literal, not to the declaration. An annotation
-        \\is still needed to reach a 128-bit type, because an unannotated literal
-        \\defaults to `int`: binding the `s128` maximum with `:=` gives
-        \\`error: 170141183460469231731687303715884105727 does not fit int, whose
-        \\range is -9223372036854775808..=9223372036854775807`. Defaulting is
-        \\covered in Compile-Time Numbers and Literal Defaulting.
+        \\The remaining 128-bit limit belongs to compile-time VM execution, not
+        \\to decimal literals, constant folding, or native code. A top-level
+        \\`#comptime { ... }` step that tries to execute arithmetic on `u129`
+        \\reports `compile-time execution does not support u129, an integer wider
+        \\than 128 bits`. Foldable `#comptime` constants such as `FOLD` above and
+        \\compiled `u129` arithmetic remain exact.
     );
     subheading(34, "Rejected spellings");
     paragraph(35, #string,oneline
@@ -611,46 +618,32 @@ render_section_9 :: () {
         \\with real arithmetic; only the literal is limited, and a constant more
         \\precise than a double cannot be written down as one token.
     );
-    subheading(19, "Out-of-range literals");
+    subheading(19, "The lexer's `f64` range check");
     paragraph(20, #string,oneline
-        \\There is no fitting check for floats. A literal too large for its type
-        \\becomes an infinity and one too small becomes zero, in both cases
-        \\silently. The integer diagnostic `does not fit` has no float
-        \\counterpart.
+        \\Every float token is parsed as `f64` before an expected type is applied.
+        \\The scanner rejects a non-finite result, and it also rejects a nonzero
+        \\mantissa that underflows to zero. This check is lexical, so an `f80` or
+        \\`f128` annotation cannot make a token outside the host `f64` range legal.
     );
-    table_header(21, "Written   —   Stored");
-    table_row(22, "`x : f64 = 1e400;`   |   Positive infinity");
-    table_row(23, "`x : f64 = 1e-400;`   |   Zero");
-    table_row(24, "`x : f16 = 100000.0;`   |   Positive infinity, since `f16` stops at 65504");
-    code_block(25, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    big  : f64 = 1e400;
-        \\    tiny : f64 = 1e-400;
-        \\    over : f16 = 100000.0;
-        \\    print("% % %\n", big > 1.797_693_134_862_315_7e308, tiny == 0.0, cast(f64) over > 1000000.0);
-        \\}
-    );
-    code_block(26, "text", #string
-        \\1 1 1
-    );
+    table_header(21, "Written   —   Result");
+    table_row(22, "`x : f64 = 1e400;`   |   `error: float literal '1e400' is out of range for f64`");
+    table_row(23, "`x : f64 = 1e-400;`   |   `error: float literal '1e-400' is out of range for f64`");
+    table_row(24, "`x : f64 = 0e-400;`   |   Zero; its mantissa was already zero");
     paragraph(27, #string,oneline
-        \\The three comparisons confirm the three rows: `big` exceeds the largest
-        \\finite `f64`, `tiny` has collapsed to zero, and `over` has left the
-        \\`f16` range entirely.
+        \\That token check is separate from conversion to a narrower destination.
+        \\A value that is finite as `f64` can still overflow or underflow when the
+        \\annotation narrows it. For example, `x : f16 = 100000.0;` is accepted
+        \\and stores positive infinity because `f16` stops at 65504.
     );
     note(28, #string,oneline
-        \\Those values do not print usefully on every target. Where the host C
-        \\runtime formatter is not used, `print` renders a float as an integer
-        \\part plus six fraction digits, so an infinity or any magnitude past the
-        \\64-bit range prints as a fixed piece of nonsense: `print("%\n",
-        \\6.02e23);` gives `9223372036854775809`. Formatting is covered in
-        \\`Show`, `FromString`, and `print` Formatting.
+        \\The range check concerns the token's `f64` payload, not the eventual
+        \\storage width. It prevents a literal itself from silently becoming
+        \\infinity or nonzero-to-zero during lexing; it does not add a general
+        \\checked float-conversion rule.
     );
     paragraph(29, #string,oneline
         \\A float literal never reaches an integer target. `x : s64 = 1.5;` is
-        \\`error: cannot implicitly convert comptime_float to int`, and
+        \\`error: cannot implicitly convert comptime_float to isize`, and
         \\`x : u8 = 1.0;` is `error: cannot implicitly convert comptime_float to
         \\u8` even though the value is whole. That rule and its escape hatches
         \\are in Conversions: What Is Implicit.
@@ -661,15 +654,15 @@ render_section_10 :: () {
     paragraph(0, #string,oneline
         \\A string literal is written between double quotes. The scanner walks
         \\forward to the closing quote, stepping two characters over any
-        \\backslash pair so that an escaped quote does not end the literal, and
-        \\stores the raw source text found between the quotes.
+        \\backslash pair so that an escaped quote does not end the literal. It
+        \\then validates every escape and stores the raw source text found
+        \\between the quotes.
     );
     paragraph(1, #string,oneline
-        \\Decoding is deferred. The stored text still holds the backslashes as
+        \\Decoding is deferred: the stored text still holds the backslashes as
         \\written, and escapes become characters later, when the literal turns
-        \\into a value. One consequence is worth stating up front: no escape
-        \\sequence is ever a lexical error, because the scanner never inspects
-        \\the character after a backslash.
+        \\into a value. Validation is not deferred. An unknown escape, a malformed
+        \\hexadecimal escape, or an invalid Unicode scalar is a lexical error.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -680,15 +673,13 @@ render_section_10 :: () {
         \\    print("% % % % % % % %\n",
         \\        controls[0], controls[1], controls[2], controls[3],
         \\        controls[4], controls[5], controls[6], controls[7]);
-        \\    print("[%]\n", "\\ \" \' \? \x41");
-        \\    print("[%]\n", "\q\e\s");
+        \\    print("[%]\n", "\\ \" \' \? \x41 \u{03bb}");
         \\}
     );
     code_block(3, "text", #string
         \\count 8
         \\7 8 12 10 13 9 11 0
-        \\[\ " ' ? A]
-        \\[qes]
+        \\[\ " ' ? A λ]
     );
     subheading(4, "The escape table");
     table_header(5, "Escape   —   Result");
@@ -731,42 +722,39 @@ render_section_10 :: () {
     table_row(18, #string,oneline
         \\`\xHH`   |   The code point U+00HH; exactly two hexadecimal digits
     );
+    table_row(47, #string,oneline
+        \\`\u{H...}`   |   One Unicode scalar; one to six hexadecimal digits
+    );
     table_row(19, #string,oneline
         \\`\%`   |   Nothing; the backslash and the per-cent sign both survive
     );
-    table_row(20, #string,oneline
-        \\Anything else   |   The backslash is dropped and the character kept
-    );
     paragraph(21, #string,oneline
-        \\The last row is why a typo is silent. `"\q\e\s"` decodes to `qes`, and
-        \\a malformed hexadecimal escape degrades the same way: `"\xZZ"` is `xZZ`
-        \\because `Z` is not a hexadecimal digit, and `"\xA"` is `xA` because one
-        \\digit is not two.
+        \\The table is closed. `\x` requires exactly two hexadecimal digits.
+        \\`\u` requires braces, one to six hexadecimal digits, and a value that
+        \\is a Unicode scalar rather than a surrogate or a value above U+10FFFF.
+        \\Every other character after a backslash is rejected by name.
     );
-    code_block(22, "glosso", #string
-        \\#import "Io";
+    code_block(22, "text", #string
+        \\main :: () { _ := "\q"; }
+        \\error: unknown string escape '\q'
         \\
-        \\main :: () {
-        \\    print("[%]\n", "\q\e\s");
-        \\    print("[%]\n", "\xZZ");
-        \\    print("[%]\n", "\xA");
-        \\    print("[%]\n", "\x41\x42");
-        \\}
-    );
-    code_block(23, "text", #string
-        \\[qes]
-        \\[xZZ]
-        \\[xA]
-        \\[AB]
+        \\main :: () { _ := "\xA"; }
+        \\error: \x escape needs exactly two hexadecimal digits
+        \\
+        \\main :: () { _ := "\u{}"; }
+        \\error: \u escape needs hexadecimal digits and a closing '}'
+        \\
+        \\main :: () { _ := "\u{d800}"; }
+        \\error: \u escape is not a Unicode scalar value
     );
     subheading(24, #string,oneline
-        \\`\xHH` writes a code point, not a byte
+        \\`\xHH` and `\u{...}` write code points, not bytes
     );
     paragraph(25, #string,oneline
-        \\The two digits name a code point, not a storage byte. The character
-        \\they select is then stored in the string's UTF-8 encoding, so an escape
-        \\above `\x7f` occupies two bytes and `.count`, which counts bytes,
-        \\reports two.
+        \\The hexadecimal digits name a code point, not a storage byte. The
+        \\character they select is then stored in the string's UTF-8 encoding, so
+        \\an escape above `\x7f` may occupy several bytes and `.count`, which
+        \\counts bytes, reports the encoded length.
     );
     code_block(26, "glosso", #string
         \\#import "Io";
@@ -833,9 +821,9 @@ render_section_10 :: () {
     paragraph(38, #string,oneline
         \\A literal may span physical lines. The newline is part of the text, and
         \\the line counter is corrected afterwards so that later diagnostics
-        \\still report the right line. A backslash before a newline is not a line
-        \\continuation: it is consumed as an escape pair, the unknown-escape rule
-        \\drops the backslash, and the newline stays in the string.
+        \\still report the right line. A backslash immediately before a physical
+        \\newline is an explicitly accepted escape: decoding drops the backslash
+        \\and keeps the newline, so it is not a line continuation.
     );
     code_block(39, "glosso", #string
         \\#import "Io";
@@ -1022,14 +1010,20 @@ render_section_11 :: () {
         \\and may each be given at most once. `,oneline` changes the separator
         \\from a newline to a single space. `,escape` changes how the joined text
         \\is stored: without it the text is already final and backslashes stay
-        \\literal, with it the ordinary escape table described in the chapter on
-        \\string literals is applied to the joined text.
+        \\literal, with it the escape decoder described in the chapter on string
+        \\literals is applied to the joined text.
     );
     table_header(19, "Form   —   Separator   —   Escape decoding");
     table_row(20, "`#string`   |   newline   |   none: backslashes are literal");
     table_row(21, "`#string,oneline`   |   one space   |   none: backslashes are literal");
-    table_row(22, "`#string,escape`   |   newline   |   the ordinary escape table");
-    table_row(23, "`#string,escape,oneline`   |   one space   |   the ordinary escape table");
+    table_row(22, "`#string,escape`   |   newline   |   string-literal escape decoding");
+    table_row(23, "`#string,escape,oneline`   |   one space   |   string-literal escape decoding");
+    note(38, #string,oneline
+        \\Marked `#string` lines are tokenized separately and do not pass through
+        \\the quoted-literal escape validator. Use the documented escape forms
+        \\with `,escape`; malformed and unknown sequences are not guaranteed the
+        \\same clean lexical diagnostics as an ordinary quoted string.
+    );
     paragraph(24, #string,oneline
         \\The four forms differ on exactly two axes, so the same two marked lines
         \\produce four different strings. This program reports each result by
@@ -1143,11 +1137,9 @@ render_section_11 :: () {
         \\error: duplicate #string modifier 'escape'
     );
     note(37, #string,oneline
-        \\Capture stops at the newline character, not at the line ending. In a
-        \\file saved with CRLF line endings every line of a block therefore keeps
-        \\a trailing carriage return. The two-line block `alpha` / `beta` has
-        \\`count == 10` saved with LF and `count == 12` saved with CRLF, and
-        \\nothing in the program says which one it got.
+        \\Capture excludes the line ending. When the scanner finds LF it also
+        \\removes a CR immediately before it, so a two-line `alpha` / `beta`
+        \\block has `count == 10` in both LF and CRLF source files.
     );
 }
 
@@ -1178,9 +1170,10 @@ render_section_12 :: () {
     );
     paragraph(3, #string,oneline
         \\The form is the directive, then optional spaces and tabs, then a quoted
-        \\string holding exactly one character or one two-character escape. The
-        \\separator may be empty, so `#char"A"` is the same literal as `#char
-        \\"A"`. It may not contain a newline: a string on the following line is
+        \\string holding exactly one direct code point, one fixed two-character
+        \\escape, or one exact `\xHH` escape. The separator may be empty, so
+        \\`#char"A"` is the same literal as `#char "A"`. It may not contain a
+        \\newline: a string on the following line is
         \\`error: #char expects a string literal`.
     );
 
@@ -1219,8 +1212,8 @@ render_section_12 :: () {
     subheading(8, "The accepted escapes");
     paragraph(9, #string,oneline
         \\The scanner decodes the escape itself rather than deferring to the
-        \\string machinery, so `#char` has its own table. It is the C table
-        \\without the numeric forms.
+        \\string machinery, so `#char` has its own closed table. It uses the
+        \\fixed C escapes plus an exact two-digit hexadecimal form.
     );
     table_header(10, "Escape   —   Value   —   Character");
     table_row(11, "`\\a`   |   7   |   alert");
@@ -1235,6 +1228,7 @@ render_section_12 :: () {
     table_row(20, "`\\\"`   |   34   |   quotation mark");
     table_row(21, "`\\'`   |   39   |   apostrophe");
     table_row(22, "`\\?`   |   63   |   question mark");
+    table_row(36, "`\\xHH`   |   0 through 255   |   exactly two hexadecimal digits");
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
@@ -1242,30 +1236,38 @@ render_section_12 :: () {
         \\    print("a=% b=% f=% n=% r=% t=% v=%\n",
         \\        #char "\a", #char "\b", #char "\f", #char "\n",
         \\        #char "\r", #char "\t", #char "\v");
-        \\    print("0=% backslash=% quote=% apostrophe=% question=%\n",
-        \\        #char "\0", #char "\\", #char "\"", #char "\'", #char "\?");
-        \\    print("unknown escape = %\n", #char "\q");
+        \\    print("0=% backslash=% quote=% apostrophe=% question=% hex=%\n",
+        \\        #char "\0", #char "\\", #char "\"", #char "\'", #char "\?",
+        \\        #char "\x41");
         \\}
     );
     code_block(24, "text", #string
         \\a=7 b=8 f=12 n=10 r=13 t=9 v=11
-        \\0=0 backslash=92 quote=34 apostrophe=39 question=63
-        \\unknown escape = 113
+        \\0=0 backslash=92 quote=34 apostrophe=39 question=63 hex=65
     );
     paragraph(25, #string,oneline
-        \\An escape outside the table yields the escaped character itself, which
-        \\is why `#char "\q"` is `113`, the code of `q`. The escaped character is
-        \\taken as a single byte, so escaping a character outside ASCII truncates
-        \\it: `#char "\λ"` is `187`, the low byte of `955`.
+        \\An escape outside the table is rejected instead of dropping its
+        \\backslash. Thus `#char "\q"` reports
+        \\`error: unknown #char escape '\q'`. Escaping a direct non-ASCII
+        \\character is rejected too rather than truncating the code point.
     );
     paragraph(26, #string,oneline
-        \\There is no `\xHH` form, and no `\u{...}` form either. The scan accepts
-        \\one character or one backslash-plus-character pair and nothing longer,
-        \\so a numeric escape trips the length check.
+        \\`\xHH` requires exactly two hexadecimal digits and produces that byte
+        \\value. There is no `\u{...}` form for `#char`; write a non-ASCII code
+        \\point directly between the quotes instead.
     );
     code_block(27, "text", #string
         \\main :: () { c := #char "\x41"; }
-        \\error: #char string literal contains more than two characters
+        \\accepted: c is 65
+        \\
+        \\main :: () { c := #char "\x4"; }
+        \\error: #char \x escape needs exactly two hexadecimal digits
+        \\
+        \\main :: () { c := #char "\q"; }
+        \\error: unknown #char escape '\q'
+        \\
+        \\main :: () { c := #char "ab"; }
+        \\error: #char string literal must contain exactly one character
         \\
         \\main :: () { c := #char ""; }
         \\error: #char expects one character
@@ -1295,7 +1297,7 @@ render_section_12 :: () {
     table_row(33, "above `0x7f`   |   `u32`   |   `u32`");
     code_block(34, "text", #string
         \\main :: () { c : s64 = #char "A"; }
-        \\error: ASCII #char literal can infer only as u8, s8, or u32, not int
+        \\error: ASCII #char literal can infer only as u8, s8, or u32, not isize
         \\
         \\main :: () { c : u16 = #char "A"; }
         \\error: ASCII #char literal can infer only as u8, s8, or u32, not u16
@@ -1329,7 +1331,7 @@ render_section_13 :: () {
         \\here with the rest.
     );
     table_header(3, "Spelling   —   Token   —   Meaning");
-    table_row(4, "`;`   |   Semicolon   |   statement terminator");
+    table_row(4, "`;`   |   Semicolon   |   statement and declaration terminator; grammar delimiter");
     table_row(5, "`,`   |   Comma   |   separator in lists and literals");
     table_row(6, "`,,`   |   CommaComma   |   nonlocal label, as in `main,,'entry`");
     table_row(7, "`.`   |   Dot   |   member access");
@@ -1339,6 +1341,7 @@ render_section_13 :: () {
     table_row(11, "`...`   |   Ellipsis   |   variadic parameter and the rest pattern");
     table_row(12, "`:`   |   Colon   |   type annotation");
     table_row(13, "`::`   |   ColonColon   |   constant binding");
+    table_row(43, "`:::`   |   TripleColon   |   separates an instance head from `instance`");
     table_row(14, "`:=`   |   ColonEqual   |   variable binding");
     table_row(15, "`::=`   |   ColonColonEqual   |   compile-time binding");
     table_row(16, "`=`   |   Equal   |   assignment");
@@ -1359,9 +1362,9 @@ render_section_13 :: () {
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
-        \\Point :: struct { x: int; y: int; }
+        \\Point :: struct { x: isize; y: isize; }
         \\
-        \\sum_all :: (values: ...int) -> int {
+        \\sum_all :: (values: ...isize) -> isize {
         \\    total := 0;
         \\    for v : values total += v;
         \\    return total;
@@ -1371,10 +1374,10 @@ render_section_13 :: () {
         \\    K :: 10;                          // ::   constant binding
         \\    n := 3;                           // :=   variable binding
         \\    m ::= 6 * 7;                      // ::=  compile-time binding
-        \\    q : int = 5;                      // :    type annotation
+        \\    q : isize = 5;                      // :    type annotation
         \\    q = 6;                            // =    assignment
         \\    p : Point = .{ .x = 1, .y = 2 };  // .{   aggregate literal
-        \\    a : [5]int = .[10, 20, 30, 40, 50];
+        \\    a : [5]isize = .[10, 20, 30, 40, 50];
         \\    t := .(1, "two");                 // .(   Dot then LParen
         \\    print("K=% n=% m=% q=% p=% a=% t=%\n", K, n, m, q, p.x, a[2], t.0);
         \\    print("full=% tail=% head=% mid=%\n",
@@ -1403,7 +1406,7 @@ render_section_13 :: () {
     paragraph(28, #string,oneline
         \\What is absent matters as much as what is present. `$`, `#`, `\`, `'`,
         \\backtick, `"`, `;` and the six bracket characters are not operator
-        \\characters, so they always end an operator run. That is why `x: []int`
+        \\characters, so they always end an operator run. That is why `x: []isize`
         \\and `Err![]T` lex the way they read, and why an operator whose name
         \\contains a bracket can only be written in the quoted form described in
         \\the chapter on reserved operators.
@@ -1419,8 +1422,10 @@ render_section_13 :: () {
         \\suffix composes with whatever follows it. A lone `@` is taken by
         \\itself, but only when no operator character follows, which keeps `@=`
         \\and `@>` available as user spellings. After `:` the scanner checks the
-        \\fixed forms `::=`, `::` and `:=` first, then falls into the general
-        \\scan unless the next character is `*`. After `=` it falls into the
+        \\fixed forms `:::`, `::=`, `::` and `:=` first, then falls into the
+        \\general scan unless the next character is `*`. The order is
+        \\load-bearing: `T ::: instance C` is one `TripleColon` token, not a
+        \\constant-binding token followed by a colon. After `=` it falls into the
         \\general scan whenever another operator character follows. A trailing
         \\`.` is handed back when the character after it could start a
         \\non-operator token, which is what makes `p.*.b` parse; if a token still
@@ -1430,11 +1435,11 @@ render_section_13 :: () {
     table_row(32, "`a = -1`   |   `=` `-` `1`   |   assignment of a negated literal");
     table_row(33, "`a =-1`   |   `=-`   |   `error: unexpected token '=-'`");
     table_row(34, "`1 ++2`   |   `++`   |   `error: unexpected token '++'`");
-    table_row(35, "`o: ?int`   |   `:` then `?int`   |   an optional annotation");
-    table_row(36, "`o:?int`   |   `:` alone   |   `error: reserved operator token ':'`");
-    table_row(37, "`p:*int`   |   `:` `*`   |   works, by the `*` exception");
-    table_row(38, "`Err! *int`   |   `!` `*`   |   a result of a pointer");
-    table_row(39, "`Err!*int`   |   `!*`   |   `error: unexpected token '!*'`");
+    table_row(35, "`o: ?isize`   |   `:` then `?isize`   |   an optional annotation");
+    table_row(36, "`o:?isize`   |   `:` alone   |   `error: reserved operator token ':'`");
+    table_row(37, "`p:*isize`   |   `:` `*`   |   works, by the `*` exception");
+    table_row(38, "`Err! *isize`   |   `!` `*`   |   a result of a pointer");
+    table_row(39, "`Err!*isize`   |   `!*`   |   `error: unexpected token '!*'`");
     table_row(40, "`2 * p.*.b`   |   `*` `.` `*` `.` `b`   |   works, by the trailing-dot rule");
     table_row(41, "`2 *. 3`   |   `*.`   |   `error: operator token cannot end with '.'`");
     note(42, #string,oneline
@@ -1448,7 +1453,7 @@ render_section_13 :: () {
 
 render_section_14 :: () {
     paragraph(0, #string,oneline
-        \\Fourteen operator spellings are reserved. The check lives in the
+        \\Fifteen operator spellings are reserved. The check lives in the
         \\scanner and fires on the token, not on the declaration, so it catches a
         \\reserved spelling written as a quoted operator name and a reserved
         \\spelling that reaches operator position by accident with the same
@@ -1476,6 +1481,7 @@ render_section_14 :: () {
     table_row(9, "`,,`   |   nonlocal label constructor");
     table_row(10, "`:=`   |   variable binding");
     table_row(11, "`::`   |   constant binding");
+    table_row(41, "`:::`   |   instance declaration separator");
     table_row(12, "`:`   |   type annotation");
     table_row(13, "`->`   |   return-type arrow");
     table_row(14, "`::=`   |   compile-time binding");
@@ -1490,6 +1496,12 @@ render_section_14 :: () {
         \\scanner and reports `error: reserved operator token '.' (operator '.'
         \\cannot be overloaded)`. So does `. {`, written with a space, which is
         \\why `.{` has to be spelled without one.
+    );
+    note(42, #string,oneline
+        \\The instance separator is reserved all the way down in the lexer.
+        \\Writing `':::'` as an operator name reports `reserved operator token
+        \\':::' (operator ':::' cannot be overloaded)`, and the former
+        \\`T :: instance C` form no longer parses. Write `T ::: instance C`.
     );
 
     subheading(21, "Why `..`, `..=` and `?` are not on the list");
@@ -1644,9 +1656,9 @@ render_section_15 :: () {
         \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
         \\}
         \\
-        \\(int, int) :: instance Mod {
-        \\    Output :: int;
-        \\    '%%' :: (a: int, b: int) -> Output { return a * 10 + b; }
+        \\(isize, isize) ::: instance Mod {
+        \\    Output :: isize;
+        \\    '%%' :: (a: isize, b: isize) -> Output { return a * 10 + b; }
         \\}
     );
     code_block(16, "text", #string
@@ -1692,16 +1704,16 @@ render_section_15 :: () {
     );
     code_block(24, "glosso", #string
         \\// Mod2.glo: combine uses %% on its first line, before the declaration
-        \\combine :: (a: int, b: int) -> int { return a %% b; }
+        \\combine :: (a: isize, b: isize) -> isize { return a %% b; }
         \\
         \\Mod :: typeclass (L: type, R: type) {
         \\    Output :: type;
         \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
         \\}
         \\
-        \\(int, int) :: instance Mod {
-        \\    Output :: int;
-        \\    '%%' :: (a: int, b: int) -> Output { return a * 10 + b; }
+        \\(isize, isize) ::: instance Mod {
+        \\    Output :: isize;
+        \\    '%%' :: (a: isize, b: isize) -> Output { return a * 10 + b; }
         \\}
     );
     code_block(25, "glosso", #string

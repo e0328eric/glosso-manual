@@ -101,7 +101,7 @@ render_section_142 :: () {
     );
     subheading(17, "Modules that are one file");
     paragraph(18, #string,oneline
-        \\These fifteen names resolve to a single `.glo` file at the top of the
+        \\These fourteen names resolve to a single `.glo` file at the top of the
         \\tree, and each imports on its own.
     );
     table_header(19, "Module   —   Purpose");
@@ -109,7 +109,6 @@ render_section_142 :: () {
     table_row(21, "`Bindgen`   |   Compile-time generation of bindings from a C header.");
     table_row(22, "`Compiler`   |   The compile-time build API: nested compiles, C archives, build options.");
     table_row(23, "`Context`   |   The allocator procedures and constructors behind the implicit `context`.");
-    table_row(24, "`File_System`   |   Filesystem prelude: typed handles, paths, metadata, directories.");
     table_row(25, "`Format`   |   String formatting entry points, including `format_int`.");
     table_row(26, "`Html`   |   Lightweight HTML parsing, crawling, and extraction.");
     table_row(27, "`Io`   |   The stream umbrella: `print`, writers, readers, scanning, files.");
@@ -120,6 +119,31 @@ render_section_142 :: () {
     table_row(32, "`Terminal`   |   A dependency-free terminal and TUI toolkit.");
     table_row(33, "`Thread`   |   Native threading primitives layered on `Os`.");
     table_row(34, "`VarArg`   |   C ABI `va_list` support: `Va_List`, `start`, `arg`, `end`.");
+    subheading(75, "Terminal sessions and structured events");
+    paragraph(76, #string,oneline
+        \\A `Terminal_Session` returned by `terminal_begin` owns every terminal
+        \\setting it changes. Pair it with `terminal_end`, normally through
+        \\`defer`, so input modes, the cursor, and the alternate screen are
+        \\restored even when the program leaves early.
+    );
+    paragraph(77, #string,oneline
+        \\Call `terminal_read_event` for a `Terminal_Event` whose nonempty
+        \\`Terminal_Event_Kind` is `Key`, `Mouse`, `Resize`, or `Focus`.
+        \\`terminal_read_key` is the
+        \\compatibility wrapper: while waiting for a key it consumes and
+        \\discards mouse, resize, and focus events.
+    );
+    paragraph(78, #string,oneline
+        \\Windows reads `ReadConsoleInputW` records and uses native console
+        \\controls where they preserve the same behavior; other terminals
+        \\decode ANSI/UTF-8 keys, SGR mouse reports, and focus reports. Mouse
+        \\coordinates are zero-based and relative to the current viewport, with
+        \\horizontal wheel buttons and separate `moved`, `dragged`, and
+        \\`double_click` flags. A classic Windows console cannot emulate every
+        \\VT feature: alternate-screen sessions, canvas rendering, styling, and
+        \\other ANSI-only controls can report `.Unsupported` when VT output is
+        \\unavailable.
+    );
     subheading(35, "Modules that are a directory");
     paragraph(36, #string,oneline
         \\These thirteen directories carry a `module.glo`, so the whole
@@ -143,24 +167,24 @@ render_section_142 :: () {
     table_row(50, "`Unicode`   |   UTF-8 helpers plus the generated character tables.");
     subheading(51, "Namespace directories");
     paragraph(52, #string,oneline
-        \\These six directories have no `module.glo` and no sibling file, so the
+        \\These seven directories have no `module.glo` and no sibling file, so the
         \\directory name is not importable at all. Every component listed is
         \\importable by path, subject to the caveat below.
     );
     table_header(53, "Directory   —   Components");
     table_row(54, "`Container`   |   `BTreeMap`, `BTreeSet`, `BinaryHeap`, `Deque`, `LinkedList`, `HashMap`, `HashSet`, `Hash`, `Error`.");
     table_row(55, "`Crypto`   |   `Aes`, `AesGcm`, `ChaCha20`, `ChaCha20Poly1305`, `Poly1305`, `Sha1`, `Sha2`, `Sha3`, `Hmac`, `Kdf`, `ConstantTime`, `Encoding`, `Random`, `Error`.");
+    table_row(62, "`File_System`   |   `Atomic`, `Copy`, `Directory`, `File`, `Map`, `Metadata`, `Native`, `Path`, `Sandbox`, `System`, `Temporary`, `Types`, `Walk`, `Watch`.");
     table_row(56, "`Math`   |   `Core`, `Constants`, `Bit`, `Complex`, `Matrix`, `NumberTheory`.");
     table_row(57, "`Net`   |   `Address`, `Socket`, `Poll`, `Async`, `Dns`, `Dns_Types`, `Resolver`, `Hosts`, `Interface`, `Platform`, `Url`, `Encoding`, `Http`, `Http_Types`, `Http_Auth`, `Http_Server`, `Https`, `Tls`, `Certificate`, `Trust_Store`, `WebSocket`, `Types`.");
     table_row(58, "`Serialization`   |   `Core`, `Json`, `Toml`, `Yaml`, `MessagePack`.");
     table_row(59, "`Strings`   |   `Utf8`, `Utf16`.");
     paragraph(60, #string,oneline
-        \\Three names are both a file and a directory. The file is what
+        \\Two names are both a file and a directory. The file is what
         \\`#import` resolves to, because the directory has no `module.glo`; the
         \\directory holds the components that the file deliberately leaves out.
     );
     table_header(61, "Module   —   Included by the file   —   Explicit only");
-    table_row(62, "`File_System`   |   `Types`, `Path`, `File`, `Directory`, `Metadata`, `System`   |   `Copy`, `Temporary`, `Atomic`, `Walk`, `Map`, `Watch`, `Sandbox`, `Native`");
     table_row(63, "`Io`   |   `Core`, `Transfer`, `Adapters`, `Buffer`, `Scan`, `Vector`, `Binary`, `Hash`, `Format`, `Terminal`   |   none");
     table_row(64, "`Process`   |   the small prelude only   |   `Arguments`, `Child`, `Command`, `Environment`, `Inspection`, `Limits`, `Pipe`, `Scheduling`, `Signals`, `System`, `User`");
     note(65, #string,oneline
@@ -267,16 +291,19 @@ render_section_143 :: () {
         \\INT       = decimal | based | charlit ;
         \\decimal   = digit { digit | "_" } ;
         \\based     = decimal "#" basedigit { basedigit | "_" } ;   (* base 2 to 36 *)
-        \\charlit   = "#char" STRING ;                              (* one code point *)
+        \\charlit   = "#char" quote ( codepoint | char-escape | "\x" hex hex ) quote ;
         \\FLOAT     = decimal "." decimal [ exponent ] | decimal exponent ;
         \\exponent  = ( "e" | "E" ) [ "+" | "-" ] digit { digit } ;
-        \\STRING    = quote { any - quote | "\" any } quote ;
+        \\STRING    = quote { any - quote - "\" | string-escape } quote ;
+        \\string-escape = "\" fixed-escape | "\x" hex hex
+        \\              | "\u{" hex [ hex [ hex [ hex [ hex [ hex ] ] ] ] ] "}" ;
         \\MLSTR     = "\\" { any - newline } ;
         \\DIRECTIVE = "#" { letter | digit | "_" } ;
         \\OPNAME    = "'" { opchar } "'" ;
         \\LABEL     = "'" IDENT ;                                   (* no closing quote *)
         \\BACKTICK  = "`" IDENT ;
         \\DBACKTICK = "``" IDENT ;
+        \\TRIPLECOLON = ":::" ;                                  (* reserved *)
         \\OP        = opchar { opchar } ;                           (* maximal munch *)
         \\opchar    = "+" | "-" | "*" | "/" | "<" | ">" | "!" | "@" | "%"
         \\          | "^" | "&" | "|" | "~" | "?" | "." | "," | ":" | "=" ;
@@ -298,46 +325,97 @@ render_section_143 :: () {
         \\feature     = ( "#enable" | "#disable" ) "(" IDENT [ "," IDENT ] ")" [ ";" ] ;
         \\
         \\declaration = "#memory" overlay
-        \\            | "#insert" expression [ ";" ]
-        \\            | "#comptime" ( [ "->" type ] block | expression [ ";" ] )
+        \\            | "#insert" insertoperand ";"
+        \\            | "#comptime" ( block | "->" type block [ ";" ]
+        \\                           | expression ";" )
         \\            | "#import" importtail
-        \\            | "#load" STRING [ ";" ]
+        \\            | "#load" STRING ";"
         \\            | "#thread_local" declaration
         \\            | instance
         \\            | binding ;
         \\
-        \\binding     = name ( ":=" | "::=" ) expression [ ";" ]
-        \\            | name ":" [ type ] globaltail
-        \\            | name "::" bound ;
+        \\binding     = name "::" ( definition | expression ";" )
+        \\            | name ( ":=" | "::=" ) ( definition | expression ";" )
+        \\            | name ":" [ type ] globaltail ;
         \\
         \\name        = IDENT | OPNAME ;
         \\
-        \\globaltail  = ( ":" | "::" ) expression [ ";" ]   (* typed constant *)
-        \\            | ( "=" | ":=" ) expression [ ";" ]   (* typed global *)
+        \\globaltail  = ( ":" | "::" ) ( definition | expression ";" )
+        \\            | ( "=" | ":=" ) expression ";"       (* typed global *)
         \\            | ";" ;                               (* zero initialised *)
         \\
-        \\bound       = typeclass | distinct | import | load | library
+        \\definition  = typeclass | distinct ";" | import | load | library
         \\            | fnptr | struct | enum | enumflags | union
-        \\            | procedure | expression [ ";" ] ;
+        \\            | procedure ;
         \\
         \\import      = "#import" importtail ;
         \\importtail  = [ "," ( "only" | "hide" ) "(" [ name { "," name } ] ")" ]
-        \\              STRING [ ";" ] ;
-        \\load        = "#load" STRING [ ";" ] ;
+        \\              STRING ";" ;
+        \\load        = "#load" STRING ";" ;
         \\library     = "#library" { "," ( "static" | "system" | "dyn" ) }
-        \\              STRING [ ";" ] ;
+        \\              STRING ";" ;
         \\fnptr       = "#fn_ptr" "(" [ params ] ")" [ "->" type ]
         \\              { "#c_call" | "#no_context" | "#memory" effects }
-        \\              [ ";" ] ;
-        \\distinct    = "distinct" type { distderive } [ ";" ] ;
+        \\              ";" ;
+        \\distinct    = "distinct" type { distderive } ;
         \\distderive  = "#derive" ( "," "all" | "(" type { "," type } ")" ) ;
         \\derive      = "#derive" "(" IDENT { "," IDENT } ")" ;
+        \\insertoperand = [ "," "scope" "(" [ expression ] ")" ]
+        \\                ( [ "->" type ] block | expression ) ;
     );
     paragraph(18, #string,oneline
-        \\The trailing `;` is optional after every top-level form, because the
-        \\parser consumes one only if it is there. `#thread_local` is checked
-        \\after its inner declaration is parsed and is rejected on anything but
-        \\a global variable.
+        \\A top-level form whose production does not finish with its own braced
+        \\definition body must end with `;`. Omitting it is `error: declaration
+        \\must end with ';'`, framed just after the declaration's last token. A
+        \\procedure with a body, aggregate, typeclass, instance, or bare braced
+        \\`#comptime` step instead ends at `}`; a following semicolon is a new,
+        \\invalid declaration. `#enable` and `#disable` are section directives
+        \\outside the declaration loop, and a `#memory` overlay consumes its own optional
+        \\semicolon, so those exceptions remain optional. The typed
+        \\`#comptime -> T { ... }` form likewise accepts an optional semicolon.
+        \\`#thread_local` is checked after its inner declaration is parsed and is
+        \\rejected on anything but a global variable. One parser loophole is not
+        \\part of the grammar: because a parsed block records a definition-body
+        \\boundary even inside an expression, a declaration ending in a block
+        \\expression such as `K :: #code { value }` may currently slip through
+        \\without `;`. Do not rely on it.
+    );
+    paragraph(178, #string,oneline
+        \\The `definition` alternative is deliberately shared by `::`, `:=`,
+        \\`::=`, and a typed second `:` or `::`. A definition-shaped initializer
+        \\therefore creates a named type, procedure, namespace, library, or macro
+        \\rather than an ordinary constant or global. An explicit annotation
+        \\describes that declaration value and is checked against its actual
+        \\kind; without one, the same kind is inferred.
+    );
+    code_block(179, "glosso", #string
+        \\Point : type : struct { x: isize; }
+        \\double : (isize) -> isize : (value: isize) -> isize { return value * 2; }
+        \\Io : Namespace : #import "Io";
+        \\kernel32 : Library : #library,system "kernel32";
+        \\Show_One : Typeclass(type) : typeclass(T: type) {
+        \\    show_one :: (value: T) -> string;
+        \\}
+        \\trace : Macro((isize) -> void) : (value: isize) #expand { _ := value; }
+        \\Auto_Point := struct { x: isize; }
+        \\auto_main ::= () {}
+    );
+    table_header(180, "Definition   —   Its explicit declaration annotation");
+    table_row(181, "aggregate, `distinct`, `#fn_ptr`   |   `type`");
+    table_row(182, "`#import`, `#load`   |   `Namespace`");
+    table_row(183, "`#library`   |   `Library`");
+    table_row(184, "typeclass with parameter kinds `K...`   |   `Typeclass(K...)`");
+    table_row(185, "macro with signature `F`   |   `Macro(F)`");
+    table_row(78, "ordinary procedure   |   its procedure type");
+    note(79, #string,oneline
+        \\`Namespace` and `Library` are case-sensitive compile-time-only types.
+        \\`Typeclass(K...)` and `Macro(F)` are parameterized forms recognized in
+        \\an explicit declaration annotation: `Typeclass` needs at least one
+        \\parameter kind, and `Macro` takes exactly one procedure signature.
+        \\They are not generally callable type constructors in ordinary
+        \\expressions—`row(Typeclass(type))` is an unresolved function call, for
+        \\example. The old lowercase `namespace`, `library`, and `pattern` type
+        \\spellings do not resolve.
     );
     code_block(19, "glosso", #string
         \\#import "Io";
@@ -393,8 +471,13 @@ render_section_143 :: () {
     );
     subheading(24, "Procedures");
     code_block(25, "ebnf", #string
-        \\procedure   = "(" [ params ] ")" [ "->" rettype ]
-        \\              { fndir } { where } ( block | ";" ) ;
+        \\procedure   = definedproc | bodylessproc ";" ;
+        \\definedproc = procbase { regularfndir } { where } block ;
+        \\bodylessproc = procbase { regularfndir } bodylessdir
+        \\               { regularfndir } { where } ;
+        \\nestedproc  = definedproc | bodylessproc [ ";" ] ;
+        \\classproc   = definedproc | procbase { fndir } { where } ";" ;
+        \\procbase    = "(" [ params ] ")" [ "->" rettype ] ;
         \\
         \\params      = param { "," param } [ "," "..." ] [ "," ] ;
         \\param       = { "using" | "noalias" } { "#comptime" | "#lazy" }
@@ -407,16 +490,17 @@ render_section_143 :: () {
         \\rettype     = type | "(" [ resultlist ] ")" ;
         \\resultlist  = [ IDENT ":" ] type { "," [ IDENT ":" ] type } ;
         \\
-        \\fndir       = "#expand" [ "," "expression" ]
+        \\fndir       = regularfndir | bodylessdir ;
+        \\regularfndir = "#expand" [ "," "expression" ]
         \\            | "#inline" [ "," ( "always" | "never" ) ]
         \\            | "#operator" "(" mode [ "," INT ] ")"
         \\            | "#precedence" "(" mode "," INT ")"
-        \\            | "#magic" STRING
-        \\            | "#foreign" ( STRING | IDENT ) [ STRING ]
         \\            | "#memory" effects
         \\            | "#modify" ( block | expression )
         \\            | "#c_call" | "#no_context" | "#noreturn"
         \\            | "#returns_twice" | "#dump" | "#must" ;
+        \\bodylessdir = "#magic" STRING
+        \\            | "#foreign" ( STRING | IDENT ) [ STRING ] ;
         \\mode        = "left" | "right" | "assign" | "prefix" | "suffix" ;
         \\where       = "where" expression ;
         \\
@@ -458,6 +542,23 @@ render_section_143 :: () {
         \\only `left`, `right` or `assign`, and its level must be between 0 and
         \\1000.
     );
+    paragraph(81, #string,oneline
+        \\A `#expand` procedure with an explicit result other than `void` is a
+        \\value macro automatically. Its body may contain several statements,
+        \\branches, and static recursion, provided every reachable path returns a
+        \\value. The older `#expand,expression` form remains for a macro whose
+        \\result is inferred; that form must still reduce to exactly one
+        \\`return <expression>;` (or equivalent static branches).
+    );
+    note(82, #string,oneline
+        \\Control flow in a macro distinguishes its own expansion from its
+        \\caller explicitly. Plain `return` supplies the macro's value, while
+        \\prefixing `return` with a backtick leaves the procedure that invoked
+        \\the macro. Plain `defer` runs inside the macro before its value
+        \\returns; prefixing `defer` with a backtick registers the statement in
+        \\the caller. A backtick likewise selects a caller name for reads and
+        \\writes, not only for declarations.
+    );
     subheading(27, "Typeclasses and instances");
     code_block(28, "ebnf", #string
         \\typeclass   = "typeclass" "(" [ tcparams ] ")" { where }
@@ -467,16 +568,18 @@ render_section_143 :: () {
         \\disjunction = conjunction { "|" conjunction } ;
         \\conjunction = atom { "," atom } ;
         \\atom        = name | "(" disjunction ")" ;
-        \\member      = name "::" ( procedure | type ";" ) ;
+        \\member      = name "::" ( classproc | type ";" ) ;
         \\
-        \\instance    = head "::" "instance" [ "!" ] IDENT { where }
+        \\instance    = head ":::" "instance" [ "!" ] IDENT { where }
         \\              "{" { member } "}" ;
-        \\head        = token { token } ;   (* every token up to the "::" *)
+        \\head        = token { token } ;   (* every token up to the ":::" *)
     );
     paragraph(29, #string,oneline
-        \\An instance is found by scanning forward for a `::` at bracket depth
+        \\An instance is found by scanning forward for a `:::` at bracket depth
         \\zero whose next token is the identifier `instance`; everything before
-        \\that `::` is the head, taken as raw tokens and re-parsed as a type.
+        \\that `:::` is the head, taken as raw tokens and re-parsed as a type.
+        \\`:::` is a dedicated, reserved lexer token; the former `:: instance`
+        \\spelling is rejected rather than interpreted as an instance.
         \\`#minimal` sits between the header and the body, so a `#minimal`
         \\written after the closing brace is read as a new declaration and fails
         \\with `error: bad decl name 'minimal'`. A member whose body is a type
@@ -498,12 +601,12 @@ render_section_143 :: () {
         \\    }
         \\}
         \\
-        \\(s32, s32) :: instance Scale {
+        \\(s32, s32) ::: instance Scale {
         \\    Output :: s32;
         \\    scale_by :: (a: s32, b: s32) -> s32 { return a * b; }
         \\}
         \\
-        \\([]$T) :: instance Sized where Show(T) {
+        \\([]$T) ::: instance Sized where Show(T) {
         \\    Item :: T;
         \\    measure :: (c: []T) -> s64 { return c.count; }
         \\}
@@ -595,7 +698,8 @@ render_section_143 :: () {
         \\            | "true" | "false" | "null" | IDENT | OPNAME
         \\            | BACKTICK | DBACKTICK | "$" IDENT
         \\            | "#undefined" | "#string" strmods MLSTR { MLSTR }
-        \\            | "#simd" arraylit | "#code" block
+        \\            | "#simd" arraylit | "#code" codequote
+        \\            | "#insert" insertoperand
         \\            | "#inline" ( "while" expression body | for )
         \\            | lambda
         \\            | "." "(" [ expression { "," expression } ] ")"
@@ -605,6 +709,7 @@ render_section_143 :: () {
         \\arraylit    = ".[" [ expression { "," expression } ] "]" ;
         \\fields      = { [ "." namelike "=" ] expression [ "," ] } ;
         \\strmods     = { "," ( "oneline" | "escape" ) } ;
+        \\codequote   = block | statement ;
         \\
         \\lambda      = ( "|" [ lparams ] ( "|" | "|->" ) | "||" | "||->" )
         \\              [ "->" type ] ( block | expression ) ;
@@ -623,6 +728,15 @@ render_section_143 :: () {
         \\but disagree about associativity cannot be mixed without parentheses,
         \\and the parser says which two.
     );
+    note(80, #string,oneline
+        \\A `#code` quote may contain a braced statement list, one unbraced
+        \\statement, or a parenthesised expression such as `#code (a < b)`.
+        \\The single-statement form borrows its terminator from the surrounding
+        \\delimiter, which is a contextual exception to the `statement` grammar.
+        \\`#insert` is a primary expression as well as a statement, declaration,
+        \\and pattern splice; `#insert,scope() code` resolves a `Code` value in
+        \\the insertion environment.
+    );
     code_block(39, "text", #string
         \\error: operators '<+' and '+>' both have precedence 19 but different associativity, so '<+ +>' is ambiguous; add parentheses
     );
@@ -639,17 +753,17 @@ render_section_143 :: () {
         \\body        = block | statement ;
         \\
         \\statement   = "#memory" ( trusted | overlay )
-        \\            | name "::" ( procedure | struct | enum | union | distinct )
+        \\            | name "::" nesteddecl
         \\            | block
         \\            | "#bytes" expression [ ";" ]
         \\            | "#asm" asmbody
         \\            | LABEL ( ":" | ";" )
-        \\            | "return" [ expression { "," expression } ] [ ";" ]
+        \\            | return
         \\            | "break" [ ";" ] | "continue" [ ";" ]
         \\            | "while" expression body
         \\            | for
         \\            | "#inline" ( "while" expression body | for )
-        \\            | [ "#try" ] "defer" statement
+        \\            | [ "#try" ] "defer" statement | "`defer" statement
         \\            | "using" IDENT [ ";" ]
         \\            | if | "#if" staticif
         \\            | "#push_context" [ expression ] body
@@ -658,16 +772,19 @@ render_section_143 :: () {
         \\            | "#assert" [ "#comptime" ] expression
         \\                        [ "," expression ] [ ";" ]
         \\            | "#compile_error" expression [ ";" ]
-        \\            | "#insert" expression [ ";" ]
+        \\            | "#insert" insertoperand [ ";" ]
+        \\            | patternlet [ ";" ]
         \\            | vardecl
-        \\            | expression [ ( "=" | assignop ) expression ] [ ";" ] ;
+        \\            | expression [ ( "=" | assignop ) expression ] ";" ;
         \\
-        \\vardecl     = names ( ":=" | "::=" | "::" ) expression memdir [ ";" ]
-        \\            | names ":" ":=" expression memdir [ ";" ]
-        \\            | names ":" [ type ] vartail memdir [ ";" ] ;
+        \\nesteddecl  = nestedproc | struct | enum | union | distinct [ ";" ] ;
+        \\return      = ( "return" | "`return" )
+        \\              ( ";" | expression { "," expression } ";" ) ;
+        \\patternlet  = "#pattern" pattern ":=" expression "else" block ;
+        \\vardecl     = names ( ":=" | "::=" | "::" ) expression memdir ";"
+        \\            | names ":" ( type [ vartail ] | vartail ) memdir ";" ;
         \\names       = namelike { "," namelike } ;
-        \\vartail     = [ "=" expression | ":=" expression
-        \\              | ( "::" | ":" ) expression ] ;
+        \\vartail     = ( "=" | ":=" | "::" | ":" ) expression ;
         \\memdir      = { "#memory" effects } ;
         \\
         \\if          = "if" [ "#partial" ]
@@ -693,7 +810,7 @@ render_section_143 :: () {
         \\              "}" [ ";" ]
         \\            | ( MLSTR { MLSTR } | expression )
         \\              [ ":" [ legacyops ] [ ":" [ legacyops ]
-        \\                    [ ":" [ STRING { "," STRING } ] ] ] ] [ ";" ] ;
+        \\                    [ ":" [ STRING { "," STRING } ] ] ] ] ";" ;
         \\asmoperand  = IDENT ":" ( "in" | "out" | "inout" )
         \\              "(" constraint [ "," ".Early_Clobber" ] ")"
         \\              [ "=" ( expression | IDENT ) ] ";" ;
@@ -707,7 +824,16 @@ render_section_143 :: () {
         \\A nested `name :: (...)`, `struct`, `enum`, `union` or `distinct` is
         \\parsed as a declaration and hoisted to file scope, leaving nothing
         \\behind in the body; a nested `name :: expression` is an ordinary local
-        \\constant and is not hoisted. `#falling` must be the last statement of
+        \\constant and is not hoisted. A nested `distinct` and a bodyless nested
+        \\`#foreign` or `#magic` procedure currently accept an optional `;`;
+        \\braced nested definitions do not. The required terminator on a local
+        \\declaration, assignment, expression statement, value-bearing `return`,
+        \\or legacy `#asm` is waived immediately before `}` inside a
+        \\`#code` quote, including before a nested block's closing brace. In an
+        \\expression-position `#inline while` or `#inline for`, an ordinary
+        \\expression statement in the generated body may use
+        \\`,` instead. These are contextual parser rules omitted from the EBNF.
+        \\`#falling` must be the last statement of
         \\its arm, and anything written after it is
         \\`error: '#falling' must be the last statement of a case`. An `ifx`
         \\conditional has no one-armed form, because it must produce a value on
@@ -750,8 +876,8 @@ render_section_143 :: () {
     );
     subheading(46, "Patterns");
     code_block(47, "ebnf", #string
-        \\patternexpr = "#pattern" ( pattern ":=" expression "else" block
-        \\                         | "{" { arm [ ";" | "," ] } "}"
+        \\patternexpr = patternlet
+        \\            | "#pattern" ( "{" { arm [ ";" | "," ] } "}"
         \\                         | arm
         \\                         | pattern ) ;
         \\arm         = pattern "=" expression ;
@@ -799,13 +925,13 @@ render_section_143 :: () {
     table_row(53, "`#import`, `#load`, `#library`, `#fn_ptr`   |   declaration position; `#import` and `#load` also bare");
     table_row(54, "`#thread_local`   |   prefix of a global variable declaration");
     table_row(55, "`#comptime`   |   top-level declaration, statement, expression prefix, parameter modifier");
-    table_row(56, "`#insert`   |   top-level declaration, statement, pattern element");
+    table_row(56, "`#insert`   |   top-level declaration, statement, expression, pattern element; the declaration, statement, and expression forms accept optional `,scope(...)`");
     table_row(57, "`#memory`   |   top-level overlay, statement overlay or `trusted` block, function and `#fn_ptr` directive, variable declaration, expression postfix");
     table_row(58, "`#if`, `#assert`, `#compile_error`, `#asm`, `#bytes`, `#push_context`, `#push_allocator`   |   statement position only");
     table_row(59, "`#inline`   |   before `while` or `for`, in statement or expression position, and as a function directive");
     table_row(60, "`#pattern`, `#partial`, `#falling`   |   pattern test or switch, after `if`, and at the end of a case arm");
     table_row(61, "`#try`   |   `#try { expression }` in expression position, and `#try defer`");
-    table_row(62, "`#code`, `#string`, `#simd`, `#undefined`, `#meaningful`   |   expression position");
+    table_row(62, "`#code`, `#string`, `#simd`, `#undefined`, `#meaningful`   |   expression position; `#code` quotes a block or one statement");
     table_row(63, "`#char`   |   an integer literal, recognised by the lexer");
     table_row(64, "`#derive`, `#minimal`   |   `#derive` on `struct`, `union`, `typeclass` and `distinct`; `#minimal` on `typeclass` only");
     table_row(65, "`#empty`, `#as`, `#from`, `#raw`, `#packed`   |   aggregate declarations; `#empty` also in a parameter list");
@@ -819,9 +945,9 @@ render_section_143 :: () {
         \\grammar.
     );
     bullet(71, #string,oneline
-        \\An instance is recognised by scanning for a `::` at bracket depth
-        \\zero followed by the identifier `instance`. Until that is found, the
-        \\head is held as raw tokens.
+        \\An instance is recognised by scanning for the dedicated `:::` token
+        \\at bracket depth zero followed by the identifier `instance`. Until
+        \\that token is found, the head is held as raw tokens.
     );
     bullet(72, #string,oneline
         \\`#pattern` is a test when a `=` appears at depth zero before any `;`,
@@ -916,8 +1042,9 @@ render_section_144 :: () {
     paragraph(10, #string,oneline
         \\A program run under `--run` that aborts is reported as
         \\`glosso: program exited with status exit code: 134` on Windows, and
-        \\the compiler itself then exits `1`. Overflow and bounds traps abort
-        \\with no message of their own.
+        \\the compiler itself then exits `1`. A WASI module takes the equivalent
+        \\path through `proc_exit(125)`. Overflow and bounds traps print a
+        \\runtime-check category before terminating.
     );
     subheading(11, "Driver messages");
     paragraph(12, #string,oneline
@@ -944,10 +1071,14 @@ render_section_144 :: () {
         \\space-like character lands here.
     );
     table_header(23, "Message   —   Produced by");
-    table_row(24, "`reserved operator token '=' (operator '=' cannot be overloaded)`   |   Any of the fourteen reserved spellings written as an operator name or in operator position. The message names the operator twice.");
+    table_row(24, "`reserved operator token '=' (operator '=' cannot be overloaded)`   |   Any of the fifteen reserved spellings written as an operator name or in operator position, including the `:::` instance separator. The message names the operator twice.");
     table_row(25, "`operator token cannot end with '.'`   |   An operator run whose last character is `.` and which is not `..`, as in `2 *. 3`.");
+    table_row(212, "`unterminated block comment`   |   End of input while a nested `/* ... */` depth is still open.");
     table_row(26, "`unterminated string literal`   |   A `\"` with no closing quote before end of file.");
-    table_row(27, "`unexpected token '++'`   |   Maximal munch glued two operator characters together: `1 ++ 2`, `a =-1`, `Err!*int`.");
+    table_row(213, "`unknown string escape '\\q'`   |   A quoted string uses a backslash escape outside the closed escape table.");
+    table_row(214, "`\\x escape needs exactly two hexadecimal digits`   |   A quoted string's `\\x` is not followed by exactly two hexadecimal digits.");
+    table_row(215, "`\\u escape must use \\u{hex-digits}`   |   A quoted string uses `\\u` without braces; related messages reject an empty, over-six-digit, non-hexadecimal, or non-scalar value.");
+    table_row(27, "`unexpected token '++'`   |   Maximal munch glued two operator characters together: `1 ++ 2`, `a =-1`, `Err!*isize`.");
     table_row(28, "`unexpected directive 'frobnicate'`   |   A `#name` the parser does not recognise in that position. There is no unknown-directive message.");
     table_row(29, "`unexpected token 'line one'`   |   A `\\\\` continuation line outside a `#string` or `#asm` block.");
     subheading(30, "Number literals");
@@ -956,19 +1087,22 @@ render_section_144 :: () {
     table_row(33, "`integer literal base must be between 2 and 36, got 40`   |   `40#zz`. Base 1 and base 0 give the same message.");
     table_row(34, "`digit '2' is not valid for base 2`   |   `2#102`.");
     table_row(35, "`base-2 integer literal needs at least one digit`   |   `2#` with nothing after the marker.");
-    table_row(36, "`integer literal '340282366920938463463374607431768211456' does not fit in 128 bits`   |   A decimal magnitude past `u128`. The base form is `base-16 integer literal does not fit in 128 bits`.");
+    table_row(36, "`base-16 integer literal does not fit in 128 bits`   |   A based bit pattern wider than the lexer's 128-bit pattern payload. Decimal integer tokens have arbitrary precision and instead receive the ordinary destination-range check.");
     table_row(37, "`300 does not fit s8, whose range is -128..=127`   |   A literal outside the annotated type. The message always states the range.");
     table_row(38, "`a based literal is a bit pattern, so it may use every bit of s8 - this one is wider than that`   |   A `note` attached to the previous message when the literal was written `base#digits`, as in `16#1ff` at `s8`.");
     table_row(39, "`invalid '_' separator in number literal`   |   A leading, trailing, or doubled `_`. Fractional parts, exponents, and base digits each have their own wording.");
     table_row(40, "`scientific number literal needs exponent digits after 'e' or 'E'`   |   `1e` with no digits.");
+    table_row(209, "`float literal '1e400' is out of range for f64`   |   A float token parses as non-finite `f64`, or a nonzero mantissa such as `1e-400` underflows to zero.");
     table_row(41, "`number literals must use ASCII digits`   |   A number scan that began on a non-ASCII digit, such as a leading superscript.");
     subheading(42, "`#char` and `#string`");
     table_header(43, "Message   —   Produced by");
     table_row(44, "`#char expects a string literal`   |   `#char 5`, or a newline between `#char` and the string.");
     table_row(45, "`unterminated #char string literal`   |   `#char \"a;`.");
     table_row(46, "`#char expects one character`   |   `#char \"\"`.");
-    table_row(47, "`#char string literal contains more than two characters`   |   `#char \"ab\"`, and also `#char \"\\x41\"`, because `#char` has no hex escape.");
-    table_row(48, "`ASCII #char literal can infer only as u8, s8, or u32, not int`   |   `c: s64 = #char \"A\"`. The message names the type that was asked for.");
+    table_row(47, "`#char string literal must contain exactly one character`   |   More than one direct code point, as in `#char \"ab\"`.");
+    table_row(210, "`#char \\x escape needs exactly two hexadecimal digits`   |   `#char \"\\x4\"` or `#char \"\\xZZ\"`; `#char \"\\x41\"` is valid and has value 65.");
+    table_row(211, "`unknown #char escape '\\q'`   |   A `#char` escape outside its fixed table and exact `\\xHH` form.");
+    table_row(48, "`ASCII #char literal can infer only as u8, s8, or u32, not isize`   |   `c: s64 = #char \"A\"`. The message names the type that was asked for.");
     table_row(49, "`non-ASCII #char literal can infer only as u32, not u8`   |   `c: u8 = #char \"λ\"`.");
     table_row(50, "`#string expects one or more '\\\\' lines`   |   A `#string` immediately followed by `;`.");
     table_row(51, "`unknown #string modifier 'wrapped'; expected 'oneline' or 'escape'`   |   Any modifier outside the pair.");
@@ -976,13 +1110,18 @@ render_section_144 :: () {
     subheading(53, "Declarations, procedures, and parameters");
     table_header(54, "Message   —   Produced by");
     table_row(55, "`bad decl name '1'`   |   A top-level declaration whose name does not lex as an identifier, as in `1bad :: 3;`. `#if` at file scope gives `bad decl name 'if'`.");
+    table_row(200, "`declaration must end with ';'`   |   A top-level declaration that did not end in its own definition body and lacks its required terminator, such as `#import \"Io\"`, `K :: 5`, or `G: isize = 7`. The frame points just after the declaration's last token.");
+    table_row(201, "`expected a declaration, found ';'`   |   A stray semicolon at file scope, including one after a function or aggregate body. After a braced definition the help says the declaration ended at `}` and to remove the semicolon.");
+    table_row(202, "`declaration 'Wrong' has type type, not declared type Library`   |   An explicit declaration-value annotation that does not match the named definition on its right.");
+    table_row(203, "`Typeclass expects the kind of each typeclass parameter`   |   `Typeclass` used without at least one parameter kind in an explicit declaration annotation.");
+    table_row(204, "`Macro expects one function signature, for example Macro((isize) -> void)`   |   `Macro` with zero or several type arguments in an explicit declaration annotation; a non-procedure argument instead reports `Macro expects a function signature`.");
     table_row(56, "`a top-level constant binding uses '::'; the second ':' is missing`   |   `Foo : struct { … }`.");
     table_row(57, "`a global variable without an initializer needs a type`   |   `g: ;`.");
     table_row(58, "`function 'render' is already declared`   |   Two ordinary procedures with one name. There is no ad-hoc overloading; the constant form is `constant 'K' is already declared`.");
     table_row(59, "`constant cannot be modified`   |   Assigning to a local `::` binding. It carries `help: change '::' to ':=' to make the binding mutable`. Assigning to a top-level constant gives `unbound '<name>'` instead.");
     table_row(60, "`#thread_local can only prefix a global variable declaration`   |   `#thread_local` on a constant or a procedure.");
     table_row(61, "`main must not take parameters; use get_cmdline_args() for command-line arguments`   |   Any parameter on `main`.");
-    table_row(62, "`noalias parameter 'v' must have a pointer type, got int`   |   `noalias` on a non-pointer parameter.");
+    table_row(62, "`noalias parameter 'v' must have a pointer type, got isize`   |   `noalias` on a non-pointer parameter.");
     table_row(63, "`function directives must appear before where clauses`   |   A directive written after a `where`; the order in a signature is fixed.");
     table_row(64, "`polymorph $T is already bound; use plain T after the first $T`   |   `(a: $T, b: $T)`.");
     table_row(65, "`lambda captures local 'base', but captured closures are not supported`   |   A lambda reading an enclosing local. It carries `help: pass the value as an explicit callback or context argument`.");
@@ -999,7 +1138,7 @@ render_section_144 :: () {
     table_row(76, "`no field 'z' in 'V'`   |   An unknown member, with `help: did you mean 'x'?` when a near name exists.");
     table_row(77, "`member of non-struct`   |   A member access whose left side is not a struct, including `p.field` on a `*T`: a single pointer does not auto-dereference, so write `p.*.field`.");
     table_row(78, "`fixed array literal has 2 element(s), expected 3`   |   An array literal whose length disagrees with the annotation.");
-    table_row(79, "`[]int has no field capacity`   |   Asking a view for a dynamic array's field.");
+    table_row(79, "`[]isize has no field capacity`   |   Asking a view for a dynamic array's field.");
     table_row(80, "`a zero-sized 'void' member inside a struct, tuple, or array is not supported yet; remove the member, or wrap it in a single-field struct`   |   A `void` field.");
     subheading(81, "Modules and feature gates");
     table_header(82, "Message   —   Produced by");
@@ -1028,13 +1167,13 @@ render_section_144 :: () {
     );
     table_header(100, "Message   —   Produced by");
     table_row(101, "`got u8, expected s8`   |   A conversion that is not a lossless widening. Only widening is implicit, and floats never convert implicitly in either direction.");
-    table_row(102, "`cannot implicitly convert comptime_float to int`   |   A fractional literal at an integer type. The integer form names `comptime_int`.");
-    table_row(103, "`cannot cast string to int`   |   A `cast` between families that have no conversion.");
+    table_row(102, "`cannot implicitly convert comptime_float to isize`   |   A fractional literal at an integer type. The integer form names `comptime_int`.");
+    table_row(103, "`cannot cast string to isize`   |   A `cast` between families that have no conversion.");
     table_row(104, "`cast requires a type in parentheses; use acast for contextual casts`   |   `cast T value`.");
     table_row(105, "`acast needs a target type from context or an explicit cast type`   |   `acast` in a position that carries no expected type.");
-    table_row(106, "`'null' is not a value of *int`   |   `null` at a plain pointer, with two notes naming `?*int` and `.None`.");
-    table_row(107, "`cast to *int of an address that is zero at compile time`   |   `cast(*T) 0`, with notes explaining the niche that makes it illegal.");
-    table_row(108, "`got int, expected Option_int`   |   `?T` does not wrap implicitly; write `.Some(x)`.");
+    table_row(106, "`'null' is not a value of *isize`   |   `null` at a plain pointer, with two notes naming `?*isize` and `.None`.");
+    table_row(107, "`cast to *isize of an address that is zero at compile time`   |   `cast(*T) 0`, with notes explaining the niche that makes it illegal.");
+    table_row(108, "`got isize, expected Option_isize`   |   `?T` does not wrap implicitly; write `.Some(x)`. The diagnostic uses the instantiated union's internal name.");
     subheading(109, "Operators");
     table_header(110, "Message   —   Produced by");
     table_row(111, "`no operator '+' for u8, u16`   |   Operators are homogeneous: there is no implicit promotion of one operand to the other's type.");
@@ -1059,7 +1198,7 @@ render_section_144 :: () {
     subheading(130, "`Try`, `Termination`, and `Show`");
     table_header(131, "Message   —   Produced by");
     table_row(132, "`postfix '?' requires a Try-returning function or an enclosing #try block`   |   `?` with no boundary to break out to.");
-    table_row(133, "`no suffix operator '?' for int`   |   `?` on a value whose type has no `Try` instance. A type that has one but disagrees about the branch type gives `postfix '?' operand type T does not implement Try`.");
+    table_row(133, "`no suffix operator '?' for isize`   |   `?` on a value whose type has no `Try` instance. A type that has one but disagrees about the branch type gives `postfix '?' operand type T does not implement Try`.");
     table_row(134, "`cannot infer the carrier type of #try expression; propagate at least one value with '?'`   |   A `#try` block with no `?` inside it.");
     table_row(135, "`#try contains one expression; remove the semicolon`   |   A `#try` block whose single expression ends in `;`. Anything else in the block gives `#try requires one expression`, and a missing block gives `#try requires a block`.");
     table_row(136, "`#try defer requires a Try-returning function or an enclosing #try block`   |   An error-only defer with no error path to run on.");
@@ -1089,7 +1228,11 @@ render_section_144 :: () {
     table_row(160, "`#inline while made no compile-time progress; update a compile-time variable used by the condition`   |   A body that never changes what the condition reads.");
     table_row(161, "`#inline for expects a compile-time array`   |   `#inline for` over something other than a tuple or fixed array; a dynamic array gives its own message about runtime length.");
     table_row(162, "`#insert generated invalid source: parse error line 1: unexpected token ';'`   |   Generated text that does not parse, with a `note` and a frame pointing into the cached generated file.");
-    table_row(163, "`a 'Code' value is compile-time only; bind it with '::' rather than ':='`   |   `:=` on a `Code` value. The `pattern` type has the same message.");
+    table_row(208, "`#insert needs a Code value or a compile-time string`   |   A statement or declaration splice whose operand folds to any other value kind.");
+    table_row(205, "`#insert expects scope after ','`   |   A modifier other than `scope` after `#insert,`; the accepted form is `#insert,scope(...) value`.");
+    table_row(163, "`a 'Code' value is compile-time only; bind it with '::' rather than ':='`   |   `:=` on a `Code` value. `Pattern` and values produced by named definitions are compile-time-only too.");
+    table_row(206, "expression macro 'f' must contain exactly `return <expr>;`   |   The legacy inferred-result `#expand,expression` form has a body other than one return statement (or equivalent static branches). Explicitly typed value macros may use a multi-statement body when every path returns; a missing path reports `expanded value macro does not return a value on every path`.");
+    table_row(207, "`compile-time execution does not support u129, an integer wider than 128 bits`   |   A `#comptime { ... }` VM step that executes a value of an integer type wider than 128 bits. Arbitrary-precision constant folding and compiled code are not limited this way.");
     subheading(164, "Memory contracts");
     paragraph(165, #string,oneline
         \\Contract validation is always fatal and ignores `--borrow-check`: a
@@ -1131,19 +1274,21 @@ render_section_144 :: () {
     subheading(185, "Warnings");
     paragraph(186, #string,oneline
         \\Warnings use the identical layout with `warning:` in place of
-        \\`error:`. Besides the temporal-analysis family above there are two,
-        \\and both point at code that compiles but probably does not mean what
-        \\it says.
+        \\`error:`. Besides the temporal-analysis family above there are three,
+        \\and all three point at code that compiles but probably does not mean
+        \\what it says.
     );
     table_header(187, "Message   —   Produced by");
     table_row(188, "`this expression changes meaning under the 0-20 precedence table: bitwise operators now bind tighter than comparisons`   |   An unparenthesised bitwise expression as an operand of a comparison, or the reverse, as in `flags & mask == 4`. It carries `note: add parentheses to say which reading you mean`.");
     table_row(189, "`unreachable pattern - already covered by an earlier case`   |   An arm of a `#pattern` switch that the arms above it already cover.");
+    table_row(300, "`no '+' for <T>: the where-clause only provides Addable`   |   A generic definition uses an operator whose owning typeclass is absent from the parameter's `where` evidence. It is reported at the definition and carries `note: reported at the definition; add the class to the 'where' clause`.");
     subheading(190, "Runtime messages");
     paragraph(191, #string,oneline
         \\A program can also print. Runtime messages come from the compiled
         \\program, not the compiler, are written to standard error, and are
-        \\followed by an abort. Each names the source position of the operation
-        \\that failed.
+        \\followed by the target's abort path. Array bounds, union-tag failures,
+        \\and assertions name a source position when available; the shorter category reports do
+        \\not.
     );
     code_block(192, "text", #string
         \\…\k11.glo:5:46: union access: expected .Box, but the value holds one of .Circle | .Box
@@ -1152,15 +1297,20 @@ render_section_144 :: () {
     table_header(193, "Message   —   Produced by");
     table_row(194, "`union access: expected .Box, but the value holds one of .Circle | .Box`   |   An `#enable(allow_union_unwrap)` payload read whose tag check failed at `-O0` or `-O1`.");
     table_row(195, "`assertion failed: x must be big`   |   A `#assert` whose condition was not compile-time known and was false at run time.");
-    table_row(196, "`cast to *int of an address that is zero`   |   A runtime `cast(*T)` of a null address.");
+    table_row(196, "`cast to *isize of an address that is zero`   |   A runtime `cast(*T)` of a null address.");
     table_row(197, "`glosso debug allocator: leaked 1 allocation(s), 64 byte(s)`   |   The `-O0` debug allocator at exit; each leak is listed with its allocation site.");
     table_row(198, "`glosso debug allocator: double free`   |   The same allocator on a repeated release. Use-after-free, invalid free, and invalid realloc have matching lines.");
+    table_row(301, "`runtime check failed: arithmetic.overflow`   |   Checked integer addition, subtraction, multiplication, or negation overflowed.");
+    table_row(302, "`runtime check failed: divide.by.zero` or `divide.overflow`   |   A checked integer division or remainder used zero, or signed division evaluated `MIN / -1`.");
+    table_row(303, "`<path>:<line>:<column>: runtime check failed: array.bounds`   |   A checked index was outside the count carried by an array, view, or string.");
+    table_row(304, "`runtime check failed: slice.bounds`   |   A checked slice range was negative, inverted, or extended past the source count.");
+    table_row(305, "`integer formatting base is outside 2..=16`   |   `format_int` or a print style used an unsupported base in a checked build.");
     note(199, #string,oneline
-        \\Integer overflow and array bounds failures abort with no message at
-        \\all: the only evidence is exit status 134. They are checked only at
-        \\`-O0` and `-O1`, so the same program compiled with `-O2` runs past the
-        \\overflow instead. Division by zero and the signed `MIN / -1` case trap
-        \\in hardware at every level, with the operating system's own status.
+        \\These backend guards are emitted only at `-O0` and `-O1`. Hosted
+        \\Windows and Linux x86-64 terminate them with status 134, WASI uses
+        \\125, and the remaining targets call `abort()`. At `-O2` and `-O3`,
+        \\overflow and bounds guards are absent; bad division reaches LLVM and
+        \\the target hardware instead of a Glosso report.
     );
 }
 
@@ -1219,7 +1369,7 @@ render_section_145 :: () {
         \\    describe :: (value: T) -> string;
         \\}
         \\
-        \\Slot_Table :: instance Describable {
+        \\Slot_Table ::: instance Describable {
         \\    describe :: (value: Slot_Table) -> string { return value.name; }
         \\}
         \\
@@ -1234,7 +1384,7 @@ render_section_145 :: () {
     note(14, #string,oneline
         \\Names collide across the whole program, so the prefix habit is doing
         \\real work. A typeclass method name is reserved with no import at all:
-        \\`show :: (x: int) -> int { … }` is
+        \\`show :: (x: isize) -> isize { … }` is
         \\`error: function 'show' is owned by typeclass 'Show' and cannot be
         \\redeclared`, and so are `next`, `from_string`, and every operator
         \\name. Anything an import brings in collides too: with `#import
@@ -1247,7 +1397,7 @@ render_section_145 :: () {
     bullet(17, "Lines wrap near 80 columns; nine lines in ten of the library are under 76.");
     bullet(18, "The opening brace stays on the line that opened the construct, and the closing brace sits at the owner's indentation.");
     bullet(19, "One blank line between top-level declarations; none inside a short body.");
-    bullet(20, "Semicolons end statements. They are optional everywhere except a `case` label, but the library writes them.");
+    bullet(20, "Semicolons terminate top-level declarations that do not end in their own definition body, and ordinary simple statements inside bodies. A small set of statement forms accepts an optional `;`; switch case and `else` labels require one, and a label statement requires `;` or the legacy `:`. The library writes semicolons consistently.");
     paragraph(21, #string,oneline
         \\A signature too long for one line breaks after the open parenthesis,
         \\puts one parameter per line, keeps a trailing comma on the last one,
@@ -1431,11 +1581,11 @@ render_section_145 :: () {
         \\
         \\Packet :: struct { payload: s64; }
         \\
-        \\Packet :: instance Byte_Size {
+        \\Packet ::: instance Byte_Size {
         \\    byte_size :: (value: Packet) -> s64 { return 8; }
         \\}
         \\
-        \\$T :: instance Byte_Size where Is_Integer(T) {
+        \\$T ::: instance Byte_Size where Is_Integer(T) {
         \\    byte_size :: (value: T) -> s64 { return size_of(T); }
         \\}
         \\
@@ -1473,7 +1623,7 @@ render_section_145 :: () {
         \\
         \\Parse_Error :: struct { text: string; }
         \\
-        \\Parse_Error :: instance Error {
+        \\Parse_Error ::: instance Error {
         \\    report_error :: (error: Parse_Error) -> void {
         \\        error_report_line("bad number", error.text);
         \\    }
@@ -1532,5 +1682,5 @@ render_section_145 :: () {
     bullet(64, "Say what a caller must guarantee, not what the next statement does.");
     bullet(65, "Put the ownership story in the header: who allocates, who releases, what invalidates what.");
     bullet(66, "Name a known limitation where a reader will hit it, rather than in a change log.");
-    bullet(67, "A `/* */` comment nests, so it is safe to comment out a region that already contains one; an unterminated one at end of file is accepted silently, which is worth knowing before trusting a stray `/*`.");
+    bullet(67, "A `/* */` comment nests, so it is safe to comment out a region that already contains one; an unterminated one is the lexical error `unterminated block comment`.");
 }

@@ -22,16 +22,17 @@
   "distinct"
 ] @keyword
 
+(caller_return_statement "`return" @keyword)
+(caller_defer_statement "`defer" @keyword)
+
 [
   "#comptime"
   "#lazy"
   "#import"
   "#load"
-  "#private_section"
   "#thread_local"
   "#library"
   "#fn_ptr"
-  "#c_ptr"
   "#as"
   "#empty"
   "#raw"
@@ -48,7 +49,6 @@
   "#packed"
   "#no_context"
   "#dump"
-  "#fallback"
   "#must"
   "#noreturn"
   "#returns_twice"
@@ -277,3 +277,4 @@
 (structured_asm_clobber_kind) @constant.builtin
 (import_selector mode: _ @attribute)
 (expand_directive mode: (identifier) @attribute)
+(insert_scope "scope" @attribute)
