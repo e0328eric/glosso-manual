@@ -94,7 +94,7 @@ render_section_68 :: () {
         \\
         \\Cell :: struct { value: $A; }
         \\
-        \\s64 ::: instance Tagged { tag_of :: (value: s64) -> string { return "isize"; } }
+        \\s64 ::: instance Tagged { tag_of :: (value: s64) -> string { return "s64"; } }
         \\
         \\(s64, string) ::: instance Blend {
         \\    Output :: string;
@@ -114,7 +114,7 @@ render_section_68 :: () {
         \\}
     );
     code_block(19, "text", #string
-        \\isize
+        \\s64
         \\7x
         \\inside
     );
@@ -267,7 +267,7 @@ render_section_68 :: () {
     bullet(42, #string,oneline
         \\For an operator member, the spelling, arity, fixity and precedence, all
         \\registered globally. The class alone makes `a <*> b` parse; only the
-        \\instance is missing, and the call is `error: no operator '<*>' for isize, isize`
+        \\instance is missing, and the call is `error: no operator '<*>' for ssize, ssize`
         \\until one exists. The Operator System covers the rules.
     );
 }
@@ -814,7 +814,7 @@ render_section_71 :: () {
         \\Collection :: typeclass (C: type) #minimal(first_of, count_of) {
         \\    Elem :: type;
         \\    first_of :: (container: C) -> Elem;
-        \\    count_of :: (container: C) -> s64;
+        \\    count_of :: (container: C) -> ssize;
         \\}
         \\
         \\Words  :: struct { items: []string; }
@@ -823,13 +823,13 @@ render_section_71 :: () {
         \\Words ::: instance Collection {
         \\    Elem :: string;
         \\    first_of :: (container: Words) -> string { return container.items[0]; }
-        \\    count_of :: (container: Words) -> s64 { return container.items.count; }
+        \\    count_of :: (container: Words) -> ssize { return container.items.count; }
         \\}
         \\
         \\Scores ::: instance Collection {
         \\    Elem :: s64;
         \\    first_of :: (container: Scores) -> s64 { return container.items[0]; }
-        \\    count_of :: (container: Scores) -> s64 { return container.items.count; }
+        \\    count_of :: (container: Scores) -> ssize { return container.items.count; }
         \\}
         \\
         \\main :: () {
@@ -1343,6 +1343,23 @@ render_section_72 :: () {
         \\call    = the s64 instance
         \\evidence = 0
     );
+    subheading(36, "Associated-type definitions are checked eagerly");
+    paragraph(37, #string,oneline
+        \\The lazy overlap rule applies to methods, not to two definitions of the
+        \\same associated type. Those definitions are registered as a compile-time
+        \\mapping, so a duplicate semantic instance head is rejected immediately
+        \\with `associated type 'Class.Name' for <head> is already defined`. The
+        \\checker normalises generic names and the order of `where` terms while it
+        \\compares definitions. Two instances with genuinely different predicates,
+        \\such as `where Is_Integer(T)` and `where Is_Float(T)`, remain separate.
+    );
+    note(38, #string,oneline
+        \\Concrete native and fixed-width heads use their target representation for
+        \\this duplicate check. On a 64-bit target, associated-type definitions for
+        \\`ssize` and `s64` are the same head when their `where` clauses are the
+        \\same; on a 32-bit target the corresponding pair is `ssize` and `s32`.
+        \\This is protocol-head compatibility, not ordinary type equality.
+    );
 }
 
 render_section_73 :: () {
@@ -1585,6 +1602,46 @@ render_section_73 :: () {
         \\`#empty:` witness parameter is the usual way to place one that carries no
         \\value.
     );
+    subheading(44, "Native and fixed-width protocol heads");
+    paragraph(45, #string,oneline
+        \\Protocol dispatch has one narrow target-dependent compatibility rule. A
+        \\concrete fixed-width instance can service the native integer type with the
+        \\same signedness and target representation: `s64` covers `ssize` on a
+        \\64-bit target, and `s32` covers it on a 32-bit target. The unsigned pairs
+        \\are `u64`/`usize` and `u32`/`usize`. Matching recurses through pointers,
+        \\arrays, tuples, and function-shaped protocol heads.
+    );
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Native_Unary_Fallback :: typeclass (T: type) {
+        \\    '%%' :: (value: T) -> s64 #operator(prefix) { return 0; }
+        \\}
+        \\s64 ::: instance Native_Unary_Fallback {
+        \\    '%%' :: (value: s64) -> s64 { return 42; }
+        \\}
+        \\
+        \\main :: () {
+        \\    value: ssize = 1;
+        \\    print("%\n", %% value);
+        \\}
+    );
+    code_block(47, "text", #string
+        \\42
+    );
+    paragraph(48, #string,oneline
+        \\The selected declaration still has its written formal type: in the
+        \\example, the operator body receives `s64`. The same fallback works for
+        \\multi-parameter protocols such as `IndexSet`, including assignment
+        \\lowering. It does not merge the language types: `ssize == s64` remains
+        \\false, ordinary generic unification keeps them separate, and a matrix or
+        \\other value whose element type is `s64` is not a matrix of `ssize`.
+    );
+    note(49, #string,oneline
+        \\This relation never crosses width or signedness, never removes a nominal
+        \\`distinct` boundary, and never treats `char` or `rune` as their `u8` or
+        \\`u32` storage types. It exists only for protocol instance heads.
+    );
 }
 
 render_section_74 :: () {
@@ -1673,7 +1730,7 @@ render_section_74 :: () {
         \\Box   :: struct #derive(Functor) { value: $A; }
         \\Plain :: struct { n: s64; }
         \\
-        \\count_functors :: (values: ...Functor) -> s64 { return values.count; }
+        \\count_functors :: (values: ...Functor) -> ssize { return values.count; }
         \\
         \\main :: () {
         \\    b: Box(s64)    = .{ .value = 1 };
@@ -1776,7 +1833,7 @@ render_section_74 :: () {
     );
     code_block(26, "text", #string
         \\error: no overload 'pure' accepts these arguments
-        \\note: call pure cannot produce expected type Ident_isize
+        \\note: call pure cannot produce expected type Ident_s64
         \\note: possible candidates for 'pure':
         \\candidate: pure :: (x: A) -> Ident(A)
         \\candidate: pure :: (x: A) -> F(A)
@@ -1969,7 +2026,7 @@ render_section_75 :: () {
         \\}
     );
     code_block(20, "text", #string
-        \\through print = {Tagged_isize}
+        \\through print = {Tagged_s64}
     );
     subheading(21, "Deriving on a `distinct` type");
     paragraph(22, #string,oneline
@@ -2087,19 +2144,19 @@ render_section_76 :: () {
         \\#import "Typeclass/Derive";
         \\
         \\Arity :: typeclass (T: type) #derive(derive_arity) #minimal(arity_of) {
-        \\    arity_of :: (value: T) -> s64;
+        \\    arity_of :: (value: T) -> ssize;
         \\}
         \\
         \\derive_arity :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
         \\    if !Is_Struct(T) #compile_error "Arity can only be derived for structs";
-        \\    empty_focuses: []s64;
+        \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
         \\    section    := derive_type_section(info, empty_focuses);
         \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
         \\    count      := info.fields.count;
         \\    #insert #code {
         \\        ``section ::: instance Arity {
-        \\            arity_of :: (value: ``input_type) -> s64 { return ``count; }
+        \\            arity_of :: (value: ``input_type) -> ssize { return ``count; }
         \\        }
         \\    };
         \\}
@@ -2184,7 +2241,7 @@ render_section_76 :: () {
         \\
         \\derive_same_shape :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
         \\    _ := opts;
-        \\    empty_focuses: []s64;
+        \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
         \\    section := derive_type_section(info, empty_focuses);
         \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
@@ -2228,7 +2285,7 @@ render_section_76 :: () {
         \\}
         \\
         \\members_body :: (info: Derive_Type_Info) -> string
-        \\    #memory(returns_fresh, reads(info), noescape(info))
+        \\    #memory{returns_fresh, reads(info), noescape(info)}
         \\{
         \\    source := sb_new();
         \\    sb_append(*source, "return \"");
@@ -2256,7 +2313,7 @@ render_section_76 :: () {
         \\        #compile_error "Members derive is not defined for #raw union";
         \\    }
         \\    _ := opts;
-        \\    empty_focuses: []s64;
+        \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
         \\    section := derive_type_section(info, empty_focuses);
         \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
@@ -2312,7 +2369,7 @@ render_section_76 :: () {
         \\    map_last :: (fa: F($A), f: (A) -> $B) -> F(B);
         \\}
         \\
-        \\map_last_field :: (field: Derive_Field_Info, focus: s64) -> Code {
+        \\map_last_field :: (field: Derive_Field_Info, focus: ssize) -> Code {
         \\    name := field.name;
         \\    if !type_uses_param(field.ty, focus) return #code { .``name = fa.``name };
         \\    if !type_is_param(field.ty, focus) {
@@ -2344,7 +2401,7 @@ render_section_76 :: () {
         \\
         \\Cell :: struct #derive(Map_Last) { key: $K; value: $V; }
         \\
-        \\length :: (s: string) -> s64 { return s.count; }
+        \\length :: (s: string) -> ssize { return s.count; }
         \\
         \\main :: () {
         \\    c: Cell(string, string) = .{ .key = "id", .value = "hello" };
@@ -2355,7 +2412,7 @@ render_section_76 :: () {
     );
     code_block(39, "text", #string
         \\key = id value = 5
-        \\type = Cell_string_isize
+        \\type = Cell_string_ssize
     );
     paragraph(40, #string,oneline
         \\`map_last_field` is a compile-time helper returning `Code`, and the
@@ -2533,7 +2590,7 @@ render_section_77 :: () {
     );
     paragraph(14, #string,oneline
         \\A procedure that requires reflexive equality names it in its own `where`.
-        \\`find_at :: (values: []$T, wanted: T) -> s64 where Eq(T)` accepts an
+        \\`find_at :: (values: []$T, wanted: T) -> ssize where Eq(T)` accepts an
         \\`[]s64` or an `[]string` and rejects an `[]f64` with
         \\`error: constraint failed for find_at`. The constraint expresses an intent
         \\that `PartialEq` alone cannot: a lookup that must find back the value it
@@ -2680,7 +2737,7 @@ render_section_78 :: () {
     code_block(1, "glosso", #string
         \\Show :: typeclass (T: type) #derive(derive_show) {
         \\    show :: (value: T) -> string
-        \\        #memory unknown(reason: "implementation-dependent memory behavior");
+        \\        #memory{unknown(reason: "implementation-dependent memory behavior")};
         \\}
         \\
         \\FromString :: typeclass (T: type) {
@@ -2693,7 +2750,7 @@ render_section_78 :: () {
         \\Both live in `std/Prelude/Show_and_Read.glo`, which every program
         \\loads unqualified, so neither name needs an import. `show` returns a
         \\`string` and declares
-        \\`#memory unknown(reason: "implementation-dependent memory behavior")`,
+        \\`#memory{unknown(reason: "implementation-dependent memory behavior")}`,
         \\which leaves each instance free to return a borrow, a static, or a
         \\fresh allocation. The leading
         \\`#empty:` parameter of `from_string` carries the result type without
@@ -2729,7 +2786,7 @@ render_section_78 :: () {
     );
     paragraph(18, #string,oneline
         \\There is no `Show` instance for `E!T`. Passing a result to `print`
-        \\is `error: variadic arg type `Result_isize_string` does not implement
+        \\is `error: variadic arg type `Result_s64_string` does not implement
         \\`Show` in call `print``; match on it and show the payload instead.
         \\`?T` does have one, so an option prints directly.
     );
@@ -2923,8 +2980,8 @@ render_section_78 :: () {
         \\}
     );
     code_block(47, "text", #string
-        \\print only  = {Tagged_isize}
-        \\option only = {Option_isize}
+        \\print only  = {Tagged_s64}
+        \\option only = {Option_s64}
         \\enum        = 1
         \\bool        = 1
     );
@@ -3003,7 +3060,7 @@ render_section_79 :: () {
     );
     bullet(12, #string,oneline
         \\The operand type must implement `Try`. A type with no instance at
-        \\all is `error: no suffix operator '?' for isize`, because `?` is
+        \\all is `error: no suffix operator '?' for ssize`, because `?` is
         \\resolved as an ordinary suffix operator before any Try-specific
         \\reasoning happens.
     );
@@ -3012,7 +3069,7 @@ render_section_79 :: () {
         \\`branch(operand)` is called. The result must be exactly
         \\`Try_Branch(Output, Residual)`; an instance that returns something
         \\else is rejected at the use site, for example `error: Try propagation
-        \\operator returned isize, expected Try_Branch_isize_X_Residual from
+        \\operator returned ssize, expected Try_Branch_s64_X_Residual from
         \\Try.branch`.
     );
     bullet(14, #string,oneline
@@ -3605,11 +3662,11 @@ render_section_81 :: () {
     table_row(23, "any integer type   |   the value, narrowed to `s32`   |   the host applies its own exit-code rules");
     table_row(24, "`E!void` where `E: Error`   |   0 on `.Ok`, 1 on `.Err`   |   `report_error(error)` runs first");
     table_row(25, "a type with a `Termination` instance   |   whatever `termination_status` returns   |   a struct or enum works; see below");
-    table_row(26, "`?T`, `bool`, `E!T` for non-`void` `T`   |   rejected   |   `main return type Option_isize does not implement Termination`");
+    table_row(26, "`?T`, `bool`, `E!T` for non-`void` `T`   |   rejected   |   `main return type Option_s64 does not implement Termination`");
     paragraph(27, #string,oneline
         \\The `E!void` instance is the only one keyed on a result, and it is
         \\keyed on `void` specifically: `main :: () -> My_Err!s64` is `error:
-        \\main return type Result_isize_My_Err does not implement Termination`,
+        \\main return type Result_s64_My_Err does not implement Termination`,
         \\because a successful `s64` has no meaning at the process boundary
         \\that the integer instance does not already give. `bool` is rejected
         \\for the same reason `Is_Integer(bool)` is false.
@@ -3738,7 +3795,7 @@ render_section_82 :: () {
         \\    name_of :: (value: T) -> string;
         \\}
         \\
-        \\$T ::: instance Named where Is_Integer(T) { name_of :: (v: T) -> string { return "isize"; } }
+        \\$T ::: instance Named where Is_Integer(T) { name_of :: (v: T) -> string { return "ssize"; } }
         \\$T ::: instance Named where Is_String(T)  { name_of :: (v: T) -> string { return "text"; } }
         \\
         \\join_names :: (args: ...Named) -> string {
@@ -3760,7 +3817,7 @@ render_section_82 :: () {
         \\}
     );
     code_block(4, "text", #string
-        \\names = isize,text,isize
+        \\names = ssize,text,ssize
         \\both  = 2
     );
     subheading(5, "Element-wise checking");
@@ -3852,7 +3909,7 @@ render_section_82 :: () {
     bullet(17, #string,oneline
         \\The view is read-only. Assigning to a pack element is not supported
         \\and currently fails during lowering with `error: internal error:
-        \\'op_lbrrbreq_tuple_isize_isize' is called but was never lowered`; copy
+        \\'op_lbrrbreq_tuple_ssize_ssize' is called but was never lowered`; copy
         \\the element into a local instead.
     );
     subheading(18, "`#inline for` and per-element evidence");

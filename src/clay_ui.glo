@@ -19,9 +19,9 @@ FONT_SANS_BOLD : u16 : 1;
 FONT_MONO : u16 : 2;
 FONT_MONO_BOLD : u16 : 3;
 FONT_SERIF_BOLD : u16 : 4;
-FRAME_TEXT_CAPACITY : s64 : 2 * 1024 * 1024;
+FRAME_TEXT_CAPACITY : ssize : 2 * 1024 * 1024;
 frame_text_storage: [FRAME_TEXT_CAPACITY]u8;
-frame_text_cursor: s64 = 0;
+frame_text_cursor: ssize = 0;
 content_table_open: bool = false;
 // Kept here because content tables are emitted by the shared primitives,
 // before the manual and reference views split into their own modules.
@@ -29,8 +29,8 @@ document_viewport_width: f32 = 1280.0;
 
 frame_string_from_raw_parts :: (
     data: [*]u8,
-    count: s64,
-    capacity: s64,
+    count: ssize,
+    capacity: ssize,
 ) -> string #magic "string_from_raw_parts"
     #memory{returns_static, reads(data), noescape(data)};
 
@@ -45,7 +45,7 @@ frame_text_copy :: (value: string) -> string
 
     start := frame_text_cursor;
     storage := cast([*]u8)*frame_text_storage;
-    index: s64 = 0;
+    index: ssize = 0;
     while index < value.count {
         storage[start + index] = value[index];
         index += 1;
@@ -346,15 +346,15 @@ content_table_column_width :: (columns: s32, column_index: s32) -> f32 {
 }
 
 table_trim :: (value: string) -> string {
-    start: s64 = 0;
+    start: ssize = 0;
     finish := value.count;
     while start < finish && (
-        value[start] == #char " " || value[start] == #char "\t" ||
-        value[start] == #char "\r" || value[start] == #char "\n"
+        value[start] == cast(u8)(#char " ") || value[start] == cast(u8)(#char "\t") ||
+        value[start] == cast(u8)(#char "\r") || value[start] == cast(u8)(#char "\n")
     ) start += 1;
     while finish > start && (
-        value[finish - 1] == #char " " || value[finish - 1] == #char "\t" ||
-        value[finish - 1] == #char "\r" || value[finish - 1] == #char "\n"
+        value[finish - 1] == cast(u8)(#char " ") || value[finish - 1] == cast(u8)(#char "\t") ||
+        value[finish - 1] == cast(u8)(#char "\r") || value[finish - 1] == cast(u8)(#char "\n")
     ) finish -= 1;
     return value[start..finish];
 }
@@ -364,13 +364,13 @@ table_display_text :: (value: string, uppercase: bool) -> string
     if frame_text_cursor + value.count > FRAME_TEXT_CAPACITY return "";
     start := frame_text_cursor;
     storage := cast([*]u8)*frame_text_storage;
-    source: s64 = 0;
+    source: ssize = 0;
     while source < value.count {
         byte := value[source];
         // Table source uses Markdown-style backticks for inline code. The
         // cell's typography carries that distinction, so do not print them.
-        if byte != #char "`" {
-            if uppercase && byte >= #char "a" && byte <= #char "z"
+        if byte != cast(u8)(#char "`") {
+            if uppercase && byte >= cast(u8)(#char "a") && byte <= cast(u8)(#char "z")
                 byte = byte - 32;
             storage[frame_text_cursor] = byte;
             frame_text_cursor += 1;
@@ -382,6 +382,24 @@ table_display_text :: (value: string, uppercase: bool) -> string
         frame_text_cursor - start,
         frame_text_cursor - start,
     );
+}
+
+table_text_index_from :: (
+    value: string,
+    needle: string,
+    start: ssize = 0,
+) -> ssize {
+    if needle.count == 0 return 0;
+    i := start;
+    if i < 0 i = 0;
+    last := value.count - needle.count;
+    while i <= last {
+        j: ssize = 0;
+        while j < needle.count && value[i + j] == needle[j] j += 1;
+        if j == needle.count return i;
+        i += 1;
+    }
+    return -1;
 }
 
 render_table_cell :: (
@@ -406,7 +424,7 @@ render_table_cell :: (
     display := table_display_text(table_trim(value), header);
     if header {
         emit_text(display, text_style(10, color(109, 107, 102), FONT_SANS_BOLD, 18));
-    } else if index_of(value, "`") >= 0 {
+    } else if table_text_index_from(value, "`") >= 0 {
         emit_text(display, text_style(13, color(23, 50, 158), FONT_MONO, 22));
     } else {
         emit_text(display, text_style(14, color(66, 65, 62), FONT_SANS, 22));
@@ -420,12 +438,12 @@ render_table_cells :: (
     separator: string,
     header: bool,
 ) {
-    first := index_of(value, separator);
+    first := table_text_index_from(value, separator);
     columns: s32 = 1;
-    second: s64 = -1;
+    second: ssize = -1;
     if first >= 0 {
         columns = 2;
-        second = index_of_from(value, separator, first + separator.count);
+        second = table_text_index_from(value, separator, first + separator.count);
         if second >= 0 columns = 3;
     }
 

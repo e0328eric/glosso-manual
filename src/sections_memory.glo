@@ -23,7 +23,7 @@ render_section_116 :: () {
         \\    logger:           Logger;
         \\    random_generator: Random_Generator;
         \\    user_ptr:         ?*void;
-        \\    user_index:       s64;
+        \\    user_index:       ssize;
         \\}
     );
     table_header(3, "Field   —   What reads it");
@@ -48,7 +48,7 @@ render_section_116 :: () {
         \\record, so nothing restores it later.
     );
     code_block(14, "glosso", #string
-        \\with_index :: (base: #Context, index: s64) -> #Context {
+        \\with_index :: (base: #Context, index: ssize) -> #Context {
         \\    out := base;
         \\    out.user_index = index;
         \\    return out;
@@ -233,10 +233,10 @@ render_section_117 :: () {
         \\Allocator_Proc :: #fn_ptr(
         \\    data: ?*void,
         \\    mode: Allocator_Mode,
-        \\    size: s64,
-        \\    alignment: s64,
+        \\    size: ssize,
+        \\    alignment: ssize,
         \\    old_memory: ?*void,
-        \\    old_size: s64
+        \\    old_size: ssize
         \\) -> ?*void
         \\    #memory{unknown(result: returned, reason: "allocator mode determines result provenance"),
         \\            reads(data, old_memory), writes(data, old_memory),
@@ -306,10 +306,11 @@ render_section_117 :: () {
     table_row(30, "`nil_allocator()`   |   none; every request answers `.None`   |   nothing");
     paragraph(31, #string,oneline
         \\The default context installs the debug allocator in
-        \\`context.allocator` at `-O0` and the heap allocator at every other
-        \\optimization level, and always installs the default temporary
-        \\allocator in `context.temp_allocator`. The `-O0` swap is the subject
-        \\of The Debug Allocator.
+        \\`context.allocator` when `GLOSSO_DEBUG_ALLOCATOR` is set to any value
+        \\other than `0`; otherwise it installs the heap allocator at every
+        \\optimization level. It always installs the default temporary allocator
+        \\in `context.temp_allocator`. The environment-controlled swap is the
+        \\subject of The Debug Allocator.
     );
     subheading(32, "Allocating");
     paragraph(33, #string,oneline
@@ -371,15 +372,15 @@ render_section_117 :: () {
         \\#import "Format";
         \\#import "String_Builder";
         \\
-        \\requests: s64 = 0;
+        \\requests: ssize = 0;
         \\
         \\tracking_proc :: (
         \\    data: ?*void,
         \\    mode: Allocator_Mode,
-        \\    size: s64,
-        \\    alignment: s64,
+        \\    size: ssize,
+        \\    alignment: ssize,
         \\    old_memory: ?*void,
-        \\    old_size: s64
+        \\    old_size: ssize
         \\) -> ?*void #memory{unknown, noescape(data, old_memory),
         \\        maybe_kills(old_memory), maybe_invalidates(old_memory)} {
         \\    heap := heap_allocator();
@@ -632,17 +633,25 @@ render_section_118 :: () {
 
 render_section_119 :: () {
     paragraph(0, #string,oneline
-        \\At `-O0`, and only at `-O0`, the default `context.allocator` is the
-        \\debug allocator instead of the heap allocator. It is not requested by
-        \\a flag of its own and it is unrelated to `--borrow-check` and to the
-        \\sanitizers: the optimization level alone selects it.
+        \\Set `GLOSSO_DEBUG_ALLOCATOR` to any value other than `0` when compiling
+        \\to make the default `context.allocator` the debug allocator instead of
+        \\the heap allocator. With the variable absent or equal to `0`, the heap
+        \\allocator remains the default. This choice is independent of `-O`,
+        \\`--borrow-check`, and the sanitizers.
     );
     paragraph(1, #string,oneline
         \\Every allocation it serves gets a 48-byte header holding the size, the
         \\source trace of the request and links into a live list, plus an
         \\eight-byte guard written past the end of the user bytes. That
         \\bookkeeping is what lets the allocator name the line a leaked block
-        \\came from, and it is why it is not installed at any other level.
+        \\came from, and it is why diagnostic mode must be requested explicitly.
+    );
+    note(41, #string,oneline
+        \\A program can still install `debug_allocator()` explicitly. That routes
+        \\allocations and releases through the wrapper, but the compiler-wide
+        \\`GLOSSO_DEBUG_ALLOCATOR` mode additionally instruments pointer uses and
+        \\requests the automatic report on normal exit, `exit`, failed `#assert`,
+        \\and `process_abort`.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -656,14 +665,14 @@ render_section_119 :: () {
         \\}
     );
     code_block(3, "text", #string
-        \\$ glosso -O0 --run trace.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --run trace.glo
         \\done
         \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
         \\  leak: 64 byte(s)
         \\    allocated at:
         \\      ...\trace.glo:5:13
         \\
-        \\$ glosso -O1 --run trace.glo
+        \\$ glosso -O0 --run trace.glo
         \\done
     );
     paragraph(4, #string,oneline
@@ -690,7 +699,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(8, "text", #string
-        \\$ glosso -O0 --borrow-check off --run twice.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --borrow-check off --run twice.glo
         \\glosso debug allocator: double free
         \\    allocated at:
         \\      ...\twice.glo:5:10
@@ -713,9 +722,10 @@ render_section_119 :: () {
     );
     subheading(10, "Use after free");
     paragraph(11, #string,oneline
-        \\At `-O0` the backend inserts a check before every load and store
-        \\through a pointer. If the address falls inside a block on the freed
-        \\list, the read or write is reported and then allowed to proceed.
+        \\When debug-allocator mode is enabled, the backend inserts a check before
+        \\every load and store through a pointer at every optimization level. If
+        \\the address falls inside a block on the freed list, the read or write is
+        \\reported and then allowed to proceed.
     );
     code_block(12, "glosso", #string
         \\#import "Io";
@@ -732,7 +742,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(13, "text", #string
-        \\$ glosso -O0 --borrow-check off --run after.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --borrow-check off --run after.glo
         \\glosso debug allocator: use after free
         \\    allocated at:
         \\      ...\after.glo:4:10
@@ -760,7 +770,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(17, "text", #string
-        \\$ glosso -O0 --borrow-check off --run notmine.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --borrow-check off --run notmine.glo
         \\glosso debug allocator: invalid free
         \\    free at:
         \\      ...\notmine.glo:6:5
@@ -785,7 +795,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(20, "text", #string
-        \\$ glosso -O0 --borrow-check off --run badresize.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --borrow-check off --run badresize.glo
         \\glosso debug allocator: invalid realloc
         \\    realloc at:
         \\      ...\std\Context.glo:309:50
@@ -816,7 +826,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(24, "text", #string
-        \\$ glosso -O0 --run overrun.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --run overrun.glo
         \\continued
         \\glosso debug allocator: 1 allocator error(s)
     );
@@ -858,7 +868,7 @@ render_section_119 :: () {
         \\}
     );
     code_block(30, "text", #string
-        \\$ glosso -O0 --run early.glo
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 --run early.glo
         \\glosso debug allocator: leaked 1 allocation(s), 64 byte(s)
         \\  leak: 64 byte(s)
         \\    allocated at:
@@ -906,7 +916,7 @@ render_section_120 :: () {
     table_row(4, "temporal analysis   |   after type checking, before lowering   |   set by `--borrow-check`, warning by default");
     table_row(5, "static semantics   |   during type checking   |   always an error, relaxed only by `#enable`");
     table_row(6, "runtime safety checks   |   in the program, at `-O0` and `-O1`   |   report a category, then take the target's abort path (134 on hosted Windows and Linux x86-64; 125 on WASI)");
-    table_row(7, "debug allocator   |   in the program, at `-O0`   |   report on stderr, the program continues");
+    table_row(7, "debug allocator   |   in the program, when `GLOSSO_DEBUG_ALLOCATOR` is nonzero   |   report on stderr, the program continues");
 
     subheading(8, "Contract validation");
     paragraph(9, #string,oneline
@@ -920,7 +930,7 @@ render_section_120 :: () {
         \\parse error, `error: unknown #memory effect 'reclaims'`.
     );
     code_block(10, "glosso", #string
-        \\count :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\count :: (x: ssize) -> ssize #memory returns_fresh { return x; }
         \\
         \\main :: () { }
     );
@@ -928,7 +938,7 @@ render_section_120 :: () {
         \\error: [memory.contract] #memory returns_fresh requires 'count' to return a memory-capable value
         \\  --> contract.glo:1:34
         \\  |
-        \\1 | count :: (x: s64) -> s64 #memory returns_fresh { return x; }
+        \\1 | count :: (x: ssize) -> ssize #memory returns_fresh { return x; }
         \\  |                                  ^^^^^^^^^^^^^
     );
     paragraph(12, #string,oneline
@@ -1026,11 +1036,12 @@ render_section_120 :: () {
         \\runtime safety checks and panics lists the full family.
     );
     paragraph(26, #string,oneline
-        \\The debug allocator is a wrapper around `context.allocator` installed at
-        \\`-O0` alone. It records an allocation trace for every block and reports
-        \\leaks, double frees, use after free, invalid frees, and invalid
-        \\reallocations on stderr. It never aborts; it prints an error count when
-        \\the process ends. Its own chapter covers the reports in detail.
+        \\The debug allocator is a wrapper installed as `context.allocator` when
+        \\`GLOSSO_DEBUG_ALLOCATOR` has a value other than `0`, independently of
+        \\the optimization level. It records an allocation trace for every block
+        \\and reports leaks, double frees, use after free, invalid frees, and
+        \\invalid reallocations on stderr. It never aborts; it prints an error
+        \\count when the process ends. Its own chapter covers the reports in detail.
     );
     paragraph(27, #string,oneline
         \\Neither runtime layer knows anything about the compile-time ones, and
@@ -1055,9 +1066,10 @@ render_section_120 :: () {
         \\      keep.glo:5:14
     );
     paragraph(30, #string,oneline
-        \\That output is from `-O0`. The same program built at `-O1` prints its
-        \\own line and nothing else, because the report belongs to the allocator
-        \\and the allocator is installed only at `-O0`.
+        \\That output appears when `GLOSSO_DEBUG_ALLOCATOR` is nonzero, at any
+        \\optimization level. With the variable absent or equal to `0`, the same
+        \\program prints its own line and nothing else, because the report belongs
+        \\to the allocator rather than the runtime-safety-check level.
     );
 
     subheading(31, "What is proved and what is assumed");
@@ -1442,7 +1454,7 @@ render_section_122 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\make_buffer :: (n: s64) -> ?*void #memory(returns_fresh, released_by(free)) {
+        \\make_buffer :: (n: ssize) -> ?*void #memory(returns_fresh, released_by(free)) {
         \\    return alloc(n);
         \\}
         \\
@@ -1605,7 +1617,7 @@ render_section_122 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\make_buffer :: (n: s64) -> ?*void {
+        \\make_buffer :: (n: ssize) -> ?*void {
         \\    return alloc(n);
         \\}
         \\
@@ -1675,7 +1687,7 @@ render_section_122 :: () {
         \\interned table, a global cache, anything whose lifetime is the process.
         \\It is the only clause accepted on a variable declaration, and on an
         \\aggregate binding it covers every member place reached from that name.
-        \\It removes the obligation and changes nothing else, so the `-O0` debug
+        \\It removes the obligation and changes nothing else, so an enabled debug
         \\allocator still reports the allocation when the process ends.
     );
     code_block(32, "glosso", #string
@@ -2560,9 +2572,9 @@ render_section_125 :: () {
     paragraph(28, #string,oneline
         \\Because the failure mode is silence, the useful habit is to treat a
         \\clean memory pass as evidence about the code the pass could see. The
-        \\runtime layers cover a different set: the debug allocator at `-O0`
-        \\observes actual allocations, so it catches exactly the class the
-        \\static pass drops.
+        \\runtime layers cover a different set: the debug allocator, enabled with
+        \\a nonzero `GLOSSO_DEBUG_ALLOCATOR`, observes actual allocations, so it
+        \\catches exactly the class the static pass drops.
     );
     code_block(29, "glosso", #string
         \\#import "Io";
@@ -2580,12 +2592,13 @@ render_section_125 :: () {
     paragraph(30, #string,oneline
         \\The memory pass reports a possible leak and never the double free,
         \\because the release happened inside a generic body whose effects do
-        \\not reach `main`. At the default `-O1` the program aborts with
-        \\`0xc0000374`. Built with `-O0`, the debug allocator names both frees
-        \\and the allocation, each with the call chain that reached it.
+        \\not reach `main`. With the debug allocator disabled the program can
+        \\abort in the process heap, for example with `0xc0000374` on Windows.
+        \\With `GLOSSO_DEBUG_ALLOCATOR=1`, the allocator names both frees and the
+        \\allocation, each with the call chain that reached it.
     );
     code_block(31, "text", #string
-        \\$ glosso -O0 -o g1.exe g1.glo && ./g1.exe
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso -O1 -o g1.exe g1.glo && ./g1.exe
         \\glosso debug allocator: double free
         \\    allocated at:
         \\      ...\g1.glo:7:10
@@ -2999,8 +3012,8 @@ render_section_127 :: () {
     paragraph(32, #string,oneline
         \\`pointer_punning` relaxes the pointee check and the distinction
         \\between a single pointer and a many-pointer. The two assignments below
-        \\are rejected without it: `error: got *isize, expected [*]isize` and
-        \\`error: got *isize, expected *u8`. With it, both are accepted and the
+        \\are rejected without it: `error: got *s64, expected [*]s64` and
+        \\`error: got *s64, expected *u8`. With it, both are accepted and the
         \\program prints `65 65`.
     );
     code_block(33, "glosso", #string
@@ -3021,7 +3034,7 @@ render_section_127 :: () {
         \\branch that has already established the qualifier direction is
         \\legal, so discarding `const` remains an error under the gate:
         \\`writable: *s64 = readonly;` with `readonly: *const s64` reports
-        \\`error: got *const isize, expected *isize`.
+        \\`error: got *const s64, expected *s64`.
     );
     subheading(35, "The gate that tightens");
     paragraph(36, #string,oneline

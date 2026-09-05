@@ -287,7 +287,7 @@ render_section_7 :: () {
     );
     subheading(30, "Words that only look reserved");
     paragraph(31, #string,oneline
-        \\`typeclass`, `instance`, `distinct`, `type`, `isize` and `string` are
+        \\`typeclass`, `instance`, `distinct`, `type`, `ssize` and `string` are
         \\plain identifier tokens. Their meaning comes from the position they
         \\appear in, which is why each of them can also be bound as a local.
     );
@@ -299,9 +299,9 @@ render_section_7 :: () {
         \\    instance := 2;
         \\    distinct := 3;
         \\    type := 4;
-        \\    isize := 5;
+        \\    ssize := 5;
         \\    string := 6;
-        \\    print("% % % % % %\n", typeclass, instance, distinct, type, isize, string);
+        \\    print("% % % % % %\n", typeclass, instance, distinct, type, ssize, string);
         \\}
     );
     code_block(33, "text", #string
@@ -643,7 +643,7 @@ render_section_9 :: () {
     );
     paragraph(29, #string,oneline
         \\A float literal never reaches an integer target. `x : s64 = 1.5;` is
-        \\`error: cannot implicitly convert comptime_float to isize`, and
+        \\`error: cannot implicitly convert comptime_float to s64`, and
         \\`x : u8 = 1.0;` is `error: cannot implicitly convert comptime_float to
         \\u8` even though the value is whole. That rule and its escape hatches
         \\are in Conversions: What Is Implicit.
@@ -1145,11 +1145,11 @@ render_section_11 :: () {
 
 render_section_12 :: () {
     paragraph(0, #string,oneline
-        \\`#char` writes a character as an integer literal. The scanner handles
-        \\it inside the directive scan and emits an integer token, so a `#char`
-        \\is not a directive the parser sees and not a value of some character
-        \\type. Glosso has no character type; a `#char` is a number that happens
-        \\to have been written as a glyph.
+        \\`#char` writes one character value. The scanner handles the form
+        \\inside directive scanning and emits a marked integer token; the parser
+        \\keeps that marker, and the checker gives the literal the builtin
+        \\`char` or `rune` type. These types retain distinct identities even
+        \\though their storage is the same width as `u8` and `u32`.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
@@ -1160,13 +1160,15 @@ render_section_12 :: () {
         \\    l := #char "λ";
         \\    print("A      = % (%)\n", a, type_name(type_of(a)));
         \\    print("lambda = % (%)\n", l, type_name(type_of(l)));
-        \\    print("A + 1  = %\n", a + 1);
+        \\    contextual: rune = #char "A";
+        \\    print("contextual A = % (%)\n", cast(u32)contextual,
+        \\        type_name(type_of(contextual)));
         \\}
     );
     code_block(2, "text", #string
-        \\A      = 65 (u8)
-        \\lambda = 955 (u32)
-        \\A + 1  = 66
+        \\A      = 65 (char)
+        \\lambda = 955 (rune)
+        \\contextual A = 65 (rune)
     );
     paragraph(3, #string,oneline
         \\The form is the directive, then optional spaces and tabs, then a quoted
@@ -1177,36 +1179,36 @@ render_section_12 :: () {
         \\`error: #char expects a string literal`.
     );
 
-    subheading(4, "Why it is an integer and not a character");
+    subheading(4, "Character types are not integers");
     paragraph(5, #string,oneline
-        \\Indexing a `string` yields a `u8`, and byte classification is written
-        \\as ordinary integer comparison. Making `#char` an integer literal is
-        \\what lets those comparisons be written with glyphs instead of numbers,
-        \\with no conversion and no character type to carry through the program.
-        \\The arithmetic is the underlying integer arithmetic, with the same
-        \\overflow rules as any other value of that width.
+        \\`char` is a one-byte ASCII character and `rune` is a four-byte Unicode
+        \\scalar. They are deliberately outside `Is_Integer` and `Is_Numeric`.
+        \\They have equality and ordering, but no arithmetic, bitwise, shift,
+        \\integer-range, or SIMD-lane operations. Direct string indexing is still
+        \\code-unit oriented, so it yields `u8` or `u16`; convert explicitly when
+        \\byte-oriented code needs to compare a code unit with a glyph.
     );
     code_block(6, "glosso", #string
         \\#import "Io";
         \\
         \\is_digit_byte :: (byte: u8) -> bool {
-        \\    return byte >= #char "0" && byte <= #char "9";
+        \\    return byte >= cast(u8)(#char "0")
+        \\        && byte <= cast(u8)(#char "9");
         \\}
         \\
         \\main :: () {
         \\    text : string = "h7";
-        \\    print("first is h: %\n", text[0] == #char "h");
+        \\    print("first is h: %\n", text[0] == cast(u8)(#char "h"));
         \\    print("second is a digit: %\n", is_digit_byte(text[1]));
-        \\    print("A + 32 = %\n", #char "A" + 32);
-        \\    upper := text[0] - #char "a" + #char "A";
-        \\    print("upper h = %\n", upper);
+        \\    c := #char "A";
+        \\    r := char_to_rune(c);
+        \\    print("char_to_rune(A): %\n", cast(u32)r);
         \\}
     );
     code_block(7, "text", #string
         \\first is h: 1
         \\second is a digit: 1
-        \\A + 32 = 97
-        \\upper h = 72
+        \\char_to_rune(A): 65
     );
 
     subheading(8, "The accepted escapes");
@@ -1279,37 +1281,38 @@ render_section_12 :: () {
         \\error: unterminated #char string literal
     );
     paragraph(28, #string,oneline
-        \\A code point above ASCII is written directly instead: `#char "λ"` is
-        \\`955`, the whole code point, because the file is decoded to code points
+        \\A code point above ASCII is written directly instead: `#char "λ"`
+        \\has scalar value `955`, because the source is decoded to code points
         \\before the scan and the literal takes one of them.
     );
 
     subheading(29, "The synthesised type");
     paragraph(30, #string,oneline
-        \\Left alone, a `#char` synthesises as `u8` when its code point is at
-        \\most `0x7f` and as `u32` otherwise. The split is deliberate: an ASCII
-        \\literal is almost always about to meet a string byte, and a non-ASCII
-        \\one cannot fit in a byte at all. Given an expected type, the literal
-        \\accepts only the types that can hold what was written.
+        \\Left alone, an ASCII `#char` synthesises as `char`; every other code
+        \\point synthesises as `rune`. Context can widen an ASCII literal directly
+        \\to `rune`, but this privilege belongs to the literal, not to stored
+        \\`char` values. A variable of type `char` reaches `rune` only through
+        \\`char_to_rune`.
     );
     table_header(31, "Code point   —   Default type   —   Types it accepts");
-    table_row(32, "at most `0x7f`   |   `u8`   |   `u8`, `s8`, `u32`");
-    table_row(33, "above `0x7f`   |   `u32`   |   `u32`");
+    table_row(32, "at most `0x7f`   |   `char`   |   `char`, `rune`");
+    table_row(33, "above `0x7f`   |   `rune`   |   `rune`");
     code_block(34, "text", #string
-        \\main :: () { c : s64 = #char "A"; }
-        \\error: ASCII #char literal can infer only as u8, s8, or u32, not isize
+        \\main :: () { c : u8 = #char "A"; }
+        \\error: ASCII #char literal can infer only as char or rune, not u8
         \\
-        \\main :: () { c : u16 = #char "A"; }
-        \\error: ASCII #char literal can infer only as u8, s8, or u32, not u16
+        \\main :: () { c : char = #char "λ"; }
+        \\error: non-ASCII #char literal can infer only as rune, not char
         \\
-        \\main :: () { c : u8 = #char "λ"; }
-        \\error: non-ASCII #char literal can infer only as u32, not u8
+        \\main :: () { c := #char "A"; r : rune = c; }
+        \\error: got char, expected rune
     );
     note(35, #string,oneline
-        \\The list is closed, so `u16` is refused even though it is wide enough.
-        \\A `#char` at any other integer type has to go through a cast, and a
-        \\cast accepts it because at that point it is a number like any other:
-        \\`cast(u16) #char "A"` is `65`.
+        \\The contextual list is closed: integer targets are refused even when
+        \\their representation is wide enough. Low-level conversion remains
+        \\explicit: `cast(u8)(#char "A")` is `65`, and `cast(u32)(#char "λ")`
+        \\is `955`. Conversely, an integer cast can forge a `char` or `rune`
+        \\outside its scalar domain, so validate external data before casting.
     );
 }
 
@@ -1362,9 +1365,9 @@ render_section_13 :: () {
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
-        \\Point :: struct { x: isize; y: isize; }
+        \\Point :: struct { x: ssize; y: ssize; }
         \\
-        \\sum_all :: (values: ...isize) -> isize {
+        \\sum_all :: (values: ...ssize) -> ssize {
         \\    total := 0;
         \\    for v : values total += v;
         \\    return total;
@@ -1374,10 +1377,10 @@ render_section_13 :: () {
         \\    K :: 10;                          // ::   constant binding
         \\    n := 3;                           // :=   variable binding
         \\    m ::= 6 * 7;                      // ::=  compile-time binding
-        \\    q : isize = 5;                      // :    type annotation
+        \\    q : ssize = 5;                      // :    type annotation
         \\    q = 6;                            // =    assignment
         \\    p : Point = .{ .x = 1, .y = 2 };  // .{   aggregate literal
-        \\    a : [5]isize = .[10, 20, 30, 40, 50];
+        \\    a : [5]ssize = .[10, 20, 30, 40, 50];
         \\    t := .(1, "two");                 // .(   Dot then LParen
         \\    print("K=% n=% m=% q=% p=% a=% t=%\n", K, n, m, q, p.x, a[2], t.0);
         \\    print("full=% tail=% head=% mid=%\n",
@@ -1406,7 +1409,7 @@ render_section_13 :: () {
     paragraph(28, #string,oneline
         \\What is absent matters as much as what is present. `$`, `#`, `\`, `'`,
         \\backtick, `"`, `;` and the six bracket characters are not operator
-        \\characters, so they always end an operator run. That is why `x: []isize`
+        \\characters, so they always end an operator run. That is why `x: []ssize`
         \\and `Err![]T` lex the way they read, and why an operator whose name
         \\contains a bracket can only be written in the quoted form described in
         \\the chapter on reserved operators.
@@ -1435,11 +1438,11 @@ render_section_13 :: () {
     table_row(32, "`a = -1`   |   `=` `-` `1`   |   assignment of a negated literal");
     table_row(33, "`a =-1`   |   `=-`   |   `error: unexpected token '=-'`");
     table_row(34, "`1 ++2`   |   `++`   |   `error: unexpected token '++'`");
-    table_row(35, "`o: ?isize`   |   `:` then `?isize`   |   an optional annotation");
-    table_row(36, "`o:?isize`   |   `:` alone   |   `error: reserved operator token ':'`");
-    table_row(37, "`p:*isize`   |   `:` `*`   |   works, by the `*` exception");
-    table_row(38, "`Err! *isize`   |   `!` `*`   |   a result of a pointer");
-    table_row(39, "`Err!*isize`   |   `!*`   |   `error: unexpected token '!*'`");
+    table_row(35, "`o: ?ssize`   |   `:` then `?ssize`   |   an optional annotation");
+    table_row(36, "`o:?ssize`   |   `:` alone   |   `error: reserved operator token ':'`");
+    table_row(37, "`p:*ssize`   |   `:` `*`   |   works, by the `*` exception");
+    table_row(38, "`Err! *ssize`   |   `!` `*`   |   a result of a pointer");
+    table_row(39, "`Err!*ssize`   |   `!*`   |   `error: unexpected token '!*'`");
     table_row(40, "`2 * p.*.b`   |   `*` `.` `*` `.` `b`   |   works, by the trailing-dot rule");
     table_row(41, "`2 *. 3`   |   `*.`   |   `error: operator token cannot end with '.'`");
     note(42, #string,oneline
@@ -1656,9 +1659,9 @@ render_section_15 :: () {
         \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
         \\}
         \\
-        \\(isize, isize) ::: instance Mod {
-        \\    Output :: isize;
-        \\    '%%' :: (a: isize, b: isize) -> Output { return a * 10 + b; }
+        \\(ssize, ssize) ::: instance Mod {
+        \\    Output :: ssize;
+        \\    '%%' :: (a: ssize, b: ssize) -> Output { return a * 10 + b; }
         \\}
     );
     code_block(16, "text", #string
@@ -1704,16 +1707,16 @@ render_section_15 :: () {
     );
     code_block(24, "glosso", #string
         \\// Mod2.glo: combine uses %% on its first line, before the declaration
-        \\combine :: (a: isize, b: isize) -> isize { return a %% b; }
+        \\combine :: (a: ssize, b: ssize) -> ssize { return a %% b; }
         \\
         \\Mod :: typeclass (L: type, R: type) {
         \\    Output :: type;
         \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
         \\}
         \\
-        \\(isize, isize) ::: instance Mod {
-        \\    Output :: isize;
-        \\    '%%' :: (a: isize, b: isize) -> Output { return a * 10 + b; }
+        \\(ssize, ssize) ::: instance Mod {
+        \\    Output :: ssize;
+        \\    '%%' :: (a: ssize, b: ssize) -> Output { return a * 10 + b; }
         \\}
     );
     code_block(25, "glosso", #string

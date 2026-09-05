@@ -134,6 +134,24 @@
 (instance_declaration
   class: (identifier) @type)
 
+; Keep this list aligned with `parser_builtin_type_name` in ../glosso.
+(
+  [
+    (named_type (identifier) @type.builtin)
+    (generic_type name: (identifier) @type.builtin)
+    (type_constructor_pattern (identifier) @type.builtin)
+    (generic_type_constructor_pattern name: (identifier) @type.builtin)
+  ]
+  (#any-of? @type.builtin
+    "ssize" "usize" "char" "rune" "bool"
+    "string" "cstring" "string16" "cstring16"
+    "type" "void" "any" "label"
+    "Code" "Pattern" "Namespace" "Library" "Typeclass" "Macro"
+    "s8" "s16" "s32" "s64" "s128"
+    "u8" "u16" "u32" "u64" "u128"
+    "f16" "f32" "f64" "f80" "f128"
+    "c32" "c64" "c128" "c160" "c256"))
+
 (named_declaration
   name: (declaration_name [
     (identifier)

@@ -477,11 +477,13 @@ render_section_132 :: () {
 
 render_section_133 :: () {
     paragraph(0, #string,oneline
-        \\Nothing is converted at a C boundary. The argument's machine image is
-        \\handed to the callee as it stands, so a type crosses correctly exactly
-        \\when its Glosso lowering is bit-for-bit the C type the header declares.
-        \\The checker does not verify this; it verifies the Glosso signature that
-        \\was written down, and a wrong signature becomes a wrong call.
+        \\For fixed C parameters and results, the declared type selects the ABI
+        \\image; the compiler does not repair a mismatched declaration with an
+        \\implicit numeric conversion. Apart from the string-to-byte-pointer
+        \\adaptation below and C's default promotions in a variadic tail, the
+        \\argument is handed to the callee as that image. The checker verifies the
+        \\Glosso signature that was written down, so a wrong signature becomes a
+        \\wrong call.
     );
     paragraph(1, #string,oneline
         \\Every scalar, every pointer shape, an enum with an explicit backing type,
@@ -504,8 +506,8 @@ render_section_133 :: () {
         \\f_dist   :: (a: Meters) -> Meters #c_call { return a; }
         \\f_array  :: (a: [4]s32) -> s64 #c_call { return 0; }
         \\
-        \\f_string :: (a: string) -> s64 #c_call { return a.count; }
-        \\f_view   :: (a: []u8) -> s64 #c_call { return a.count; }
+        \\f_string :: (a: string) -> ssize #c_call { return a.count; }
+        \\f_view   :: (a: []u8) -> ssize #c_call { return a.count; }
         \\f_option :: (a: ?s32) -> s64 #c_call { return 0; }
     );
     code_block(3, "text", #string
@@ -525,6 +527,8 @@ render_section_133 :: () {
     table_header(4, "Glosso type   —   Machine image   —   C spelling");
     table_row(5, "`s8` `s16` `s32` `s64`   |   `i8` `i16` `i32` `i64`   |   `int8_t` through `int64_t`");
     table_row(6, "`u8` `u16` `u32` `u64`   |   `i8` `i16` `i32` `i64`   |   `uint8_t` through `uint64_t`");
+    table_row(44, "`ssize`, `usize`   |   the target pointer width (`i32` or `i64`)   |   `intptr_t`, `uintptr_t`");
+    table_row(45, "`char`, `rune`   |   `i8`, `i32`   |   `uint8_t`, `uint32_t`");
     table_row(7, "`f32` `f64`   |   `float` `double`   |   `float`, `double`");
     table_row(8, "`bool`   |   `i1 zeroext`   |   `_Bool`");
     table_row(9, "`enum u8`, `enum_flags u32`   |   the backing integer   |   the enum's underlying type");
@@ -538,12 +542,13 @@ render_section_133 :: () {
         \\The remaining aggregate types are Glosso descriptors with no C
         \\counterpart. They compile in a `#c_call` signature, because the checker
         \\has no notion of C representability, and they pass the descriptor by
-        \\value. That is almost never what the C side expects.
+        \\value. That is almost never what the C side expects. `word` below is the
+        \\target's `ssize` width: 32 bits on a 32-bit target and 64 on a 64-bit one.
     );
     table_header(17, "Glosso type   —   Machine image   —   Reason");
-    table_row(18, "`string`, `cstring`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
-    table_row(19, "`[]T`   |   `{ i64, ptr }`   |   count and data");
-    table_row(20, "`[..]T`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
+    table_row(18, "`string`, `cstring`   |   `{ word, ptr, word }`   |   count, data, capacity");
+    table_row(19, "`[]T`   |   `{ word, ptr }`   |   count and data");
+    table_row(20, "`[..]T`   |   `{ word, ptr, word }`   |   count, data, capacity");
     table_row(21, "`?T` for non-pointer `T`   |   tag plus payload   |   a tagged union, not a null value");
     table_row(22, "`E!T`, `union`, tuples   |   tag plus payload   |   a tagged union");
 
@@ -570,9 +575,10 @@ render_section_133 :: () {
         \\main :: () {
         \\    c_puts("a string literal is NUL-terminated in the image");
         \\    buf: [8]u8;
-        \\    buf[0] = #char "A"; buf[1] = #char "B"; buf[2] = #char "C";
-        \\    buf[3] = #char "X"; buf[4] = #char "Y"; buf[5] = #char "Z";
-        \\    buf[6] = #char "!"; buf[7] = #char "?";
+        \\    buf[0] = cast(u8)(#char "A"); buf[1] = cast(u8)(#char "B");
+        \\    buf[2] = cast(u8)(#char "C"); buf[3] = cast(u8)(#char "X");
+        \\    buf[4] = cast(u8)(#char "Y"); buf[5] = cast(u8)(#char "Z");
+        \\    buf[6] = cast(u8)(#char "!"); buf[7] = cast(u8)(#char "?");
         \\    c_puts(cast(*const s8)buf.data);
         \\}
     );
@@ -641,12 +647,12 @@ render_section_133 :: () {
         \\libc   :: #library "c";
         \\printf :: (format: *const s8, ...) -> s32 #foreign libc "printf";
         \\
-        \\sum_s64 :: (count: s64, ...) -> s64 #c_call {
+        \\sum_s64 :: (count: ssize, ...) -> s64 #c_call {
         \\    ap: Va_List;
         \\    start(*ap);
         \\    defer end(*ap);
         \\    total: s64 = 0;
-        \\    i: s64 = 0;
+        \\    i: ssize = 0;
         \\    while i < count {
         \\        total += arg(s64, *ap);
         \\        i += 1;
@@ -671,11 +677,12 @@ render_section_133 :: () {
         \\buffer independently.
     );
     note(43, #string,oneline
-        \\No conversion happens in the variadic tail. Arguments after the last
-        \\declared parameter are pushed exactly as their Glosso representation, so
-        \\`c_printf("%s\n", "hello")` passes a three-word descriptor where C reads a
-        \\pointer and the program dies with `exit code: 0xc0000005`. Convert with
-        \\`c_string` first.
+        \\C's default argument promotions do happen in the variadic tail: `bool`,
+        \\`char`, `s8`, `u8`, `s16`, and `u16` become `s32`, while `f16` and `f32`
+        \\become `f64`; other tail values keep their representation. Aggregate
+        \\descriptors are not adapted, so `c_printf("%s\n", "hello")` passes a
+        \\three-word string descriptor where C reads a pointer and can crash.
+        \\Convert the string with `c_string` first.
     );
 }
 
@@ -1279,7 +1286,7 @@ render_section_135 :: () {
         \\// 0xf3 0x90 is `pause`, the x86 spin-wait hint. It reads and writes nothing.
         \\PAUSE_X86 :: .[16#f3, 16#90];
         \\
-        \\spin :: (rounds: s64) {
+        \\spin :: (rounds: ssize) {
         \\    i := 0;
         \\    while i < rounds {
         \\        #if OUT.cpu == {
@@ -1338,7 +1345,7 @@ render_section_136 :: () {
         \\the checker sees, and the string picks the implementation out of a registry
         \\built into the compiler. This is how the standard library reaches the type
         \\system, the host operating system, and the machine. 493 distinct intrinsic
-        \\names appear across the current `std`, in 594 declarations.
+        \\names appear across the current `std`, in 608 declarations.
     );
     paragraph(1, #string,oneline
         \\`#magic` exists so that these operations stay ordinary declarations. A
@@ -1352,7 +1359,7 @@ render_section_136 :: () {
         \\#import "Meta";
         \\
         \\// A user declaration may bind any registered intrinsic name.
-        \\byte_width :: (T: type) -> s64 #magic "size_of";
+        \\byte_width :: (T: type) -> ssize #magic "size_of";
         \\concat     :: (a: string, b: string) -> string #magic "str_concat"
         \\    #memory{returns_fresh, reads(a, b), noescape(a, b)};
         \\
@@ -1511,9 +1518,10 @@ render_section_136 :: () {
     note(47, #string,oneline
         \\`sb_new`, `sb_append` and `sb_to_string` are the one family whose behaviour
         \\differs between the two compile-time engines: the constant evaluator
-        \\special-cases the mutation through a pointer, and the VM does not, so a
-        \\`String_Builder` used inside a top-level `#comptime` silently produces the
-        \\empty string. Build compile-time text with `str_cat` instead.
+        \\special-cases the mutation through a pointer, and the VM does not. A
+        \\`String_Builder` used inside a top-level `#comptime` stops with
+        \\`#comptime stopped: VM: value is not a string`; build compile-time text
+        \\with `str_cat` or `str_repeat` instead.
     );
     subheading(48, "`#magic` on an aggregate");
     paragraph(49, #string,oneline

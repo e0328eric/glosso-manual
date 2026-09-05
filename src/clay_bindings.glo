@@ -3,10 +3,43 @@
 #import "Compiler";
 #import "Bindgen";
 
-// Returns Bindgen's freshly built source on success and a static
-// `#compile_error` literal on every failure path, so the function makes no
+// The compiler services serialize these records in the order shown. Keep the
+// bridge records `#c_call`: ordinary structs are reordered by target layout,
+// and `string` becoming two 32-bit words on wasm32 otherwise moves `s64`
+// ahead of it and scrambles the service result.
+Clay_Native_Compile_Result :: struct #c_call {
+    output: string;
+    artifact: string;
+    status: s64;
+    ok: bool;
+}
+
+clay_compile_c_archive :: (
+    name: string,
+    sources: [..]string,
+    options: C_Compile_Options,
+) -> Clay_Native_Compile_Result #magic "compiler_compile_c_archive"
+    #memory{returns_fresh, reads(name, sources, options),
+            noescape(name, sources, options)};
+
+Clay_Bindgen_Result :: struct #c_call {
+    output: string;
+    status: s64;
+    ok: bool;
+}
+
+clay_generate_bindings :: (
+    header: string,
+    library: any,
+    options: Bindgen_Options,
+) -> Clay_Bindgen_Result #magic "bindgen_generate_source"
+    #memory{returns_fresh, reads(header, library, options),
+            noescape(header, library, options)};
+
+// Produces Bindgen's freshly built source on success and a static
+// `#compile_error` literal on every failure path, so the computation makes no
 // return-origin claim; the checker infers what each path produced.
-clay_bindings_source :: () -> string {
+CLAY_BINDINGS_SOURCE :: #comptime -> string {
     if OUT.os != Target_OS.Wasm ||
        OUT.cpu != Target_CPU.Wasm32 ||
        OUT.abi != Target_ABI.Freestanding
@@ -36,13 +69,11 @@ clay_bindings_source :: () -> string {
     add_c_include_path(*c_options, "vendor/clay");
     add_c_compiler_arg(*c_options, "-ffreestanding");
     add_c_compiler_arg(*c_options, "-fno-builtin");
-    clay_archive: Native_Compile_Output;
-    if compile_c_archive("clay", sources, c_options) == {
-        case .Ok(archive); clay_archive = archive;
-        case .Err(failure);
-            print("Clay compilation failed:\n");
-            report_error(failure);
-            return "#compile_error \"Clay compilation failed\";";
+    clay_archive := clay_compile_c_archive("clay", sources, c_options);
+    if !clay_archive.ok {
+        print("Clay compilation failed (status %):\n", clay_archive.status);
+        print("%", clay_archive.output);
+        return "#compile_error \"Clay compilation failed\";";
     }
 
     bindgen_options: Bindgen_Options;
@@ -51,18 +82,17 @@ clay_bindings_source :: () -> string {
     add_bindgen_preprocessor_definition(*bindgen_options, "CLAY_DISABLE_SIMD");
     add_bindgen_compiler_arg(*bindgen_options, "--target=wasm32-unknown-unknown");
     add_bindgen_compiler_arg(*bindgen_options, "-ffreestanding");
-    bindings := generate_source(
+    generated := clay_generate_bindings(
         header,
-        static_library("clay", clay_archive.artifact),
+        clay_archive.artifact,
         bindgen_options,
     );
-    if bindings == {
-        case .Ok(source); return source;
-        case .Err(failure);
-            print("Clay Bindgen failed:\n");
-            report_error(failure);
-            return "#compile_error \"Clay Bindgen failed\";";
+    if !generated.ok {
+        print("Clay Bindgen failed (status %):\n", generated.status);
+        print("%", generated.output);
+        return "#compile_error \"Clay Bindgen failed\";";
     }
+    return generated.output;
 }
 
-#insert clay_bindings_source();
+#insert CLAY_BINDINGS_SOURCE;

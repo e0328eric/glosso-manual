@@ -37,13 +37,13 @@ reference_json_bool :: (
 reference_json_int :: (
     value: ?*Serialization_Value,
     name: string,
-    fallback: s64 = 0,
-) -> s64 {
+    fallback: ssize = 0,
+) -> ssize {
     if #pattern .Some(field) = reference_json_field(value, name) {
         if #partial field.* == {
-            case .signed_integer(signed); return cast(s64)signed;
-            case .unsigned_integer(unsigned); return cast(s64)unsigned;
-            case .floating(floating); return cast(s64)floating;
+            case .signed_integer(signed); return cast(ssize)signed;
+            case .unsigned_integer(unsigned); return cast(ssize)unsigned;
+            case .floating(floating); return cast(ssize)floating;
         }
     }
     return fallback;
@@ -83,36 +83,36 @@ reference_read_file_text :: (path: string) -> string {
             return "";
     }
     if size < 0 return "";
-    if read_file(path, size + 1) == {
+    if read_file(path, cast(ssize)(size + 1)) == {
         case .Ok(text); return text;
         case .Err; return "";
     }
 }
 
-reference_line_end :: (source: string, start: s64) -> s64 {
+reference_line_end :: (source: string, start: ssize) -> ssize {
     i := start;
-    while i < source.count && source[i] != #char "\n" i += 1;
+    while i < source.count && source[i] != cast(u8)(#char "\n") i += 1;
     return i;
 }
 
 reference_trim_line :: (value: string) -> string {
-    start: s64 = 0;
+    start: ssize = 0;
     finish := value.count;
     while start < finish &&
-        (value[start] == #char " " || value[start] == #char "\t") start += 1;
-    while finish > start && (value[finish - 1] == #char " " ||
-        value[finish - 1] == #char "\t" ||
-        value[finish - 1] == #char "\r") finish -= 1;
+        (value[start] == cast(u8)(#char " ") || value[start] == cast(u8)(#char "\t")) start += 1;
+    while finish > start && (value[finish - 1] == cast(u8)(#char " ") ||
+        value[finish - 1] == cast(u8)(#char "\t") ||
+        value[finish - 1] == cast(u8)(#char "\r")) finish -= 1;
     return value[start..finish];
 }
 
-reference_leading_number :: (value: string) -> s64 {
-    result: s64 = 0;
+reference_leading_number :: (value: string) -> ssize {
+    result: ssize = 0;
     seen := false;
     for i: 0..value.count {
         byte := value[i];
-        if byte < #char "0" || byte > #char "9" break;
-        result = result * 10 + cast(s64)(byte - #char "0");
+        if byte < cast(u8)(#char "0") || byte > cast(u8)(#char "9") break;
+        result = result * 10 + cast(ssize)(byte - cast(u8)(#char "0"));
         seen = true;
     }
     if !seen return -1;
@@ -121,10 +121,11 @@ reference_leading_number :: (value: string) -> s64 {
 
 // The text of a call written on one line, as in `table_row(3, "a | b");`.
 reference_quoted_argument :: (line: string) -> string {
-    open := index_of(line, "\"");
+    open: ssize = -1;
+    if #pattern .Some(found) = index_of(line, "\"") open = found;
     if open < 0 return "";
     close := line.count - 1;
-    while close > open && line[close] != #char "\"" close -= 1;
+    while close > open && line[close] != cast(u8)(#char "\"") close -= 1;
     if close <= open return "";
     return line[open + 1..close];
 }
@@ -133,13 +134,13 @@ reference_quoted_argument :: (line: string) -> string {
 // searchable text of their own. Escapes written for the literal are undone so
 // the index holds what a reader sees.
 reference_append_prose :: (out: *String_Builder, value: string) {
-    i: s64 = 0;
+    i: ssize = 0;
     while i < value.count {
         byte := value[i];
-        if byte == #char "`" { i += 1; continue; }
-        if byte == #char "\\" && i + 1 < value.count {
+        if byte == cast(u8)(#char "`") { i += 1; continue; }
+        if byte == cast(u8)(#char "\\") && i + 1 < value.count {
             next := value[i + 1];
-            if next == #char "\"" || next == #char "\\" {
+            if next == cast(u8)(#char "\"") || next == cast(u8)(#char "\\") {
                 builder_write_byte(out, next);
                 i += 2;
                 continue;
@@ -148,13 +149,13 @@ reference_append_prose :: (out: *String_Builder, value: string) {
         builder_write_byte(out, byte);
         i += 1;
     }
-    builder_write_byte(out, #char " ");
+    builder_write_byte(out, cast(u8)(#char " "));
 }
 
 reference_manual_titles :: () -> [..]string {
     titles: [..]string;
     source := reference_read_file_text("src/section_catalog.glo");
-    position: s64 = 0;
+    position: ssize = 0;
     while position < source.count {
         finish := reference_line_end(source, position);
         line := reference_trim_line(source[position..finish]);
@@ -177,7 +178,7 @@ reference_manual_section_files :: () -> [..]string {
     files: [..]string;
     source := reference_read_file_text("main.glo");
     marker := "#load \"src/sections_";
-    position: s64 = 0;
+    position: ssize = 0;
     while position < source.count {
         finish := reference_line_end(source, position);
         line := reference_trim_line(source[position..finish]);
@@ -196,9 +197,9 @@ MANUAL_SCAN_CODE :: 2;
 reference_collect_manual_text :: (path: string, texts: *[..]string) {
     source := reference_read_file_text(path);
     out := builder_make_len_cap(0, 8 * 1024);
-    current: s64 = -1;
+    current: ssize = -1;
     mode := MANUAL_SCAN_IDLE;
-    position: s64 = 0;
+    position: ssize = 0;
     while position < source.count {
         finish := reference_line_end(source, position);
         line := reference_trim_line(source[position..finish]);
@@ -268,34 +269,34 @@ reference_manual_json :: () -> string {
     }
     for path: files reference_collect_manual_text(path, *texts);
 
-    empty: s64 = 0;
+    empty: ssize = 0;
     for text: texts if text.count == 0 empty += 1;
     if empty != 0 print("manual index: % of % chapters have no prose\n", empty, titles.count);
 
     out := builder_make_len_cap(0, 1024 * 1024);
-    builder_write_byte(*out, #char "[");
+    builder_write_byte(*out, cast(u8)(#char "["));
     for i: 0..titles.count {
-        if i != 0 builder_write_byte(*out, #char ",");
-        builder_write_byte(*out, #char "[");
+        if i != 0 builder_write_byte(*out, cast(u8)(#char ","));
+        builder_write_byte(*out, cast(u8)(#char "["));
         reference_write_escaped_string(*out, titles[i], false);
-        builder_write_byte(*out, #char ",");
+        builder_write_byte(*out, cast(u8)(#char ","));
         reference_write_escaped_string(*out, reference_one_line(texts[i]), false);
-        builder_write_byte(*out, #char "]");
+        builder_write_byte(*out, cast(u8)(#char "]"));
     }
-    builder_write_byte(*out, #char "]");
+    builder_write_byte(*out, cast(u8)(#char "]"));
     return builder_into_string(out);
 }
 
 reference_is_space :: (byte: u8) -> bool {
-    return byte == #char " " || byte == #char "\t" ||
-        byte == #char "\n" || byte == #char "\r" ||
+    return byte == cast(u8)(#char " ") || byte == cast(u8)(#char "\t") ||
+        byte == cast(u8)(#char "\n") || byte == cast(u8)(#char "\r") ||
         byte == 11 || byte == 12;
 }
 
 reference_is_rule_byte :: (byte: u8) -> bool {
-    return byte == #char "=" || byte == #char "-" || byte == #char "~" ||
-        byte == #char "_" || byte == #char "*" || byte == #char "#" ||
-        byte == #char "+";
+    return byte == cast(u8)(#char "=") || byte == cast(u8)(#char "-") || byte == cast(u8)(#char "~") ||
+        byte == cast(u8)(#char "_") || byte == cast(u8)(#char "*") || byte == cast(u8)(#char "#") ||
+        byte == cast(u8)(#char "+");
 }
 
 // Documentation comments draw section rules out of repeated punctuation. The
@@ -306,7 +307,7 @@ reference_is_rule_token :: (value: string) -> bool {
     if value.count < 4 return false;
     first := value[0];
     if !reference_is_rule_byte(first) return false;
-    i: s64 = 1;
+    i: ssize = 1;
     while i < value.count {
         if value[i] != first return false;
         i += 1;
@@ -317,8 +318,8 @@ reference_is_rule_token :: (value: string) -> bool {
 reference_one_line :: (value: string) -> string {
     out := builder_make_len_cap(0, value.count);
     wrote := false;
-    start: s64 = 0;
-    i: s64 = 0;
+    start: ssize = 0;
+    i: ssize = 0;
     while i <= value.count {
         if i < value.count && !reference_is_space(value[i]) {
             i += 1;
@@ -327,7 +328,7 @@ reference_one_line :: (value: string) -> string {
         if i > start {
             token := value[start..i];
             if !reference_is_rule_token(token) {
-                if wrote builder_write_byte(*out, #char " ");
+                if wrote builder_write_byte(*out, cast(u8)(#char " "));
                 write_string(*out, token);
                 wrote = true;
             }
@@ -338,13 +339,13 @@ reference_one_line :: (value: string) -> string {
     return builder_into_string(out);
 }
 
-reference_compact_summary :: (value: string, limit: s64 = 150) -> string {
+reference_compact_summary :: (value: string, limit: ssize = 150) -> string {
     summary := value;
     if summary.count <= limit return summary;
     cut := limit;
     i := limit - 1;
     while i >= 0 {
-        if summary[i] == #char " " {
+        if summary[i] == cast(u8)(#char " ") {
             if i > limit * 3 / 5 cut = i;
             break;
         }
@@ -404,7 +405,7 @@ reference_details_cell :: (value: *Serialization_Value) -> string {
     return builder_into_string(out);
 }
 
-reference_kind_order :: (kind: string) -> s64 {
+reference_kind_order :: (kind: string) -> ssize {
     if kind == "type" return 0;
     if kind == "typeclass" return 1;
     if kind == "constant" return 2;
@@ -413,30 +414,30 @@ reference_kind_order :: (kind: string) -> s64 {
     return 99;
 }
 
-reference_collation_weight :: (byte: u8) -> s64 {
-    if byte == #char "_" return 1;
-    if byte == #char "-" return 2;
-    if byte == #char "!" return 3;
-    if byte == #char "." return 4;
-    if byte == #char "[" || byte == #char "]" return 5;
-    if byte == #char "*" return 6;
-    if byte == #char "/" return 7;
-    if byte == #char "&" return 8;
-    if byte == #char "%" return 9;
-    if byte == #char "^" return 10;
-    if byte == #char "+" return 11;
-    if byte == #char "<" return 12;
-    if byte == #char "=" return 13;
-    if byte == #char ">" return 14;
-    if byte == #char "|" return 15;
-    if byte == #char "~" return 16;
-    if byte >= #char "0" && byte <= #char "9"
-        return 100 + cast(s64)(byte - #char "0");
-    if byte >= #char "A" && byte <= #char "Z"
-        return 200 + cast(s64)(byte - #char "A");
-    if byte >= #char "a" && byte <= #char "z"
-        return 200 + cast(s64)(byte - #char "a");
-    return 50 + cast(s64)byte;
+reference_collation_weight :: (byte: u8) -> ssize {
+    if byte == cast(u8)(#char "_") return 1;
+    if byte == cast(u8)(#char "-") return 2;
+    if byte == cast(u8)(#char "!") return 3;
+    if byte == cast(u8)(#char ".") return 4;
+    if byte == cast(u8)(#char "[") || byte == cast(u8)(#char "]") return 5;
+    if byte == cast(u8)(#char "*") return 6;
+    if byte == cast(u8)(#char "/") return 7;
+    if byte == cast(u8)(#char "&") return 8;
+    if byte == cast(u8)(#char "%") return 9;
+    if byte == cast(u8)(#char "^") return 10;
+    if byte == cast(u8)(#char "+") return 11;
+    if byte == cast(u8)(#char "<") return 12;
+    if byte == cast(u8)(#char "=") return 13;
+    if byte == cast(u8)(#char ">") return 14;
+    if byte == cast(u8)(#char "|") return 15;
+    if byte == cast(u8)(#char "~") return 16;
+    if byte >= cast(u8)(#char "0") && byte <= cast(u8)(#char "9")
+        return 100 + cast(ssize)(byte - cast(u8)(#char "0"));
+    if byte >= cast(u8)(#char "A") && byte <= cast(u8)(#char "Z")
+        return 200 + cast(ssize)(byte - cast(u8)(#char "A"));
+    if byte >= cast(u8)(#char "a") && byte <= cast(u8)(#char "z")
+        return 200 + cast(ssize)(byte - cast(u8)(#char "a"));
+    return 50 + cast(ssize)byte;
 }
 
 reference_compare_strings :: (left: string, right: string) -> Ordering {
@@ -450,9 +451,9 @@ reference_compare_strings :: (left: string, right: string) -> Ordering {
     if left.count != right.count return left.count <=> right.count;
     for i: 0..count {
         if left[i] == right[i] continue;
-        left_upper := left[i] >= #char "A" && left[i] <= #char "Z";
-        right_upper := right[i] >= #char "A" && right[i] <= #char "Z";
-        if left_upper != right_upper return cast(s64)left_upper <=> cast(s64)right_upper;
+        left_upper := left[i] >= cast(u8)(#char "A") && left[i] <= cast(u8)(#char "Z");
+        right_upper := right[i] >= cast(u8)(#char "A") && right[i] <= cast(u8)(#char "Z");
+        if left_upper != right_upper return cast(ssize)left_upper <=> cast(ssize)right_upper;
         return left[i] <=> right[i];
     }
     return Ordering.Equal;
@@ -470,7 +471,7 @@ reference_compare_symbols :: (
     return reference_compare_strings(left_name, right_name);
 }
 
-reference_write_integer :: (out: *String_Builder, value: s64) {
+reference_write_integer :: (out: *String_Builder, value: ssize) {
     write_string(out, format_int(value, 10));
 }
 
@@ -484,19 +485,19 @@ reference_write_escaped_string :: (
     value: string,
     glosso: bool,
 ) {
-    builder_write_byte(out, #char "\"");
-    i: s64 = 0;
+    builder_write_byte(out, cast(u8)(#char "\""));
+    i: ssize = 0;
     while i < value.count {
         byte := value[i];
-        if byte == #char "\"" {
+        if byte == cast(u8)(#char "\"") {
             write_string(out, "\\\"");
-        } else if byte == #char "\\" {
+        } else if byte == cast(u8)(#char "\\") {
             write_string(out, "\\\\");
-        } else if byte == #char "\n" {
+        } else if byte == cast(u8)(#char "\n") {
             write_string(out, "\\n");
-        } else if byte == #char "\r" {
+        } else if byte == cast(u8)(#char "\r") {
             write_string(out, "\\r");
-        } else if byte == #char "\t" {
+        } else if byte == cast(u8)(#char "\t") {
             write_string(out, "\\t");
         } else if byte < 32 {
             write_string(out, " ");
@@ -516,7 +517,7 @@ reference_write_escaped_string :: (
         }
         i += 1;
     }
-    builder_write_byte(out, #char "\"");
+    builder_write_byte(out, cast(u8)(#char "\""));
 }
 
 reference_stream_detail_row :: (
@@ -537,8 +538,8 @@ reference_stream_detail_row :: (
 reference_stream_function_rows :: (
     function: ?*Serialization_Value,
     details: *String_Builder,
-    detail_count: *s64,
-) -> (s64, s64, string, s64, s64) {
+    detail_count: *ssize,
+) -> (ssize, ssize, string, ssize, ssize) {
     first_parameter := detail_count.*;
     if !function
         return first_parameter, 0, "", detail_count.*, 0;
@@ -578,14 +579,16 @@ reference_stream_function_rows :: (
 reference_stream_type_details :: (
     symbol: *Serialization_Value,
     details: *String_Builder,
-    detail_count: *s64,
-) -> (string, s64, s64) {
+    detail_count: *ssize,
+) -> (string, ssize, ssize) {
     first := detail_count.*;
     kind := "";
     type_info := reference_json_field(symbol, "type_info");
     if !type_info return kind, first, 0;
     type_kind := reference_json_text(type_info, "kind");
-    if type_kind == "struct" {
+    if type_kind == "function-pointer" {
+        kind = "function-pointer";
+    } else if type_kind == "struct" {
         kind = "fields";
         fields := reference_json_array(type_info, "fields");
         for i: 0..fields.count {
@@ -623,13 +626,13 @@ reference_stream_type_details :: (
 reference_stream_typeclass_members :: (
     symbol: *Serialization_Value,
     details: *String_Builder,
-    detail_count: *s64,
+    detail_count: *ssize,
     members_out: *String_Builder,
-    member_count: *s64,
-) -> (string, bool, s64, s64, s64, s64) {
+    member_count: *ssize,
+) -> (string, bool, ssize, ssize, ssize, ssize) {
     first := member_count.*;
-    associated: s64 = 0;
-    methods: s64 = 0;
+    associated: ssize = 0;
+    methods: ssize = 0;
     minimal := "No methods are required.";
     explicit := false;
     typeclass := reference_json_field(symbol, "class_info");
@@ -678,8 +681,8 @@ reference_stream_instances :: (
     symbol: *Serialization_Value,
     all_instances: []Serialization_Value,
     instances_out: *String_Builder,
-    instance_count: *s64,
-) -> (s64, s64) {
+    instance_count: *ssize,
+) -> (ssize, ssize) {
     first := instance_count.*;
     if reference_json_text(symbol, "kind") != "typeclass" return first, 0;
     typeclass := reference_json_text(symbol, "name");
@@ -749,10 +752,10 @@ reference_generate_outputs :: (
         case .Err; return false;
         }
     }
-    symbol_count: s64 = 0;
-    detail_count: s64 = 0;
-    member_count: s64 = 0;
-    instance_count: s64 = 0;
+    symbol_count: ssize = 0;
+    detail_count: ssize = 0;
+    member_count: ssize = 0;
+    instance_count: ssize = 0;
 
     for module_index: 0..modules.count {
         module := *modules[module_index];
@@ -819,14 +822,14 @@ reference_generate_outputs :: (
             write_string(*glo_symbols, ", .method_count = "); reference_write_integer(*glo_symbols, method_count);
             write_string(*glo_symbols, " },\n");
 
-            if symbol_count > 0 builder_write_byte(*js_symbols, #char ",");
-            builder_write_byte(*js_symbols, #char "[");
-            reference_write_escaped_string(*js_symbols, name, false); builder_write_byte(*js_symbols, #char ",");
-            reference_write_escaped_string(*js_symbols, signature, false); builder_write_byte(*js_symbols, #char ",");
-            reference_write_escaped_string(*js_symbols, searchable_signature, false); builder_write_byte(*js_symbols, #char ",");
-            reference_write_escaped_string(*js_symbols, summary, false); builder_write_byte(*js_symbols, #char ",");
-            reference_write_integer(*js_symbols, module_index); builder_write_byte(*js_symbols, #char ",");
-            reference_write_escaped_string(*js_symbols, kind, false); builder_write_byte(*js_symbols, #char "]");
+            if symbol_count > 0 builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            builder_write_byte(*js_symbols, cast(u8)(#char "["));
+            reference_write_escaped_string(*js_symbols, name, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, signature, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, searchable_signature, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, summary, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            reference_write_integer(*js_symbols, module_index); builder_write_byte(*js_symbols, cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, kind, false); builder_write_byte(*js_symbols, cast(u8)(#char "]"));
             symbol_count += 1;
             if !reference_flush_large_builder_to_file(part_files[1], *glo_symbols) ||
                !reference_flush_large_builder_to_file(part_files[2], *glo_details) ||
@@ -847,12 +850,12 @@ reference_generate_outputs :: (
         write_string(*glo_modules, ", .symbol_count = "); reference_write_integer(*glo_modules, module_symbol_count);
         write_string(*glo_modules, " },\n");
 
-        if module_index > 0 builder_write_byte(*js_modules, #char ",");
-        builder_write_byte(*js_modules, #char "[");
-        reference_write_escaped_string(*js_modules, module_name, false); builder_write_byte(*js_modules, #char ",");
-        reference_write_escaped_string(*js_modules, module_summary, false); builder_write_byte(*js_modules, #char ",");
-        reference_write_integer(*js_modules, first_symbol); builder_write_byte(*js_modules, #char ",");
-        reference_write_integer(*js_modules, module_symbol_count); builder_write_byte(*js_modules, #char "]");
+        if module_index > 0 builder_write_byte(*js_modules, cast(u8)(#char ","));
+        builder_write_byte(*js_modules, cast(u8)(#char "["));
+        reference_write_escaped_string(*js_modules, module_name, false); builder_write_byte(*js_modules, cast(u8)(#char ","));
+        reference_write_escaped_string(*js_modules, module_summary, false); builder_write_byte(*js_modules, cast(u8)(#char ","));
+        reference_write_integer(*js_modules, first_symbol); builder_write_byte(*js_modules, cast(u8)(#char ","));
+        reference_write_integer(*js_modules, module_symbol_count); builder_write_byte(*js_modules, cast(u8)(#char "]"));
         if !reference_flush_large_builder_to_file(part_files[0], *glo_modules) ||
            !reference_flush_large_builder_to_file(part_files[5], *js_modules)
             return false;
@@ -990,7 +993,7 @@ generate_reference :: (source_path: string) -> bool {
         return false;
     }
     source: string;
-    if read_file(source_path, size + 1) == {
+    if read_file(source_path, cast(ssize)(size + 1)) == {
         case .Err;
             print("could not read generated reference source %\n", source_path);
             return false;
