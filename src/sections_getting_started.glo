@@ -522,6 +522,9 @@ render_section_1 :: () {
         \\vector begins with the executable path, and the compile-time one does
         \\not. `--` also swallows the whole rest of the command line,
         \\so the source file and every driver option have to appear before it.
+        \\For a nested `add_build_file` or `add_build_string` call, the elements
+        \\of `Build_Options.compile_time_command_line` occupy this same tail,
+        \\one argument per element and after an implicit `--`.
     );
     subheading(53, "Exit codes");
     table_header(54, "Situation   —   Exit code");
@@ -567,8 +570,9 @@ render_section_1 :: () {
     );
     bullet(62, #string,oneline
         \\The last optimization flag wins and resets the other mode entirely:
-        \\`-Ozz -O1` builds as plain `-O1`, while `-O1 -Ozz` reaches the
-        \\currently unsupported size pipeline and fails there.
+        \\`-Ozz -O1` builds as plain `-O1` with runtime checks, while
+        \\`-O1 -Ozz` selects the tiny size pipeline and currently aborts in
+        \\LLVM 23 before producing an artifact.
     );
     bullet(63, #string,oneline
         \\`--memory-sanitizer` and `--thread-sanitizer` are mutually exclusive
@@ -668,30 +672,33 @@ render_section_2 :: () {
     );
     subheading(20, "Optimization levels");
     paragraph(21, #string,oneline
-        \\The driver still accepts seven optimization flags. `-O0` through
-        \\`-O3` are working speed levels and the default is `-O1`. `-Os`, `-Oz`,
-        \\and `-Ozz` remain in the command-line and compile API, but the current
-        \\LLVM 23 backend cannot complete a linked build with them.
+        \\The driver accepts seven optimization flags. `-O0` through `-O3` are
+        \\working speed levels and the default is `-O1`; `-Os`, `-Oz`, and
+        \\`-Ozz` select progressively stronger size policies but do not
+        \\currently complete under LLVM 23. Each size flag also selects an
+        \\underlying speed level, which would decide whether runtime checks are
+        \\emitted if code generation completed.
     );
     table_header(22, "Flag   —   Request   —   Current result");
     table_row(23, "`-O0`   |   level 0   |   builds; runtime checks on; the default allocator remains the heap allocator");
     table_row(24, "`-O1` (default)   |   level 1   |   builds; runtime checks on");
     table_row(25, "`-O2`   |   level 2   |   builds; runtime checks off");
     table_row(26, "`-O3`   |   level 3   |   builds; runtime checks off");
-    table_row(27, "`-Os`   |   level 2 plus `Small`   |   LLVM 23 rejects optimization level `Os`");
-    table_row(28, "`-Oz`   |   level 3 plus `VerySmall`   |   LLVM 23 rejects optimization level `Oz`");
-    table_row(29, "`-Ozz`   |   level 3 plus `Tiny` and stripping   |   reaches the same unsupported size pipeline");
+    table_row(27, "`-Os`   |   level 2 plus `Small`   |   requests `default<Os>` plus `optsize`; LLVM 23 aborts, no artifact");
+    table_row(28, "`-Oz`   |   level 3 plus `VerySmall`   |   requests `default<Oz>` plus `optsize` and `minsize`; LLVM 23 aborts, no artifact");
+    table_row(29, "`-Ozz`   |   level 3 plus `Tiny`   |   the `-Oz` LLVM request plus `Tiny` linker policy; LLVM 23 aborts first, no artifact");
     paragraph(30, #string,oneline
-        \\For the working speed levels, runtime checks are kept exactly at level
-        \\0 or 1. Levels 2 and 3 remove overflow, bounds, tag, and null checks.
-        \\Use `-O2` for the manual and other release builds that previously chose
-        \\a size mode.
+        \\Runtime checks are configured exactly at underlying level 0 or 1.
+        \\Levels 2 and 3 remove overflow, bounds, tag, and null checks, so the
+        \\three size modes are configured without them. Today that distinction
+        \\does not become observable program behaviour because LLVM stops before
+        \\emitting the object.
     );
     note(31, #string,oneline
-        \\The failure occurs after the compiler announces the link:
-        \\`LLVM ERROR: The optimization level "Os" is no longer supported. Use
-        \\O2 in conjunction with the optsize attribute instead.` No `done` line
-        \\or usable linked artifact follows it.
+        \\The backend already uses an ordinary code-generation level and adds
+        \\`optsize` or `minsize` function attributes. Its pass pipeline is still
+        \\spelled `default<Os>` or `default<Oz>`, however, and LLVM 23 rejects
+        \\that specialization with the same removed-level error.
     );
     subheading(32, "What the checks cover");
     bullet(33, #string,oneline
@@ -827,13 +834,14 @@ render_section_2 :: () {
         \\or the reverse. The switch is independent of the runtime checks:
         \\`-O0` and `-O1` still control those exactly as the table above says.
     );
-    subheading(50, "Size modes under LLVM 23");
+    subheading(50, "The current LLVM 23 size-mode limitation");
     paragraph(51, #string,oneline
-        \\The three size flags still parse and still map to `Small`,
-        \\`VerySmall`, and `Tiny` in the compiler API. The current backend passes
-        \\that spelling to LLVM's LTO pipeline, but LLVM 23 removed those
-        \\pipeline levels. A linked build therefore stops before an artifact is
-        \\completed.
+        \\The three size flags map to `Small`, `VerySmall`, and `Tiny` in the
+        \\driver. `Small` asks for LLVM's `default<Os>` pipeline and marks
+        \\functions `optsize`; the other two ask for `default<Oz>` and add both
+        \\`optsize` and `minsize`. The attributes are valid in LLVM 23, but the
+        \\pipeline names still carry the retired `Os` and `Oz` levels and abort
+        \\the compiler before an object, IR file, or linked output is written.
     );
     code_block(52, "text", #string
         \\$ glosso -Os -o hello.exe hello.glo
@@ -842,16 +850,20 @@ render_section_2 :: () {
         \\LLVM ERROR: The optimization level "Os" is no longer supported. Use O2 in conjunction with the optsize attribute instead.
     );
     paragraph(53, #string,oneline
-        \\`-Oz` and `-Ozz` reach the corresponding unsupported size pipeline.
-        \\Until the backend maps size requests to `-O2` plus LLVM's
-        \\`optsize` or `minsize` attributes, use `-O2`; do not rely on the old
-        \\size measurements or linker transcripts.
+        \\The intended linker policy is already format-specific: COFF adds
+        \\`/opt:ref` and then `/opt:icf`; ELF progresses through section GC,
+        \\identical-code folding, and stripping; Mach-O uses dead stripping and
+        \\symbol/UUID suppression; wasm uses section GC and strips at `-Ozz`.
+        \\Those arguments are not reached while LLVM emission still aborts.
     );
     note(54, #string,oneline
-        \\Nested builds have the same limitation. In `Compile_Options` or
-        \\`Build_Options`, select `Optimization.Optimized` instead of
-        \\`Optimized_Small`, `Optimized_Very_Small`, or `Optimized_Tiny` when the
-        \\request must produce a linked artifact.
+        \\Nested builds select the same currently failing policies through
+        \\`Build_Options.optimization_level`: `Optimized_Small`,
+        \\`Optimized_Very_Small`, and `Optimized_Tiny` become `-Os`, `-Oz`, and
+        \\`-Ozz`. Use `Optimization.Optimized` (`-O2`) when an artifact is
+        \\required. `compile_c_archive` takes its own `optimization_level`
+        \\parameter and accepts only the numeric levels `Debug` through
+        \\`Very_Optimized`, defaulting to `.Optimized`.
     );
     bullet(61, #string,oneline
         \\A bare-metal target cannot use `-O0` or `-O1` without supplying an
@@ -1264,14 +1276,14 @@ render_section_4 :: () {
     );
     table_header(20, "On disk   —   Result");
     table_row(21, "`std/Name.glo`   |   That one file is the module.");
-    table_row(22, "`std/Name/module.glo` exists   |   Every `.glo` file directly inside `std/Name/` is the module, in file-name order.");
+    table_row(22, "`std/Name/module.glo` exists   |   That entry file is the module; its `#export` directives select its public components.");
     table_row(23, "both exist   |   `error: ambiguous module \"Name\": both <file> and <dir>/module.glo exist`");
     table_row(24, "neither exists   |   `error: cannot find module \"Name\" (searched: <roots>)`, where the roots are the standard-library directory followed by every `--module-path` directory");
     paragraph(25, #string,oneline
-        \\Only files directly inside the directory are taken; sub-directories are
-        \\separate modules addressed with a slash. `module.glo` is often nothing
-        \\but `#load` lines and may be empty: its existence is what marks the
-        \\directory as a module, and it is loaded along with its siblings.
+        \\Only `module.glo` is loaded automatically. It normally contains
+        \\`#export "Component.glo";` directives that assemble an umbrella module.
+        \\A sibling file is included only through an explicit dependency. Nested
+        \\modules can be named by path or reexported by their parent.
     );
     paragraph(26, #string,oneline
         \\Both shapes coexist in the standard library, and a name may have a file
@@ -1318,19 +1330,17 @@ render_section_4 :: () {
     paragraph(33, #string,oneline
         \\The same path form also names one file of a real module, so
         \\`#import "Io/Core";` imports a single component of the `Io` directory.
-        \\Not every component stands alone, though: `#import "Time/Core";` fails
-        \\with `error: unknown type 'Duration'` reported inside
-        \\`std/Time/Core.glo`, because that file depends on its siblings. Such
-        \\directories are imported whole. The Standard Library Map says which is
-        \\which.
+        \\Each component declares its own dependencies. Umbrella modules expose
+        \\the components their `#export` directives select; importing a component
+        \\directly exposes that component's public declarations and reexports.
     );
     subheading(34, "`#load`");
     paragraph(35, #string,oneline
-        \\`#load` splices a source file into the current compilation unit. The
-        \\path is relative to the file containing the directive, not to the
-        \\working directory, and no search path and no module are involved. An
-        \\alias puts the spliced names under a namespace instead of into the
-        \\loading file's scope.
+        \\`#load` loads an isolated module by file path. The path is relative to
+        \\the file containing the directive, not the working directory, and may
+        \\contain `..`. Public declarations become available in the loading
+        \\file; an alias makes them available through a namespace. The loaded
+        \\file resolves names using its own explicit dependencies.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
@@ -1358,9 +1368,9 @@ render_section_4 :: () {
         \\path>)`, and the absolute path the compiler tried is printed in full.
     );
     bullet(41, #string,oneline
-        \\An `#import` inside a loaded file brings its names into the loading
-        \\unit as well, so a file that loads a helper which imports `Io` can call
-        \\`print` itself.
+        \\Dependencies stay local: loading a helper that imports `Io` does not
+        \\make `print` available to the caller. The helper also cannot use a
+        \\dependency loaded only by its caller or by another sibling module.
     );
     bullet(42, #string,oneline
         \\Declarations in a private section of a loaded file stay invisible to
@@ -1368,8 +1378,37 @@ render_section_4 :: () {
     );
     note(43, #string,oneline
         \\The operator prescan runs per file. An operator declared in a `#load`ed
-        \\file is not available to the file that loads it, even though every
-        \\other name is. The Operator Prescan explains why.
+        \\file is not available while parsing the file that loads it. The
+        \\Operator Prescan explains why.
+    );
+    subheading(44, "`#export`: umbrella modules");
+    paragraph(45, #string,oneline
+        \\`#export "path";` loads a relative module and exposes its public
+        \\declarations to this module's users. If `A.glo` exports `B.glo`, a
+        \\file that loads `A.glo` can use `B.glo` too. Reexports are transitive;
+        \\ordinary loads and imports inside a dependency remain local.
+    );
+    code_block(46, "glosso", #string
+        \\// shapes/module.glo
+        \\#export "point.glo";
+        \\#export "rectangle.glo";
+        \\
+        \\// app.glo
+        \\#load "shapes/module.glo";
+        \\// Public declarations from both components are available here.
+    );
+    subheading(47, "`#load,embed`: shared source fragments");
+    paragraph(48, #string,oneline
+        \\`#load,embed "path";` keeps the source-splicing behavior: the loaded
+        \\fragment shares its containing module's declarations and dependencies.
+        \\Use it when files deliberately implement one shared compilation unit,
+        \\such as this manual's chapter and UI fragments. The path is still
+        \\relative to the file containing the directive.
+    );
+    code_block(49, "glosso", #string
+        \\#import "Io";
+        \\#load,embed "parts/driver.glo";
+        \\// The embedded driver can use this file's Io dependency.
     );
 }
 
@@ -1397,7 +1436,7 @@ render_section_5 :: () {
     table_row(6, "Native-size integers   |   `ssize`, `usize`");
     table_row(7, "Floating point   |   `f16`, `f32`, `f64`, `f80`, `f128`");
     table_row(8, "Complex   |   `c32`, `c64`, `c128`, `c160`, `c256`");
-    table_row(9, "Characters and text   |   `char`, `rune`, `string`, `cstring`, `string16`, `cstring16`");
+    table_row(9, "Characters and text   |   `rune`, `string`, `cstring`, `string16`, `cstring16`");
     table_row(10, "Other   |   `bool`, `void`, `any`, `type`, `label`, `Code`, `Pattern`, `Namespace`, `Library`");
     table_row(65, "Type constructors   |   `Simd(T, N)`, `Matrix(T, Rows, Cols)`");
     table_row(67, "Declaration annotations   |   `Typeclass(T, …)`, `Macro(signature)`");
@@ -1407,8 +1446,9 @@ render_section_5 :: () {
         \\integer literal with no other context defaults to `ssize`; collection
         \\counts and indices use it too. The checker additionally accepts `sN`
         \\and `uN` for every unpadded decimal width `N` from 1 through 65535.
-        \\`char` is an ASCII character in one byte and `rune` is a Unicode scalar
-        \\in four; neither is an ordinary integer. Primitive Types covers the
+        \\`rune` is a Unicode scalar in four bytes, distinct from integers.
+        \\An ASCII `#char` literal defaults to `u8`, while a non-ASCII literal
+        \\defaults to `rune`; there is no built-in `char` type. Primitive Types covers the
         \\full primitive set and its representations. `Typeclass(...)` and
         \\`Macro(...)` describe explicitly typed declarations; they are not
         \\general-purpose type-value constructors.
@@ -1476,8 +1516,8 @@ render_section_5 :: () {
     );
     subheading(21, "The eight Prelude files");
     paragraph(22, #string,oneline
-        \\`std/Prelude/module.glo` is eight `#load` lines. Everything the loaded
-        \\files declare is in scope for every program.
+        \\`std/Prelude/module.glo` explicitly assembles the Prelude. Everything its public
+        \\components declare is in scope for every program.
     );
     table_header(23, "File   —   Supplies");
     table_row(24, "`Show_and_Read.glo`   |   `Show`, the protocol behind `%` and `print`; `FromString`; the `derive_show` macro.");

@@ -180,10 +180,9 @@ render_section_56 :: () {
         \\multiple-result value.
     );
     note(28, #string,oneline
-        \\A tuple result has no `Show` instance, so it cannot be handed to `print`
-        \\directly. `print("%\n", divmod(7, 2))` reports error: variadic arg type
-        \\`tuple` does not implement `Show` in call `print`. Destructure first, or
-        \\print the elements.
+        \\A tuple result has no `Show` instance, so the default `%` has no
+        \\matching `Formatter` for it. Destructure the result and print its
+        \\elements, or supply a custom rendering.
     );
 
     subheading(29, "Bodyless declarations");
@@ -493,6 +492,7 @@ render_section_58 :: () {
     );
     table_header(1, "Spelling   —   Elements   —   The body sees");
     table_row(2, "`xs: ...`   |   any types, mixed   |   `[]any`");
+    table_row(40, "`xs: ...any`   |   any types, mixed   |   a heterogeneous tuple; constant indices retain concrete types");
     table_row(3, "`xs: ...ssize`   |   all `ssize`   |   `[]ssize`");
     table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]T`");
     table_row(5, "`xs: ...Show`   |   any type implementing `Show`   |   a pack whose elements keep their own types");
@@ -549,6 +549,25 @@ render_section_58 :: () {
         \\reached code generation without a decided type [opcode BoxAny] while
         \\lowering 'main'`. Give the argument a type, or use a typed pack.
     );
+    paragraph(41, #string,oneline
+        \\Explicit `...any` is different from bare `...`: it preserves the
+        \\argument types in a heterogeneous tuple and accepts ordinary numeric
+        \\literals. A constant index or inline iteration retains each element's
+        \\type, which lets a forwarding wrapper select a `Formatter` instance.
+        \\The whole pack cannot be assigned to `[]any`; that assignment reports
+        \\`got tuple, expected []any`. Expand it with `args...` when forwarding.
+    );
+    code_block(42, "glosso", #string
+        \\#import "Format";
+        \\
+        \\render :: (#comptime fmt: string, args: ...any) -> string {
+        \\    return tprint(fmt, args...);
+        \\}
+        \\
+        \\main :: () {
+        \\    text := render("%x %c", 255, #char "λ"); // "ff λ"
+        \\}
+    );
 
     subheading(14, "Homogeneous and generic packs");
     paragraph(15, #string,oneline
@@ -591,9 +610,10 @@ render_section_58 :: () {
         \\long as each one has an instance of `C`. Several classes are combined with
         \\`&&` inside parentheses. `&&` is the only connective; `...(Show ||
         \\PartialEq)` is `error: unexpected token '||'`, and an empty list is
-        \\`error: constrained variadic parameter needs at least one typeclass`. This
-        \\is the form `print` itself uses, declared as
-        \\`print :: (#comptime fmt: string, args: ...Show)`.
+        \\`error: constrained variadic parameter needs at least one typeclass`.
+        \\`print` instead uses `args: ...any`: its compile-time format parser
+        \\checks `Formatter` for each argument's selected rendering. A wrapper
+        \\that specifically requires default `Show` values can use `...Show`.
     );
     code_block(21, "glosso", #string
         \\#import "Io";
@@ -2652,7 +2672,7 @@ render_section_67 :: () {
     table_header(5, "Directive   —   Form   —   Effect");
     table_row(6, "`#enable` / `#disable`   |   `#enable(feature[, mode]);`   |   opens or closes a feature gate, sticky to the end of the file");
     table_row(7, "`#import`   |   `#import[,only(…)] \"M\";`, or `,hide(…)`   |   loads a standard-library module, optionally under an alias");
-    table_row(8, "`#load`   |   `#load \"path\";`   |   splices a source file into this unit, optionally under an alias");
+    table_row(8, "`#load`   |   `#load \"path\";`   |   loads an isolated relative module; `#load,embed` shares this unit; `#export` reexports a relative dependency");
     table_row(9, "`#library`   |   `N :: #library \"file\";` with `,system`, `,dyn` or `,static`   |   declares a foreign library handle for `#foreign`");
     table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call] [#no_context] [#memory …];`   |   declares a function-pointer type");
     table_row(11, "`#thread_local`   |   `#thread_local <global var decl>`   |   gives the variable thread-local storage");
@@ -2833,10 +2853,13 @@ render_section_67 :: () {
         \\the `#` reports `error: the built-in Context type is written #Context`.
     );
     note(70, #string,oneline
-        \\`#char` is not a parser directive at all. The lexer recognises
-        \\`#char "A"` and produces the character literal `65` directly, which is
-        \\why its errors read `#char expects a string literal` and
-        \\`unterminated #char string literal` rather than mentioning a token.
-        \\`#char` Character Literals covers it.
+        \\`#char` is not a parser directive. The lexer consumes the whole
+        \\`#char "A"` form and emits a numeric token carrying scalar value `65`
+        \\plus a character-literal marker. The checker preserves that marker:
+        \\ASCII defaults to `u8` and may adopt `s8` or `rune` context, while a non-ASCII
+        \\value defaults to and accepts only `rune`. Because validation happens
+        \\while lexing, malformed forms report `#char expects a string literal` or
+        \\`unterminated #char string literal`. `#char` Character Literals covers
+        \\the complete contextual-typing and escape rules.
     );
 }

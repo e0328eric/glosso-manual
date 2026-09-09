@@ -120,7 +120,7 @@ reference_is_identifier_continue :: (byte: u8) -> bool {
 }
 
 // The public UTF-8 search API now returns `?ssize` and character-oriented
-// searches accept `char`/`rune`.  Reference extraction deliberately works in
+// searches accept `u8`/`rune`. Reference extraction deliberately works in
 // byte offsets because every slice below indexes the original source text.
 // Keep the old sentinel-shaped operation local instead of repeatedly
 // unpacking an option at every scanner call site.
@@ -717,6 +717,7 @@ reference_type_info :: (
     info: Reference_Type_Info;
     if starts_with(definition, "struct") info.kind = "struct";
     else if starts_with(definition, "union") info.kind = "union";
+    else if starts_with(definition, "enum_flags") info.kind = "enum_flags";
     else if starts_with(definition, "enum") info.kind = "enum";
     else if starts_with(definition, "#fn_ptr") {
         info.kind = "function-pointer";
@@ -769,14 +770,13 @@ reference_split_top_level :: (value: string, delimiter: u8 = cast(u8)(#char ",")
 reference_parse_parameter :: (raw: string) -> Reference_Parameter {
     parameter: Reference_Parameter;
     value := trim(raw);
-    while starts_with(value, "using ") || starts_with(value, "noalias ") {
+    while starts_with(value, "using ") || starts_with(value, "noalias ") ||
+          starts_with(value, "#comptime ") || starts_with(value, "#lazy ") {
         space := reference_index_of_byte(value, cast(u8)(#char " "));
-        array_add(*parameter.modifiers, value[0..space]);
+        modifier := value[0..space];
+        if starts_with(modifier, "#") modifier = modifier[1..modifier.count];
+        array_add(*parameter.modifiers, reference_copy_string(modifier));
         value = trim(value[space + 1..value.count]);
-    }
-    if starts_with(value, "#comptime ") {
-        array_add(*parameter.modifiers, "comptime");
-        value = trim(value[10..value.count]);
     }
     equal := reference_top_level_index(value, cast(u8)(#char "="));
     if equal >= 0 {
@@ -1292,7 +1292,7 @@ reference_finalize_typeclasses :: (module: *Reference_Module) {
 }
 
 reference_builtin_type_alias :: (name: string) -> bool {
-    return name == "any" || name == "bool" || name == "char" ||
+    return name == "any" || name == "bool" ||
         name == "rune" || name == "ssize" || name == "usize" ||
         name == "s8" || name == "s16" || name == "s32" ||
         name == "s64" || name == "s128" || name == "u8" ||
@@ -1688,7 +1688,9 @@ main :: () {
 #import "File_System/File";
 #import "Format";
 #import "Io";
+#import "Typeclass/Error";
 #import "Os";
+#import "Serialization/Core";
 #import "Serialization/Json";
 #import "Sort";
 #import "String_Builder";

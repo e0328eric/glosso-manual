@@ -14,7 +14,8 @@ private Glosso repository or compile the project in GitHub Actions.
 
 - `first.glo` is the compile-time build driver.
 - `main.glo` is the manual compiler entry point and loads the sources under
-  `src/`.
+  `src/` with `#load,embed`; these UI and chapter fragments intentionally
+  share one compilation unit.
 - `src/clay_bindings.glo` builds Clay and inserts its target-specific bindings.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
 - `src/section_catalog.glo` contains section state and titles. It is the single
@@ -72,6 +73,17 @@ glosso first.glo -- tree-sitter
 glosso first.glo -- gen-reference ../glosso/std
 ```
 
+The current compiler services return host-ordered result records even when
+compiling for wasm32. `src/clay_bindings.glo` isolates a small `#c_call` wire
+adapter for that upstream layout mismatch; it does not depend on the removed
+public C/Bindgen options structs. Binding generation must use the full Clang
+frontend: the adapter rejects textual-fallback output. Ordinary programs should
+use the public, named-parameter APIs documented in the manual.
+
+After regenerating the reference, run `node scripts/test-reference.mjs` to check
+compact signatures, parameter constraints and defaults, `#memory` contracts,
+flag enums, lazy parameters, and function-pointer declarations.
+
 `build` compiles `main.glo` and stages the complete site in `dist/`.
 `tree-sitter` updates the query embedded in `app.js` from
 `tree-sitter/highlights.scm`. `gen-reference <std-directory>` reads public
@@ -116,13 +128,21 @@ glosso first.glo -- gen-reference ../glosso/std
 glosso first.glo -- build
 ```
 
-Review and commit the regenerated `src/generated/std_reference.glo`,
-`reference-index.js`, and staged files under `dist/`. The extractor rebuilds the
+Review the regenerated `src/generated/std_reference.glo`, then commit
+`reference-index.js` and staged files under `dist/`. The generated Glosso data is
+ignored and recreated locally. The extractor rebuilds the
 modules, symbols, signatures, and typeclass instances directly from Glosso
 sources, and rebuilds the language-manual search entries from the chapter
 sources in the same pass. Run it after editing chapters as well as after editing
 `glosso/std/`; it reports how many chapters produced no prose, which is how a
 missing or misnamed `render_section_N` shows up.
+
+When updating for a new compiler checkout, read `../glosso/std/API_MIGRATION.md`
+and check the current declarations as well as regenerating the reference.
+The library now takes ordinary named parameters and typed flag enums instead
+of input-only option records. Compiler and Bindgen option lists are string
+slices; use `library_spec` to describe a Bindgen artifact. Chapter examples,
+the build driver, and the reference extractor must all use the same current API.
 
 Adding or removing a chapter therefore means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in

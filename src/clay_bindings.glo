@@ -2,25 +2,32 @@
 #import "Io";
 #import "Compiler";
 #import "Bindgen";
+#import "Strings/Utf8";
 
-// The compiler services serialize these records in the order shown. Keep the
-// bridge records `#c_call`: ordinary structs are reordered by target layout,
-// and `string` becoming two 32-bit words on wasm32 otherwise moves `s64`
-// ahead of it and scrambles the service result.
-Clay_Native_Compile_Result :: struct #c_call {
+// Temporary wasm32 compiler-service adapter. The public Result wrappers use
+// ordinary private records, but the services still return host-ordered fields:
+// wasm32 moves s64 ahead of string and misreads their output/artifact fields.
+// Keep the wire layout explicit here until the upstream service ABI is fixed.
+// These are local transport records, not the removed public options API.
+Clay_C_Parameters :: struct #c_call {
+    include_paths: [..]string;
+    preprocessor_definitions: [..]string;
+    compiler_args: [..]string;
+    optimization_level: Optimization = .Optimized;
+    position_independent: bool = false;
+}
+
+Clay_Native_Result :: struct #c_call {
     output: string;
     artifact: string;
     status: s64;
     ok: bool;
 }
 
-clay_compile_c_archive :: (
-    name: string,
-    sources: [..]string,
-    options: C_Compile_Options,
-) -> Clay_Native_Compile_Result #magic "compiler_compile_c_archive"
-    #memory{returns_fresh, reads(name, sources, options),
-            noescape(name, sources, options)};
+clay_compile_archive :: (name: string, sources: [..]string, parameters: Clay_C_Parameters)
+    -> Clay_Native_Result #magic "compiler_compile_c_archive"
+    #memory{returns_fresh, reads(name, sources, parameters),
+            noescape(name, sources, parameters)};
 
 Clay_Bindgen_Result :: struct #c_call {
     output: string;
@@ -28,70 +35,61 @@ Clay_Bindgen_Result :: struct #c_call {
     ok: bool;
 }
 
-clay_generate_bindings :: (
-    header: string,
-    library: any,
-    options: Bindgen_Options,
-) -> Clay_Bindgen_Result #magic "bindgen_generate_source"
-    #memory{returns_fresh, reads(header, library, options),
-            noescape(header, library, options)};
+// The service accepts a command-line string as well as its private options
+// record. Use that supported wire form instead of copying Bindgen's private
+// type identity. Normal application code should call generate_source with
+// named slice parameters, as shown in the interop chapter.
+clay_generate_source :: (header: string, library: any, arguments: string)
+    -> Clay_Bindgen_Result #magic "bindgen_generate_source"
+    #memory{returns_fresh, reads(header, library, arguments),
+            noescape(header, library, arguments)};
 
 // Produces Bindgen's freshly built source on success and a static
-// `#compile_error` literal on every failure path, so the computation makes no
+// failed compile-time assertion on every failure path, so it makes no
 // return-origin claim; the checker infers what each path produced.
 CLAY_BINDINGS_SOURCE :: #comptime -> string {
     if OUT.os != Target_OS.Wasm ||
        OUT.cpu != Target_CPU.Wasm32 ||
        OUT.abi != Target_ABI.Freestanding
-        return "#compile_error \"Clay manual bindings require wasm32-freestanding\";";
+        return "#comptime { #assert false, \"Clay manual bindings require wasm32-freestanding\"; }";
 
     header := find_header("clay.h", "vendor/clay");
     if header.count == 0 {
         print("Clay header was not found under vendor/clay\n");
-        return "#compile_error \"Clay header was not found\";";
+        return "#comptime { #assert false, \"Clay header was not found\"; }";
     }
 
     sources: [..]string;
     defer array_free(*sources);
     array_add(*sources, header);
 
-    definitions: [..]string;
-    defer array_free(*definitions);
-    array_add(
-        *definitions,
-        "CLAY_IMPLEMENTATION",
-        "CLAY_WASM",
-        "CLAY_DISABLE_SIMD",
-    );
-
-    c_options: C_Compile_Options;
-    c_options.preprocessor_definitions = definitions;
-    add_c_include_path(*c_options, "vendor/clay");
-    add_c_compiler_arg(*c_options, "-ffreestanding");
-    add_c_compiler_arg(*c_options, "-fno-builtin");
-    clay_archive := clay_compile_c_archive("clay", sources, c_options);
+    parameters: Clay_C_Parameters;
+    defer array_free(*parameters.include_paths);
+    defer array_free(*parameters.preprocessor_definitions);
+    defer array_free(*parameters.compiler_args);
+    array_add(*parameters.include_paths, "vendor/clay");
+    array_add(*parameters.preprocessor_definitions,
+        "CLAY_IMPLEMENTATION", "CLAY_WASM", "CLAY_DISABLE_SIMD");
+    array_add(*parameters.compiler_args, "-ffreestanding", "-fno-builtin");
+    clay_archive := clay_compile_archive("clay", sources, parameters);
     if !clay_archive.ok {
-        print("Clay compilation failed (status %):\n", clay_archive.status);
-        print("%", clay_archive.output);
-        return "#compile_error \"Clay compilation failed\";";
+        print("Clay compilation failed (status %):\n%", clay_archive.status, clay_archive.output);
+        return "#comptime { #assert false, \"Clay compilation failed\"; }";
     }
 
-    bindgen_options: Bindgen_Options;
-    add_include_path(*bindgen_options, "vendor/clay");
-    add_bindgen_preprocessor_definition(*bindgen_options, "CLAY_WASM");
-    add_bindgen_preprocessor_definition(*bindgen_options, "CLAY_DISABLE_SIMD");
-    add_bindgen_compiler_arg(*bindgen_options, "--target=wasm32-unknown-unknown");
-    add_bindgen_compiler_arg(*bindgen_options, "-ffreestanding");
-    generated := clay_generate_bindings(
+    generated := clay_generate_source(
         header,
-        clay_archive.artifact,
-        bindgen_options,
+        library_spec("clay", clay_archive.artifact),
+        "--target=wasm32-unknown-unknown -ffreestanding -Ivendor/clay -DCLAY_WASM -DCLAY_DISABLE_SIMD",
     );
     if !generated.ok {
-        print("Clay Bindgen failed (status %):\n", generated.status);
-        print("%", generated.output);
-        return "#compile_error \"Clay Bindgen failed\";";
+        print("Clay Bindgen failed (status %):\n%", generated.status, generated.output);
+        return "#comptime { #assert false, \"Clay Bindgen failed\"; }";
     }
+    // String options enable a textual fallback. Its approximate C layouts are
+    // unsuitable for Clay; require the full Clang frontend's output marker.
+    if !starts_with(generated.output, "// Generated by Glosso's Clang C header bindgen from ")
+        return "#comptime { #assert false, \"Clay requires Clang-generated bindings\"; }";
     return generated.output;
 }
 

@@ -302,7 +302,7 @@ render_section_17 :: () {
     table_row(17, "`name :: #fn_ptr(…) -> R;`   |   A function-pointer type.");
     table_row(18, "`name :: #library[,kind] \"file\";`   |   A foreign library handle.");
     table_row(19, "`#import \"M\";`, `name :: #import \"M\";`   |   A module import.");
-    table_row(20, "`#load \"path\";`, `name :: #load \"path\";`   |   A source splice.");
+    table_row(20, "`#load \"path\";`, `name :: #load \"path\";`   |   An isolated relative module; use `#load,embed` for a shared source fragment.");
     table_row(21, "`#thread_local <global declaration>`   |   A thread-local global.");
     table_row(22, "`#comptime { … }`, `#comptime call();`   |   A compile-time step; the expression form requires `;`.");
     table_row(23, "`#insert <Code-or-string expression>;`   |   Declarations generated during checking.");
@@ -890,10 +890,12 @@ render_section_19 :: () {
         \\prints `3`.
     );
     paragraph(35, #string,oneline
-        \\Shadowing is refused at file scope. The top level of a program is one
-        \\flat namespace, and a second declaration of a name already declared
-        \\there is an error, whether it came from the file itself, from a
-        \\`#load`, or from hoisting out of a procedure body.
+        \\Shadowing is refused within one file's top-level namespace. A second
+        \\declaration there is an error, including declarations brought into
+        \\the same unit by `#load,embed` or hoisted from a procedure body.
+        \\Ordinary `#load` preserves the loaded module's identity. Qualified
+        \\loads let a caller distinguish equally named declarations in separate
+        \\modules without merging their types or global storage.
     );
     table_header(36, "Duplicate at file scope   —   Diagnostic");
     table_row(37, "`K :: 1;` then `K :: 2;`   |   `error: constant 'K' is already declared`");
@@ -1032,10 +1034,11 @@ render_section_20 :: () {
     paragraph(21, #string,oneline
         \\Because the hash comes from the path, the same private name may be
         \\declared in as many files as needed without collision; each file gets
-        \\its own symbol and its own references resolve to it. Removing the
-        \\gates from the program below turns the two `helper` declarations into
-        \\ordinary file-scope declarations, and they collide with `error:
-        \\function 'helper' is already declared`.
+        \\its own symbol and its own references resolve to it. An isolated
+        \\`#load` also preserves each module's identity. Removing the gates
+        \\exports both helpers. To call them directly from a common caller,
+        \\use qualified loads and names such as `Left.helper()` and
+        \\`Right.helper()`; each module's own calls keep their local meaning.
     );
     code_block(22, "glosso", #string
         \\// parts/left.glo
@@ -1068,19 +1071,19 @@ render_section_20 :: () {
         \\module.
     );
     table_header(26, "Visibility   —   Reachable from");
-    table_row(27, "Public   |   Anywhere in the program.");
+    table_row(27, "Public   |   The declaring module and files that explicitly load, import, or receive its reexports.");
     table_row(28, "Private   |   The one source file that declares it.");
-    table_row(29, "Siblings   |   Any file sharing the declaring file's module identity.");
+    table_row(29, "Siblings   |   An explicit dependency from the same directory, or a shared embedded unit.");
     paragraph(30, #string,oneline
-        \\A standard-library module's identity is the module itself, so every
-        \\`.glo` file in a `std/<Name>/` directory is a sibling of every other
-        \\one. A user program's identity is its root file, shared by that root
-        \\and by every file reached from it through `#load`; for a program,
-        \\`siblings` therefore means the whole compilation unit. Module
-        \\resolution is covered in Source Files, Imports, and Loads.
+        \\Files in the same directory can share sibling-private declarations
+        \\through explicit dependencies. An ordinary `#load` does not merge
+        \\their dependencies or give a file access to unrelated siblings.
+        \\`#load,embed` deliberately shares the containing compilation unit.
+        \\Module resolution is covered in Source Files, Imports, and Loads.
     );
     code_block(31, "glosso", #string
         \\// std/Demo/module.glo
+        \\#load,embed "other.glo";
         \\DEMO_PUBLIC :: 1;
         \\_demo_internal :: 9;
         \\
@@ -1123,8 +1126,8 @@ render_section_20 :: () {
     paragraph(35, #string,oneline
         \\The same two levels apply to a user program built from `#load`. A
         \\private declaration in a loaded file is invisible to the file that
-        \\loaded it, while a `siblings` declaration is visible across the whole
-        \\load graph.
+        \\loaded it. A `siblings` declaration is available through an explicit
+        \\dependency from the same directory, or inside a shared embedded unit.
     );
     code_block(36, "glosso", #string
         \\// parts/store.glo
@@ -1142,7 +1145,7 @@ render_section_20 :: () {
         \\
         \\// app.glo
         \\#import "Io";
-        \\#load "parts/store.glo";
+        \\#load,embed "parts/store.glo";
         \\
         \\main :: () {
         \\    print("public=% accessor=% shared=%\n",

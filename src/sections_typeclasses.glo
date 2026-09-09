@@ -64,8 +64,8 @@ render_section_68 :: () {
     subheading(12, "Parameter kinds");
     paragraph(13, #string,oneline
         \\A parameter is written as an ordinary annotated binding, and the annotation
-        \\is its kind. Two spellings carry meaning: `type` for a parameter that binds
-        \\a type, and an arrow for a parameter that binds a type constructor. The
+        \\is its kind. `type` binds a type and an arrow binds a type constructor.
+        \\A `#comptime` string parameter binds a value, as in `Formatter`. The
         \\number of parameters decides the shape of every instance head for the
         \\class.
     );
@@ -73,6 +73,7 @@ render_section_68 :: () {
     table_row(15, "`T: type`   |   one type   |   `Show(T)`, `Iterable(T)`, `Try(Carrier)`");
     table_row(16, "`L: type, R: type`   |   a pair of types   |   `Add(L, R)`, `PartialEq(L, R)`");
     table_row(17, "`F: (type) -> type`   |   a one-argument type constructor   |   `Functor(F)`, `Monad(M)`");
+    table_row(43, "`#comptime spec: string`   |   a compile-time string value   |   `Formatter(T, spec, W)`");
     code_block(18, "glosso", #string
         \\#import "Io";
         \\
@@ -123,9 +124,12 @@ render_section_68 :: () {
         \\a single type; a two-parameter class takes a parenthesised argument tuple;
         \\a constructor parameter takes the bare constructor name, with evidence
         \\asked at the applied type. Arrows of higher arity are accepted, so
-        \\`(type, type) -> type` binds a two-argument constructor. An annotation that
-        \\is neither spelling parses, but the parameter still binds a type: there are
-        \\no value parameters on a class. Instance heads are the subject of
+        \\`(type, type) -> type` binds a two-argument constructor. Value parameters
+        \\must be marked `#comptime` and currently require `string`; another
+        \\type reports `compile-time typeclass value parameters currently require
+        \\string`. A mixed head such as `(Token, "token", $W)` therefore fixes
+        \\both a type and a selector while leaving the writer generic.
+        \\Instance heads are the subject of
         \\Instances: Heads, Bodies, and `where`, and constructor parameters of
         \\Higher-Kinded Typeclasses.
     );
@@ -573,7 +577,7 @@ render_section_70 :: () {
         \\raw, then re-lexes and re-parses them as a type annotation, which is why a
         \\head may be any type expression and why a malformed one reports the text it
         \\collected: `Z + ::: instance K` is `error: invalid instance head 'Z+'`. The
-        \\`::` is what ends the scan, so omitting it does not give a bad head; it
+        \\`:::` is what ends the scan, so omitting it does not give a bad head; it
         \\gives no instance at all, and the declaration fails as
         \\`error: unexpected token 'instance'`.
     );
@@ -1639,8 +1643,8 @@ render_section_73 :: () {
     );
     note(49, #string,oneline
         \\This relation never crosses width or signedness, never removes a nominal
-        \\`distinct` boundary, and never treats `char` or `rune` as their `u8` or
-        \\`u32` storage types. It exists only for protocol instance heads.
+        \\`distinct` boundary, and never treats `rune` as its `u32` storage type.
+        \\It exists only for protocol instance heads.
     );
 }
 
@@ -2009,11 +2013,10 @@ render_section_75 :: () {
         \\or `Functor derive needs exactly one focused type parameter`.
     );
     note(18, #string,oneline
-        \\A derived `Show` on a generic type is only lowered where a call demands
-        \\the monomorphization. `print("%", value)` boxes the argument and looks the
-        \\shower up by mangled name at code generation, so a generic instance with
-        \\no direct `show` call anywhere in the program prints the type name in
-        \\braces instead. Write `print("%", show(value))` for generic types.
+        \\The default `Formatter` instance calls the selected `Show` method
+        \\directly. `print("%", value)` therefore instantiates a generic derived
+        \\`Show` on demand, just as `show(value)` does. No preliminary direct
+        \\`show` call is needed for a generic struct, union, or option.
     );
     code_block(19, "glosso", #string
         \\#import "Io";
@@ -2026,7 +2029,7 @@ render_section_75 :: () {
         \\}
     );
     code_block(20, "text", #string
-        \\through print = {Tagged_s64}
+        \\through print = Some(9)
     );
     subheading(21, "Deriving on a `distinct` type");
     paragraph(22, #string,oneline
@@ -2726,13 +2729,12 @@ render_section_77 :: () {
 
 render_section_78 :: () {
     paragraph(0, #string,oneline
-        \\`Show` is the protocol every formatting call goes through. A `%`
-        \\placeholder in `print`, `format`, `tprint` or `format_args` consumes
-        \\one argument and replaces itself with `show` of that argument, so a
-        \\type becomes printable by acquiring a `Show` instance and by nothing
-        \\else. `FromString` is the parsing counterpart, and the two are
-        \\deliberately not symmetric: `Show` ships a derive macro, `FromString`
-        \\does not.
+        \\`Formatter` selects a rendering by value type, compile-time selector,
+        \\and writer type. The default selector in `%` and `%{}` delegates to
+        \\`Show`; selectors such as `%x` and `%{token}` use their own instances.
+        \\A type can therefore support a named rendering without implementing
+        \\`Show`. `FromString` is the parsing counterpart to `Show`: `Show`
+        \\ships a derive macro, while `FromString` does not.
     );
     code_block(1, "glosso", #string
         \\Show :: typeclass (T: type) #derive(derive_show) {
@@ -2745,10 +2747,17 @@ render_section_78 :: () {
         \\        #memory{unknown(reason: "implementation-dependent memory behavior"),
         \\                reads(text), noescape(text)};
         \\}
+        \\
+        \\Formatter :: typeclass (T: type, #comptime spec: string, W: type)
+        \\    where Writer(W) {
+        \\    format_to :: (writer: *W, value: T) -> Io_Error!ssize
+        \\        #memory{writes(writer), reads(value), noescape(writer, value)};
+        \\}
     );
     paragraph(2, #string,oneline
-        \\Both live in `std/Prelude/Show_and_Read.glo`, which every program
-        \\loads unqualified, so neither name needs an import. `show` returns a
+        \\`Show` and `FromString` live in `std/Prelude/Show_and_Read.glo`,
+        \\which every program loads unqualified. `Formatter` and its parser
+        \\live in `Format`; writer contracts come from `Io/Core`. `show` returns a
         \\`string` and declares
         \\`#memory{unknown(reason: "implementation-dependent memory behavior")}`,
         \\which leaves each instance free to return a borrow, a static, or a
@@ -2785,10 +2794,10 @@ render_section_78 :: () {
         \\`.None` on any leftover byte.
     );
     paragraph(18, #string,oneline
-        \\There is no `Show` instance for `E!T`. Passing a result to `print`
-        \\is `error: variadic arg type `Result_s64_string` does not implement
-        \\`Show` in call `print``; match on it and show the payload instead.
-        \\`?T` does have one, so an option prints directly.
+        \\There is no `Show` instance for `E!T`, so its default `%` formatter
+        \\is unavailable. Match on a result and show its payload, or define a
+        \\`Formatter` instance for the result type and a chosen selector.
+        \\`?T` does have `Show` when its payload does, so an option prints directly.
     );
     subheading(19, "What `#derive(Show)` produces");
     paragraph(20, #string,oneline
@@ -2833,29 +2842,30 @@ render_section_78 :: () {
         \\point = {1, origin}
         \\tag   = Count(9) and Plain
     );
-    subheading(23, "`args: ...Show` and the `%` loop");
+    subheading(23, "Selectors and compile-time formatting");
     paragraph(24, #string,oneline
-        \\Every formatting entry point has the same shape: a `#comptime fmt:
-        \\string` followed by `args: ...Show`. The constraint on the pack is
-        \\what rejects an unprintable argument at the call site rather than
-        \\inside the formatter. Constrained variadics are covered in
-        \\Typeclass-Constrained Variadics.
+        \\Formatting entry points take a `#comptime fmt: string` followed by
+        \\`args: ...any`. The pack preserves each argument's concrete type.
+        \\`format_to_writer` parses the format string at compile time and checks
+        \\`Formatter(Value_Type, spec, Writer_Type)` for each substitution.
+        \\Every argument is evaluated once; only the selected writes run at runtime.
     );
     paragraph(25, #string,oneline
-        \\The formatter itself is ordinary Glosso, in `__format` in
-        \\`std/Format.glo`. It walks the format string one byte at a time. A
-        \\`%` appends `show(args[ai])` and advances the argument index; every
-        \\other byte is copied. Nothing else in the format string is
-        \\interpreted: there are no width, precision, or conversion fields, and
-        \\a type controls its own rendering entirely through its instance.
+        \\A bare `%` or `%{}` selects the empty key. `%c` selects the one-letter
+        \\key `"c"`, and `%{name}` selects `"name"`. A short selector consumes
+        \\exactly one ASCII letter whether an instance exists or not, so `%xray`
+        \\means hexadecimal followed by `ray`. Use `%{}x` when the letter `x`
+        \\should follow a default rendering. `%%` means two substitutions,
+        \\not a literal percent; no C-style width or precision grammar is built in.
     );
     paragraph(26, #string,oneline
-        \\Because `fmt` is a `#comptime` parameter, the placeholder count is
-        \\checked while the call is checked. Too few arguments is `error:
-        \\print: format has 3 '%' placeholder(s) but 1 argument(s) given`, and
-        \\too many is the same message with the numbers reversed. The runtime
-        \\fallbacks in `__format` for a surplus `%` are therefore unreachable
-        \\through `print`.
+        \\Missing arguments produce `format has more '%' placeholders than
+        \\arguments`; surplus arguments produce `format has fewer '%'
+        \\placeholders than arguments`. Unknown keys or unsupported argument
+        \\types report `no Formatter instance for selector '<key>' and value
+        \\type <T>`. Unterminated or nested braces report `unterminated or
+        \\nested formatter selector`. These are compile-time errors, including
+        \\when the format string is computed by a compile-time expression.
     );
     subheading(27, "Writing a literal percent");
     paragraph(28, #string,oneline
@@ -2881,23 +2891,26 @@ render_section_78 :: () {
     subheading(31, "The `Format` helpers");
     table_header(32, "Call   —   Result   —   Allocator");
     table_row(33, "`print(fmt, args)`   |   written to standard output   |   temporary; `print` formats through `tprint`");
-    table_row(34, "`format(fmt, args)`   |   a fresh `string`   |   `context.allocator`");
+    table_row(34, "`format(fmt, args)`   |   an owned `string`; release with `string_free`   |   `context.allocator`");
     table_row(35, "`tprint(fmt, args)`   |   a temporary `string`   |   `context.temp_allocator`");
-    table_row(36, "`format_args(fmt, args, .allocator = a)`   |   a fresh `string`   |   the named argument, defaulting to `context.allocator`");
-    table_row(37, "`format_int(value, base)`   |   digits in `base`   |   fresh; usable in a compile-time expression");
+    table_row(36, "`format(fmt, args, .allocator = a)`   |   an owned `string`; free with the same allocator   |   the named allocator; replaces removed `format_args`");
+    table_row(37, "`format_int(value, base)`   |   digits in `base`; do not free individually   |   temporary arena; also usable at compile time");
     table_row(38, "`format_int_with_allocator(value, base, a)`   |   digits in `base`   |   the explicit allocator");
     code_block(39, "glosso", #string
         \\#import "Io";
         \\#import "Format";
         \\#import "Context";
+        \\#import "String_Builder";
         \\
         \\main :: () {
         \\    heap := format("% and %", 1, "two");
+        \\    defer string_free(heap);
         \\    temp := tprint("% and %", 3, "four");
-        \\    args := format_args("%-%", 5, 6, .allocator = context.temp_allocator);
+        \\    explicit := format("%-%", 5, 6, .allocator = context.allocator);
+        \\    defer string_free(explicit, .allocator = context.allocator);
         \\    print("format     = %\n", heap);
         \\    print("tprint     = %\n", temp);
-        \\    print("format_args= %\n", args);
+        \\    print("explicit   = %\n", explicit);
         \\    print("hex        = %\n", format_int(255, 16));
         \\    print("binary     = %\n", format_int(10, 2));
         \\}
@@ -2905,7 +2918,7 @@ render_section_78 :: () {
     code_block(40, "text", #string
         \\format     = 1 and two
         \\tprint     = 3 and four
-        \\format_args= 5-6
+        \\explicit   = 5-6
         \\hex        = ff
         \\binary     = 1010
     );
@@ -2926,14 +2939,14 @@ render_section_78 :: () {
         \\
         \\Celsius ::: instance Show {
         \\    show :: (value: Celsius) -> string {
-        \\        return tprint("%C", value.degrees);
+        \\        return tprint("%{}C", value.degrees);
         \\    }
         \\}
         \\
         \\Celsius ::: instance FromString {
         \\    from_string :: (#empty: Celsius, text: string) -> ?Celsius {
         \\        if text.count == 0 return .None;
-        \\        if text[text.count - 1] != #char "C" return .None;
+        \\        if text[text.count - 1] != cast(u8)(#char "C") return .None;
         \\        digits := text[0..text.count - 1];
         \\        n := from_string(s64, digits);
         \\        if n == {
@@ -2955,13 +2968,10 @@ render_section_78 :: () {
         \\refused = none
     );
     note(45, #string,oneline
-        \\A `%` placeholder boxes its argument into `any`, and the backend then
-        \\looks for a lowered `show` for that exact type. A concrete instance
-        \\always has one. A generic instance only produces one where some call
-        \\site demanded that monomorphisation, so a value whose only `Show`
-        \\instance is generic prints as its type name in braces. Writing
-        \\`print("%", show(x))` forces the instantiation and is the reliable
-        \\form for any generic carrier, `?T` included.
+        \\A default placeholder selects `Formatter(T, "", W)` and calls
+        \\`Show(T).show` directly. Generic `Show` instances are instantiated
+        \\by the formatting call, so derived generic unions and `?T` render
+        \\their values without requiring an earlier direct `show` call.
     );
     code_block(46, "glosso", #string
         \\#import "Io";
@@ -2980,17 +2990,61 @@ render_section_78 :: () {
         \\}
     );
     code_block(47, "text", #string
-        \\print only  = {Tagged_s64}
-        \\option only = {Option_s64}
+        \\print only  = Some_Value(9)
+        \\option only = Some(3)
         \\enum        = 1
         \\bool        = 1
     );
     note(48, #string,oneline
-        \\The same program with `show(t)` and `show(o)` written anywhere prints
-        \\`Some_Value(9)` and `Some(3)`. Enums and booleans render as ordinals
+        \\Enums and booleans still use the default `Show` rendering as ordinals
         \\in every case: `show_enum` is the integer shower, so `Color.Green` is
         \\`1` and `show(true)` is `1`. A variant name in output requires a
         \\hand-written instance.
+    );
+    subheading(49, "Standard and user-defined selectors");
+    table_header(50, "Selector   —   Argument   —   Rendering");
+    table_row(51, "`%`, `%{}`   |   any `Show` type   |   its default `show` rendering");
+    table_row(52, "`%d`, `%x`, `%X`, `%b`, `%o`   |   integer   |   decimal, lower/upper hexadecimal, binary, octal; no radix prefix");
+    table_row(53, "`%c`   |   `u8` or `rune`   |   a UTF-8 character; a byte denotes U+0000 through U+00FF");
+    paragraph(54, #string,oneline
+        \\Numeric selectors preserve signedness and all integer widths,
+        \\including 128-bit values. `%c` encodes `cast(u8)16#e9` as the two
+        \\UTF-8 bytes for `é`, not one raw byte. Invalid rune values created
+        \\by casts render as U+FFFD. A `rune` does not satisfy the integer
+        \\selectors; use `%` for its decimal scalar value or cast explicitly.
+    );
+    code_block(55, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\Token :: struct { value: u8; }
+        \\
+        \\(Token, "token", $W) ::: instance Formatter where Writer(W) {
+        \\    format_to :: (writer: *W, value: Token) -> Io_Error!ssize {
+        \\        return io_write_format(writer, "<%X>", value.value);
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    token: Token = .{ .value = 16#ab };
+        \\    print("%{token} %x %c %{}C\n", token, 255, #char "λ", 21);
+        \\}
+    );
+    code_block(56, "text", "<AB> ff λ 21C");
+    paragraph(57, #string,oneline
+        \\`Token` has no `Show` instance and needs none for `%{token}`.
+        \\Selectors are ordinary typeclass instance keys: no registration or
+        \\parser modification is required, and the same selector may render
+        \\different types differently. A one-letter key supports both `%Z`
+        \\and `%{Z}`. Wrappers should retain a `#comptime` format parameter
+        \\and forward `args: ...any` as `args...` to preserve this dispatch.
+    );
+    paragraph(58, #string,oneline
+        \\For fallible output, `io_write_format` formats directly to any
+        \\`Writer` and returns `Io_Error!ssize`. Its success count measures
+        \\bytes, not characters. An error includes the bytes completed before
+        \\and inside the failing formatter, so custom instances must preserve
+        \\partial-write counts and must not retain writer or value borrows.
     );
 }
 
@@ -3834,8 +3888,9 @@ render_section_82 :: () {
         \\Expansion is checked the same way. `xs...` splices a typed array
         \\into the pack, and because every element has one type the check
         \\runs once for that type: `error: expanded variadic element type
-        \\`Plain` does not implement `Show` in call `print``. This is the
-        \\form `print` takes when the arguments are already collected.
+        \\`Plain` does not implement `Show` in call `show_all``. Formatting
+        \\itself now takes `...any` and checks `Formatter` after selecting
+        \\each placeholder; `show_all` retains an explicit `...Show` constraint.
     );
     code_block(8, "glosso", #string
         \\#import "Io";

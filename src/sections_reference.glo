@@ -26,10 +26,10 @@ render_section_142 :: () {
         \\If `std/Name.glo` exists, the module is that one file.
     );
     bullet(5, #string,oneline
-        \\If `std/Name/module.glo` exists, the module is every `.glo` file
-        \\directly inside `std/Name/`, in file-name order. The sweep is not
-        \\recursive, so a nested directory such as `Math/Bignum` is a module of
-        \\its own and is never pulled in by its parent.
+        \\If `std/Name/module.glo` exists, that entry file is the module.
+        \\It explicitly loads implementation dependencies and uses `#export`
+        \\to expose its component modules. Other files in the directory are not
+        \\automatically included.
     );
     bullet(6, #string,oneline
         \\If both exist the name is ambiguous, and if neither exists the name
@@ -146,10 +146,10 @@ render_section_142 :: () {
     );
     subheading(35, "Modules that are a directory");
     paragraph(36, #string,oneline
-        \\These thirteen directories carry a `module.glo`, so the whole
-        \\directory imports as one unit. `module.glo` is often nothing but
-        \\`#load` lines, and in two cases it is a single `#insert` that builds
-        \\native code on demand.
+        \\These thirteen directories carry a `module.glo` entry point.
+        \\An umbrella entry point uses `#export` to expose component modules;
+        \\implementation fragments can be joined with `#load,embed`. In two
+        \\cases a `#insert` builds native code on demand.
     );
     table_header(37, "Module   —   Purpose");
     table_row(38, "`Gui`   |   Cross-platform software-rendered GUI over the bundled RGFW.");
@@ -188,15 +188,11 @@ render_section_142 :: () {
     table_row(63, "`Io`   |   `Core`, `Transfer`, `Adapters`, `Buffer`, `Scan`, `Vector`, `Binary`, `Hash`, `Format`, `Terminal`   |   none");
     table_row(64, "`Process`   |   the small prelude only   |   `Arguments`, `Child`, `Command`, `Environment`, `Inspection`, `Limits`, `Pipe`, `Scheduling`, `Signals`, `System`, `User`");
     note(65, #string,oneline
-        \\A component of an aggregate module is not always importable on its
-        \\own. Importing one file of a module that was written to be assembled
-        \\by `module.glo` leaves the other files behind, and the missing halves
-        \\surface as ordinary unknown-name errors: `#import "Time/Core"` gives
-        \\`error: unknown type 'Duration'`, `#import "Random/Engines"` gives
-        \\`error: unknown function __random_load_le32`, and
-        \\`#import "Sort/Heap"` gives `error: unknown type 'Sort_Error'`. For
-        \\`Time`, `Random`, `Sort`, `Os`, `Unicode`, `Memory` and
-        \\`Math/SpecialFunctions` the module is the unit.
+        \\A component declares its dependencies explicitly. Importing its
+        \\umbrella adds the public components selected by `#export`; an ordinary
+        \\`#load` or `#import` inside that component does not expose those
+        \\dependency names to the caller. Files intended only as shared source
+        \\fragments are assembled explicitly with `#load,embed`.
     );
     subheading(66, "Finding the module that owns an operation");
     paragraph(67, #string,oneline
@@ -221,7 +217,7 @@ render_section_142 :: () {
     code_block(70, "text", #string
         \\error: #import,only names unknown public declaration 'is_ascii_hex' in module "Ascii"
         \\note: public names: is_ascii_alpha, is_ascii_alphanumeric, is_ascii_digit,
-        \\      is_ascii_lowercase, is_ascii_space, is_ascii_uppercase,
+        \\      is_ascii_lowercase, is_ascii_uppercase,
         \\      is_ascii_whitespace, to_ascii_lower_byte, to_ascii_upper_byte
     );
     paragraph(71, #string,oneline
@@ -246,6 +242,60 @@ render_section_142 :: () {
         \\top-level module and a raw face in `Os`. Prefer the portable one:
         \\`Os` is the boundary the rest of the library is built on, and its
         \\shape changes with the target.
+    );
+    subheading(79, "Default parameters and typed flags");
+    paragraph(80, #string,oneline
+        \\The library uses one entry point when operations differ only by a
+        \\setting, allocator, or fixed argument. Omit a setting to use its
+        \\default; select an alternative with `.parameter = value`. Input-only
+        \\option records have been replaced by direct parameters. Values with
+        \\their own lifetime, such as a `File`, a `Dns_Resolver_Config`, and
+        \\workspace `Build_Options`, remain records.
+    );
+    paragraph(81, #string,oneline
+        \\`open` in `File_System/File` takes a path followed by `access = .Read`,
+        \\`disposition = .Open_Existing`,
+        \\`permissions = File_Permissions.Default_File`, and
+        \\`flags = Open_Flags.None`. Its path type must satisfy
+        \\`AsView(P, Path_View)`. The returned `File` owns its handle, and
+        \\`close(*file)` consumes that ownership even if closing reports an error.
+    );
+    code_block(82, "glosso", #string
+        \\#import "File_System/File";
+        \\
+        \\create_private_file :: (path: string) -> Fs_Error!void {
+        \\    file := open(path, .Write, .Create_New,
+        \\        .permissions = File_Permissions.Owner_Read | File_Permissions.Owner_Write,
+        \\        .flags = Open_Flags.Exclusive | Open_Flags.Sync)?;
+        \\    _ := close(*file)?;
+        \\}
+    );
+    table_header(83, "Operation   —   Current call");
+    table_row(84, "Read an existing file   |   `open(path)`");
+    table_row(85, "Create or truncate a writable file   |   `open(path, .Write, .Create_Always)`");
+    table_row(86, "Append, creating when absent   |   `open(path, .Write, .Open_Or_Create, .flags = .Append)`");
+    table_row(87, "Open for reading and writing   |   `open(path, .access = .Read_Write)`");
+    table_row(88, "Synchronize data only   |   `sync(*file, .data_only = true)`; omit the parameter for full synchronization");
+    paragraph(89, #string,oneline
+        \\Independent Boolean choices are collected in an `enum_flags` type.
+        \\Combine qualified members with `|`, test membership with `&`, and
+        \\clear a member with `flags = flags & ~Open_Flags.Append`. Plain
+        \\integers and members of an unrelated enum cannot satisfy a typed
+        \\flags parameter. Filesystem permissions likewise use
+        \\`File_Permissions` members instead of untyped integer constants.
+    );
+    table_header(90, "API family   —   Direct parameter examples");
+    table_row(91, "Terminal   |   `terminal_begin(.title = \"App\", .flags = Terminal_Flags.Default | Terminal_Flags.Mouse)`; `terminal_clear(*session, .Line)`");
+    table_row(92, "JSON   |   `json_serialize(value, .pretty = true, .indent = \"    \")`; `json_deserialize(T, text, .max_depth = 64)`");
+    table_row(93, "Memory   |   `memory_fill(pointer, byte_count)` zeros a range; `memory_fill(pointer, byte_count, byte_value)` fills it; `memory_copy` supports overlap");
+    table_row(94, "Strings and formatting   |   `index_of(text, needle, .start = offset)`; `replace(text, old, new, .limit = count)`; `format(fmt, args..., .allocator = allocator)`");
+    table_row(95, "Sorting   |   `sort(values)` is stable by default; `sort(values, .stable = false)` selects unstable sorting");
+    note(96, #string,oneline
+        \\These calls replace removed wrapper names and option records; they
+        \\are the current API, not compatibility overloads. The generated
+        \\reference lists every parameter's default and applicable type
+        \\constraint. Ownership and release effects are shown separately under
+        \\`#memory` contracts, including effects on an `.Ok` result payload.
     );
 }
 
@@ -283,7 +333,8 @@ render_section_143 :: () {
     paragraph(13, #string,oneline
         \\The lexer produces the classes below. `#char` is the one directive the
         \\lexer itself interprets. It yields a marked integer token whose origin is
-        \\retained so the checker can infer `char` or `rune`. A `\\` at the start
+        \\retained so the checker can infer `u8`, `s8`, or `rune` for ASCII
+        \\literals and `rune` for non-ASCII literals. A `\\` at the start
         \\of a line yields `MLSTR`, which
         \\only `#string` and `#asm` consume.
     );
@@ -304,7 +355,7 @@ render_section_143 :: () {
         \\LABEL     = "'" IDENT ;                                   (* no closing quote *)
         \\BACKTICK  = "`" IDENT ;
         \\DBACKTICK = "``" IDENT ;
-        \\TRIPLECOLON = ":::" ;                                  (* reserved *)
+        \\TRIPLECOLON = ":::" ;                    (* instance separator *)
         \\OP        = opchar { opchar } ;                           (* maximal munch *)
         \\opchar    = "+" | "-" | "*" | "/" | "<" | ">" | "!" | "@" | "%"
         \\          | "^" | "&" | "|" | "~" | "?" | "." | "," | ":" | "=" ;
@@ -330,7 +381,8 @@ render_section_143 :: () {
         \\            | "#comptime" ( block | "->" type block [ ";" ]
         \\                           | expression ";" )
         \\            | "#import" importtail
-        \\            | "#load" STRING ";"
+        \\            | "#load" [ "," "embed" ] STRING ";"
+        \\            | "#export" STRING ";"
         \\            | "#thread_local" declaration
         \\            | instance
         \\            | binding ;
@@ -352,7 +404,7 @@ render_section_143 :: () {
         \\import      = "#import" importtail ;
         \\importtail  = [ "," ( "only" | "hide" ) "(" [ name { "," name } ] ")" ]
         \\              STRING ";" ;
-        \\load        = "#load" STRING ";" ;
+        \\load        = "#load" [ "," "embed" ] STRING ";" ;
         \\library     = "#library" { "," ( "static" | "system" | "dyn" ) }
         \\              STRING ";" ;
         \\fnptr       = "#fn_ptr" "(" [ params ] ")" [ "->" type ]
@@ -564,7 +616,8 @@ render_section_143 :: () {
     code_block(28, "ebnf", #string
         \\typeclass   = "typeclass" "(" [ tcparams ] ")" { where }
         \\              { derive | minimal } "{" { member } "}" ;
-        \\tcparams    = IDENT ":" type { "," IDENT ":" type } ;
+        \\tcparams    = tcparam { "," tcparam } [ "," ] ;
+        \\tcparam     = [ "#comptime" ] IDENT ":" type ;
         \\minimal     = "#minimal" "(" [ disjunction ] ")" ;
         \\disjunction = conjunction { "|" conjunction } ;
         \\conjunction = atom { "," atom } ;
@@ -933,7 +986,7 @@ render_section_143 :: () {
     table_row(60, "`#pattern`, `#partial`, `#falling`   |   pattern test or switch, after `if`, and at the end of a case arm");
     table_row(61, "`#try`   |   `#try { expression }` in expression position, and `#try defer`");
     table_row(62, "`#code`, `#string`, `#simd`, `#undefined`, `#meaningful`   |   expression position; `#code` quotes a block or one statement");
-    table_row(63, "`#char`   |   a character literal recognised by the lexer; the checker infers `char` or `rune`");
+    table_row(63, "`#char`   |   a character literal recognised by the lexer; ASCII defaults to `u8`, non-ASCII to `rune`");
     table_row(64, "`#derive`, `#minimal`   |   `#derive` on `struct`, `union`, `typeclass` and `distinct`; `#minimal` on `typeclass` only");
     table_row(65, "`#empty`, `#as`, `#from`, `#raw`, `#packed`   |   aggregate declarations; `#empty` also in a parameter list");
     table_row(66, "`#c_call`, `#modify`, `#magic`   |   both aggregate and procedure declarations");
@@ -1103,8 +1156,8 @@ render_section_144 :: () {
     table_row(47, "`#char string literal must contain exactly one character`   |   More than one direct code point, as in `#char \"ab\"`.");
     table_row(210, "`#char \\x escape needs exactly two hexadecimal digits`   |   `#char \"\\x4\"` or `#char \"\\xZZ\"`; `#char \"\\x41\"` is valid and has value 65.");
     table_row(211, "`unknown #char escape '\\q'`   |   A `#char` escape outside its fixed table and exact `\\xHH` form.");
-    table_row(48, "`ASCII #char literal can infer only as char or rune, not u8`   |   `c: u8 = #char \"A\"`. The message names the type that was asked for.");
-    table_row(49, "`non-ASCII #char literal can infer only as rune, not char`   |   `c: char = #char \"λ\"`.");
+    table_row(48, "`#char literal can infer only as u8, s8, or rune, not u32`   |   `c: u32 = #char \"A\"`. The message names the type that was asked for.");
+    table_row(49, "`#char literal can infer only as rune, not u8`   |   `c: u8 = #char \"λ\"`.");
     table_row(50, "`#string expects one or more '\\\\' lines`   |   A `#string` immediately followed by `;`.");
     table_row(51, "`unknown #string modifier 'wrapped'; expected 'oneline' or 'escape'`   |   Any modifier outside the pair.");
     table_row(52, "`duplicate #string modifier 'oneline'`   |   The same modifier written twice.");
@@ -1333,7 +1386,7 @@ render_section_145 :: () {
     table_row(4, "Types: struct, union, enum, distinct   |   `Upper_Snake_Case`   |   `Slot_Table`, `Io_Error_Kind`, `Date_Time`");
     table_row(5, "Typeclasses   |   `PascalCase`, no underscores   |   `Show`, `PartialEq`, `FromString`, `Indexable`");
     table_row(6, "Enum variants   |   `Upper_Snake_Case`   |   `Read_At`, `Unexpected_Eof`, `Out_Of_Memory`");
-    table_row(7, "Flag-enum members   |   `UPPER_SNAKE`   |   `POINTER`, `REVERSE`, `DIRTY`");
+    table_row(7, "Flag-enum members   |   `Upper_Snake_Case`   |   `Append`, `No_Follow`, `Owner_Read`");
     table_row(8, "Constants   |   `UPPER_SNAKE`   |   `MAX_SLOTS`, `DEFAULT_TEMP_ALLOCATOR_SIZE`");
     table_row(9, "Procedures, parameters, fields, locals   |   `lower_snake_case`   |   `slot_table_new`, `capacity`, `it_index`");
     table_row(10, "Module-internal declarations   |   a `__` prefix on the usual shape   |   `__grid_index`, `__BTreeMap_Node`");
@@ -1357,8 +1410,8 @@ render_section_145 :: () {
         \\Slot_State :: enum { Free; Taken; Retired; }
         \\
         \\Slot_Flags :: enum_flags u32 {
-        \\    PINNED :: 16#1;
-        \\    DIRTY  :: 16#2;
+        \\    Pinned :: 16#1;
+        \\    Dirty  :: 16#2;
         \\}
         \\
         \\Slot_Table :: struct {
@@ -1444,7 +1497,7 @@ render_section_145 :: () {
     );
     table_header(27, "Position   —   Contents");
     table_row(28, "1   |   A header comment naming the file and stating in one line what it is for, then a short paragraph of what a caller must know.");
-    table_row(29, "2   |   `#import` and `#load` lines.");
+    table_row(29, "2   |   `#import`, `#load`, and `#export` lines.");
     table_row(30, "3   |   The module's error type, then its data types, then its typeclasses and instances.");
     table_row(31, "4   |   Constructors, then queries, then mutators, then the destructor, grouped by the type they belong to.");
     table_row(32, "5   |   `#enable(private_section);` and the `__`-prefixed helpers, at the end of the file.");

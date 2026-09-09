@@ -528,7 +528,7 @@ render_section_133 :: () {
     table_row(5, "`s8` `s16` `s32` `s64`   |   `i8` `i16` `i32` `i64`   |   `int8_t` through `int64_t`");
     table_row(6, "`u8` `u16` `u32` `u64`   |   `i8` `i16` `i32` `i64`   |   `uint8_t` through `uint64_t`");
     table_row(44, "`ssize`, `usize`   |   the target pointer width (`i32` or `i64`)   |   `intptr_t`, `uintptr_t`");
-    table_row(45, "`char`, `rune`   |   `i8`, `i32`   |   `uint8_t`, `uint32_t`");
+    table_row(45, "`rune`   |   `i32`   |   `uint32_t`; a Unicode scalar, not an integer alias");
     table_row(7, "`f32` `f64`   |   `float` `double`   |   `float`, `double`");
     table_row(8, "`bool`   |   `i1 zeroext`   |   `_Bool`");
     table_row(9, "`enum u8`, `enum_flags u32`   |   the backing integer   |   the enum's underlying type");
@@ -678,7 +678,7 @@ render_section_133 :: () {
     );
     note(43, #string,oneline
         \\C's default argument promotions do happen in the variadic tail: `bool`,
-        \\`char`, `s8`, `u8`, `s16`, and `u16` become `s32`, while `f16` and `f32`
+        \\`s8`, `u8`, `s16`, and `u16` become `s32`, while `f16` and `f32`
         \\become `f64`; other tail values keep their representation. Aggregate
         \\descriptors are not adapted, so `c_printf("%s\n", "hello")` passes a
         \\three-word string descriptor where C reads a pointer and can crash.
@@ -697,18 +697,20 @@ render_section_134 :: () {
     );
     paragraph(1, #string,oneline
         \\There are two entry points. Both take the header path, a library
-        \\descriptor, and an optional `Bindgen_Options`, and both return
-        \\`Bindgen_Error!string`.
+        \\descriptor, and optional settings as named parameters, and both return
+        \\`Bindgen_Error!string`. The library argument must satisfy
+        \\`Bindgen_Library`: use a `Library_Spec`, a bare library string, or
+        \\`Libraries` when the header contains functions from several artifacts.
     );
     table_header(2, "Call   —   Produces   —   Used with");
-    table_row(3, "`generate(header, output, library, options)`   |   writes a `.glo` file   |   a checked-in bindings file");
-    table_row(4, "`generate_source(header, library, options)`   |   returns the source text   |   `#insert`, no file on disk");
+    table_row(3, "`generate(header, output, library)`   |   writes a `.glo` file   |   a checked-in bindings file");
+    table_row(4, "`generate_source(header, library)`   |   returns the source text   |   `#insert`, no file on disk");
     code_block(5, "glosso", #string
         \\#import "Io";
         \\#import "Bindgen";
         \\
         \\emit :: () {
-        \\    if generate("counter.h", "counter_bindings.glo", static_library("counter", "")) == {
+        \\    if generate("counter.h", "counter_bindings.glo", library_spec("counter")) == {
         \\    case .Ok(message); print("[bindgen] %\n", message);
         \\    case .Err(error);  print("[bindgen] failed: %\n", error.message);
         \\    }
@@ -765,38 +767,46 @@ render_section_134 :: () {
 
     subheading(9, "Library descriptors");
     paragraph(10, #string,oneline
-        \\The third argument decides the `#library` declaration at the head of the
+        \\The library argument decides the `#library` declaration at the head of the
         \\generated file. The descriptor's name becomes the Glosso identifier every
         \\`#foreign` in the file refers to; its file or path becomes the string.
-        \\`static_library` and `system_library` default the file to the name.
+        \\`library_spec(name, file = "", kind = .Static)` defaults an empty file
+        \\to the name for `.Static` and `.System`. `.Dynamic` requires a path.
     );
     table_header(11, "Descriptor   —   Emitted declaration");
-    table_row(12, "`static_library(\"small\", \"\")`   |   `small :: #library,static \"small\";`");
-    table_row(13, "`static_library(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
-    table_row(14, "`system_library(\"m\", \"\")`   |   `m :: #library,system \"m\";`");
-    table_row(15, "`dynamic_library(\"small\", \"libsmall.so\")`   |   `small :: #library,dyn \"libsmall.so\";`");
+    table_row(12, "`library_spec(\"small\")`   |   `small :: #library,static \"small\";`");
+    table_row(13, "`library_spec(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
+    table_row(14, "`library_spec(\"m\", .kind = .System)`   |   `m :: #library,system \"m\";`");
+    table_row(15, "`library_spec(\"small\", \"libsmall.so\", .Dynamic)`   |   `small :: #library,dyn \"libsmall.so\";`");
 
-    subheading(16, "`Bindgen_Options`");
+    subheading(16, "Direct generation parameters");
     code_block(17, "glosso", #string
-        \\Bindgen_Options :: struct #c_call {
-        \\    include_paths: [..]string;
-        \\    preprocessor_definitions: [..]string;
-        \\    compiler_args: [..]string;
-        \\    allow_textual_fallback: bool = false;
+        \\emit_small :: () -> Bindgen_Error!string {
+        \\    includes: [1]string = .["include"];
+        \\    definitions: [1]string = .["SMALL_EXTRA=1"];
+        \\    names: [2]string = .["small_add", "SMALL_VERSION"];
+        \\    return generate_source("small.h", library_spec("small"),
+        \\        .include_paths = includes[..],
+        \\        .preprocessor_definitions = definitions[..],
+        \\        .allowlist = names[..]);
         \\}
     );
-    table_header(18, "Field   —   Becomes   —   Default");
+    table_header(18, "Parameter   —   Becomes   —   Default");
     table_row(19, "`include_paths`   |   `-I` arguments   |   empty");
     table_row(20, "`preprocessor_definitions`   |   `-D` arguments, `NAME` or `NAME=VALUE`   |   empty");
     table_row(21, "`compiler_args`   |   raw arguments to clang   |   empty");
     table_row(22, "`allow_textual_fallback`   |   a limited non-clang parser   |   `false`");
+    table_row(45, "`allowlist`   |   exact declaration names and their transitive dependencies   |   empty, generating all supported local declarations");
     paragraph(23, #string,oneline
-        \\Three mutators append to the arrays without naming the fields:
-        \\`add_include_path`, `add_bindgen_preprocessor_definition`, and
-        \\`add_bindgen_compiler_arg`, each taking a `*Bindgen_Options`. Definitions
-        \\reach the header exactly as clang would apply them, so
-        \\`add_bindgen_preprocessor_definition(*options, "SMALL_EXTRA=1")` selects
-        \\the other side of an `#ifdef` and changes the constants that come out.
+        \\Include paths, definitions, compiler arguments and allowlists are
+        \\ordinary `[]string` parameters, each defaulting to `.[]`. The call
+        \\borrows these slices and their text only while generating. Pass a
+        \\fixed array's `[..]` view or a slice; no option record or specialized
+        \\array mutator is needed. Definitions use `NAME` or `NAME=VALUE` without
+        \\`-D`, so `SMALL_EXTRA=1` selects the corresponding preprocessor branch.
+        \\A nonempty allowlist also reaches declarations in external SDK includes,
+        \\requires Clang even when textual fallback is enabled, and rejects
+        \\unknown names.
     );
     paragraph(24, #string,oneline
         \\`allow_textual_fallback` is `false` because a clang error is more useful
@@ -811,9 +821,8 @@ render_section_134 :: () {
         \\// broken.h begins with: #include <no_such_header_anywhere.h>
         \\
         \\emit :: (allow: bool) {
-        \\    options: Bindgen_Options;
-        \\    options.allow_textual_fallback = allow;
-        \\    if generate_source("broken.h", static_library("broken", ""), options) == {
+        \\    if generate_source("broken.h", library_spec("broken"),
+        \\        .allow_textual_fallback = allow) == {
         \\    case .Ok(source);  print("[ok, allow=%]\n%\n", allow, source);
         \\    case .Err(error);  print("[err, allow=%] %\n", allow, error.message);
         \\    }
@@ -943,13 +952,12 @@ render_section_134 :: () {
         \\    sources: [..]string;
         \\    defer array_free(*sources);
         \\    array_add(*sources, "counter.c");
-        \\    c_options: C_Compile_Options;
         \\    archive: Native_Compile_Output;
-        \\    if compile_c_archive("counter", sources, c_options) == {
+        \\    if compile_c_archive("counter", sources) == {
         \\    case .Ok(built);  archive = built;
         \\    case .Err(error); print("cc failed: %\n", error.message); return "";
         \\    }
-        \\    if generate_source("counter.h", static_library("counter", archive.artifact)) == {
+        \\    if generate_source("counter.h", library_spec("counter", archive.artifact)) == {
         \\    case .Ok(source); return source;
         \\    case .Err(error); print("bindgen failed: %\n", error.message); return "";
         \\    }
@@ -1344,8 +1352,8 @@ render_section_136 :: () {
         \\declaration has no body: its parameters and result type are the signature
         \\the checker sees, and the string picks the implementation out of a registry
         \\built into the compiler. This is how the standard library reaches the type
-        \\system, the host operating system, and the machine. 493 distinct intrinsic
-        \\names appear across the current `std`, in 608 declarations.
+        \\system, the host operating system, and the machine. 491 distinct intrinsic
+        \\names appear across the current `std`, in 606 declarations.
     );
     paragraph(1, #string,oneline
         \\`#magic` exists so that these operations stay ordinary declarations. A
@@ -1384,27 +1392,30 @@ render_section_136 :: () {
     subheading(5, "The four availability classes");
     paragraph(6, #string,oneline
         \\Each registry entry carries two independent flags: whether the compile-time
-        \\VM has an implementation, and whether the checker may fold the call while
-        \\type checking. The four combinations are the availability classes, and every
-        \\refusal in this chapter follows from them.
+        \\VM has an implementation, and whether the checker may evaluate the call while
+        \\type checking. Their four combinations describe evaluator availability.
+        \\Native LLVM lowering is classified separately, so an intrinsic available to
+        \\both compile-time engines can still be deliberately forbidden in a program.
     );
     table_header(7, "Class   —   Runs where   —   Representative names");
-    table_row(8, "compile-time only   |   folded by the checker; never in the VM and never natively   |   `size_of`, `type_info`, `field_name`, `pattern_missing`");
-    table_row(9, "VM and compile time   |   both compile-time engines and compiled code   |   `str_concat`, `substring`, file and process services, `compiler_compile`");
-    table_row(10, "VM, not foldable   |   the VM and compiled code, but not folded into a constant   |   `exit`, `assert_failed`, `int_add`, `num_lt`");
-    table_row(11, "native only   |   compiled code only   |   `ptr_add`, `va_arg`, `ctx_alloc`, `jump_goto`");
+    table_row(8, "compile-time only   |   checker evaluation, not the VM; native lowering rejects these queries   |   `size_of`, `type_info`, `field_name`, `pattern_missing`");
+    table_row(9, "VM and compile time   |   both compile-time engines; native availability is decided independently   |   `str_concat`, `substring`, file services, `compiler_add_build_file`");
+    table_row(10, "VM, not foldable   |   the VM but not checker evaluation; these representatives also lower natively   |   `exit`, `assert_failed`, `int_add`, `num_lt`");
+    table_row(11, "native only   |   neither compile-time engine; compiled code only   |   `ptr_add`, `va_arg`, `ctx_alloc`, `jump_goto`");
     paragraph(12, #string,oneline
-        \\Membership follows the nature of the operation, not a policy. A query about
-        \\a type has no runtime existence, so it is compile-time only. An operation on
-        \\a raw address or on the implicit context has no meaning inside an evaluator
-        \\that has no addresses and no context, so it is native only. Everything that
-        \\is a pure computation on values, or a request to the host, works in both.
+        \\Membership follows the nature of the operation. A query about a type has no
+        \\runtime existence, so it is compile-time only. An operation on a raw address
+        \\or on the implicit context has no meaning inside an evaluator with neither,
+        \\so it is native only. Pure value operations generally work everywhere.
+        \\Host compiler and bindgen services work in the two compile-time engines but
+        \\are rejected by native lowering: they are services of a build, not of the
+        \\program that build emits.
     );
     table_header(13, "Family   —   Class   —   Note");
     table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
     table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `str_repeat`, `substring`, `byte_string`, the `show_*` formatters");
     table_row(16, "files, filesystem, processes   |   VM and compile time   |   so a build script can read the host; the handle-relative sandbox primitives stay native only");
-    table_row(17, "compiler and bindgen services   |   VM and compile time   |   `compiler_compile`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
+    table_row(17, "compiler and bindgen services   |   VM and compile time, native forbidden   |   `compiler_add_build_file`, `compiler_add_build_string`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
     table_row(18, "complex numbers, wrapping and saturating integers, indexing, ranges   |   VM and compile time   |   `complex_*`, `int_wrap_*`, `int_sat_*`, `index_array`, the `slice*` family, `type_eq`");
     table_row(19, "arithmetic and comparison templates   |   VM, not foldable   |   `int_add`, `flt_mul`, `num_lt`, `bool_and`, `ptr_eq`");
     table_row(20, "pointer arithmetic, varargs, jumps, raw memory   |   native only   |   `ptr_add`, `ptr_diff`, `ptr_index`, `memory_copy_magic`, `va_start`, `va_arg`, `jump_context_save`, `jump_goto`, `string_from_raw_parts`");
@@ -1489,18 +1500,19 @@ render_section_136 :: () {
         \\names the function and the IR instruction being lowered.
     );
     table_header(39, "Classification   —   Message");
-    table_row(40, "compile-time only, so it should have been folded   |   `#magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering`");
+    table_row(40, "compile-time-only query or service   |   `#magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering`; compiler services use `compiler service or type query must be folded before native lowering`");
     table_row(41, "deliberately unlowered representation   |   `native LLVM lowering rejects #magic 'sb_new': string-builder runtime representation is not lowered`");
     table_row(42, "classified as implemented, but no lowering matched   |   `native LLVM magic coverage drift: #magic '<name>' is classified as implemented but no lowering matched`");
     table_row(43, "name not in the backend's table   |   `native LLVM lowering has no classification for #magic '<name>'`");
     paragraph(44, #string,oneline
-        \\The first of those is reachable only by writing a declaration the standard
-        \\library would not: a call to a compile-time-only intrinsic is folded during
-        \\lowering when the declaration has a `type`-valued parameter and the registry
-        \\entry is compile-time. That is the rule that lets `size_of(Vec3)` and
+        \\Type queries normally disappear before this classification: a call to a
+        \\compile-time intrinsic is folded during lowering when the declaration has a
+        \\`type`-valued parameter. That lets `size_of(Vec3)` and
         \\`field_name(Vec3, 1)` stand in a runtime body and become constants. Bind
-        \\`"size_of"` to a signature with no `type` parameter and the fold does not
-        \\happen, and the call arrives at the backend.
+        \\`"size_of"` to a signature with no `type` parameter and the call instead
+        \\arrives at the backend. Compiler and bindgen services reach the same class
+        \\when called from ordinary runtime code; use them from `#comptime`, where the
+        \\VM supplies the service.
     );
     code_block(45, "glosso", #string
         \\#import "Io";

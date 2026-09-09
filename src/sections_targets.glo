@@ -317,8 +317,10 @@ render_section_139 :: () {
     note(8, #string,oneline
         \\The rule that governs this is that runtime checks are emitted when the
         \\optimization level is 1 or less. Use `-O2` or `-O3` for a linkable
-        \\bare-metal image. Although the driver still recognizes `-Os`, `-Oz`
-        \\and `-Ozz`, the current LLVM 23 backend cannot run those size modes.
+        \\bare-metal image today. The backend marks functions `no-builtins` on
+        \\targets without a C runtime so future working size pipelines cannot
+        \\turn loops into unresolved libc calls such as `strlen`, but the current
+        \\LLVM 23 `default<Os>` and `default<Oz>` requests abort first.
         \\Overflow, Traps, and the `-O` Level covers the checks themselves.
     );
     bullet(9, #string,oneline
@@ -483,24 +485,28 @@ render_section_139 :: () {
         \\    .abi = Target_ABI.Freestanding,
         \\};
         \\
-        \\options: Compile_Options;
-        \\set_target(*options, wasm_target);
-        \\set_optimization_level(*options, .Optimized);
-        \\set_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\set_temp_allocator_size(*options, 1024 * 1024);
-        \\add_linker_arg(*options, "--export=glo_manual_set_view");
-        \\add_linker_arg(*options, "--export=glo_manual_select_section");
-        \\add_linker_arg(*options, "--allow-undefined");
-        \\add_linker_arg(*options, "--initial-memory=134217728");
-        \\built := compile("main.glo", "dist/manual.wasm", options);
+        \\workspace := compiler_create_workspace("manual");
+        \\options := get_build_options(workspace);
+        \\options.output_type = Build_Output_Type.Executable;
+        \\options.output_path = "dist";
+        \\options.output_executable_name = "manual.wasm";
+        \\set_build_target(*options, wasm_target);
+        \\set_build_optimization(*options, .Optimized);
+        \\set_build_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\set_build_temp_allocator_size(*options, 1024 * 1024);
+        \\add_build_linker_arg(*options, "--export=glo_manual_set_view");
+        \\add_build_linker_arg(*options, "--export=glo_manual_select_section");
+        \\add_build_linker_arg(*options, "--allow-undefined");
+        \\add_build_linker_arg(*options, "--initial-memory=134217728");
+        \\set_build_options(options, workspace);
+        \\built := add_build_file("main.glo", workspace);
     );
     paragraph(39, #string,oneline
-        \\The manual currently uses `Optimized`, or `-O2`. LLVM 23 rejects `Os`
-        \\and `Oz` as LTO optimisation levels and asks front ends to express
-        \\size optimisation with function attributes instead; until the compiler
-        \\maps its size modes that way, `Optimized_Small`,
-        \\`Optimized_Very_Small`, and `Optimized_Tiny` cannot complete this
-        \\build. The explicit `--export=` arguments exist
+        \\The manual uses `Optimized`, or `-O2`. `Optimized_Small`,
+        \\`Optimized_Very_Small`, and `Optimized_Tiny` become `-Os`, `-Oz`, and
+        \\`-Ozz`; although the backend attaches `optsize`/`minsize`, its LLVM 23
+        \\pass-pipeline spelling still aborts, so none can build the manual yet.
+        \\The explicit `--export=` arguments exist
         \\because only `glo_main` is exported by default. `--allow-undefined`
         \\admits the symbols the browser host supplies. And the manual's `main`
         \\is a `#c_call` procedure taking the viewport size and pointer state,

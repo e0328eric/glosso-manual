@@ -611,7 +611,7 @@ render_section_118 :: () {
     table_row(27, "`tprint`   |   the formatted string, in the arena");
     table_row(28, "`read_line`   |   the `text` field of its `Read_Line`, in the arena");
     table_row(29, "`c_string`   |   a NUL-terminated copy of the string, in the arena");
-    table_row(30, "`format_args`   |   the formatted string, when it is passed `.allocator = context.temp_allocator`");
+    table_row(30, "`format`   |   the formatted string, when it is passed `.allocator = context.temp_allocator` and transferred with `string_into_temporary`");
     table_row(31, "`builder_into_temporary_string`   |   the builder's arena-backed bytes as a string");
     table_row(32, "`string_into_temporary`   |   the same string with its release obligation dropped");
     paragraph(33, #string,oneline
@@ -2750,12 +2750,11 @@ render_section_126 :: () {
     );
     subheading(26, "Raising the mode in a build script");
     paragraph(27, #string,oneline
-        \\A build script sets the mode per compilation through the
-        \\`borrow_check` field of `Compile_Options`, whose type is
-        \\`Compiler_Borrow_Check` with variants `Off`, `Warning`, and `Error`.
-        \\The field defaults to `Warning`, matching the command line.
-        \\`Build_Options` carries the same field for the whole-workspace
-        \\form.
+        \\A build script sets the mode through the `borrow_check` field of a
+        \\workspace's `Build_Options`, whose type is `Compiler_Borrow_Check`
+        \\with variants `Off`, `Warning`, and `Error`. The field defaults to
+        \\`Warning`, matching the command line. Edit the detached options
+        \\record, then install it with `set_build_options` before compiling.
     );
     code_block(28, "glosso", #string
         \\#import "Io";
@@ -2763,10 +2762,13 @@ render_section_126 :: () {
         \\
         \\build :: () {
         \\    set_build_options_dc(.do_output = false);
-        \\    options: Compile_Options;
-        \\    options.borrow_check = Compiler_Borrow_Check.Error;
-        \\    if compile("leaky_child.glo", "leaky_child.exe", options) == {
-        \\    case .Ok(path);   print("[build] ok %\n", path);
+        \\    workspace := compiler_create_workspace("memory-check");
+        \\    options := get_build_options(workspace);
+        \\    options.output_executable_name = "leaky_child.exe";
+        \\    set_build_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\    set_build_options(options, workspace);
+        \\    if add_build_file("leaky_child.glo", workspace) == {
+        \\    case .Ok(log);    print("[build] ok\n%", log);
         \\    case .Err(error); print("[build] memory diagnostics are fatal here\n"); exit(1);
         \\    }
         \\}
@@ -2784,7 +2786,7 @@ render_section_126 :: () {
         \\`error.message`, printed by the script rather than by the compiler.
         \\Without the `exit(1)` the outer build succeeds and returns 0: a
         \\failed inner compilation is a value, not a signal. The chapter on
-        \\build scripts covers the rest of `Compile_Options`.
+        \\build scripts covers the rest of `Build_Options` and workspaces.
     );
     paragraph(31, #string,oneline
         \\The mode to choose is a project decision rather than a language one.
@@ -3127,8 +3129,8 @@ render_section_127 :: () {
         \\read, as the second half of the transcript shows. The tag check
         \\belongs to the runtime-check family described in the chapter on
         \\runtime safety checks and panics, which is enabled at `-O0` and
-        \\`-O1` only. The current LLVM 23 backend cannot complete a size-mode
-        \\build, so use `-O2` or `-O3` when this check must be absent.
+        \\`-O1` only. Use `-O2` or `-O3` to omit it; the size modes are also
+        \\configured without the check but currently produce no LLVM 23 artifact.
     );
     note(50, #string,oneline
         \\A gate is not a promise that the compiler will stop looking. If the

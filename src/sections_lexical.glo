@@ -871,8 +871,8 @@ render_section_10 :: () {
     );
     paragraph(46, #string,oneline
         \\A `cstring` exists to be handed to C and has no `Show` instance, so it
-        \\cannot be printed directly; the attempt reports error: variadic arg
-        \\type `cstring` does not implement `Show` in call `print`. The types
+        \\cannot use the default `%` rendering: no matching `Formatter`
+        \\instance exists for `cstring` and the empty selector. The types
         \\themselves are covered in Built-in Strings.
     );
 }
@@ -1147,9 +1147,9 @@ render_section_12 :: () {
     paragraph(0, #string,oneline
         \\`#char` writes one character value. The scanner handles the form
         \\inside directive scanning and emits a marked integer token; the parser
-        \\keeps that marker, and the checker gives the literal the builtin
-        \\`char` or `rune` type. These types retain distinct identities even
-        \\though their storage is the same width as `u8` and `u32`.
+        \\keeps that marker, and the checker defaults ASCII literals to `u8`
+        \\and other literals to `rune`. The old `char` type has been removed;
+        \\`#char` remains the spelling of the literal directive.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
@@ -1166,7 +1166,7 @@ render_section_12 :: () {
         \\}
     );
     code_block(2, "text", #string
-        \\A      = 65 (char)
+        \\A      = 65 (u8)
         \\lambda = 955 (rune)
         \\contextual A = 65 (rune)
     );
@@ -1179,26 +1179,25 @@ render_section_12 :: () {
         \\`error: #char expects a string literal`.
     );
 
-    subheading(4, "Character types are not integers");
+    subheading(4, "Bytes and Unicode scalars");
     paragraph(5, #string,oneline
-        \\`char` is a one-byte ASCII character and `rune` is a four-byte Unicode
-        \\scalar. They are deliberately outside `Is_Integer` and `Is_Numeric`.
-        \\They have equality and ordering, but no arithmetic, bitwise, shift,
-        \\integer-range, or SIMD-lane operations. Direct string indexing is still
-        \\code-unit oriented, so it yields `u8` or `u16`; convert explicitly when
-        \\byte-oriented code needs to compare a code unit with a glyph.
+        \\`u8` is an ordinary integer byte; `rune` is a four-byte Unicode scalar.
+        \\Only `rune` is outside `Is_Integer` and `Is_Numeric`: it has equality
+        \\and ordering but no arithmetic, bitwise, shift, integer-range, or
+        \\SIMD-lane operations. Direct string indexing yields `u8` or `u16`
+        \\code units. An ASCII `#char` literal compares directly with a byte;
+        \\a UTF-8 character above ASCII may occupy several bytes.
     );
     code_block(6, "glosso", #string
         \\#import "Io";
         \\
         \\is_digit_byte :: (byte: u8) -> bool {
-        \\    return byte >= cast(u8)(#char "0")
-        \\        && byte <= cast(u8)(#char "9");
+        \\    return byte >= #char "0" && byte <= #char "9";
         \\}
         \\
         \\main :: () {
         \\    text : string = "h7";
-        \\    print("first is h: %\n", text[0] == cast(u8)(#char "h"));
+        \\    print("first is h: %\n", text[0] == #char "h");
         \\    print("second is a digit: %\n", is_digit_byte(text[1]));
         \\    c := #char "A";
         \\    r := char_to_rune(c);
@@ -1288,31 +1287,33 @@ render_section_12 :: () {
 
     subheading(29, "The synthesised type");
     paragraph(30, #string,oneline
-        \\Left alone, an ASCII `#char` synthesises as `char`; every other code
-        \\point synthesises as `rune`. Context can widen an ASCII literal directly
-        \\to `rune`, but this privilege belongs to the literal, not to stored
-        \\`char` values. A variable of type `char` reaches `rune` only through
-        \\`char_to_rune`.
+        \\Left alone, an ASCII `#char` synthesises as `u8`; every other code
+        \\point synthesises as `rune`. Context can select `s8` or `rune` for an
+        \\ASCII literal. Untyped constants preserve that literal choice, but a
+        \\stored byte does not: use `char_to_rune` or an explicit cast to widen
+        \\a byte variable. Where several overloads match an ASCII literal, `u8`
+        \\is preferred to `s8`, and `s8` to `rune`.
     );
     table_header(31, "Code point   —   Default type   —   Types it accepts");
-    table_row(32, "at most `0x7f`   |   `char`   |   `char`, `rune`");
+    table_row(32, "at most `0x7f`   |   `u8`   |   `u8`, `s8`, `rune`");
     table_row(33, "above `0x7f`   |   `rune`   |   `rune`");
     code_block(34, "text", #string
-        \\main :: () { c : u8 = #char "A"; }
-        \\error: ASCII #char literal can infer only as char or rune, not u8
+        \\main :: () { c : u32 = #char "A"; }
+        \\error: #char literal can infer only as u8, s8, or rune, not u32
         \\
-        \\main :: () { c : char = #char "λ"; }
-        \\error: non-ASCII #char literal can infer only as rune, not char
+        \\main :: () { c : u8 = #char "λ"; }
+        \\error: #char literal can infer only as rune, not u8
         \\
         \\main :: () { c := #char "A"; r : rune = c; }
-        \\error: got char, expected rune
+        \\error: got u8, expected rune
     );
     note(35, #string,oneline
-        \\The contextual list is closed: integer targets are refused even when
-        \\their representation is wide enough. Low-level conversion remains
+        \\The contextual list is closed: other integer targets are refused even
+        \\when their representation is wide enough. Low-level conversion remains
         \\explicit: `cast(u8)(#char "A")` is `65`, and `cast(u32)(#char "λ")`
-        \\is `955`. Conversely, an integer cast can forge a `char` or `rune`
-        \\outside its scalar domain, so validate external data before casting.
+        \\is `955`. Conversely, an integer cast can forge a `rune` outside
+        \\its scalar domain, so validate external data before casting. `%c`
+        \\renders bytes or runes as UTF-8; bare `%` renders their decimal value.
     );
 }
 
@@ -1697,13 +1698,14 @@ render_section_15 :: () {
         \\operator is never registered.
     );
 
-    subheading(22, "The operator table is per file");
+    subheading(22, "Operator syntax across relative modules");
     paragraph(23, #string,oneline
-        \\Each source file is prescanned on its own, and the table it gets is the
-        \\Prelude's operators plus whatever that file itself declares. Nothing
-        \\else reaches it. A file loaded with `#load` is prescanned separately
-        \\from the file that loads it, so an operator declared in the loaded file
-        \\works inside that file and is an unknown token in the other.
+        \\The resolver seeds the operator table from the Prelude and prescans
+        \\relative `#load` and `#export` dependencies before parsing the caller.
+        \\An operator declared in a loaded file can therefore be written in the
+        \\loading file. The source files still have separate name visibility:
+        \\learning an operator's syntax does not grant access to hidden methods
+        \\or to an unrelated module's instances.
     );
     code_block(24, "glosso", #string
         \\// Mod2.glo: combine uses %% on its first line, before the declaration
@@ -1725,22 +1727,23 @@ render_section_15 :: () {
         \\
         \\main :: () {
         \\    print("combine(3, 4) = %\n", combine(3, 4));   // fine
-        \\    print("%\n", 3 %% 4);                          // not fine
+        \\    print("operator = %\n", 3 %% 4);                // also fine
         \\}
     );
     code_block(26, "text", #string
-        \\error: unexpected token '%%'
+        \\combine(3, 4) = 34
+        \\operator = 34
     );
     paragraph(27, #string,oneline
-        \\Removing the second `print` makes the program compile and print
-        \\`combine(3, 4) = 34`: the operator is real, its instance is real, and
-        \\the function that uses it is callable. Only the spelling failed to
-        \\cross the file boundary.
+        \\Both calls compile. The dependency prescan supplies `%%`'s precedence
+        \\before the caller is parsed, and the explicit load supplies the public
+        \\class and instance needed when the expression is checked.
     );
     bullet(28, #string,oneline
-        \\`#import` behaves the same way. A module that introduces a new operator
-        \\spelling can use it throughout its own files, but the importing file
-        \\still cannot write it.
+        \\The early dependency walk follows relative `#load` and `#export`
+        \\paths recursively. Directory imports have their own entrypoint and
+        \\dependency traversal; use an explicit relative dependency when an
+        \\operator's syntax must be available while parsing the caller.
     );
     bullet(29, #string,oneline
         \\The Prelude is prescanned before anything else and its table seeds
@@ -1748,13 +1751,13 @@ render_section_15 :: () {
         \\spellings are available with no import and no declaration.
     );
     bullet(30, #string,oneline
-        \\Within one standard module the files share an accumulating table, so a
-        \\spelling declared in one file of a module is usable in the module's
-        \\other files.
+        \\A directory import reads `module.glo`; it does not discover all other
+        \\files in the directory automatically. The entrypoint must load,
+        \\export, or embed every required component explicitly.
     );
     paragraph(31, #string,oneline
-        \\The practical rule that falls out of this is short: every operator a
-        \\file can write is either one the Prelude declares or one declared in
-        \\that same file, and within the file its position does not matter.
+        \\A declaration may follow its use within a file because the prescan
+        \\runs first. Across files, make the module dependency explicit and
+        \\export the declarations that callers need.
     );
 }

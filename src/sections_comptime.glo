@@ -1521,7 +1521,7 @@ render_section_112 :: () {
     table_header(5, "Field   —   Type   —   Holds");
     table_row(6, "`tag`   |   `Type_Info_Tag`   |   which family `T` belongs to");
     table_row(7, "`name`   |   `string`   |   the printed spelling, as `type_name` gives it");
-    table_row(8, "`size`   |   `ssize`   |   size in bytes under natural C layout");
+    table_row(8, "`size`   |   `ssize`   |   size in bytes under the target layout, including `#packed` when present");
     table_row(9, "`alignment`   |   `ssize`   |   required alignment in bytes");
     table_row(10, "`shower`   |   `Any_Show_Proc`   |   the `Show` thunk the `any` boxing carries");
     paragraph(11, #string,oneline
@@ -1534,8 +1534,9 @@ render_section_112 :: () {
     );
     subheading(12, "`Type_Info_Tag`");
     paragraph(13, #string,oneline
-        \\The tag is a closed enum of twenty members numbered `0` through `19`;
-        \\`Char` and `Rune` are the final two, at `18` and `19`,
+        \\The tag is a closed enum of nineteen members numbered `0` through `17`
+        \\and `19`. Tag `18` is reserved for the removed character-byte type;
+        \\`Rune` remains `19`,
         \\and `type_kind(T)` is the same value without the surrounding record.
         \\Types as Values lists the numbering. What matters when reflecting is
         \\which written spellings collapse onto one tag, because a single tag
@@ -1572,9 +1573,10 @@ render_section_112 :: () {
         \\`#import "Meta";`.
     );
     note(33, #string,oneline
-        \\Every one of these is registered compile-time-only. There is no runtime
-        \\type-information table to walk: a query that cannot be folded is an
-        \\error at the query, not a lookup at run time. That is why the index
+        \\Every one of these queries is registered compile-time-only. A query
+        \\that cannot be folded is an error at the query, not a lookup at run
+        \\time. The compiler also emits static `Type_Info` records for runtime
+        \\`any` boxes, which is distinct from evaluating these queries. That is why the index
         \\arguments below have to be constants.
     );
     subheading(34, "Indices must be compile-time constants");
@@ -2138,9 +2140,14 @@ render_section_114 :: () {
         \\run_build :: () {
         \\    set_build_options_dc(.do_output = false);
         \\
-        \\    options: Compile_Options;
-        \\    set_optimization_level(*options, .Optimized);
-        \\    if compile("hello.glo", "hello.exe", options) == {
+        \\    workspace := compiler_create_workspace("hello");
+        \\    options := get_build_options(workspace);
+        \\    options.output_type = .Executable;
+        \\    options.output_executable_name = "hello.exe";
+        \\    set_build_optimization(*options, .Optimized);
+        \\    set_build_options(options, workspace);
+        \\
+        \\    if add_build_file("hello.glo", workspace) == {
         \\    case .Ok(log);
         \\        print("[build] nested compilation said:\n%", log);
         \\    case .Err(failure);
@@ -2175,34 +2182,41 @@ render_section_114 :: () {
     paragraph(4, #string,oneline
         \\A nested compilation is a new `glosso` process, taken from
         \\`GLOSSO_COMPILER_EXE` if that is set and from the running executable
-        \\otherwise. Its standard error is captured into the result rather than
-        \\passed through, which is why the child's transcript appears indented
-        \\under `[build]` above and why discarding the `Ok` payload discards the
-        \\child's log. Every operation returns `Compiler_Error!T`, and
-        \\`Compiler_Error` is an `Error` instance, so `report_error(failure)`
-        \\prints `compiler error: ` followed by the child's diagnostics verbatim.
+        \\otherwise. `add_build_file` and `add_build_string` wait for that child
+        \\and return its standard output followed by its standard error instead of
+        \\passing either stream through. That is why the child's transcript appears
+        \\under `[build]` above and why discarding the `.Ok` payload discards the
+        \\child's log. A failed child returns `Compiler_Error`; that type implements
+        \\`Error`, so `report_error(failure)` prints `compiler error: ` followed by
+        \\the captured diagnostics.
     );
-    subheading(5, "`Compile_Options`");
+    subheading(5, "`Workspace` and `Build_Options`");
     paragraph(6, #string,oneline
-        \\`compile(source, output, options)` is the one-shot form: it builds
-        \\`source` into `output` with the given options and returns the child's
-        \\log. Each field of `Compile_Options` becomes an argument on the child's
-        \\command line, so the table below is also the mapping from the API to
-        \\the flags documented in Using the Compiler.
+        \\A `Workspace` is an `s64` handle to one reusable `Build_Options`
+        \\configuration. Create one with `compiler_create_workspace`, obtain a
+        \\detached copy of its options with `get_build_options`, edit that copy,
+        \\and install it with `set_build_options`. Nothing is queued:
+        \\`add_build_file(path, workspace)` and `add_build_string(source,
+        \\workspace)` each start and await one child compilation immediately.
+        \\Omitting the workspace argument uses the shared implicit handle `-1`.
     );
     table_header(7, "Field   —   Default   —   Child argument");
-    table_row(8, "`backend`   |   `.Default`   |   `--backend` with the matching name. `.Default` lets the child derive it.");
-    table_row(9, "`target`   |   zeroed   |   `--target`. A zeroed record passes the parent's active target instead.");
-    table_row(10, "`optimization_level`   |   `.Default`   |   One optimization flag; see the table below.");
-    table_row(11, "`compiler_args`   |   empty   |   Inserted verbatim, ahead of the source path.");
-    table_row(12, "`linker_args`   |   empty   |   One `--linker-arg` per entry, after the output path.");
-    table_row(13, "`memory_sanitizer`   |   `false`   |   `--memory-sanitizer`.");
-    table_row(14, "`thread_sanitizer`   |   `false`   |   `--thread-sanitizer`.");
-    table_row(15, "`borrow_check`   |   `.Warning`   |   `--borrow-check` with `off`, `warning`, or `error`.");
-    table_row(16, "`color`   |   `.Auto`   |   `--color always` or `--color never`.");
-    table_row(17, "`temp_allocator_size`   |   4 MiB   |   `--temp-allocator-size <bytes>` when positive.");
-    table_row(18, "`no_main`   |   `false`   |   `--no-main`.");
-    table_row(19, "`import_path`   |   empty   |   One `--module-path` per entry, added to the child's `#import` search list.");
+    table_row(8, "`output_type`   |   `.Executable`   |   Selects the backend when `backend` is `.Default`; `.No_Output` omits `-o` but does not suppress the child's artifact.");
+    table_row(9, "`backend`   |   `.Default`   |   `--backend` with the matching name, or derive it from `output_type`.");
+    table_row(10, "`output_executable_name`   |   empty   |   The name passed through `-o`; empty falls back to the source stem.");
+    table_row(11, "`output_path`   |   empty   |   Directory joined to the output name; empty uses the working directory.");
+    table_row(12, "`target`   |   zeroed   |   An all-zero target inherits the caller; raw `compiler_args` may override it, while a nonzero field is appended last and wins.");
+    table_row(13, "`optimization_level`   |   `.Default`   |   One optimization flag; see the table below.");
+    table_row(14, "`compiler_args`   |   empty   |   Raw child arguments before the flags derived from this record.");
+    table_row(15, "`import_path`   |   empty   |   One `--module-path` per entry, after the standard library in search order.");
+    table_row(16, "`linker_args`   |   empty   |   One `--linker-arg` per entry.");
+    table_row(17, "`compile_time_command_line`   |   empty   |   Entries after `--`, preserving spaces and empty strings as individual arguments.");
+    table_row(18, "`memory_sanitizer`, `thread_sanitizer`   |   `false`   |   `--memory-sanitizer` and `--thread-sanitizer`.");
+    table_row(19, "`borrow_check`   |   `.Warning`   |   `--borrow-check` with `off`, `warning`, or `error`.");
+    table_row(69, "`color`   |   `.Auto`   |   `--color always` or `--color never`, resolved against the parent's stderr.");
+    table_row(70, "`temp_allocator_size`   |   4 MiB   |   `--temp-allocator-size <bytes>` when positive.");
+    table_row(71, "`no_main`   |   `false`   |   `--no-main`.");
+    table_row(72, "`intermediate_path`, `do_output`, `write_added_strings`, `text_output_flags`   |   reserved defaults   |   Currently ignored by workspace builds.");
     paragraph(20, #string,oneline
         \\`.Auto` never reaches the child as `auto`. The child's standard error
         \\is a capture pipe and can never be a terminal, so the parent resolves
@@ -2211,12 +2225,15 @@ render_section_114 :: () {
     );
     paragraph(21, #string,oneline
         \\The fields are written through mutators that take a pointer to the
-        \\record: `set_backend`, `set_target`, `set_optimization_level`,
-        \\`set_memory_sanitizer`, `set_thread_sanitizer`, `set_borrow_check`,
-        \\`set_color`, `set_temp_allocator_size`, `set_no_main`,
-        \\`add_compiler_arg`, `add_linker_arg` and `add_module_path`. They are
-        \\plain procedures, not intrinsics; assigning the field directly does the
-        \\same thing.
+        \\record: `set_build_backend`, `set_build_target`,
+        \\`set_build_optimization`, `set_build_memory_sanitizer`,
+        \\`set_build_thread_sanitizer`, `set_build_borrow_check`,
+        \\`set_build_color`, `set_build_temp_allocator_size`,
+        \\`set_build_no_main`, `add_build_compiler_arg`,
+        \\`add_build_linker_arg`, `add_build_linker_args` and
+        \\`add_build_module_path`. They mutate only the detached local record;
+        \\call `set_build_options` afterwards. Direct field assignment and
+        \\`array_add` on its dynamic-array fields are equivalent.
     );
     paragraph(22, #string,oneline
         \\`Compiler_Backend` has seven members. `LLVM`, `Object`, `LLVM_IR`,
@@ -2224,6 +2241,14 @@ render_section_114 :: () {
         \\`llvm-ir`, `static-lib` and `shared-lib`. `Default` passes no
         \\`--backend` and lets the output type decide. `X64` maps to nothing at
         \\all and behaves exactly like `Default`; it is a dead value.
+    );
+    note(73, #string,oneline
+        \\`Build_Output_Type` supplies the default backend independently of the
+        \\file name: `.Executable`, `.Object_File`, `.LLVM_IR`, `.Static_Library`
+        \\and `.Shared_Library` select the corresponding artifact. `.No_Output`
+        \\means "do not pass `-o`"; the child still emits to its own source-derived
+        \\default path. To suppress the build script's own artifact, use
+        \\`set_build_options_dc(.do_output = false)` instead.
     );
     subheading(23, "Optimization levels");
     paragraph(24, #string,oneline
@@ -2233,29 +2258,32 @@ render_section_114 :: () {
         \\applies its own default, which is `-O1`.
     );
     table_header(25, "Member   —   Value   —   Child flag and current result");
-    table_row(26, "`Debug`   |   0   |   `-O0`; builds");
-    table_row(27, "`Very_Debug`   |   1   |   `-O1`; builds");
-    table_row(28, "`Optimized`   |   2   |   `-O2`; builds");
-    table_row(29, "`Very_Optimized`   |   3   |   `-O3`; builds");
-    table_row(30, "`Optimized_Small`   |   4   |   `-Os`; rejected by the LLVM 23 LTO pipeline");
-    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`; rejected by the LLVM 23 LTO pipeline");
-    table_row(32, "`Optimized_Tiny`   |   6   |   `-Ozz`; reaches the same unsupported size pipeline");
+    table_row(26, "`Debug`   |   0   |   `-O0`; runtime checks stay enabled");
+    table_row(27, "`Very_Debug`   |   1   |   `-O1`; runtime checks stay enabled");
+    table_row(28, "`Optimized`   |   2   |   `-O2`");
+    table_row(29, "`Very_Optimized`   |   3   |   `-O3`");
+    table_row(30, "`Optimized_Small`   |   4   |   `-Os`; currently rejected by LLVM 23's `default<Os>` pipeline");
+    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`; currently rejected by LLVM 23's `default<Oz>` pipeline");
+    table_row(32, "`Optimized_Tiny`   |   6   |   `-Ozz`; reaches the same rejected `default<Oz>` pipeline before stripping");
     table_row(33, "`Default`   |   7   |   none; child defaults to working `-O1`");
     note(68, #string,oneline
-        \\The size members remain ABI values and still produce their child flags,
-        \\but a linked child does not finish. Use `Optimized` (`-O2`) until the
-        \\backend maps size requests to LLVM 23's `optsize` and `minsize`
-        \\attributes.
+        \\Glosso maps the three size modes to LLVM `optsize` or `minsize`
+        \\attributes and selects `default<Os>` or `default<Oz>`, but LLVM 23 still
+        \\aborts on those pipeline-level optimization names. Use `Optimized` or
+        \\`Very_Optimized` for a linked workspace build. C archive compilation is
+        \\narrower by design: `compile_c_archive` accepts only `Debug` through
+        \\`Very_Optimized`; the size modes and `.Default` return a
+        \\`Compiler_Error` before invoking the C compiler.
     );
-    subheading(34, "Workspaces and `Build_Options`");
+    subheading(34, "Named and implicit workspaces");
     paragraph(35, #string,oneline
-        \\`Compile_Options` describes one call. `Build_Options` describes a
-        \\record of settings that several calls share, and a workspace is a
-        \\numbered slot holding one such record. `compiler_create_workspace(name)`
-        \\allocates a slot, `get_build_options(w)` reads it, `set_build_options(o,
-        \\w)` writes it back, and `add_build_file(path, w)` compiles a file with
-        \\it. Workspace `-1`, the default argument everywhere, is the
-        \\process-wide record.
+        \\`compiler_create_workspace(name)` returns fresh handles numbered from
+        \\zero for the life of the compiler process. The name is retained but is
+        \\otherwise informational; it need not be unique, and there is no destroy
+        \\operation. Each new handle starts with independent default options.
+        \\Handle `-1` is reserved for the process-wide implicit workspace used by
+        \\every call that omits its workspace argument. Reading any other unknown
+        \\handle materializes it with defaults rather than reporting an error.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
@@ -2302,31 +2330,35 @@ render_section_114 :: () {
         \\`glosso: done outdir\hello`. `add_build_string(source, w)`
         \\is the same operation over text: the source is written to a temporary
         \\file named `glosso_build_string_<pid>_<n>.glo` and that file is
-        \\compiled, which is why its diagnostics name a path in the system
-        \\temporary directory.
+        \\compiled and left in place, which is why its diagnostics name a path in
+        \\the system temporary directory. Give it an explicit output name when the
+        \\temporary source stem would not be a useful artifact name.
     );
     note(39, #string,oneline
-        \\Three `Build_Options` fields are recorded but not acted on by the
-        \\nested compilation. `compile_time_command_line` does not reach the
-        \\child: a workspace carrying it still produces a child that sees zero
-        \\compile-time arguments. `write_added_strings = false` does not stop
-        \\`add_build_string` from writing its temporary file. `text_output_flags`
-        \\has no consumer. Forwarding compile-time arguments is done with
-        \\`compile_args` instead, as described in The Compile-Time Command Line
-        \\and Artifact Cache.
+        \\`compile_time_command_line` is active: a nonempty list is appended after
+        \\`--`, and the child reads exactly those entries through
+        \\`get_cmdline_args()`. Four other fields are currently reserved:
+        \\`intermediate_path`, `do_output`, `write_added_strings`, and
+        \\`text_output_flags`. In particular, changing `Build_Options.do_output`
+        \\does not suppress either compilation, and `write_added_strings = false`
+        \\does not stop `add_build_string` from writing its temporary source.
     );
     subheading(40, "Building C sources");
     paragraph(41, #string,oneline
-        \\`compile_c_archive(name, sources, options)` compiles a list of C files
+        \\`compile_c_archive(name, sources)` compiles a list of C files
         \\with the compiler's bundled native toolchain and returns
         \\`Native_Compile_Output`, whose `artifact` field is the path of the
         \\static library it produced and whose `output` field is the tool's log.
         \\The archive is written into the native cache, keyed by the archive
-        \\name, the active target and the options, so an unchanged archive is
-        \\built once. `C_Compile_Options` carries `include_paths`,
-        \\`preprocessor_definitions`, `compiler_args`, `optimization_level` and
-        \\`position_independent`, written through `add_c_include_path`,
-        \\`add_c_preprocessor_definition` and `add_c_compiler_arg`.
+        \\name, the active target and the parameters, so an unchanged archive is
+        \\built once. Pass `include_paths`, `preprocessor_definitions`, and
+        \\`compiler_args` as named `[]string` parameters, which default to `.[]`.
+        \\Their slices and strings are borrowed for the call. `sources` remains a
+        \\dynamic `[..]string` array. `position_independent` defaults to `false`,
+        \\and `optimization_level` defaults to `.Optimized`; only `.Debug`,
+        \\`.Very_Debug`, `.Optimized`, and `.Very_Optimized` are accepted.
+        \\The input option record and its specialized mutators are no longer
+        \\public APIs.
     );
     code_block(42, "glosso", #string
         \\#import "Io";
@@ -2338,17 +2370,17 @@ render_section_114 :: () {
         \\    defer array_free(*sources);
         \\    array_add(*sources, "adder.c");
         \\
-        \\    c_options: C_Compile_Options;
-        \\    add_c_compiler_arg(*c_options, "-fno-builtin");
+        \\    arguments: [1]string = .["-fno-builtin"];
         \\
-        \\    if compile_c_archive("adder", sources, c_options) == {
+        \\    if compile_c_archive("adder", sources,
+        \\        .compiler_args = arguments[..]) == {
         \\    case .Ok(archive);
         \\        print("[c] archive at %\n", archive.artifact);
         \\        return str_cat(
         \\            str_cat("adder :: #library,static \"", archive.artifact),
         \\            "\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
         \\    case .Err(failure);
-        \\        return "#compile_error \"the adder archive did not build\";";
+        \\        return "#comptime { #compile_error \"the adder archive did not build\"; }";
         \\    }
         \\}
         \\
@@ -2368,7 +2400,7 @@ render_section_114 :: () {
         \\inserted together. A top-level string `#insert` that declares only the
         \\library, with the `#foreign` procedure written in the file, is
         \\`error: #foreign refers to unknown library 'adder' (declare it with
-        \\#library)`. Handing `archive.artifact` to Bindgen's `static_library`
+        \\#library)`. Handing `archive.artifact` to Bindgen's `library_spec`
         \\and inserting the generated source does the same job for a real header;
         \\that route is covered in Generating Bindings with Bindgen.
     );
@@ -2389,6 +2421,15 @@ render_section_114 :: () {
         \\error: could not open '/no-such-linker-flag': no such file or
         \\directory`.
     );
+    note(74, #string,oneline
+        \\`macro_unit(path, argument)` is the native-code route for a reusable
+        \\source generator. It builds `path` as a program through a nested compiler,
+        \\benefits from the native artifact cache, runs the result with `argument`
+        \\after `--`, and returns the program's standard output as source text.
+        \\Write `#insert macro_unit("macros/derive_json.glo", "record");` at the
+        \\use site. A build or run failure is returned as diagnostic text so the
+        \\following insertion fails with the generator's error visible.
+    );
     subheading(47, "The build-driver idiom");
     paragraph(48, #string,oneline
         \\The shape every real build script converges on is a single top-level
@@ -2403,11 +2444,14 @@ render_section_114 :: () {
         \\#import "Compiler";
         \\
         \\build_release :: () {
-        \\    options: Compile_Options;
-        \\    set_optimization_level(*options, .Optimized);
-        \\    set_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\    set_color(*options, .Always);
-        \\    if #pattern .Err(failure) = compile("hello.glo", "hello.exe", options) {
+        \\    workspace := compiler_create_workspace("release");
+        \\    options := get_build_options(workspace);
+        \\    options.output_executable_name = "hello.exe";
+        \\    set_build_optimization(*options, .Optimized);
+        \\    set_build_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\    set_build_color(*options, .Always);
+        \\    set_build_options(options, workspace);
+        \\    if #pattern .Err(failure) = add_build_file("hello.glo", workspace) {
         \\        print("release build failed:\n");
         \\        report_error(failure);
         \\        exit(failure.status);
@@ -2461,10 +2505,12 @@ render_section_114 :: () {
         \\from a shell script or a continuous-integration job. Because the driver
         \\emits nothing, the run above produces `hello.exe` and no `first.exe`.
         \\Cross-compiling a nested build is a matter of one more setter:
-        \\`set_target(*options, .{ .os = Target_OS.Wasm, .cpu = Target_CPU.Wasm32,
-        \\.abi = Target_ABI.Freestanding })` makes the child report
-        \\`target=wasm32-unknown-unknown`, and the C archive and Bindgen calls in
-        \\the same script then see that target as the active one.
+        \\`set_build_target(*options, .{ .os = Target_OS.Wasm, .cpu =
+        \\Target_CPU.Wasm32, .abi = Target_ABI.Freestanding })` makes the child report
+        \\`target=wasm32-unknown-unknown`. That changes only children using this
+        \\workspace. `compile_c_archive` still uses the build script's active target;
+        \\compile the script itself for the matching target when its C archive must
+        \\be link-compatible with the nested Glosso artifact.
     );
 }
 
@@ -2537,15 +2583,14 @@ render_section_115 :: () {
         \\go to standard error, so the interleaving of the two in a terminal is
         \\not something to depend on.
     );
-    subheading(5, "Arguments are not inherited");
+    subheading(5, "Forwarding arguments to a workspace build");
     paragraph(6, #string,oneline
-        \\A nested compilation started by `compile` or `add_build_file` receives
-        \\none of the parent's `--` arguments, and setting
-        \\`Build_Options.compile_time_command_line` does not change that. The
-        \\route that works is `compile_args(source, output, args)`, which appends
-        \\its argument list after the output path, so a `--` written inside that
-        \\list separates the child's compile-time arguments exactly as it would
-        \\on a shell command line.
+        \\A child started by `add_build_file` or `add_build_string` does not inherit
+        \\the build script's own `--` arguments automatically. Put the arguments
+        \\for that child in `Build_Options.compile_time_command_line`, then install
+        \\the options before starting the build. The service writes one `--`
+        \\separator followed by the list; each element remains one argument, even
+        \\when it contains spaces or is empty.
     );
     code_block(7, "glosso", #string
         \\#import "Io";
@@ -2554,10 +2599,15 @@ render_section_115 :: () {
         \\drive :: () {
         \\    set_build_options_dc(.do_output = false);
         \\    print("[parent] % argument(s)\n", get_cmdline_args().count);
-        \\    forwarded: [..]string;
-        \\    defer array_free(*forwarded);
-        \\    array_add(*forwarded, "--", "release");
-        \\    if compile_args("child.glo", "child.exe", forwarded) == {
+        \\
+        \\    workspace := compiler_create_workspace("child");
+        \\    options := get_build_options(workspace);
+        \\    options.output_executable_name = "child.exe";
+        \\    array_add(*options.compile_time_command_line, "release");
+        \\    defer array_free(*options.compile_time_command_line);
+        \\    set_build_options(options, workspace);
+        \\
+        \\    if add_build_file("child.glo", workspace) == {
         \\    case .Ok(log);      print("%", log);
         \\    case .Err(failure); report_error(failure);
         \\    }
