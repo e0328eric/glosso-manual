@@ -12,12 +12,14 @@ render_section_131 :: () {
         \\artifact the symbols live in, and each `#foreign` function declaration
         \\binds one symbol. The library declaration is a compile-time constant like
         \\any other, so it is named, scoped, and importable in the usual way.
+        \\Match the target's C types exactly: `strlen` returns `size_t`, so its
+        \\Glosso result is `usize`, not a fixed `u64` on 32-bit targets.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
         \\libc     :: #library "c";
-        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\c_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\c_puts   :: (s: *const s8) -> s32 #foreign libc "puts";
         \\
         \\main :: () {
@@ -82,13 +84,13 @@ render_section_131 :: () {
         \\libc :: #library "c";
         \\
         \\// (a) reference a #library declaration, then name the C symbol
-        \\a_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\a_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\
         \\// (b) name the library file inline; no #library declaration needed
-        \\b_strlen :: (s: *const s8) -> u64 #foreign "c" "strlen";
+        \\b_strlen :: (s: *const s8) -> usize #foreign "c" "strlen";
         \\
         \\// (c) omit the symbol string when the Glosso name is already the C name
-        \\strlen :: (s: *const s8) -> u64 #foreign libc;
+        \\strlen :: (s: *const s8) -> usize #foreign libc;
         \\
         \\main :: () {
         \\    print("% % %\n", a_strlen("aa"), b_strlen("bbb"), strlen("cccc"));
@@ -348,6 +350,15 @@ render_section_132 :: () {
         \\Plain    size = 8
         \\C_Layout size = 12
     );
+    note(70, #string,oneline
+        \\Stable compiler-service records need the same discipline. The
+        \\`Compiler` and `Bindgen` modules now declare their private service
+        \\result records with `#c_call`, preserving the service field order on
+        \\32-bit output targets as well as the host. Application code should
+        \\call `compile_c_archive` and `generate_source` and match their public
+        \\`Result` values, not copy the private records or redeclare their raw
+        \\`#magic` entry points.
+    );
 
     subheading(16, "The implicit context");
     paragraph(17, #string,oneline
@@ -376,10 +387,10 @@ render_section_132 :: () {
         \\exported :: (a: s32) -> s32 #c_call { return a + 1; }
         \\plain    :: (a: s32) -> s32 { return a + 2; }
         \\libc     :: #library "c";
-        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\c_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\main     :: () { x := exported(1) + plain(2); y := c_strlen("ab"); }
         \\
-        \\$ glosso --backend llvm-ir -o symbols.ll symbols.glo
+        \\$ glosso --target x86_64-windows-msvc --backend llvm-ir -o symbols.ll symbols.glo
         \\$ grep -E "glo_exported|glo_plain|glo_main|@strlen|@wmain" symbols.ll
         \\define i32 @glo_exported(i32 %0) {
         \\define i32 @glo_plain(i32 %0) {
@@ -486,10 +497,12 @@ render_section_133 :: () {
         \\wrong call.
     );
     paragraph(1, #string,oneline
-        \\Every scalar, every pointer shape, an enum with an explicit backing type,
-        \\a `distinct` type, a fixed array, and a `#c_call` struct all have exactly
-        \\one machine image, and it is the C one. Compiling `#c_call` signatures to
-        \\textual IR shows the lowering directly.
+        \\The fixed-width integers, `f32`/`f64`, pointers, an enum with an
+        \\explicit backing type, and a compatible `#c_call` struct can describe
+        \\C data directly. A `distinct` type keeps its underlying representation.
+        \\This is not a promise that every Glosso primitive has a C ABI: complex,
+        \\SIMD, and matrix values require an explicit boundary representation.
+        \\Compiling `#c_call` signatures to textual IR shows the lowering directly.
     );
     code_block(2, "glosso", #string
         \\Color :: enum u8 { Red; Green; Blue; }
@@ -539,10 +552,11 @@ render_section_133 :: () {
     table_row(14, "`distinct T`   |   the image of `T`   |   whatever `T` maps to");
     table_row(15, "`[N]T`   |   `[N x T]`   |   `T[N]` in a struct field");
     paragraph(16, #string,oneline
-        \\The remaining aggregate types are Glosso descriptors with no C
-        \\counterpart. They compile in a `#c_call` signature, because the checker
-        \\has no notion of C representability, and they pass the descriptor by
-        \\value. That is almost never what the C side expects. `word` below is the
+        \\The remaining aggregate types are Glosso descriptors with no automatic
+        \\C counterpart. A descriptor accepted in a `#c_call` signature passes
+        \\the record, not the pointed-to data, so the other side must deliberately
+        \\match its layout. `#c_call` does not turn a `string` into `char *` or a
+        \\view into a pointer-and-length parameter pair. `word` below is the
         \\target's `ssize` width: 32 bits on a 32-bit target and 64 on a 64-bit one.
     );
     table_header(17, "Glosso type   —   Machine image   —   Reason");
@@ -550,7 +564,18 @@ render_section_133 :: () {
     table_row(19, "`[]T`   |   `{ word, ptr }`   |   count and data");
     table_row(20, "`[..]T`   |   `{ word, ptr, word }`   |   count, data, capacity");
     table_row(21, "`?T` for non-pointer `T`   |   tag plus payload   |   a tagged union, not a null value");
-    table_row(22, "`E!T`, `union`, tuples   |   tag plus payload   |   a tagged union");
+    table_row(22, "`E!T`, tagged `union`   |   tag plus aligned payload (unless a built-in niche applies)   |   a tagged union");
+    table_row(46, "tuples   |   elements in tuple order, with padding   |   a record, not a tagged union");
+    note(47, #string,oneline
+        \\The checker rejects by-value complex primitives at C boundaries,
+        \\including fields in `struct #c_call`: pass the real and imaginary
+        \\components separately. `Simd(T, N)` has no portable C ABI; pass scalar
+        \\memory and use `simd_load`/`simd_store` inside Glosso. Matrices likewise
+        \\cross through a pointer to scalar storage. `f80` and `f128` must match
+        \\the exact target's floating format and convention, not merely a C type
+        \\with the same storage size; `f80` is not a portable alias for C
+        \\`long double`.
+    );
 
     subheading(23, "`string` at a pointer parameter");
     paragraph(24, #string,oneline
@@ -661,8 +686,14 @@ render_section_133 :: () {
         \\}
         \\
         \\main :: () {
-        \\    printf("printf through C varargs: n=%ld flag=%d\n", 42, true);
-        \\    print("sum_s64(10, 20, 12) = %\n", sum_s64(3, 10, 20, 12));
+        \\    #if OUT.os == Target_OS.Wasm {
+        \\        print("printf through C varargs skipped on WASI\n");
+        \\    } else {
+        \\        printf("printf through C varargs: n=%lld flag=%d\n",
+        \\            cast(s64)42, cast(s32)true);
+        \\    }
+        \\    print("sum_s64(10, 20, 12) = %\n",
+        \\        sum_s64(3, cast(s64)10, cast(s64)20, cast(s64)12));
         \\}
     );
     code_block(41, "text", #string
@@ -672,9 +703,14 @@ render_section_133 :: () {
     paragraph(42, #string,oneline
         \\`std/VarArg` supplies `Va_List`, which is opaque target-ABI storage, plus
         \\`start`, `end`, `copy`, and `arg(T, *Va_List)`. It also wraps `vprintf`,
-        \\`vfprintf`, and `vsnprintf` over an opaque `C_File`. The two lines of
-        \\output arrive in that order because Glosso's `print` and C's `printf`
-        \\buffer independently.
+        \\`vfprintf`, and `vsnprintf` over an opaque `C_File`. This is a native
+        \\run's output; WASI skips `printf` but still exercises `sum_s64`.
+        \\Glosso's `print` and C's `printf` buffer independently, so the output
+        \\order can vary. Each value consumed by `arg(s64, *ap)` is explicitly
+        \\`s64`: an unannotated integer otherwise defaults to target-width
+        \\`ssize`, which is only 32 bits on a 32-bit target. `%lld` matches the
+        \\64-bit C `long long`; `%ld` asks for `long`, which is 32 bits even
+        \\on 64-bit Windows.
     );
     note(43, #string,oneline
         \\C's default argument promotions do happen in the variadic tail: `bool`,

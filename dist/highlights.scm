@@ -40,7 +40,6 @@
   "#aos"
   "#soa"
   "#operator"
-  "#precedence"
   "#modify"
   "#expand"
   "#magic"
@@ -88,6 +87,7 @@
 (null_literal) @constant.builtin
 (label_none_literal) @constant.builtin
 (context_expression) @constant.builtin
+(source_location_expression) @constant.builtin
 (context_type) @type.builtin
 
 ; Give every identifier a baseline capture first. Context-specific captures below

@@ -59,6 +59,10 @@ procedure:
 3. Links the result as `dist/manual.wasm`.
 4. Copies the browser host, search index, and Tree-sitter assets to `dist/`.
 
+Before compilation, `build` synchronizes the highlight query embedded in the
+browser host. This keeps it compatible with the staged grammar when language
+directives change (for example, `#operator` replaces the removed `#precedence`).
+
 `first.glo` marks its outer build-driver compilation as output-free and starts
 the `main.glo` compilation with an explicit wasm target. This gives both the C
 compiler and Bindgen the correct active target without creating a disposable
@@ -73,16 +77,27 @@ glosso first.glo -- tree-sitter
 glosso first.glo -- gen-reference ../glosso/std
 ```
 
-The current compiler services return host-ordered result records even when
-compiling for wasm32. `src/clay_bindings.glo` isolates a small `#c_call` wire
-adapter for that upstream layout mismatch; it does not depend on the removed
-public C/Bindgen options structs. Binding generation must use the full Clang
-frontend: the adapter rejects textual-fallback output. Ordinary programs should
-use the public, named-parameter APIs documented in the manual.
+`src/clay_bindings.glo` uses the public `compile_c_archive`, `library_spec`, and
+`generate_source` APIs with named slice parameters and Result error handling.
+Use a current Glosso checkout whose Compiler/Bindgen service records preserve
+their field order on wasm32; the old local ABI adapters are no longer needed.
+Binding generation explicitly disables textual fallback so Clay uses Clang's
+complete C layouts.
 
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
 compact signatures, parameter constraints and defaults, `#memory` contracts,
 flag enums, lazy parameters, and function-pointer declarations.
+
+`node scripts/test-language.mjs` compiles and runs the operator and source-location
+fixtures with `../glosso/build/bin/glosso` (`glosso.exe` on Windows), and checks
+that removed directives fail compilation. Pass a compiler path as its optional
+first argument to test another build. All output and caches stay under `build/`.
+
+`node scripts/test-manual.mjs` checks staged assets and exercises the actual
+Wasm renderer for every chapter and reference module at narrow and wide widths,
+including the search bridge, current operator and memory syntax, and rejection
+of the removed `#precedence` directive. Its synthetic font metrics check layout
+validity and the browser/Clay ABI; they do not replace a visual browser check.
 
 `build` compiles `main.glo` and stages the complete site in `dist/`.
 `tree-sitter` updates the query embedded in `app.js` from

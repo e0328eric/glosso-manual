@@ -36,9 +36,9 @@ render_section_22 :: () {
         \\Both numbers come from `type_info(T)`, whose result carries
         \\`.size` and `.alignment`. There is no separate alignment
         \\intrinsic: `align_of(s64)` is `error: unknown function align_of`.
-        \\The figures below are for `x86_64-pc-windows-msvc`; only the
-        \\pointer-derived ones (`ssize`, `usize`, `any`, `label`, and the string
-        \\record) move with the target.
+        \\The figures below are for `x86_64-pc-windows-msvc`. Pointer-derived
+        \\sizes change with the target, and scalar alignment can change too:
+        \\never infer a portable record layout from this host table.
     );
     code_block(11, "glosso", #string
         \\#import "Io";
@@ -106,8 +106,10 @@ render_section_22 :: () {
         \\Library   size 0   align 1
     );
     bullet(13, #string,oneline
-        \\Size equals alignment for every integer and every float, so a
-        \\primitive scalar is always naturally aligned.
+        \\Size equals alignment for the listed integers and floats on this
+        \\target. That is not a language-wide identity: on `x86-linux-musl`,
+        \\`f64` is size 8 / alignment 4 and `f80` is 16 / 4; wide integers
+        \\on 32-bit Arm, MIPS, and PowerPC have alignment 8 rather than 16.
     );
     bullet(14, #string,oneline
         \\`s128`, `u128`, `f80` and `f128` all occupy sixteen bytes.
@@ -567,8 +569,10 @@ render_section_24 :: () {
         \\Five float spellings are recognised. Each names a semantic width,
         \\which is how many bits the arithmetic actually uses, and a storage
         \\size, which is how many bytes the value occupies. The two differ
-        \\for `f80`: the x87 80-bit extended format, with a 64-bit
-        \\significand, is stored in sixteen bytes.
+        \\for `f80`: on x86, the x87 80-bit extended format, with a 64-bit
+        \\significand, is stored in sixteen bytes. The table shows x86-64
+        \\Windows layout; other targets can use different alignments and an
+        \\alternative carrier for `f80`.
     );
     table_header(1, "Spelling   —   Format   —   Size / alignment");
     table_row(2, "`f16`   |   IEEE binary16   |   2 / 2");
@@ -622,8 +626,9 @@ render_section_24 :: () {
         \\hardware. The backend asks the target: for cpu `x86_64`, `x86` or
         \\`i386` it emits LLVM's `x86_fp80`, and on every other target it
         \\carries the value in an `fp128` instead. The storage size stays
-        \\sixteen bytes either way, so a layout does not shift under a
-        \\cross-compile.
+        \\sixteen bytes either way, but alignment is target-dependent. In
+        \\particular, 32-bit x86 with a non-Microsoft C ABI aligns `f80` to
+        \\four bytes, so a containing record can change layout in a cross-build.
     );
     code_block(14, "glosso", #string
         \\widen :: (a: f80, b: f80) -> f80 {
@@ -753,12 +758,45 @@ render_section_24 :: () {
         \\Is_Float(T)`, because NaN is not equal to itself.
     );
     note(33, #string,oneline
-        \\On `x86_64-pc-windows-msvc`, the driver now builds and links a bundled
+        \\On `x86_64-pc-windows-msvc`, the driver builds and links a bundled
         \\quad-precision helper archive. `f128` arithmetic, comparison,
         \\conversion, boxing, and printing therefore work when that archive is
         \\available. If the helper build cannot be produced, the driver warns and
         \\the eventual link can still report unresolved compiler-runtime symbols;
-        \\other targets depend on their target runtime and toolchain.
+        \\other targets depend on their target runtime and toolchain. Linux
+        \\musl and WebAssembly links also include target-specific bundled
+        \\floating-point helpers; an emitted object alone does not supply them.
+    );
+    subheading(35, "Wide conversions and display");
+    paragraph(36, #string,oneline
+        \\A binary128 significand holds every bit of a `u64` or `s64` exactly.
+        \\Convert the value, not an intermediate `f64`, if those bits matter.
+        \\The reverse cast succeeds exactly for these in-range integers; more
+        \\general float-to-integer casts still truncate and saturate as described
+        \\in `cast` and `acast`.
+    );
+    code_block(37, "glosso", #string
+        \\#import "Io";
+        \\
+        \\round_trip :: (value: u64) -> bool {
+        \\    wide := cast(f128)value;
+        \\    return cast(u64)wide == value;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("% %\n", round_trip(1), round_trip(18446744073709551615));
+        \\}
+    );
+    code_block(38, "text", #string
+        \\1 1
+    );
+    note(39, #string,oneline
+        \\Default float display narrows to binary64; printing is not a way to
+        \\recover every significant bit of `f80` or `f128`. On 32-bit Arm, MIPS,
+        \\and PowerPC musl targets, the binary128-to-binary64 path uses an
+        \\integer-word helper because the C target has no binary128 calling
+        \\convention. That conversion rounds to nearest, ties to even, and also
+        \\handles subnormals, overflow, infinities, and NaNs.
     );
 }
 
@@ -781,7 +819,10 @@ render_section_25 :: () {
         \\thirty-two respectively, because each component uses the sixteen
         \\byte storage its scalar type uses. The components round to their
         \\own widths: one third is `0.333252` in a `c32` and `0.333333` in a
-        \\`c64`, exactly as it is in `f16` and `f32`.
+        \\`c64`, exactly as it is in `f16` and `f32`. The alignments shown are
+        \\for x86-64 Windows. Query the corresponding float on another target:
+        \\`type_info(c160).alignment == type_info(f80).alignment`, including
+        \\alignment 4 on `x86-linux-musl` and alignment 8 on `s390x-linux-musl`.
     );
     paragraph(8, #string,oneline
         \\`type_kind` reports `15` for a complex type, its own tag.
@@ -915,8 +956,10 @@ render_section_25 :: () {
     );
     bullet(32, #string,oneline
         \\`c256` components are `f128` and use that type's compiler-runtime
-        \\helpers when printed; the bundled archive supplies them on x86-64
-        \\Windows. `c160` components are `f80` and print directly as well.
+        \\helpers when printed; the driver supplies target-specific archives
+        \\for x86-64 Windows, musl, and WebAssembly. `c160` components are
+        \\`f80` and print directly as well. Neither component display preserves
+        \\all the precision of a wide float: the display path narrows to `f64`.
     );
     bullet(33, #string,oneline
         \\`c160` uses x87 arithmetic on x86 targets and an `fp128` carrier
@@ -1158,8 +1201,9 @@ render_section_27 :: () {
     table_row(10, "`.capacity`   |   `ssize`   |   code units the storage can hold");
     paragraph(11, #string,oneline
         \\`.count` and `.capacity` are measured in code units, not in bytes and
-        \\not in characters, so a `string16` of four characters has `.count` four
-        \\and occupies eight bytes of character data. `.data` is a many-pointer
+        \\not in Unicode scalars: a `string16` containing four BMP scalars has
+        \\`.count` four, but a non-BMP scalar needs two surrogate units.
+        \\`.data` is a many-pointer
         \\to the unit type; `type_name` prints it under its C spelling,
         \\`uint8_t *` for the UTF-8 types and `uint16_t *` for the UTF-16 ones.
     );
@@ -1194,6 +1238,36 @@ render_section_27 :: () {
         \\A `for` over any of the four string types decodes and yields `rune`;
         \\malformed input yields U+FFFD, and `it_index` is a scalar ordinal.
         \\Iteration and `for <` are detailed in `for` Loops and Iterable.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\#import "Strings/Utf8";
+        \\
+        \\main :: () {
+        \\    text: string = "Aé😀";
+        \\    wide: string16 = "Aé😀";
+        \\    print("units % %\n", text.count, wide.count);
+        \\    for value: text print("%:% ", it_index, cast(u32)value);
+        \\    print("\n");
+        \\    for value: utf8_bytes(text) print("% ", value);
+        \\    print("\n");
+        \\    for < value: wide print("%:% ", it_index, cast(u32)value);
+        \\    print("\n");
+        \\}
+    );
+    code_block(41, "text", #string
+        \\units 7 4
+        \\0:65 1:233 2:128512
+        \\65 195 169 240 159 152 128
+        \\0:128512 1:233 2:65
+    );
+    paragraph(42, #string,oneline
+        \\Use `utf8_bytes` when the algorithm operates on encoded bytes, and
+        \\iterate the string itself when it operates on Unicode scalars. The
+        \\explicit rune-to-`u32` cast above asks the formatter for numeric code
+        \\points instead of displaying the characters. A reverse string walk
+        \\also counts iterations from zero; its index is not a byte offset or
+        \\the original forward scalar index.
     );
     note(15, #string,oneline
         \\`.count` counts code units, so it is not a character count for anything
@@ -2304,7 +2378,10 @@ render_section_32 :: () {
         \\saturates to the target's nearest bound when it is not. This applies to
         \\a float literal directly under `cast` as well as a runtime value, so
         \\`cast(u8)(300.0)` is `255` and `cast(s8)(300.0)` is `127`. Integer to
-        \\float and `f64` to `f32` also convert. None is implicit.
+        \\float and `f64` to `f32` also convert. Negative values cast to an
+        \\unsigned integer clamp to zero, and NaN converts to zero. These are
+        \\the conversion's semantics, not optional `-O1` safety checks. None
+        \\of these runtime numeric conversions is implicit.
     );
     bullet(33, #string,oneline
         \\A compile-time integer reaches any integer target without the fitting
@@ -2351,10 +2428,12 @@ render_section_32 :: () {
     code_block(40, "glosso", #string
         \\#import "Io";
         \\
+        \\address :: (value: usize) -> usize { return value; }
+        \\
         \\main :: () {
         \\    print("start\n");
-        \\    p := cast([*]ssize) 0;
-        \\    print("survived\n");
+        \\    p := cast([*]ssize) address(0);
+        \\    print("survived %\n", cast(usize)p);
         \\}
     );
     code_block(41, "text", #string
@@ -2737,7 +2816,7 @@ render_section_35 :: () {
         \\glosso: done bump.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
         \\before
         \\runtime check failed: arithmetic.overflow
-        \\glosso: program exited with status exit code: 134
+        \\glosso: program exited with status 134
         \\
         \\$ glosso --run -O2 bump.glo
         \\glosso: compile bump.glo (target=x86_64-pc-windows-msvc)
@@ -2977,10 +3056,12 @@ render_section_36 :: () {
         \\2 ** 3 * 2  = 16
     );
     paragraph(32, #string,oneline
-        \\`#precedence(mode, level)` is an accepted synonym of `#operator` for
-        \\the binary and assignment modes. It rejects the unary modes, since
-        \\they have no level to declare: `#precedence(prefix)` is
-        \\`error: #precedence expects left, right, or assign`.
+        \\`#operator` is the only directive for declaring operator syntax. Older
+        \\code using `#precedence(left, n)`, `#precedence(right, n)` or
+        \\`#precedence(assign, n)` must use `#operator` with the same arguments;
+        \\the old spelling is no longer accepted or registered by the prescan.
+        \\Unary operators use `#operator(prefix)` or `#operator(suffix)` without
+        \\a level.
     );
     table_header(33, "Mistake   —   Diagnostic");
     table_row(34, "a binary operator with no level anywhere   |   `error: binary operator '<+>' needs #operator(left|right|assign, n)`");

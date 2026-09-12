@@ -176,12 +176,14 @@ render_section_105 :: () {
 
     subheading(28, "What both engines refuse");
     paragraph(29, #string,oneline
-        \\Neither engine can reach the running program's world. A `#foreign`
-        \\function has no body to interpret, the context allocator has no heap to
-        \\allocate from, and a mutable global has no value until the program
-        \\starts. The diagnostics differ only because the two report failure
-        \\differently: the evaluator points at the offending expression, while
-        \\every failure inside the machine is wrapped in `#comptime stopped:`.
+        \\Neither engine runs arbitrary target code. A `#foreign` function has
+        \\no body to interpret, and a runtime global is not a constant. A
+        \\compile-time context does exist, so reading `context.allocator` is
+        \\allowed; that does not make every allocator intrinsic executable.
+        \\The direct `alloc` and `free` routes require `ctx_alloc` and
+        \\`ctx_free`, which the compile-time engines do not implement. Library
+        \\operations with dedicated compile-time implementations, such as
+        \\dynamic-array growth and string construction, have separate support.
     );
     code_block(30, "glosso", #string
         \\libc :: #library,system "c";
@@ -192,8 +194,8 @@ render_section_105 :: () {
     table_header(31, "Situation   —   Diagnostic");
     table_row(32, "`now_c()` under the constant evaluator   |   `error: 'now_c' is foreign, so its result is not compile-time known`");
     table_row(33, "`now_c()` under the machine   |   `error: #comptime stopped: VM cannot call foreign/undeclared function 'now_c'; use the LLVM backend`");
-    table_row(34, "`alloc` or `free` under the constant evaluator   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`");
-    table_row(35, "`alloc` or `free` under the machine   |   `error: #comptime stopped: VM: unknown #magic intrinsic 'ctx_alloc'`");
+    table_row(34, "`alloc` under the constant evaluator   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`");
+    table_row(35, "`alloc` under the machine   |   `error: #comptime stopped: #magic ctx_alloc has no VM implementation`");
     table_row(36, "Reading `counter` in either engine   |   `error: unknown const counter`");
     paragraph(37, #string,oneline
         \\Reflection is the case that looks as though it should differ and does
@@ -446,14 +448,17 @@ render_section_106 :: () {
     subheading(32, "What `#comptime` cannot reach");
     paragraph(33, #string,oneline
         \\A `#comptime` fails when the code it names needs something that does
-        \\not exist yet. The program is not running, so there is no heap, no
-        \\process, no loaded library, and no global storage. What Runs When
-        \\compares the two engines' answers; the table below is the set a value
-        \\position runs into, all reported by the constant evaluator.
+        \\not exist in that engine. The eventual program is not running, and
+        \\arbitrary target foreign calls or runtime locals cannot be evaluated.
+        \\Compile-time context reads and compiler-provided build, file, and
+        \\string services are a different matter: they have explicit host
+        \\implementations. What Runs When compares the two engines' answers;
+        \\the table below lists refusals in a value position, reported by the
+        \\constant evaluator.
     );
     table_header(34, "Refused   —   Diagnostic");
     table_row(35, "A `#foreign` function   |   `error: 'now_c' is foreign, so its result is not compile-time known`");
-    table_row(36, "`alloc`, `free`, or any allocator route   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`");
+    table_row(36, "Direct `alloc` through `Context`   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`; other memory APIs depend on their own compile-time support");
     table_row(37, "Reading a mutable global   |   `error: unknown const counter`");
     table_row(38, "Reading a runtime local or parameter   |   `error: unknown const x`");
     table_row(39, "`goto`, a label, `#asm`, and other unsupported statements   |   `error: statement is not available at compile time`");
@@ -962,6 +967,77 @@ render_section_108 :: () {
         \\other half of the guard, and Struct Memory Layout covers what
         \\`size_of` is measuring.
     );
+    subheading(45, "`#source_location`: application diagnostics");
+    paragraph(46, #string,oneline
+        \\`#source_location` is a primary expression with no arguments. It
+        \\constructs the Prelude's `Source_Location`, whose fields are
+        \\`filename: string`, `line: ssize`, and `column: ssize`. The position
+        \\is the directive's own `#` token: lines and Unicode-scalar columns
+        \\are one-based. The filename is the compiler's source path, or
+        \\`<unknown>` when no source filename is available.
+    );
+    code_block(47, "glosso", #string
+        \\#import "Io";
+        \\
+        \\emit_diagnostic :: (location: Source_Location, message: string) {
+        \\    print("%: error: %\n", location, message);
+        \\}
+        \\
+        \\main :: () {
+        \\    emit_diagnostic(#source_location, "invalid value");
+        \\}
+    );
+    code_block(48, "text", #string
+        \\…\program.glo:8:21: error: invalid value
+    );
+    paragraph(49, #string,oneline
+        \\`Source_Location` already implements `Show`, so `%` renders exactly
+        \\`filename:line:column`; no custom formatter or import of its Prelude
+        \\component is necessary. The example deliberately prints an
+        \\editor-recognized diagnostic, but it only prints text: it does not
+        \\abort, set an exit status, or fail compilation. Use `exit`, `#assert`,
+        \\or `#compile_error` separately when that is the intended control flow.
+    );
+    subheading(50, "Lexical positions survive calls and expansion");
+    paragraph(51, #string,oneline
+        \\A directive in a helper's body names the helper's source, even when
+        \\called from another file. A default argument containing the directive
+        \\names the default declaration, not the omitted argument's call site.
+        \\A directive written in a `#code` quote or `#expand` body keeps that
+        \\written location after insertion or macro expansion. To report the
+        \\caller, pass `#source_location` explicitly from the caller, as above.
+    );
+    paragraph(52, #string,oneline
+        \\The parser materializes the three fields before those transformations,
+        \\so the result is also usable in constants, `#comptime`, and direct
+        \\member access such as `#source_location.line`. It has the fixed
+        \\nominal type `Source_Location`: an unrelated struct with identical
+        \\field names is not an acceptable destination, including in generated
+        \\or expanded code.
+    );
+    code_block(53, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\HERE :: #source_location;
+        \\MESSAGE :: #comptime tprint("%: error: generated", Source_Location.{
+        \\    .filename = "generated.glo", .line = 12, .column = 34 });
+        \\main :: () {
+        \\    #assert HERE.line == 3 && HERE.column == 9;
+        \\    print("%\n", MESSAGE);
+        \\}
+    );
+    code_block(54, "text", #string
+        \\generated.glo:12:34: error: generated
+    );
+    note(55, #string,oneline
+        \\The filename in a directive-produced value is static text. Copying
+        \\or returning that `Source_Location` does not create a release
+        \\obligation, and the filename must not be freed. A manually constructed
+        \\value, such as the one above, borrows whatever string you supply.
+        \\At runtime `show(location)` produces temporary-arena text, valid only
+        \\until that arena is reset or restored; the static filename's lifetime
+        \\does not make the formatted result static.
+    );
 }
 
 render_section_109 :: () {
@@ -1239,6 +1315,14 @@ render_section_110 :: () {
         \\and to the generated file. Nested insertion adds one
         \\`generated by this #insert` note per level, preserving the expansion
         \\chain instead of flattening it into one location.
+    );
+    note(36, #string,oneline
+        \\`#source_location` inside inserted `Code` retains the location where
+        \\the quote was written. In contrast, a directive contained in a string
+        \\is parsed as new source and names that generated cache file and its
+        \\own line and column there. Pass an original `Source_Location` into
+        \\your helper explicitly when a generated diagnostic should refer back
+        \\to application source instead of generated text.
     );
     subheading(28, "Refusals and bounds");
     table_header(29, "Written   —   Diagnostic");
@@ -2144,7 +2228,7 @@ render_section_114 :: () {
         \\    options := get_build_options(workspace);
         \\    options.output_type = .Executable;
         \\    options.output_executable_name = "hello.exe";
-        \\    set_build_optimization(*options, .Optimized);
+        \\    set_optimization(*options, .Optimized);
         \\    set_build_options(options, workspace);
         \\
         \\    if add_build_file("hello.glo", workspace) == {
@@ -2225,13 +2309,13 @@ render_section_114 :: () {
     );
     paragraph(21, #string,oneline
         \\The fields are written through mutators that take a pointer to the
-        \\record: `set_build_backend`, `set_build_target`,
-        \\`set_build_optimization`, `set_build_memory_sanitizer`,
-        \\`set_build_thread_sanitizer`, `set_build_borrow_check`,
-        \\`set_build_color`, `set_build_temp_allocator_size`,
-        \\`set_build_no_main`, `add_build_compiler_arg`,
-        \\`add_build_linker_arg`, `add_build_linker_args` and
-        \\`add_build_module_path`. They mutate only the detached local record;
+        \\record: `set_backend`, `set_target`,
+        \\`set_optimization`, `set_memory_sanitizer`,
+        \\`set_thread_sanitizer`, `set_borrow_check`,
+        \\`set_color`, `set_temp_allocator_size`,
+        \\`set_no_main`, `add_compiler_arg`,
+        \\`add_linker_arg`, `add_linker_args` and
+        \\`add_module_path`. They mutate only the detached local record;
         \\call `set_build_options` afterwards. Direct field assignment and
         \\`array_add` on its dynamic-array fields are equivalent.
     );
@@ -2300,7 +2384,7 @@ render_section_114 :: () {
         \\    space := compiler_create_workspace("tool");
         \\    options := get_build_options(space);
         \\    options.output_executable_name = "tool.exe";
-        \\    set_build_optimization(*options, .Optimized);
+        \\    set_optimization(*options, .Optimized);
         \\    set_build_options(options, space);
         \\
         \\    if add_build_file("hello.glo", space) == {
@@ -2447,9 +2531,9 @@ render_section_114 :: () {
         \\    workspace := compiler_create_workspace("release");
         \\    options := get_build_options(workspace);
         \\    options.output_executable_name = "hello.exe";
-        \\    set_build_optimization(*options, .Optimized);
-        \\    set_build_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\    set_build_color(*options, .Always);
+        \\    set_optimization(*options, .Optimized);
+        \\    set_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\    set_color(*options, .Always);
         \\    set_build_options(options, workspace);
         \\    if #pattern .Err(failure) = add_build_file("hello.glo", workspace) {
         \\        print("release build failed:\n");
@@ -2505,7 +2589,7 @@ render_section_114 :: () {
         \\from a shell script or a continuous-integration job. Because the driver
         \\emits nothing, the run above produces `hello.exe` and no `first.exe`.
         \\Cross-compiling a nested build is a matter of one more setter:
-        \\`set_build_target(*options, .{ .os = Target_OS.Wasm, .cpu =
+        \\`set_target(*options, .{ .os = Target_OS.Wasm, .cpu =
         \\Target_CPU.Wasm32, .abi = Target_ABI.Freestanding })` makes the child report
         \\`target=wasm32-unknown-unknown`. That changes only children using this
         \\workspace. `compile_c_archive` still uses the build script's active target;

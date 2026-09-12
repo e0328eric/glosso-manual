@@ -165,6 +165,43 @@ render_section_142 :: () {
     table_row(48, "`Time`   |   Clocks, durations, civil calendars, text formats, TZif zones.");
     table_row(49, "`Typeclass`   |   `Functor`, `Applicative`, `Monad`, `Try`, `Error`, `Termination`, `Derive`.");
     table_row(50, "`Unicode`   |   UTF-8 helpers plus the generated character tables.");
+    subheading(97, "GUI windows and software frame buffers");
+    paragraph(98, #string,oneline
+        \\`Gui.window_open` accepts `hidden: bool = false`. Set `.hidden = true`
+        \\for a native RGFW window and surface that are not shown, useful for
+        \\automated platform checks. This is still a native window, not a
+        \\software-only rendering mode. Drawing modifies the RGBA pixel buffer;
+        \\`present` submits it to the native surface.
+    );
+    code_block(99, "glosso", #string
+        \\#import "Gui";
+        \\
+        \\main :: () -> Gui_Error!void {
+        \\    window := window_open("render check", 64, 64, .hidden = true)?;
+        \\    defer window_close(*window);
+        \\    clear(*window);
+        \\    fill_rect(*window, 8, 8, 16, 16, color(255, 0, 0));
+        \\    present(*window);
+        \\}
+    );
+    paragraph(100, #string,oneline
+        \\For software-only drawing, construct a `Window` with `native` and
+        \\`surface` left absent, positive `width` and `height`, and a `pixels`
+        \\array of at least `width * height * 4` bytes. `clear`, `set_pixel`,
+        \\and the other drawing primitives validate that storage independently
+        \\of native handles. `window_valid` remains false, input and event
+        \\polling are inactive, `window_should_close` is true, and `present`
+        \\does nothing. Importing `Gui` still requires its supported native
+        \\build environment even if no window is opened at runtime.
+    );
+    note(101, #string,oneline
+        \\A `Window` is a shallow owner: copies alias its handles and pixels.
+        \\Close exactly one owner with `window_close`, using the allocator that
+        \\allocated its pixels. For a software-only buffer you may instead free
+        \\the pixel allocation yourself, exactly once. Never do both, and never
+        \\grow or free a native window's pixels while its RGFW surface retains
+        \\their address. `window_open` reads its title without retaining it.
+    );
     subheading(51, "Namespace directories");
     paragraph(52, #string,oneline
         \\These seven directories have no `module.glo` and no sibling file, so the
@@ -179,6 +216,22 @@ render_section_142 :: () {
     table_row(57, "`Net`   |   `Address`, `Socket`, `Poll`, `Async`, `Dns`, `Dns_Types`, `Resolver`, `Hosts`, `Interface`, `Platform`, `Url`, `Encoding`, `Http`, `Http_Types`, `Http_Auth`, `Http_Server`, `Https`, `Tls`, `Certificate`, `Trust_Store`, `WebSocket`, `Types`.");
     table_row(58, "`Serialization`   |   `Core`, `Json`, `Toml`, `Yaml`, `MessagePack`.");
     table_row(59, "`Strings`   |   `Utf8`, `Utf16`.");
+    paragraph(102, #string,oneline
+        \\Filesystem path results can own text too. In `File_System/System`,
+        \\a successful `weakly_canonical(path)` owns its string and must be
+        \\released with `string_free`, including the fallback to `absolute`
+        \\when the path is absent. `relative(path, base)` also returns an owned
+        \\string, independent of temporary path components; even `"."` is an
+        \\owned result rather than a borrowed literal.
+    );
+    paragraph(103, #string,oneline
+        \\In `Net/Socket`, `socket_create` defaults to `kind = .Stream` and
+        \\`protocol = .Default`. It returns a `Net_Error` with kind `.Unsupported`
+        \\when the target has no
+        \\socket ABI or the family is `.Unspecified`. This is not a generic
+        \\`.System_Error` with a zero native code. On success, the returned
+        \\socket owns its descriptor and must be closed with `socket_close`.
+    );
     paragraph(60, #string,oneline
         \\Two names are both a file and a directory. The file is what
         \\`#import` resolves to, because the directory has no `module.glo`; the
@@ -310,8 +363,8 @@ render_section_143 :: () {
     paragraph(1, #string,oneline
         \\Two things the notation cannot carry. Operator precedence and
         \\associativity are not in the grammar at all: they live in a table the
-        \\parser fills in before parsing, from every visible `#operator` and
-        \\`#precedence` declaration, which is why the expression production is
+        \\parser fills in before parsing, from `#operator` declarations in the
+        \\source dependency graph, which is why the expression production is
         \\one flat loop. That mechanism is described in the chapter on the
         \\operator prescan, and the standard tiers in the chapter on operator
         \\precedence. Token formation is likewise a separate pass; the chapter
@@ -546,15 +599,16 @@ render_section_143 :: () {
         \\fndir       = regularfndir | bodylessdir ;
         \\regularfndir = "#expand" [ "," "expression" ]
         \\            | "#inline" [ "," ( "always" | "never" ) ]
-        \\            | "#operator" "(" mode [ "," INT ] ")"
-        \\            | "#precedence" "(" mode "," INT ")"
+        \\            | "#operator" "(" binarymode [ "," INT ] ")"
+        \\            | "#operator" "(" unarymode ")"
         \\            | "#memory" effects
         \\            | "#modify" ( block | expression )
         \\            | "#c_call" | "#no_context" | "#noreturn"
         \\            | "#returns_twice" | "#dump" | "#must" ;
         \\bodylessdir = "#magic" STRING
         \\            | "#foreign" ( STRING | IDENT ) [ STRING ] ;
-        \\mode        = "left" | "right" | "assign" | "prefix" | "suffix" ;
+        \\binarymode  = "left" | "right" | "assign" ;
+        \\unarymode   = "prefix" | "suffix" ;
         \\where       = "where" expression ;
         \\
         \\effects     = effect
@@ -591,9 +645,10 @@ render_section_143 :: () {
         \\body. Reversing the last two is
         \\`error: function directives must appear before where clauses`. A body
         \\is required unless the declaration is `#magic`, `#foreign`, or a
-        \\signature-only requirement inside a typeclass; `#precedence` accepts
-        \\only `left`, `right` or `assign`, and its level must be between 0 and
-        \\1000.
+        \\signature-only requirement inside a typeclass. `#operator` is the only
+        \\operator directive. Its binary and assignment modes take a literal
+        \\integer level from 0 to 1000, or reuse a level already registered for
+        \\the spelling. Its unary modes never take a level.
     );
     paragraph(81, #string,oneline
         \\A `#expand` procedure with an explicit result other than `void` is a
@@ -751,7 +806,8 @@ render_section_143 :: () {
         \\primary     = INT | FLOAT | STRING | LABEL | "context"
         \\            | "true" | "false" | "null" | IDENT | OPNAME
         \\            | BACKTICK | DBACKTICK | "$" IDENT
-        \\            | "#undefined" | "#string" strmods MLSTR { MLSTR }
+        \\            | "#undefined" | "#source_location"
+        \\            | "#string" strmods MLSTR { MLSTR }
         \\            | "#simd" arraylit | "#code" codequote
         \\            | "#insert" insertoperand
         \\            | "#inline" ( "while" expression body | for )
@@ -986,11 +1042,12 @@ render_section_143 :: () {
     table_row(60, "`#pattern`, `#partial`, `#falling`   |   pattern test or switch, after `if`, and at the end of a case arm");
     table_row(61, "`#try`   |   `#try { expression }` in expression position, and `#try defer`");
     table_row(62, "`#code`, `#string`, `#simd`, `#undefined`, `#meaningful`   |   expression position; `#code` quotes a block or one statement");
+    table_row(84, "`#source_location`   |   primary expression, with no arguments; a `Source_Location` value for the directive's lexical `#` token, including in a constant, default, or quote");
     table_row(63, "`#char`   |   a character literal recognised by the lexer; ASCII defaults to `u8`, non-ASCII to `rune`");
     table_row(64, "`#derive`, `#minimal`   |   `#derive` on `struct`, `union`, `typeclass` and `distinct`; `#minimal` on `typeclass` only");
     table_row(65, "`#empty`, `#as`, `#from`, `#raw`, `#packed`   |   aggregate declarations; `#empty` also in a parameter list");
     table_row(66, "`#c_call`, `#modify`, `#magic`   |   both aggregate and procedure declarations");
-    table_row(67, "`#operator`, `#precedence`, `#expand`, `#foreign`, `#no_context`, `#noreturn`, `#returns_twice`, `#dump`, `#must`, `#lazy`   |   procedure declarations; `#lazy` on a parameter");
+    table_row(67, "`#operator`, `#expand`, `#foreign`, `#no_context`, `#noreturn`, `#returns_twice`, `#dump`, `#must`, `#lazy`   |   procedure declarations; `#lazy` on a parameter");
     table_row(68, "`#Context`, `#aos`, `#soa`   |   type position");
     subheading(69, "Decisions the grammar defers to lookahead");
     paragraph(70, #string,oneline
@@ -1358,7 +1415,7 @@ render_section_144 :: () {
     table_row(302, "`runtime check failed: divide.by.zero` or `divide.overflow`   |   A checked integer division or remainder used zero, or signed division evaluated `MIN / -1`.");
     table_row(303, "`<path>:<line>:<column>: runtime check failed: array.bounds`   |   A checked index was outside the count carried by an array, view, or string.");
     table_row(304, "`runtime check failed: slice.bounds`   |   A checked slice range was negative, inverted, or extended past the source count.");
-    table_row(305, "`integer formatting base is outside 2..=16`   |   `format_int` or a print style used an unsupported base in a checked build.");
+    table_row(305, "`integer formatting base is outside 2..=16`   |   `format_int` used an unsupported base in a checked build.");
     note(199, #string,oneline
         \\These backend guards are emitted only at `-O0` and `-O1`. Hosted
         \\Windows and Linux x86-64 terminate them with status 134, WASI uses

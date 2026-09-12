@@ -5,7 +5,7 @@ render_section_116 :: () {
         \\Every procedure body sees one implicit value named `context`. It takes
         \\no import, no parameter and no declaration: the compiler creates the
         \\type, creates one instance of it, and makes the name visible
-        \\everywhere. Allocation, `print` formatting, logging and random-number
+        \\everywhere. Allocation, logging and random-number
         \\generation all read their policy out of that one value, which is how a
         \\caller redirects a library's behaviour without changing a single
         \\signature the library declares.
@@ -13,11 +13,10 @@ render_section_116 :: () {
     paragraph(1, #string,oneline
         \\The type is built into the compiler rather than written in a `.glo`
         \\file, and its spelling carries the directive sigil to say so: it is
-        \\`#Context`. The definition is fixed and has seven fields.
+        \\`#Context`. The definition is fixed and has six fields.
     );
     code_block(2, "glosso", #string
         \\Context :: struct {
-        \\    print_style:      Print_Style;
         \\    allocator:        Allocator;
         \\    temp_allocator:   Allocator;
         \\    logger:           Logger;
@@ -27,7 +26,6 @@ render_section_116 :: () {
         \\}
     );
     table_header(3, "Field   —   What reads it");
-    table_row(4, "`print_style`   |   `%` integer formatting; `default_format_int.base` is `10` in the default context");
     table_row(5, "`allocator`   |   `alloc`, `free`, `array_add`, `format`, and every standard-library call that defaults its allocator parameter");
     table_row(6, "`temp_allocator`   |   `tprint`, and everything else that returns arena-backed storage");
     table_row(7, "`logger`   |   structured logging; the vtable is zeroed in the default context");
@@ -70,25 +68,28 @@ render_section_116 :: () {
         \\#import "Io";
         \\
         \\main :: () {
-        \\    print("decimal %\n", 255);
-        \\    hex := context;
-        \\    hex.print_style.default_format_int.base = 16;
-        \\    #push_context hex {
-        \\        print("hex %\n", 255);
+        \\    context.user_index = 7;
+        \\    scoped := context;
+        \\    scoped.user_index = 42;
+        \\    #push_context scoped {
+        \\        print("scoped %\n", context.user_index);
         \\    }
-        \\    print("decimal again %\n", 255);
+        \\    print("restored %\n", context.user_index);
+        \\    print("hexadecimal %x\n", 255);
         \\}
     );
     code_block(18, "text", #string
-        \\decimal 255
-        \\hex ff
-        \\decimal again 255
+        \\scoped 42
+        \\restored 7
+        \\hexadecimal ff
     );
     paragraph(19, #string,oneline
         \\Written without an expression, `#push_context body` installs the
         \\default context, the same value the process started with. That is the
         \\way to run a piece of code under known settings regardless of what an
         \\enclosing frame installed.
+        \\Numeric formatting is selected explicitly with `Formatter` selectors
+        \\such as `%x`; the former `context.print_style` field no longer exists.
     );
     code_block(20, "glosso", #string
         \\#import "Io";
@@ -188,7 +189,7 @@ render_section_116 :: () {
         \\`#Context` and its fields are always reachable. The types of those
         \\fields are not: they are declared in the `Context` module and stay
         \\hidden until a file imports it, so that a program which never spells
-        \\one out does not have twelve extra type names dropped into its global
+        \\one out does not have the supporting type names dropped into its global
         \\namespace. Naming one without the import reports both the cause and
         \\the fix.
     );
@@ -200,7 +201,6 @@ render_section_116 :: () {
         \\  |             ^^^^^^^^^
     );
     table_header(37, "Context field   —   Types it introduces");
-    table_row(38, "`print_style`   |   `Print_Style`, `Print_Format_Int`");
     table_row(39, "`allocator`, `temp_allocator`   |   `Allocator`, `Allocator_Proc`, `Allocator_Mode`, `Allocator_Error`");
     table_row(40, "`logger`   |   `Logger`, `Logger_Proc`, `Logger_Level`");
     table_row(41, "`random_generator`   |   `Random_Generator`, `Random_Generator_Proc`, `Random_Generator_Mode`");
@@ -210,13 +210,33 @@ render_section_116 :: () {
         \\writing `context.allocator` never needs the import; only spelling one
         \\of these names as a type does. `Context` written without the sigil is
         \\`error: the built-in Context type is written #Context`.
+        \\This special type-name gate does not re-export the module's procedures:
+        \\import `Context` directly to call `alloc`, `free`, or allocator helpers.
     );
     note(43, #string,oneline
-        \\`context` cannot be read during compile-time execution. A procedure
-        \\that touches it is `error: non-constant expression` at the `context`
-        \\reference as soon as anything calls it from a `#comptime` position,
-        \\even though the same procedure is fine at run time. Compile-time
-        \\evaluation is described in `#comptime`.
+        \\The compile-time VM has its own readable and writable `context`.
+        \\Changing it does not initialize the native program's runtime context.
+        \\This does not make every context operation available in the VM:
+        \\a direct `alloc(16)` still stops with `#magic 'ctx_alloc' has no VM
+        \\implementation`. Check the operation, rather than assuming that
+        \\reading an allocator record makes its native allocation path usable.
+        \\Compile-time evaluation is described in `#comptime`.
+    );
+    code_block(44, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#comptime {
+        \\    context.user_index = 7;
+        \\    print("compile-time context %\n", context.user_index);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("runtime context %\n", context.user_index);
+        \\}
+    );
+    code_block(45, "text", #string
+        \\compile-time context 7
+        \\runtime context 0
     );
 }
 
@@ -2765,7 +2785,7 @@ render_section_126 :: () {
         \\    workspace := compiler_create_workspace("memory-check");
         \\    options := get_build_options(workspace);
         \\    options.output_executable_name = "leaky_child.exe";
-        \\    set_build_borrow_check(*options, Compiler_Borrow_Check.Error);
+        \\    set_borrow_check(*options, Compiler_Borrow_Check.Error);
         \\    set_build_options(options, workspace);
         \\    if add_build_file("leaky_child.glo", workspace) == {
         \\    case .Ok(log);    print("[build] ok\n%", log);

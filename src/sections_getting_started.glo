@@ -963,9 +963,10 @@ render_section_3 :: () {
         \\Every operator in Glosso is a typeclass method carrying an `#operator`
         \\directive, so a token like `<^>` means nothing until such a declaration
         \\has been read. Parsing cannot discover the fixity as it goes, because
-        \\the declaration may come after the use. The prescan therefore walks the
-        \\token stream once before parsing starts and records every `#operator`
-        \\and `#precedence` mode and level it finds.
+        \\the declaration may come after the use. Before parsing starts, the
+        \\prescan records the `#operator` modes and levels in the source and its
+        \\relative `#load` and `#export` dependency graph, starting with the
+        \\Prelude's operator table.
     );
     code_block(22, "glosso", #string
         \\#import "Io";
@@ -993,11 +994,12 @@ render_section_3 :: () {
     paragraph(24, #string,oneline
         \\The declaration sits below its own use and the expression still groups
         \\to the right: `2 <^> (3 <^> 2)` is 512. Changing both directives to
-        \\`#operator(left, 17)` prints 64 instead. The prescan reads one file at
-        \\a time, starting from the table the Prelude establishes, so an operator
-        \\introduced by a `#load`ed file is not available to the file that loads
-        \\it; the use then fails with `error: unexpected token '<^>'`. The
-        \\Operator Prescan gives the complete rules.
+        \\`#operator(left, 17)` prints 64 instead. An operator declared in a
+        \\relative `#load`ed dependency can also be used by its loader: the
+        \\dependency graph is scanned before the loader's expressions are parsed.
+        \\This does not make private declarations public or give one sibling
+        \\module another sibling's dependencies. The Operator Prescan gives the
+        \\complete rules.
     );
     subheading(25, "Parsing and feature gates");
     paragraph(26, #string,oneline
@@ -1377,9 +1379,12 @@ render_section_4 :: () {
         \\the loader; Visibility and Private Sections has the rules.
     );
     note(43, #string,oneline
-        \\The operator prescan runs per file. An operator declared in a `#load`ed
-        \\file is not available while parsing the file that loads it. The
-        \\Operator Prescan explains why.
+        \\The operator prescan follows relative `#load` and `#export`
+        \\dependencies, including embedded loads, before parsing expressions.
+        \\The loader can therefore use an operator declared by its loaded
+        \\module. Ordinary module visibility still governs whether the owning
+        \\typeclass and implementation can be used; a spelling in the parser's
+        \\table is not an implicit import.
     );
     subheading(44, "`#export`: umbrella modules");
     paragraph(45, #string,oneline
@@ -1417,7 +1422,7 @@ render_section_5 :: () {
         \\Every compilation begins with names already in scope. Nothing in the
         \\program declares them and no import produces them. They arrive in three
         \\layers, in this order: type spellings the parser recognises,
-        \\declarations the compiler injects, and the eight files of
+        \\declarations the compiler injects, and the twelve public components of
         \\`std/Prelude`.
     );
     paragraph(1, #string,oneline
@@ -1489,7 +1494,6 @@ render_section_5 :: () {
     );
     code_block(17, "glosso", #string
         \\Context :: struct {
-        \\    print_style:      Print_Style;
         \\    allocator:        Allocator;
         \\    temp_allocator:   Allocator;
         \\    logger:           Logger;
@@ -1508,29 +1512,33 @@ render_section_5 :: () {
     );
     paragraph(20, #string,oneline
         \\The struct is always in scope but its field types are gated. Naming
-        \\`Print_Style`, `Allocator`, `Logger` or `Random_Generator` in a program
+        \\`Allocator`, `Logger` or `Random_Generator` in a program
         \\that has not imported `Context` gives
-        \\`error: 'Print_Style' is a #Context field type`, and the rest of the
+        \\`error: 'Allocator' is a #Context field type`, and the rest of the
         \\message asks for `#import "Context";`. The Implicit Context and
         \\Allocators cover what the fields do.
     );
-    subheading(21, "The eight Prelude files");
+    subheading(21, "The twelve Prelude components");
     paragraph(22, #string,oneline
         \\`std/Prelude/module.glo` explicitly assembles the Prelude. Everything its public
         \\components declare is in scope for every program.
     );
     table_header(23, "File   —   Supplies");
     table_row(24, "`Show_and_Read.glo`   |   `Show`, the protocol behind `%` and `print`; `FromString`; the `derive_show` macro.");
+    table_row(68, "`Formatters.glo`   |   The default, integer-radix, and character `Formatter` instances. The `Formatter` protocol itself lives in `Format`.");
     table_row(25, "`Primitive_Typeclasses.glo`   |   `AsView`, `PartialEq`, `Eq`, `PartialOrd`, `Ordering`, `Num`, `Iterable`, and `PointerIterable`.");
     table_row(26, "`Primitive_Operators.glo`   |   The operator typeclasses and their primitive instances, plus `Indexable`, `Step`, the range classes, and `ToPattern`.");
     table_row(27, "`Option.glo`   |   `option_some`, `option_none`, `option_is_some`, `option_is_none`, `option_unwrap_or`, `Option_Residual`, the instances for `?T`.");
     table_row(28, "`Result.glo`   |   `result_ok`, `result_err`, `result_is_ok`, `result_is_err`, `result_unwrap_or`, `map_error`, `bind_error`, `ap_error`, `Result_Residual`.");
+    table_row(69, "`Try.glo`   |   `Try`, `Try_Branch`, and `Propagate`, the protocols behind postfix `?` and residual conversion.");
+    table_row(70, "`Termination.glo`   |   `Termination(T)`, which converts a value returned by `main` into a process status.");
     table_row(29, "`Array.glo`   |   `array_add`, `array_append`, `array_reset`, `array_free`, `array_deinit`, `array_view`.");
     table_row(30, "`Assembly.glo`   |   `Asm_Constraint`, `Asm_Operand_Flags`, `Asm_Clobber`, the vocabulary `#asm` operands are written in.");
+    table_row(71, "`Source_Location.glo`   |   `Source_Location`, with `filename: string`, `line: ssize`, and `column: ssize`; its `Show` instance renders `filename:line:column`.");
     table_row(31, "`Utilities.glo`   |   `Target_OS`, `Target_CPU`, `Target_ABI`, `Target_Endian`, `Output_Target`, `Host_Target`, `target_endian`, `get_cmdline_args`, `exit`.");
     paragraph(32, #string,oneline
-        \\Two of those files begin with `#import "Meta"`, `#import "Typeclass"`,
-        \\`#import "String_Builder"` and `#import "Format"`. Those imports serve
+        \\Prelude components import dependencies such as `Meta`, `Typeclass`,
+        \\`String_Builder` and `Format`. Those imports serve
         \\the Prelude and do not reach the program: a name that arrives only that
         \\way is `error: unknown function tprint` with `note: 'tprint' belongs to
         \\a transitive dependency; import its module directly`. A program that
@@ -1561,6 +1569,13 @@ render_section_5 :: () {
         \\constants once `Output_Target` and `Host_Target` exist, which is why
         \\`Utilities.glo` declares the shapes but not the values. Targets and
         \\Cross-Compilation covers what they hold.
+    );
+    note(72, #string,oneline
+        \\`#source_location` needs no import either: it is a compiler expression
+        \\that constructs the Prelude's `Source_Location` at the directive's
+        \\lexical position. Pass it explicitly to a diagnostic helper when you
+        \\want the caller's filename, line, and column. The chapter `#assert`
+        \\and `#compile_error` explains its ownership and diagnostic formatting.
     );
     code_block(36, "glosso", #string
         \\#import "Io";

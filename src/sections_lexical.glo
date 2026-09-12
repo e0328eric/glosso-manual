@@ -145,6 +145,33 @@ render_section_6 :: () {
         \\A `/*` or `*/` written inside a string literal is ordinary text: the
         \\scanner looks for comments only where a token could start.
     );
+    subheading(34, "Reading a source position");
+    paragraph(35, #string,oneline
+        \\`#source_location` is an expression whose value has the Prelude type
+        \\`Source_Location`. It records the position of its own `#` token, with
+        \\one-based `line` and `column` fields. Columns count Unicode scalars,
+        \\not UTF-8 bytes, display cells, or tab stops: a tab is one column and
+        \\a combining mark is another scalar. Comments and whitespace before
+        \\the directive still contribute to its position.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\main :: () {
+        \\    text := "한"; location := #source_location;
+        \\    print("% %:%\n", text, location.line, location.column);
+        \\}
+    );
+    code_block(37, "text", #string
+        \\한 3:30
+    );
+    paragraph(38, #string,oneline
+        \\The `filename` field is the compiler's source path, absolute for
+        \\loaded source files, or `<unknown>` when no filename is available.
+        \\On Windows the compiler removes extended-length path prefixes for
+        \\editor-friendly diagnostics; a path's backslashes remain literal
+        \\characters, not string escapes. The chapter `#assert` and `#compile_error`
+        \\shows how to print and pass these values without losing their origin.
+    );
 }
 
 render_section_7 :: () {
@@ -1603,7 +1630,7 @@ render_section_15 :: () {
         \\The prescan exists because Glosso lets a library introduce operator
         \\spellings and precedences. Parsing cannot decide how `2 * 3 %% 4`
         \\groups, or even whether `%%` is an operator at all, until every
-        \\`#operator` and `#precedence` declaration visible to the file has been
+        \\`#operator` declaration available to the file's prescan has been
         \\read. A single-pass parser would have to see the declaration first;
         \\the prescan removes that ordering requirement by reading the
         \\declarations out of the token stream before any of them is parsed.
@@ -1614,19 +1641,19 @@ render_section_15 :: () {
         \\The pattern is narrow and purely lexical: an operator name, then `::`,
         \\then an opening parenthesis. From the matching close parenthesis the
         \\scan runs forward to the first `{` or `;`, which is to say across the
-        \\signature and its directives and no further, looking for `#operator` or
-        \\`#precedence`.
+        \\signature and its directives and no further, looking for `#operator`.
     );
     code_block(4, "glosso", #string
-        \\'%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\'%%' :: (a: L, b: R) -> Output #operator(left, 19);
         \\'~~' :: (value: T) -> Output #operator(prefix);
         \\'!!' :: (value: T) -> Output #operator(suffix);
     );
     paragraph(5, #string,oneline
-        \\`#operator(mode)` and `#operator(mode, prec)` register a fixity and,
-        \\where the mode carries one, a precedence. `#precedence(mode, prec)`
-        \\registers precedence and associativity only, which is what a typeclass
-        \\method declaration usually wants.
+        \\`#operator(prefix)` and `#operator(suffix)` register unary fixity.
+        \\`#operator(left, prec)`, `#operator(right, prec)` and
+        \\`#operator(assign, prec)` register precedence and associativity.
+        \\Use these same forms on the owning typeclass's method signature;
+        \\there is no separate signature-only precedence directive.
     );
     table_header(6, "Mode   —   Registers   —   Meaning");
     table_row(7, "`left`   |   precedence, left associativity   |   ordinary binary operator");
@@ -1635,9 +1662,9 @@ render_section_15 :: () {
     table_row(10, "`prefix`   |   prefix fixity   |   written before its operand");
     table_row(11, "`suffix`   |   suffix fixity   |   written after its operand");
     paragraph(12, #string,oneline
-        \\A prefix or suffix mode carries no precedence, and `#precedence` with
-        \\one is rejected: `#precedence(prefix)` is `error: #precedence expects
-        \\left, right, or assign`. A name made only of asterisks is never
+        \\A prefix or suffix mode carries no precedence. Supplying a level, as
+        \\in `#operator(prefix, 19)`, is `error: unexpected token ','`.
+        \\A name made only of asterisks is never
         \\registered as prefix, because those spellings are the pointer sigils.
     );
 
@@ -1657,7 +1684,7 @@ render_section_15 :: () {
         \\
         \\Mod :: typeclass (L: type, R: type) {
         \\    Output :: type;
-        \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\    '%%' :: (a: L, b: R) -> Output #operator(left, 19);
         \\}
         \\
         \\(ssize, ssize) ::: instance Mod {
@@ -1681,10 +1708,11 @@ render_section_15 :: () {
         \\2 * 3 %% 4   = 64
     );
     paragraph(19, #string,oneline
-        \\An operator with no `#operator` and no `#precedence` is registered by
-        \\nothing, so its spelling never becomes an operator and the use site
-        \\fails as an unknown token. The declaration is reported too, with the
-        \\directive it is missing.
+        \\A new binary operator with no `#operator(left|right|assign, n)`
+        \\anywhere in the prescanned declarations has no registered precedence,
+        \\so its use site fails as an unknown token. The declaration is
+        \\reported too, with the directive it is missing. An instance can omit
+        \\the directive when its owning class already supplies the level.
     );
     code_block(20, "text", #string
         \\error: unexpected token '%%'
@@ -1693,9 +1721,9 @@ render_section_15 :: () {
     note(21, #string,oneline
         \\The precedence must be a written integer literal. The prescan reads it
         \\straight out of the token stream, before any name means anything, so a
-        \\named constant cannot be used: `#precedence(left, P)` with `P :: 19;`
-        \\is `error: unexpected token 'P'`, reported at the constant, and the
-        \\operator is never registered.
+        \\named constant cannot be used: `#operator(left, P)` with `P :: 19;`
+        \\is `error: unexpected token 'P'`, reported at the constant in the
+        \\directive, and the declaration is rejected.
     );
 
     subheading(22, "Operator syntax across relative modules");
@@ -1713,7 +1741,7 @@ render_section_15 :: () {
         \\
         \\Mod :: typeclass (L: type, R: type) {
         \\    Output :: type;
-        \\    '%%' :: (a: L, b: R) -> Output #precedence(left, 19);
+        \\    '%%' :: (a: L, b: R) -> Output #operator(left, 19);
         \\}
         \\
         \\(ssize, ssize) ::: instance Mod {

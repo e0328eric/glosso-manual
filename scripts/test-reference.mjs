@@ -18,9 +18,11 @@ const extraction = spawnSync(executable, [
 assert.ifError(extraction.error);
 assert.equal(extraction.status, 0, `${extraction.stdout}\n${extraction.stderr}`);
 
-const { modules } = JSON.parse(readFileSync(output, "utf8"));
-assert.equal(modules.length, 1);
-const symbols = new Map(modules[0].symbols.map(symbol => [symbol.name, symbol]));
+const { modules, instances } = JSON.parse(readFileSync(output, "utf8"));
+assert.equal(modules.length, 2);
+const fixture = modules.find(module => module.name === "Fixture");
+assert.ok(fixture);
+const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
 assert.equal(symbols.size, 6);
 
 const open = symbols.get("open");
@@ -70,4 +72,37 @@ for (const [name, effects] of [
 assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
 assert.equal(symbols.get("Callback").display_signature, "Callback :: #fn_ptr(path: $P) -> string");
 
-console.log("Reference extraction checks passed: current open, defaults, constraints, memory forms, typed flags, lazy parameters, and function pointers.");
+const locationModule = modules.find(module => module.name === "Source_Location");
+assert.ok(locationModule);
+const locations = new Map(locationModule.symbols.map(symbol => [symbol.name, symbol]));
+assert.equal(locations.size, 3, "instance implementations must not become public functions");
+assert.equal(locations.get("Source_Location").type_info.kind, "struct");
+assert.deepEqual(locations.get("Source_Location").type_info.fields.map(field => [field.name, field.value_type]), [
+  ["filename", "string"], ["line", "ssize"], ["column", "ssize"],
+]);
+assert.equal(locations.get("HERE").kind, "constant");
+assert.equal(locations.get("HERE").signature, "HERE :: #source_location");
+
+const diagnostic = locations.get("diagnostic");
+assert.equal(diagnostic.display_signature,
+  "diagnostic :: (message: string, location: Source_Location = #source_location, " +
+  "line := #source_location.line, fallback: Source_Location = " +
+  ".{ .filename = \"generated.glo\", .line = 1, .column = 1 }) -> string");
+assert.deepEqual(diagnostic.function_info.parameters.map(parameter => [parameter.name, parameter.value_type, parameter.default_value]), [
+  ["message", "string", ""],
+  ["location", "Source_Location", "#source_location"],
+  ["line", "", "#source_location.line"],
+  ["fallback", "Source_Location", ".{ .filename = \"generated.glo\", .line = 1, .column = 1 }"],
+]);
+assert.deepEqual(diagnostic.function_info.memory_contracts, [
+  { effect: "returns_fresh", arguments: [] },
+  { effect: "reads", arguments: ["message", "location"] },
+  { effect: "noescape", arguments: ["message", "location"] },
+]);
+assert.doesNotMatch(diagnostic.display_signature, /#memory|\bwhere\b/);
+assert.equal(instances.length, 1);
+assert.equal(instances[0].class_name, "Show");
+assert.equal(instances[0].head, "Source_Location");
+assert.equal(instances[0].module, "Source_Location");
+
+console.log("Reference extraction checks passed: current open, defaults, constraints, memory forms, typed flags, lazy parameters, function pointers, and source locations.");
