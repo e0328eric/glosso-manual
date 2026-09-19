@@ -86,12 +86,15 @@ complete C layouts.
 
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
 compact signatures, parameter constraints and defaults, `#memory` contracts,
-flag enums, lazy parameters, and function-pointer declarations.
+flag enums, lazy parameters, function-pointer declarations, private-name
+filtering, and boundary-aware `try(Target)` operators.
 
-`node scripts/test-language.mjs` compiles and runs the operator and source-location
-fixtures with `../glosso/build/bin/glosso` (`glosso.exe` on Windows), and checks
-that removed directives fail compilation. Pass a compiler path as its optional
-first argument to test another build. All output and caches stay under `build/`.
+`node scripts/test-language.mjs` checks operators, Try boundary witnesses and
+overrides, propagation cleanup, array reservation, and source locations with
+`../glosso/build/bin/glosso` (`glosso.exe` on Windows). It also checks rejection
+of removed directives and invalid Try contracts. Pass a compiler path as its
+optional first argument to test another build. All output and caches stay under
+`build/`.
 
 `node scripts/test-manual.mjs` checks staged assets and exercises the actual
 Wasm renderer for every chapter and reference module at narrow and wide widths,
@@ -152,8 +155,8 @@ sources in the same pass. Run it after editing chapters as well as after editing
 `glosso/std/`; it reports how many chapters produced no prose, which is how a
 missing or misnamed `render_section_N` shows up.
 
-When updating for a new compiler checkout, read `../glosso/std/API_MIGRATION.md`
-and check the current declarations as well as regenerating the reference.
+When updating for a new compiler checkout, check the current declarations and
+module documentation under `../glosso/std/` as well as regenerating the reference.
 The library now takes ordinary named parameters and typed flag enums instead
 of input-only option records. Compiler and Bindgen option lists are string
 slices; use `library_spec` to describe a Bindgen artifact. Chapter examples,

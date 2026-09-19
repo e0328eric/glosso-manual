@@ -100,6 +100,47 @@ for (const [mode, parameters, level] of [
   assert(removed.rootNode.hasError, `Removed #precedence(${mode}${level}) still parses`);
   removed.delete();
 }
+// Try-aware operators receive the enclosing carrier through an erased witness.
+// Cover both a typeclass signature and an ordinary custom suffix definition.
+const tryOperators = parser.parse(`
+Try :: typeclass (Carrier: type) {
+  '?' :: (#empty: $Target, value: Carrier) -> Try_Branch(Output, Target)
+      #operator(suffix, try(Target));
+}
+'!!' :: (#empty: $Boundary, value: Carrier) -> Try_Branch(Output, Boundary)
+    #operator(suffix, try(Boundary)) { return .Continue(value); }
+probe :: (value: Carrier) {
+  propagated := value?;
+  custom := value!!;
+  explicit := '?'(Target, value);
+  local := #try { value? };
+  for i: 0..count lengths[order[i]] = 1;
+  qualified := value math,,+ other;
+}
+`);
+assert(!tryOperators.rootNode.hasError, "Try-aware operators or range loops did not parse");
+const tryCaptures = query.captures(tryOperators.rootNode);
+assert.equal(tryCaptures.filter(capture =>
+  capture.node.text === "try" && capture.name === "attribute").length, 2);
+for (const target of tryOperators.rootNode.descendantsOfType("operator_try_modifier")) {
+  const identifier = target.childForFieldName("target");
+  assert(tryCaptures.some(capture => capture.name === "type" &&
+    capture.node.startIndex === identifier.startIndex && capture.node.endIndex === identifier.endIndex),
+    `Unhighlighted try boundary: ${identifier.text}`);
+}
+for (const operator of ["?", "!!"])
+  assert(tryCaptures.some(capture => capture.node.text === operator && capture.name === "operator"),
+    `Unhighlighted suffix operator: ${operator}`);
+const loop = tryOperators.rootNode.descendantsOfType("for_statement")[0];
+assert.equal(loop.childForFieldName("value").text, "0..count");
+assert.equal(loop.childForFieldName("body").type, "assignment_statement");
+for (const modifier of ["prefix, try(Target)", "suffix, try($Target)", "suffix, unknown"]) {
+  const invalid = parser.parse(`'?' :: (#empty: $Target, value: Carrier)
+    -> Try_Branch(Output, Target) #operator(${modifier});`);
+  assert(invalid.rootNode.hasError, `Invalid #operator(${modifier}) still parses`);
+  invalid.delete();
+}
+tryOperators.delete();
 query.delete();
 tree.delete();
 parser.delete();

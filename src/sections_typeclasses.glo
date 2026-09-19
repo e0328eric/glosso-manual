@@ -3050,12 +3050,13 @@ render_section_78 :: () {
 
 render_section_79 :: () {
     paragraph(0, #string,oneline
-        \\Postfix `?` is not built into the compiler's notion of errors. It is
-        \\an operator owned by the `Try` typeclass, and any type that
-        \\implements `Try` is a carrier that `?` can unwrap. The class splits a
-        \\carrier into two associated types, an `Output` for the value the
-        \\happy path produces and a `Residual` for the token the failing path
-        \\carries, and gives three methods that convert between them.
+        \\Postfix `?` is an operator owned by the `Try` typeclass. Any type
+        \\that implements `Try` is a carrier that `?` can unwrap. The class
+        \\splits a carrier into an `Output` for success and a `Residual` for
+        \\failure, and supplies methods that convert between them. The suffix
+        \\annotation `#operator(suffix, try(Target))` makes the compiler pass
+        \\the enclosing boundary's type to the operator and interpret its
+        \\returned control token.
     );
     code_block(1, "glosso", #string
         \\Propagate :: typeclass (From: type, To: type) {
@@ -3076,33 +3077,48 @@ render_section_79 :: () {
         \\    from_residual :: (#empty: Carrier, residual: Residual) -> Carrier;
         \\    branch :: (value: Carrier) -> Try_Branch(Output, Residual);
         \\
-        \\    '?' :: (value: Carrier) -> Try_Branch(Output, Residual) #operator(suffix) {
-        \\        return branch(value);
+        \\    '?' :: (#empty: $Target, value: Carrier)
+        \\        -> Try_Branch(Output, Target)
+        \\        #operator(suffix, try(Target))
+        \\        where Try(Target) &&
+        \\            (Try(Carrier).Residual == Try(Target).Residual ||
+        \\             Propagate(Try(Carrier).Residual, Try(Target).Residual)) {
+        \\        if branch(value) == {
+        \\            case .Continue(output);
+        \\                #if Try(Carrier).Output == void return .Continue;
+        \\                else return .Continue(output);
+        \\            case .Break(residual);
+        \\                #if Try(Carrier).Residual == Try(Target).Residual {
+        \\                    return .Break(from_residual(Target, residual));
+        \\                } else {
+        \\                    converted := propagate(Try(Target).Residual, residual);
+        \\                    return .Break(from_residual(Target, converted));
+        \\                }
+        \\        }
         \\    }
         \\}
     );
     paragraph(2, #string,oneline
-        \\`std/Typeclass/Try.glo` is the whole declaration. The `?` operator
-        \\has a default body in the class, so no instance ever writes `'?'`;
-        \\implementing `branch` is what makes `?` work, and an instance that
-        \\declares `'?'` with any other signature is `error: instance method
-        \\'?' does not match any declaration in typeclass 'Try'`. `#minimal`
-        \\names the three methods, and the two associated types are required
-        \\implicitly, because a missing `Output` makes the signature of
-        \\`from_output` unresolvable.
+        \\The declaration lives in `std/Prelude/Try.glo` and is available
+        \\without an import. The default `?` body is inherited by an instance,
+        \\which may override it with the same boundary witness, return type,
+        \\and `#operator(suffix, try(Target))` contract. `#minimal` names the
+        \\three required methods; `Output` and `Residual` must also be supplied
+        \\to make their signatures resolvable.
     );
     table_header(3, "Member   —   Direction   —   Role");
     table_row(4, "`Output`   |   associated type   |   what a successful carrier holds");
     table_row(5, "`Residual`   |   associated type   |   what a failed carrier holds, stripped of the carrier");
     table_row(6, "`from_output`   |   value into carrier   |   wraps a bare `Output` returned from a Try-returning function");
     table_row(7, "`from_residual`   |   residual into carrier   |   builds the carrier that `?` returns early");
-    table_row(8, "`branch`   |   carrier into token   |   the only method an instance must think about");
+    table_row(8, "`branch`   |   carrier into token   |   splits success from residual failure");
     paragraph(9, #string,oneline
-        \\`Try_Branch(T, R)` is an ordinary two-variant union, not a compiler
-        \\type. `branch` returns `.Continue(value)` or `.Break(residual)`, and
-        \\that token is the entire interface between a carrier and the `?`
-        \\machinery. A carrier need not be a union itself; a struct carrier
-        \\that decides in `branch` which side it is on works exactly as well.
+        \\`Try_Branch(T, R)` is an ordinary two-variant union. `branch`
+        \\returns `Try_Branch(Output, Residual)`, while `?` returns
+        \\`Try_Branch(Output, Target)`: its `.Break` holds the completed
+        \\boundary carrier. Returning this union from an ordinary procedure
+        \\has no control-flow effect on its caller. A carrier can be a struct
+        \\or a union; its `branch` implementation decides which side it holds.
     );
     subheading(10, "How `x?` is checked");
     paragraph(11, #string,oneline
@@ -3113,33 +3129,34 @@ render_section_79 :: () {
         \\checker performs these steps.
     );
     bullet(12, #string,oneline
-        \\The operand type must implement `Try`. A type with no instance at
-        \\all is `error: no suffix operator '?' for ssize`, because `?` is
-        \\resolved as an ordinary suffix operator before any Try-specific
-        \\reasoning happens.
+        \\The operand and boundary types must implement `Try`. The operand
+        \\is evaluated once, and the boundary type is supplied as the leading
+        \\erased witness in the equivalent call `'?'(Target, operand)`. A
+        \\`#try` expression takes its carrier from its first propagated operand.
     );
     bullet(13, #string,oneline
-        \\`Output` and `Residual` are projected from `Try(operand)`, and
-        \\`branch(operand)` is called. The result must be exactly
-        \\`Try_Branch(Output, Residual)`; an instance that returns something
-        \\else is rejected at the use site, for example `error: Try propagation
-        \\operator returned ssize, expected Try_Branch_s64_X_Residual from
-        \\Try.branch`.
+        \\The selected operator body runs, including an instance override. It
+        \\must return exactly `Try_Branch(Try(Source).Output, Target)`, where
+        \\`Source` is the operand's type. A wrong token type is rejected with a
+        \\diagnostic requiring the boundary result in `Break`.
     );
     bullet(14, #string,oneline
         \\On `.Continue(v)` the expression's value is `v`, typed as the
         \\operand's `Output`.
     );
     bullet(15, #string,oneline
-        \\On `.Break(r)`, if the boundary's `Residual` differs from the
-        \\operand's, `propagate` is inserted to convert one into the other.
-        \\That conversion is the subject of `Propagate` and Multi-Error
-        \\Programs.
+        \\The inherited operator calls `branch`. On failure it calls
+        \\`propagate` only when the two residual types differ, then calls
+        \\`from_residual(Target, residual)`. These are ordinary calls in the
+        \\library operator body, not conversions inserted by the compiler.
+        \\Matching residuals need no `Propagate` instance, even when the source
+        \\and destination success types differ.
     );
     bullet(16, #string,oneline
-        \\`from_residual` on the boundary's carrier turns the converted
-        \\residual into the value the function returns, and control leaves the
-        \\boundary.
+        \\On `.Break(carrier)`, the compiler exits the nearest boundary with
+        \\that already completed carrier. The operator's conversion and
+        \\construction finish before the exiting scopes run their `defer` and
+        \\`#try defer` entries in reverse registration order.
     );
     bullet(17, #string,oneline
         \\Separately, returning a bare `Output` from a Try-returning function
@@ -3147,8 +3164,11 @@ render_section_79 :: () {
         \\a function declared `E!s64`.
     );
     paragraph(18, #string,oneline
-        \\Each of those pieces is callable by hand, so the expansion can be
-        \\written out and compared. The two functions below behave identically.
+        \\A quoted call returns the token without leaving the caller, so the
+        \\control-flow expansion can be written out. These functions produce
+        \\the same results; an explicit `return` does not run `#try defer`, so
+        \\this hand-written expansion would need additional cleanup if the
+        \\function registered error-only defers.
     );
     code_block(19, "glosso", #string
         \\#import "Io";
@@ -3165,10 +3185,10 @@ render_section_79 :: () {
         \\
         \\expanded :: (ok: bool) -> string!s64 {
         \\    v: s64;
-        \\    token := branch(fetch(ok));
+        \\    token := '?'(string!s64, fetch(ok));
         \\    if token == {
         \\        case .Continue(output); v = output;
-        \\        case .Break(residual);  return from_residual(string!s64, residual);
+        \\        case .Break(carrier);   return carrier;
         \\    }
         \\    return from_output(string!s64, v + 1);
         \\}
@@ -3190,11 +3210,12 @@ render_section_79 :: () {
         \\expanded 21 bad input
     );
     paragraph(21, #string,oneline
-        \\The `#empty:` witness in `from_output(string!s64, v + 1)` is why the
-        \\carrier type is written as an argument. `Try(C).Output` and
-        \\`Try(C).Residual` are also usable as ordinary type annotations, which
-        \\is how a generic helper names the two halves of a carrier it was
-        \\handed.
+        \\The quoted call requires both the boundary type and the operand;
+        \\`'?'(value)` is rejected for a missing boundary witness. It can be
+        \\used outside a Try boundary because it returns an ordinary token.
+        \\`Try.'?'(Target, value)` and `Try(Source).'?'(Target, value)` also
+        \\select the class explicitly. `Try(C).Output` and `Try(C).Residual`
+        \\are available as ordinary type annotations.
     );
     subheading(22, "The built-in carriers");
     paragraph(23, #string,oneline
@@ -3306,7 +3327,6 @@ render_section_79 :: () {
     );
     code_block(36, "glosso", #string
         \\#import "Io";
-        \\#import "Typeclass/Try";
         \\
         \\Validated :: union { Valid: $T; Invalid: string; }
         \\Invalid_Reason :: struct { message: string; }
@@ -3382,11 +3402,10 @@ render_section_80 :: () {
     paragraph(2, #string,oneline
         \\The class has two parameters and one method, and the head is written
         \\as a tuple: `(From_Type, To_Type) ::: instance Propagate`. The leading
-        \\`#empty:` witness names the target, which is what lets the compiler
-        \\select a conversion by its destination rather than by inference from
-        \\the return type. `?` inserts a `propagate` call only when the two
-        \\residual types differ; a function propagating its own error type
-        \\needs no instance at all.
+        \\`#empty:` witness names the target so instance selection can match
+        \\its destination. The inherited `?` body calls `propagate` only when
+        \\the two residual types differ; matching residuals need no conversion
+        \\instance, even for carriers with different success types.
     );
     subheading(3, "The Prelude's residual lifting");
     paragraph(4, #string,oneline
@@ -3416,7 +3435,6 @@ render_section_80 :: () {
     );
     code_block(7, "glosso", #string
         \\#import "Io";
-        \\#import "Typeclass/Try";
         \\
         \\Low_Error  :: struct #derive(Show) { code: s64; }
         \\High_Error :: struct #derive(Show) { code: s64; note: string; }
@@ -3459,7 +3477,6 @@ render_section_80 :: () {
     );
     code_block(11, "glosso", #string
         \\#import "Io";
-        \\#import "Typeclass/Try";
         \\
         \\Missing :: struct #derive(Show) { key: string; }
         \\
@@ -3507,13 +3524,11 @@ render_section_80 :: () {
         \\}
     );
     paragraph(15, #string,oneline
-        \\Without one of these the call site names the missing conversion by
-        \\listing what it looked for: `error: no overload 'propagate' accepts
-        \\these arguments`, followed by the two candidates
-        \\`propagate :: (__empty0: Result_Residual(To), value:
-        \\Result_Residual(From)) -> Result_Residual(To)` and
-        \\`propagate :: (__empty0: To, value: From) -> To`. The first is the
-        \\lifting instance, the second the class requirement.
+        \\Without the needed residual conversion, the inherited operator's
+        \\`where` condition fails. A postfix use reports `error: no overload
+        \\'?' accepts these arguments`. Supply a `Propagate` instance for the
+        \\residual pair, or for the error pair when the Prelude's result
+        \\lifting instance applies.
     );
     subheading(16, "Widening across a library boundary");
     paragraph(17, #string,oneline

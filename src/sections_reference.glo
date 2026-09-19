@@ -148,11 +148,11 @@ render_section_142 :: () {
     paragraph(36, #string,oneline
         \\These thirteen directories carry a `module.glo` entry point.
         \\An umbrella entry point uses `#export` to expose component modules;
-        \\implementation fragments can be joined with `#load,embed`. In two
-        \\cases a `#insert` builds native code on demand.
+        \\implementation fragments can be joined with `#load,embed`. The Lua
+        \\entry point uses `#insert` to build its native runtime on demand.
     );
     table_header(37, "Module   —   Purpose");
-    table_row(38, "`Gui`   |   Cross-platform software-rendered GUI over the bundled RGFW.");
+    table_row(38, "`Image`   |   Owned RGBA8 images and PNG, JPEG, and WebP codecs written in Glosso.");
     table_row(39, "`Lua`   |   The Lua 5.5 C API, with a static runtime built from bundled sources.");
     table_row(40, "`Math/Bignum`   |   Arbitrary-precision `BigInt` and `BigFloat`.");
     table_row(41, "`Math/SpecialFunctions`   |   Airy, Bessel, gamma, hypergeometric, integrals, zeta and polylog.");
@@ -163,44 +163,48 @@ render_section_142 :: () {
     table_row(46, "`Random`   |   Deterministic engines, OS entropy, sampling, distributions.");
     table_row(47, "`Sort`   |   Sorting, ordered search, heaps, deterministic permutations.");
     table_row(48, "`Time`   |   Clocks, durations, civil calendars, text formats, TZif zones.");
-    table_row(49, "`Typeclass`   |   `Functor`, `Applicative`, `Monad`, `Try`, `Error`, `Termination`, `Derive`.");
+    table_row(49, "`Typeclass`   |   `Functor`, `Applicative`, `Monad`, `Error`, and `Derive`; `Try` and `Termination` are in the Prelude.");
     table_row(50, "`Unicode`   |   UTF-8 helpers plus the generated character tables.");
-    subheading(97, "GUI windows and software frame buffers");
+    subheading(97, "Images and codecs");
     paragraph(98, #string,oneline
-        \\`Gui.window_open` accepts `hidden: bool = false`. Set `.hidden = true`
-        \\for a native RGFW window and surface that are not shown, useful for
-        \\automated platform checks. This is still a native window, not a
-        \\software-only rendering mode. Drawing modifies the RGBA pixel buffer;
-        \\`present` submits it to the native surface.
+        \\`#import "Image"` provides owned, tightly packed RGBA8 pixels and
+        \\PNG, JPEG, and WebP codecs implemented in Glosso. `image_read`
+        \\detects the format from the bytes; `image_write` chooses it from the
+        \\filename extension unless an explicit `Image_Format` is supplied.
+        \\`image_resize` takes output dimensions and uses nearest-neighbor
+        \\sampling. Narrow imports such as `Image/Core` and `Image/Png` are
+        \\also available.
     );
     code_block(99, "glosso", #string
-        \\#import "Gui";
+        \\#import "Image";
         \\
-        \\main :: () -> Gui_Error!void {
-        \\    window := window_open("render check", 64, 64, .hidden = true)?;
-        \\    defer window_close(*window);
-        \\    clear(*window);
-        \\    fill_rect(*window, 8, 8, 16, 16, color(255, 0, 0));
-        \\    present(*window);
+        \\main :: () -> Image_Error!void {
+        \\    photo := image_read("photo.jpg")?;
+        \\    defer image_destroy(*photo);
+        \\    thumbnail := image_resize(photo, 320, 240)?;
+        \\    defer image_destroy(*thumbnail);
+        \\    _ := image_write("thumbnail.png", thumbnail)?;
+        \\    _ := image_write("thumbnail.jpg", thumbnail, .quality = 90)?;
+        \\    return .Ok;
         \\}
     );
     paragraph(100, #string,oneline
-        \\For software-only drawing, construct a `Window` with `native` and
-        \\`surface` left absent, positive `width` and `height`, and a `pixels`
-        \\array of at least `width * height * 4` bytes. `clear`, `set_pixel`,
-        \\and the other drawing primitives validate that storage independently
-        \\of native handles. `window_valid` remains false, input and event
-        \\polling are inactive, `window_should_close` is true, and `present`
-        \\does nothing. Importing `Gui` still requires its supported native
-        \\build environment even if no window is opened at runtime.
+        \\`image_decode` borrows encoded bytes and returns independent pixels;
+        \\`image_encode` returns an owned dynamic byte array to release with
+        \\`array_free`. PNG and WebP encoding preserve RGBA losslessly. JPEG
+        \\encoding is lossy, accepts quality 1 through 100, and discards alpha.
+        \\Decoding supports progressive JPEG and both lossy and lossless WebP
+        \\stills; animated WebP is rejected. `Image_Limits` defaults to
+        \\67,108,864 pixels and 536,870,912 encoded bytes, with checks on codec
+        \\working buffers too.
     );
     note(101, #string,oneline
-        \\A `Window` is a shallow owner: copies alias its handles and pixels.
-        \\Close exactly one owner with `window_close`, using the allocator that
-        \\allocated its pixels. For a software-only buffer you may instead free
-        \\the pixel allocation yourself, exactly once. Never do both, and never
-        \\grow or free a native window's pixels while its RGFW surface retains
-        \\their address. `window_open` reads its title without retaining it.
+        \\An `Image` is a shallow owner: copies alias its pixel array. Destroy
+        \\exactly one owner with `image_destroy`, using the allocator that
+        \\created it. Use `image_clone` for an independent copy. Pixels
+        \\allocated from temporary storage expire at the next reset. File
+        \\writes finish encoding before opening the destination, then create
+        \\or truncate it; they are not atomic replacements.
     );
     subheading(51, "Namespace directories");
     paragraph(52, #string,oneline
@@ -231,6 +235,34 @@ render_section_142 :: () {
         \\socket ABI or the family is `.Unspecified`. This is not a generic
         \\`.System_Error` with a zero native code. On success, the returned
         \\socket owns its descriptor and must be closed with `socket_close`.
+    );
+    paragraph(104, #string,oneline
+        \\`Net/Tls` verifies the peer chain and hostname by default. The Linux
+        \\GNU SDK bundles static OpenSSL archives; other hosted targets resolve
+        \\an OpenSSL-compatible provider at link time. Unless `ca_file` or
+        \\`ca_directory` is supplied, Linux supplements the provider's default
+        \\trust paths with a native CA bundle. `SSL_CERT_FILE` and
+        \\`SSL_CERT_DIR` retain their provider-defined override behavior.
+    );
+    paragraph(105, #string,oneline
+        \\The `Serialization` components provide `json_document_from_string`,
+        \\`toml_document_from_string`, `yaml_document_from_string`, and
+        \\`messagepack_document_from_bytes` for an owned parsed tree.
+        \\The resulting `Serialization_Document` captures the current allocator;
+        \\`serialization_document_destroy(*document)` releases its arrays and
+        \\decoded text. Views into `document.root` expire at destruction, and
+        \\the allocator's storage must stay valid for the document's lifetime.
+        \\For a raw model returned by a bundled value parser,
+        \\`serialization_value_destroy(*value, .owned_text = true)` also frees
+        \\decoded text; the default leaves text borrowed for manually built models.
+    );
+    paragraph(106, #string,oneline
+        \\`Strings/Utf8.substring_view(text, start, end)` borrows a clamped byte
+        \\range without allocating. Its offsets need not be UTF-8 boundaries;
+        \\the result lasts only as long as `text` and must not be freed. Use
+        \\`substring` for a copy. Filesystem path helpers such as `parent_path`,
+        \\`filename`, and `path_dirname` use borrowed views where their contracts
+        \\promise to borrow the input.
     );
     paragraph(60, #string,oneline
         \\Two names are both a file and a directory. The file is what
@@ -601,6 +633,7 @@ render_section_143 :: () {
         \\            | "#inline" [ "," ( "always" | "never" ) ]
         \\            | "#operator" "(" binarymode [ "," INT ] ")"
         \\            | "#operator" "(" unarymode ")"
+        \\            | "#operator" "(" "suffix" "," "try" "(" IDENT ")" ")"
         \\            | "#memory" effects
         \\            | "#modify" ( block | expression )
         \\            | "#c_call" | "#no_context" | "#noreturn"
@@ -648,7 +681,13 @@ render_section_143 :: () {
         \\signature-only requirement inside a typeclass. `#operator` is the only
         \\operator directive. Its binary and assignment modes take a literal
         \\integer level from 0 to 1000, or reuse a level already registered for
-        \\the spelling. Its unary modes never take a level.
+        \\the spelling. Its unary modes never take a level. A suffix operator
+        \\may use `#operator(suffix, try(Target))`, where `Target` names its
+        \\leading `#empty: $Target` witness. It returns
+        \\`Try_Branch(Try(Source).Output, Target)`: `Continue` supplies the
+        \\expression's value and `Break` leaves the boundary with the completed
+        \\carrier. The ordinary operator body performs any residual conversion.
+        \\All anonymous `#empty:` witnesses must precede runtime parameters.
     );
     paragraph(81, #string,oneline
         \\A `#expand` procedure with an explicit result other than `void` is a
@@ -1238,6 +1277,7 @@ render_section_144 :: () {
     table_row(65, "`lambda captures local 'base', but captured closures are not supported`   |   A lambda reading an enclosing local. It carries `help: pass the value as an explicit callback or context argument`.");
     table_row(66, "`discarded return value of #must function 'mkval'`   |   Calling a `#must` procedure as a statement.");
     table_row(67, "`variadic parameter uses '...T'; '..' is the range operator`   |   `..T` written where `...T` was meant.");
+    table_row(218, "`#empty parameters must appear before runtime parameters`   |   An anonymous erased witness appears after a runtime parameter.");
     table_row(68, "`argument for #comptime parameter 'n' must be known at compile time`   |   A runtime value at a `#comptime` parameter; the attached `note` names the binding.");
     subheading(69, "Aggregates and built-in sugar");
     table_header(70, "Message   —   Produced by");

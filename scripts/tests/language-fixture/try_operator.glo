@@ -1,0 +1,145 @@
+#import "Io";
+
+// A source and its boundary may have different success types.
+describe :: (value: string!s64) -> string!string {
+    number := value?;
+    return show(number);
+}
+optional :: (value: ?s64) -> ?string {
+    _ := value?;
+    return "present";
+}
+void_success :: (value: string!void) -> string!string {
+    value?;
+    return "done";
+}
+local_boundary :: (value: string!s64) -> string!string {
+    captured := #try { value? + 1 };
+    if result_is_err(captured) return "caught";
+    return "continued";
+}
+
+Inner :: struct { trace: *s64; }
+Outer :: union { #from inner: Inner; }
+
+// Conversion is inside the operator body, before both kinds of cleanup.
+Input_Error :: struct { trace: *s64; }
+Output_Error :: struct { trace: *s64; }
+(Input_Error, Output_Error) ::: instance Propagate {
+    propagate :: (#empty: Output_Error, value: Input_Error) -> Output_Error {
+        value.trace.* = value.trace.* * 10 + 1;
+        return .{ .trace = value.trace };
+    }
+}
+widen :: (value: Input_Error!s64, trace: *s64) -> Output_Error!string {
+    defer trace.* = trace.* * 10 + 3;
+    #try defer trace.* = trace.* * 10 + 2;
+    _ := value?;
+    return "ok";
+}
+explicit_error :: (trace: *s64) -> Output_Error!string {
+    defer trace.* = trace.* * 10 + 3;
+    #try defer trace.* = trace.* * 10 + 2;
+    return .Err(.{ .trace = trace });
+}
+from_variant :: (value: Inner!s64) -> Outer!string {
+    _ := value?;
+    return "ok";
+}
+
+// An override must be called exactly once, after evaluating its operand once.
+Observed :: struct { value: string!s64; calls: ?*s64; }
+Observed ::: instance Try {
+    Output :: s64;
+    Residual :: Result_Residual(string);
+    from_output :: (#empty: Observed, output: s64) -> Observed {
+        return Observed.{ .value = .Ok(output), .calls = .None };
+    }
+    from_residual :: (#empty: Observed, residual: Result_Residual(string)) -> Observed {
+        return Observed.{ .value = .Err(residual.error), .calls = .None };
+    }
+    branch :: (value: Observed) -> Try_Branch(s64, Result_Residual(string)) {
+        return branch(value.value);
+    }
+    '?' :: (#empty: $Target, value: Observed) -> Try_Branch(s64, Target)
+        #operator(suffix, try(Target))
+        where Try(Target) &&
+            (Try(Observed).Residual == Try(Target).Residual ||
+             Propagate(Try(Observed).Residual, Try(Target).Residual)) {
+        if #pattern .Some(calls) = value.calls calls.* += 1;
+        return '?'(Target, value.value);
+    }
+}
+observe :: (evaluations: *s64, calls: *s64) -> Observed {
+    evaluations.* += 1;
+    return Observed.{ .value = .Ok(41), .calls = .Some(calls) };
+}
+use_override :: (evaluations: *s64, calls: *s64) -> string!string {
+    value := observe(evaluations, calls)?;
+    return show(value);
+}
+
+Forward_Try :: typeclass (Source: type) {
+    '!!' :: (#empty: $Target, value: Source)
+        -> Try_Branch(Try(Source).Output, Target)
+        #operator(suffix, try(Target))
+        where Try(Source) && Try(Target) &&
+            (Try(Source).Residual == Try(Target).Residual ||
+             Propagate(Try(Source).Residual, Try(Target).Residual)) {
+        return '?'(Target, value);
+    }
+}
+string!s64 ::: instance Forward_Try {}
+forward :: (value: string!s64) -> string!string { return show(value!!); }
+
+verify :: () -> bool {
+    good: string!s64 = .Ok(41);
+    bad: string!s64 = .Err("failure");
+    if result_unwrap_or(describe(good), "") != "41" return false;
+    if !result_is_err(describe(bad)) return false;
+    if option_unwrap_or(optional(.Some(1)), "") != "present" return false;
+    if !option_is_none(optional(.None)) return false;
+    if result_unwrap_or(void_success(.Ok), "") != "done" return false;
+    if !result_is_err(void_success(.Err("failure"))) return false;
+    if result_unwrap_or(local_boundary(bad), "") != "caught" return false;
+    if result_unwrap_or(local_boundary(good), "") != "continued" return false;
+
+    // Quoted calls return tokens outside any boundary, including scoped calls.
+    continued := Try(string!s64).'?'(string!string, good);
+    broken := '?'(string!s64, bad);
+    if #pattern .Continue(value) = continued {
+        if value != 41 return false;
+    } else return false;
+    if #pattern .Break(carrier) = broken {
+        if #pattern .Err(error) = carrier {
+            if error != "failure" return false;
+        } else return false;
+    } else return false;
+    scoped := Forward_Try.'!!'(string!string, good);
+    if #pattern .Continue(value) = scoped {
+        if value != 41 return false;
+    } else return false;
+    if result_unwrap_or(forward(good), "") != "41" return false;
+    if !result_is_err(forward(bad)) return false;
+
+    trace: s64 = 0;
+    if !result_is_err(widen(.Err(.{ .trace = *trace }), *trace)) || trace != 123
+        return false;
+    trace = 0;
+    if result_unwrap_or(widen(.Ok(41), *trace), "") != "ok" || trace != 3
+        return false;
+    trace = 0;
+    if !result_is_err(explicit_error(*trace)) || trace != 3 return false;
+    if !result_is_err(from_variant(.Err(.{ .trace = *trace }))) return false;
+
+    evaluations: s64 = 0;
+    calls: s64 = 0;
+    if result_unwrap_or(use_override(*evaluations, *calls), "") != "41" return false;
+    return evaluations == 1 && calls == 1;
+}
+
+#comptime { #assert verify(); }
+main :: () {
+    if !verify() exit(1);
+    print("try operator passed\n");
+}

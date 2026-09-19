@@ -49,6 +49,22 @@ assert.equal(compileAndRun("operators"), [
   "loaded 68", "",
 ].join("\n"));
 
+assert.equal(compileAndRun("try_operator"), "try operator passed\n");
+assert.equal(compileAndRun("array_reserve"), "array reserve passed\n");
+
+for (const [name, diagnostic] of [
+  ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
+  ["try_missing_conversion", "no overload '?' accepts these arguments"],
+  ["try_missing_boundary", "requires a Try-returning function or an enclosing #try block"],
+  ["try_invalid_token", "with the boundary result in Break"],
+  ["empty_parameter_order", "#empty parameters must appear before runtime parameters"],
+]) {
+  const rejected = compile(name, "object");
+  assert.notEqual(rejected.status, 0, `${name}: invalid source compiled successfully`);
+  const diagnostics = `${rejected.stdout}\n${rejected.stderr}`;
+  assert.ok(diagnostics.includes(diagnostic), `${name}: missing ${diagnostic}:\n${diagnostics}`);
+}
+
 const locationSource = readFileSync(join(fixtures, "source_locations.glo"), "utf8");
 const locationLines = locationSource.split(/\r?\n/);
 function sourcePosition(lineMarker) {
@@ -75,4 +91,4 @@ const diagnostics = `${rejected.stdout}\n${rejected.stderr}`;
 assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).length, 3,
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
-console.log("Language checks passed: five operator modes, inherited levels, loaded-module prescan, lexical source locations, and removed #precedence rejection.");
+console.log("Language checks passed: operators, Try boundary contracts and overrides, array reserve capacity, lexical source locations, and rejected obsolete or invalid syntax.");

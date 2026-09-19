@@ -19,11 +19,11 @@ assert.ifError(extraction.error);
 assert.equal(extraction.status, 0, `${extraction.stdout}\n${extraction.stderr}`);
 
 const { modules, instances } = JSON.parse(readFileSync(output, "utf8"));
-assert.equal(modules.length, 2);
+assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 6);
+assert.equal(symbols.size, 6, "private names, their members, and private sections must be excluded");
 
 const open = symbols.get("open");
 assert.equal(open.display_signature,
@@ -105,4 +105,27 @@ assert.equal(instances[0].class_name, "Show");
 assert.equal(instances[0].head, "Source_Location");
 assert.equal(instances[0].module, "Source_Location");
 
-console.log("Reference extraction checks passed: current open, defaults, constraints, memory forms, typed flags, lazy parameters, function pointers, and source locations.");
+const tryModule = modules.find(module => module.name === "Try");
+assert.ok(tryModule);
+const trySymbols = new Map(tryModule.symbols.map(symbol => [symbol.name, symbol]));
+assert.equal(trySymbols.size, 5);
+const propagation = trySymbols.get("?");
+assert.equal(propagation.kind, "method");
+assert.equal(propagation.owner_typeclass, "Try");
+assert.equal(propagation.has_default, true);
+assert.equal(propagation.display_signature,
+  "'?' :: (#empty: $Target, value: Carrier) -> Try_Branch(Output, Target) #operator(suffix, try(Target))");
+assert.equal(propagation.searchable_signature, "(Carrier) -> Try_Branch(Output, Target)");
+assert.deepEqual(propagation.function_info.parameters.map(parameter => [parameter.name, parameter.value_type, parameter.modifiers]), [
+  ["#empty", "$Target", ["empty type witness"]], ["value", "Carrier", []],
+]);
+assert.deepEqual(propagation.function_info.parameters[0].constraints, [
+  "Try(Target)",
+  "(Try(Carrier).Residual == Try(Target).Residual || Propagate(Try(Carrier).Residual, Try(Target).Residual))",
+]);
+assert.equal(trySymbols.get("Try").class_info.minimal, "from_output, from_residual, branch");
+assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.name), [
+  "Output", "Residual", "from_output", "from_residual", "branch", "?",
+]);
+
+console.log("Reference extraction checks passed: current open, defaults, constraints, memory forms, typed flags, lazy parameters, function pointers, source locations, private declarations, and try(Target) operators.");

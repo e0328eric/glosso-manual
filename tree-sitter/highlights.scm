@@ -271,6 +271,8 @@
 
 (library_modifier) @attribute
 (inline_modifier) @attribute
+(operator_try_modifier "try" @attribute)
+(operator_try_modifier target: (identifier) @type)
 (string_modifier) @attribute
 (partial_directive) @attribute
 (pattern_rest) @operator

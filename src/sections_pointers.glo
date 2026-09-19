@@ -629,8 +629,9 @@ render_section_51 :: () {
     subheading(22, "Growth and the allocator");
     paragraph(23, #string,oneline
         \\A fresh `[..]T` is `count = 0`, `capacity = 0`, and holds no allocation at
-        \\all; the first `array_add` takes one. Capacity goes from zero to eight and
-        \\doubles from there, and the storage comes from `context.allocator`, so a
+        \\all; `array_add` or `array_reserve` acquires its backing storage.
+        \\Appending grows capacity from zero to eight and doubles it from there.
+        \\The storage comes from `context.allocator`, so a
         \\`#push_allocator` region redirects it without any change at the call site.
         \\Allocators and The Implicit Context cover that machinery.
     );
@@ -659,6 +660,12 @@ render_section_51 :: () {
         \\after array_reset: count=0 capacity=32
     );
     paragraph(26, #string,oneline
+        \\`array_reserve(*d, capacity)` ensures room for at least that many elements
+        \\without changing the count or existing values. A request within the
+        \\current capacity does nothing; a larger request allocates that capacity.
+        \\The extra storage is uninitialized. Negative capacities and byte-size
+        \\overflow are rejected before allocation. Reservation also works at compile
+        \\time and on structure-of-arrays dynamic arrays.
         \\`array_reset` sets the count to zero and keeps the allocation, which is
         \\what makes a reused buffer cheap. `array_free` goes further and restores
         \\the descriptor a fresh array has, sentinel data pointer included, so a
@@ -684,21 +691,22 @@ render_section_51 :: () {
 
     subheading(29, "The dynamic-array procedures");
     paragraph(30, #string,oneline
-        \\The whole `[..]T` surface is four procedures and two aliases, declared in
+        \\The whole `[..]T` surface is five procedures and two aliases, declared in
         \\the prelude with hand-written `#memory` contracts. The mutators take a
         \\pointer to the descriptor and update it in place.
     );
     table_header(31, "Declaration   —   Effect   —   `#memory`");
     table_row(32, "`array_add(a: *[..]$T, value: ...T)`   |   appends, growing if needed; aliased as `array_append`   |   `invalidates(a), writes(a), noescape(a), owns(value, into: a)`");
+    table_row(58, "`array_reserve(a: *[..]$T, capacity: ssize)`   |   reserves storage without changing count   |   `invalidates(a), writes(a), noescape(a)`");
     table_row(33, "`array_reset(a: *[..]$T)`   |   count to zero, allocation retained   |   `writes(a), noescape(a)`");
     table_row(34, "`array_free(a: *[..]$T)`   |   releases the allocation; aliased as `array_deinit`   |   `kills(a), noescape(a)`");
     table_row(35, "`array_view(a: [..]$T) -> []T`   |   a view over the current elements   |   `returns_borrow(a), reads(a), noescape(a)`");
     paragraph(36, #string,oneline
-        \\Those contracts are what the compiler's memory analysis reads. An
-        \\`array_add` is what makes an array owned, so a `[..]T` that is grown and
-        \\never freed is `warning: [memory.leak] resource must be released by 'array_free' before leaving scope`.
+        \\Those contracts are what the compiler's memory analysis reads. Growing
+        \\with `array_add` or `array_reserve` makes an array owned. Acquiring storage
+        \\without releasing it produces `warning: [memory.leak] resource must be released by 'array_free' before leaving scope`.
         \\`invalidates(a)` means a view taken before a growth is reported stale:
-        \\reading it after the next `array_add` is
+        \\reading it after a later `array_add` or `array_reserve` is
         \\`warning: stale reference used after storage invalidation`. Ownership and
         \\Release Obligations and Aliasing, Invalidation, and Storage Generations
         \\cover both.
@@ -707,7 +715,7 @@ render_section_51 :: () {
         \\`array_add` is variadic in its element type, so several values append in
         \\one call, but argument expansion does not reach it: `array_add(*d, xs...)`
         \\for `xs: [4]s64` is `error: got [4]s64, expected s64`, and a loop is how
-        \\an existing run is appended. All four take the dynamic array itself, never
+        \\an existing run is appended. All five take the dynamic array itself, never
         \\a view: `array_free(*v)` for a `v: []s64` is
         \\`error: array_free expects a mutable *[..]T dynamic array pointer`.
     );

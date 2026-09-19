@@ -613,13 +613,16 @@ render_section_118 :: () {
         \\spelling of what the compiler already does at a frame boundary.
     );
     paragraph(23, #string,oneline
-        \\Calling it does not move the boundary, though. The call is itself a
-        \\frame, so the mark taken on entry is restored on return and the arena
-        \\comes back exactly where it was; the sixteen-byte gap in `carrier`
-        \\above does not close if a reset is written between the two `tprint`
-        \\calls. Programs bound their temporary use by putting the work inside a
-        \\block, or inside a procedure whose signature cannot carry temporary
-        \\storage out, and letting the compiler place the boundary.
+        \\Every pointer, string, slice, and returned aggregate still referring to
+        \\the reset arena becomes invalid. The memory checker follows recognized
+        \\temporary allocator origins through scoped `#push_allocator`, Context
+        \\allocation calls, dynamic-array growth, and returned values. A later use
+        \\is diagnosed as stale when `reset_temporary_storage` or `free_all` resets
+        \\that arena. Allocations from the ordinary heap remain live, and new
+        \\allocations after the reset belong to a new storage generation.
+        \\Arbitrary allocator procedures and direct replacement of context fields
+        \\are outside this analysis; keep temporary values inside their lifetime
+        \\even when no diagnostic is emitted.
     );
     subheading(24, "What comes from temporary storage");
     paragraph(25, #string,oneline
@@ -1519,10 +1522,11 @@ render_section_122 :: () {
         \\  |     ^^^^^^
     );
     note(10, #string,oneline
-        \\`#try defer` does not discharge an obligation. The analyser checks the
-        \\statement for validity and then discards its effects, because it follows
-        \\only the successful continuation of a postfix `?`. A cleanup that must
-        \\count toward the obligation has to be a plain `defer`.
+        \\The analyser follows both continuations of postfix `?` and applies
+        \\`#try defer` cleanup when propagation exits its scope. That can discharge
+        \\an obligation on the failure path; success still needs a release or an
+        \\ownership transfer. An explicit `return .Err(...)` does not run try-only
+        \\cleanup. Use plain `defer` for a release required on every exit.
     );
 
     subheading(11, "Conditional release");
@@ -2410,14 +2414,14 @@ render_section_125 :: () {
     paragraph(1, #string,oneline
         \\This chapter is the list of places where the analysis is known to
         \\be wrong. Some are false negatives: the pass says nothing where
-        \\something is. Two are the opposite, reporting a defect in a correct
-        \\program. Both directions matter, because a warning that cannot be
+        \\something is. Others report a defect in a correct program.
+        \\Both directions matter, because a warning that cannot be
         \\true trains a reader to ignore the ones that can.
     );
     table_header(2, "Blind spot   —   What is missed");
     table_row(3, "Generic bodies   |   Their own defects are reported, but no effect is inferred for their callers, so a correct caller is diagnosed as leaking.");
     table_row(4, "`unknown` contracts   |   Every release through the call; the result carries an obligation nothing can discharge.");
-    table_row(5, "`#try defer`   |   Its cleanup is validated but its effects are discarded.");
+    table_row(5, "Custom allocator behavior   |   Arbitrary allocator procedures and direct context-field replacement do not establish tracked temporary origins.");
     table_row(6, "Standard-library bodies   |   Diagnostics are suppressed inside them unless `--borrow-check-std` is passed.");
     subheading(7, "Generic effects do not reach callers");
     paragraph(8, #string,oneline
@@ -2522,13 +2526,13 @@ render_section_125 :: () {
         \\bindgen-generated program is, by default, unanalysed with respect to
         \\ownership, and noisy about it.
     );
-    subheading(18, "`#try defer` cleanup does not count");
+    subheading(18, "`#try defer` and propagation exits");
     paragraph(19, #string,oneline
-        \\A plain `defer` is pushed onto the scope frame and replayed at every
-        \\exit, including every `return`. A `#try defer` is checked for
-        \\validity and then its effects are discarded, because the analyser
-        \\follows only the successful continuation of a postfix `?`. The
-        \\cleanup that runs on the error path is invisible.
+        \\A plain `defer` is replayed at every scope exit, including `return`.
+        \\A `#try defer` runs only when propagation leaves its scope. The analyser
+        \\tracks that failure path, applies the cleanup, and preserves ownership
+        \\carried by the completed failure result. An explicit error return still
+        \\skips try-only cleanup, as the second procedure below demonstrates.
     );
     code_block(20, "glosso", #string
         \\#import "Io";
@@ -2552,12 +2556,11 @@ render_section_125 :: () {
         \\}
     );
     paragraph(21, #string,oneline
-        \\`plain` is clean. `trying` gives `warning: [memory.maybe_leak]
-        \\resource in 'returned.Some' may not be released by 'free' on every
-        \\path` at its `alloc`, because on the `.Err` path the analyser still
-        \\sees the resource alive. This one is
-        \\a false positive rather than a false negative, and the plain `defer`
-        \\above is the spelling the analysis understands.
+        \\`plain` is clean. `trying` leaks when `fail` is true: its explicit
+        \\`return .Err(.Bad)` skips the try-only cleanup. The possible-leak
+        \\diagnostic describes that real missing release. If the failure instead
+        \\arrives through `operation()?`, the `#try defer` runs and the analyser
+        \\counts its release. Success still reaches the explicit `free(p)`.
     );
 
     subheading(22, "What is outside the analysis entirely");
@@ -2571,10 +2574,11 @@ render_section_125 :: () {
         \\silences them.
     );
     bullet(24, #string,oneline
-        \\`#push_allocator` does not relax an obligation. An `alloc` inside a
-        \\temporary-arena block still requires a matching `free`, even though
-        \\the arena releases everything at once. The annotation for that is
-        \\`#memory leak` on the acquisition.
+        \\`#push_allocator` selects the allocator; leaving that scope alone
+        \\does not discharge an allocation's release obligation. A recognized
+        \\`reset_temporary_storage` or `free_all` of that arena does discharge
+        \\its tracked obligations and invalidates surviving references. Otherwise
+        \\release or transfer the resource normally.
     );
     bullet(25, #string,oneline
         \\Contradictory clause pairs are accepted. `#memory(returns_borrow(p),

@@ -79,7 +79,7 @@ render_section_83 :: () {
     subheading(11, "Arity and fixity are part of the name");
     paragraph(12, #string,oneline
         \\The ownership key is the spelling together with its arity and its
-        \\fixity: `prefix` or `suffix` for a one-parameter operator, `infix`
+        \\fixity: `prefix` or `suffix` for a unary operator, `infix`
         \\for everything else. Two classes may therefore share a spelling as
         \\long as they differ in fixity, which is exactly how the Prelude
         \\gives `-` and `..` more than one meaning.
@@ -138,6 +138,7 @@ render_section_83 :: () {
     code_block(24, "text", #string
         \\#operator( left | right | assign , level )
         \\#operator( prefix | suffix )
+        \\#operator( suffix, try(Target) )
     );
     table_header(25, "Mode   —   Means   —   Level");
     table_row(26, "`left`   |   infix, groups to the left   |   required");
@@ -159,9 +160,10 @@ render_section_83 :: () {
         \\Bare `#operator(left)` on the class declaration counts as no level.
     );
     bullet(33, #string,oneline
-        \\A level on a unary mode does not parse: `#operator(prefix, 5)` is
-        \\`error: unexpected token ','`. Write `#operator(prefix)` or
-        \\`#operator(suffix)` with no numeric argument.
+        \\A level on a unary mode does not parse. Write `#operator(prefix)`
+        \\or `#operator(suffix)` with no numeric argument. A suffix can also
+        \\carry `try(Target)`, which requests a Try boundary rather than a
+        \\precedence level.
     );
     bullet(34, #string,oneline
         \\An unknown mode is
@@ -202,6 +204,57 @@ render_section_83 :: () {
         \\the caller, so a loaded module can supply new operator syntax there.
         \\The owning class and instance must also be visible to resolve the
         \\expression. The prescan is described in The Operator Prescan.
+    );
+    subheading(41, "Suffix operators with a Try boundary");
+    paragraph(42, #string,oneline
+        \\`#operator(suffix, try(Target))` gives a suffix operator one erased
+        \\boundary witness followed by its operand. Its signature is
+        \\`(#empty: $Target, value: Source)` and its result must be
+        \\`Try_Branch(Try(Source).Output, Target)`. Both carriers implement
+        \\`Try`. The witness is excluded from the unary ownership key, but
+        \\is included when specializing the operator for a destination type.
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\Forward_Try :: typeclass (Source: type) {
+        \\    '!!' :: (#empty: $Target, value: Source)
+        \\        -> Try_Branch(Try(Source).Output, Target)
+        \\        #operator(suffix, try(Target))
+        \\        where Try(Source) && Try(Target) &&
+        \\            (Try(Source).Residual == Try(Target).Residual ||
+        \\             Propagate(Try(Source).Residual, Try(Target).Residual)) {
+        \\        return '?'(Target, value);
+        \\    }
+        \\}
+        \\string!s64 ::: instance Forward_Try {}
+        \\describe :: (input: string!s64) -> string!string {
+        \\    value := input!!;
+        \\    return show(value);
+        \\}
+        \\main :: () {
+        \\    print("%\n", result_unwrap_or(describe(.Ok(41)), "failed"));
+        \\    print("%\n", result_unwrap_or(describe(.Err("stop")), "failed"));
+        \\}
+    );
+    code_block(44, "text", #string
+        \\41
+        \\failed
+    );
+    paragraph(45, #string,oneline
+        \\Postfix `input!!` passes the nearest boundary's carrier type and
+        \\interprets `.Continue` as a value and `.Break` as an early exit.
+        \\The quoted call `'!!'(Target, input)` returns the ordinary token;
+        \\it works outside a boundary. Scoped calls such as
+        \\`Forward_Try.'!!'(Target, input)` do the same. `?` uses this same
+        \\annotation; its body can be overridden by a `Try` instance.
+    );
+    note(46, #string,oneline
+        \\`try(Target)` is accepted only on a suffix operator. Write the
+        \\plain identifier `Target` inside the annotation, matching `$Target`
+        \\in the leading witness. The operand cannot be lazy, variadic, or
+        \\defaulted. The declaration must have a Glosso body or be a typeclass
+        \\signature; `#expand`, `#magic`, and foreign bodies are rejected.
+        \\An instance override must retain the class's Try boundary contract.
     );
 }
 
