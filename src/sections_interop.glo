@@ -1,5 +1,7 @@
 // Sections 131-137: interop and low-level code.
 
+#public(unit) {
+
 render_section_131 :: () {
     paragraph(0, #string,oneline
         \\Glosso calls C directly. There is no wrapper layer, no generated shim,
@@ -183,7 +185,7 @@ render_section_131 :: () {
         \\final order is the plan's own flags and objects, then the library
         \\arguments derived from reachable `#foreign` calls, then every
         \\`--linker-arg` in command-line order, then anything a build script added
-        \\with `add_current_linker_arg`. It is the mechanism for search paths,
+        \\with `string.add_current_linker_arg`. It is the mechanism for search paths,
         \\subsystem selection, and any flag Glosso has no directive for.
     );
     code_block(37, "text", #string
@@ -355,7 +357,7 @@ render_section_132 :: () {
         \\`Compiler` and `Bindgen` modules now declare their private service
         \\result records with `#c_call`, preserving the service field order on
         \\32-bit output targets as well as the host. Application code should
-        \\call `compile_c_archive` and `generate_source` and match their public
+        \\call `string.compile_c_archive` and `string.generate_source` and match their public
         \\`Result` values, not copy the private records or redeclare their raw
         \\`#magic` entry points.
     );
@@ -570,7 +572,7 @@ render_section_133 :: () {
         \\The checker rejects by-value complex primitives at C boundaries,
         \\including fields in `struct #c_call`: pass the real and imaginary
         \\components separately. `Simd(T, N)` has no portable C ABI; pass scalar
-        \\memory and use `simd_load`/`simd_store` inside Glosso. Matrices likewise
+        \\memory and use `simd_load`/`array.simd_store` inside Glosso. Matrices likewise
         \\cross through a pointer to scalar storage. `f80` and `f128` must match
         \\the exact target's floating format and convention, not merely a C type
         \\with the same storage size; `f80` is not a portable alias for C
@@ -622,10 +624,10 @@ render_section_133 :: () {
         \\`std/Strings/Utf8`.
     );
     table_header(30, "Call   —   Result   —   Storage");
-    table_row(31, "`cstring_from_string(text, allocator)`   |   `cstring`   |   `context.allocator` by default; release it");
-    table_row(32, "`c_string(text)`   |   `cstring`   |   the temporary allocator; no release");
-    table_row(33, "`cstring_to_string(text)`   |   `string`   |   a fresh copy");
-    table_row(34, "`cstring_free(text, allocator)`   |   nothing   |   releases a `cstring_from_string` result");
+    table_row(31, "`text.cstring_from_string(allocator)`   |   `cstring`   |   `context.allocator` by default; release it");
+    table_row(32, "`text.c_string()`   |   `cstring`   |   the temporary allocator; no release");
+    table_row(33, "`text.to_string()`   |   `string`   |   a fresh copy");
+    table_row(34, "`text.free(allocator)`   |   nothing   |   releases a `string.cstring_from_string` result");
     code_block(35, "glosso", #string
         \\#import "Io";
         \\#import "Strings/Utf8";
@@ -633,12 +635,12 @@ render_section_133 :: () {
         \\c_atoi :: (s: *const s8) -> s32 #foreign "c" "atoi" #memory(reads(s), noescape(s));
         \\
         \\main :: () {
-        \\    temporary := c_string("1234");             // temp-allocator copy
+        \\    temporary := ("1234").c_string();             // temp-allocator copy
         \\    print("atoi = %\n", c_atoi(temporary));
         \\
-        \\    owned := cstring_from_string("hello");     // context.allocator copy
-        \\    defer cstring_free(owned);
-        \\    print("count = % round trip = %\n", owned.count, cstring_to_string(owned));
+        \\    owned := ("hello").cstring_from_string();     // context.allocator copy
+        \\    defer owned.free();
+        \\    print("count = % round trip = %\n", owned.count, owned.to_string());
         \\}
     );
     code_block(36, "text", #string
@@ -674,8 +676,8 @@ render_section_133 :: () {
         \\
         \\sum_s64 :: (count: ssize, ...) -> s64 #c_call {
         \\    ap: Va_List;
-        \\    start(*ap);
-        \\    defer end(*ap);
+        \\    ap.start();
+        \\    defer ap.end();
         \\    total: s64 = 0;
         \\    i: ssize = 0;
         \\    while i < count {
@@ -718,7 +720,7 @@ render_section_133 :: () {
         \\become `f64`; other tail values keep their representation. Aggregate
         \\descriptors are not adapted, so `c_printf("%s\n", "hello")` passes a
         \\three-word string descriptor where C reads a pointer and can crash.
-        \\Convert the string with `c_string` first.
+        \\Convert the string with `string.c_string` first.
     );
 }
 
@@ -739,14 +741,14 @@ render_section_134 :: () {
         \\`Libraries` when the header contains functions from several artifacts.
     );
     table_header(2, "Call   —   Produces   —   Used with");
-    table_row(3, "`generate(header, output, library)`   |   writes a `.glo` file   |   a checked-in bindings file");
-    table_row(4, "`generate_source(header, library)`   |   returns the source text   |   `#insert`, no file on disk");
+    table_row(3, "`header.generate(output, library)`   |   writes a `.glo` file   |   a checked-in bindings file");
+    table_row(4, "`header.generate_source(library)`   |   returns the source text   |   `#insert`, no file on disk");
     code_block(5, "glosso", #string
         \\#import "Io";
         \\#import "Bindgen";
         \\
         \\emit :: () {
-        \\    if generate("counter.h", "counter_bindings.glo", library_spec("counter")) == {
+        \\    if ("counter.h").generate("counter_bindings.glo", ("counter").library_spec()) == {
         \\    case .Ok(message); print("[bindgen] %\n", message);
         \\    case .Err(error);  print("[bindgen] failed: %\n", error.message);
         \\    }
@@ -798,7 +800,7 @@ render_section_134 :: () {
     paragraph(8, #string,oneline
         \\The `.Ok` payload of `generate` is a status line, not a path: the run
         \\above printed `[bindgen] bindgen: wrote counter_bindings.glo`. The `.Ok`
-        \\payload of `generate_source` is the source text itself.
+        \\payload of `string.generate_source` is the source text itself.
     );
 
     subheading(9, "Library descriptors");
@@ -806,14 +808,14 @@ render_section_134 :: () {
         \\The library argument decides the `#library` declaration at the head of the
         \\generated file. The descriptor's name becomes the Glosso identifier every
         \\`#foreign` in the file refers to; its file or path becomes the string.
-        \\`library_spec(name, file = "", kind = .Static)` defaults an empty file
+        \\`name.library_spec(file = "", kind = .Static)` defaults an empty file
         \\to the name for `.Static` and `.System`. `.Dynamic` requires a path.
     );
     table_header(11, "Descriptor   —   Emitted declaration");
-    table_row(12, "`library_spec(\"small\")`   |   `small :: #library,static \"small\";`");
-    table_row(13, "`library_spec(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
-    table_row(14, "`library_spec(\"m\", .kind = .System)`   |   `m :: #library,system \"m\";`");
-    table_row(15, "`library_spec(\"small\", \"libsmall.so\", .Dynamic)`   |   `small :: #library,dyn \"libsmall.so\";`");
+    table_row(12, "`(\"small\").library_spec()`   |   `small :: #library,static \"small\";`");
+    table_row(13, "`(\"small\").library_spec(\"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
+    table_row(14, "`(\"m\").library_spec(.kind = .System)`   |   `m :: #library,system \"m\";`");
+    table_row(15, "`(\"small\").library_spec(\"libsmall.so\", .Dynamic)`   |   `small :: #library,dyn \"libsmall.so\";`");
 
     subheading(16, "Direct generation parameters");
     code_block(17, "glosso", #string
@@ -821,10 +823,7 @@ render_section_134 :: () {
         \\    includes: [1]string = .["include"];
         \\    definitions: [1]string = .["SMALL_EXTRA=1"];
         \\    names: [2]string = .["small_add", "SMALL_VERSION"];
-        \\    return generate_source("small.h", library_spec("small"),
-        \\        .include_paths = includes[..],
-        \\        .preprocessor_definitions = definitions[..],
-        \\        .allowlist = names[..]);
+        \\    return ("small.h").generate_source(("small").library_spec(), .include_paths = includes[..], .preprocessor_definitions = definitions[..], .allowlist = names[..]);
         \\}
     );
     table_header(18, "Parameter   —   Becomes   —   Default");
@@ -857,8 +856,7 @@ render_section_134 :: () {
         \\// broken.h begins with: #include <no_such_header_anywhere.h>
         \\
         \\emit :: (allow: bool) {
-        \\    if generate_source("broken.h", library_spec("broken"),
-        \\        .allow_textual_fallback = allow) == {
+        \\    if ("broken.h").generate_source(("broken").library_spec(), .allow_textual_fallback = allow) == {
         \\    case .Ok(source);  print("[ok, allow=%]\n%\n", allow, source);
         \\    case .Err(error);  print("[err, allow=%] %\n", allow, error.message);
         \\    }
@@ -986,14 +984,14 @@ render_section_134 :: () {
         \\
         \\build_counter :: () -> string {
         \\    sources: [..]string;
-        \\    defer array_free(*sources);
-        \\    array_add(*sources, "counter.c");
+        \\    defer sources.free();
+        \\    sources.add("counter.c");
         \\    archive: Native_Compile_Output;
-        \\    if compile_c_archive("counter", sources) == {
+        \\    if ("counter").compile_c_archive(sources) == {
         \\    case .Ok(built);  archive = built;
         \\    case .Err(error); print("cc failed: %\n", error.message); return "";
         \\    }
-        \\    if generate_source("counter.h", library_spec("counter", archive.artifact)) == {
+        \\    if ("counter.h").generate_source(("counter").library_spec(archive.artifact)) == {
         \\    case .Ok(source); return source;
         \\    case .Err(error); print("bindgen failed: %\n", error.message); return "";
         \\    }
@@ -1155,7 +1153,7 @@ render_section_135 :: () {
         \\popcount(255)     = 8
     );
     paragraph(12, #string,oneline
-        \\`rotate_left` emits `"rolq ${1:b}, $0"` with the constraint string
+        \\`u64.rotate_left` emits `"rolq ${1:b}, $0"` with the constraint string
         \\`"=r,{rcx},0,~{cc}"`: the modifier survived, the fixed register became a
         \\braced register name, and the `inout` operand became an output plus a
         \\tied input. `rolq` needs its shift count in `cl`, and `{shift:b}` is how a
@@ -1448,8 +1446,8 @@ render_section_136 :: () {
         \\program that build emits.
     );
     table_header(13, "Family   —   Class   —   Note");
-    table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
-    table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `str_repeat`, `substring`, `byte_string`, the `show_*` formatters");
+    table_row(14, "type and pattern reflection   |   compile-time only   |   `value.type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
+    table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `string.repeat`, `substring`, `byte_string`, the `show_*` formatters");
     table_row(16, "files, filesystem, processes   |   VM and compile time   |   so a build script can read the host; the handle-relative sandbox primitives stay native only");
     table_row(17, "compiler and bindgen services   |   VM and compile time, native forbidden   |   `compiler_add_build_file`, `compiler_add_build_string`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
     table_row(18, "complex numbers, wrapping and saturating integers, indexing, ranges   |   VM and compile time   |   `complex_*`, `int_wrap_*`, `int_sat_*`, `index_array`, the `slice*` family, `type_eq`");
@@ -1508,8 +1506,8 @@ render_section_136 :: () {
         \\#import "Context";
         \\
         \\make :: () -> s64 {
-        \\    p := alloc(8);
-        \\    free(p);
+        \\    p := (8).alloc();
+        \\    p.free();
         \\    return 1;
         \\}
         \\
@@ -1564,12 +1562,12 @@ render_section_136 :: () {
         \\error: #magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering [opcode Magic] while lowering 'main' at IR instruction 2
     );
     note(47, #string,oneline
-        \\`sb_new`, `sb_append` and `sb_to_string` are the one family whose behaviour
+        \\`String_Builder.source_new`, `String_Builder.append` and `String_Builder.finish_source` are the one family whose behaviour
         \\differs between the two compile-time engines: the constant evaluator
         \\special-cases the mutation through a pointer, and the VM does not. A
         \\`String_Builder` used inside a top-level `#comptime` stops with
         \\`#comptime stopped: VM: value is not a string`; build compile-time text
-        \\with `str_cat` or `str_repeat` instead.
+        \\with `string.cat` or `string.repeat` instead.
     );
     subheading(48, "`#magic` on an aggregate");
     paragraph(49, #string,oneline
@@ -1602,7 +1600,7 @@ render_section_137 :: () {
     paragraph(2, #string,oneline
         \\The work `static_bindings_source` does on a supported target is: check the
         \\target against the support matrix, locate the Lua source tree, hand the 32
-        \\C files to `compile_c_archive` with `LUA_USE_POSIX` defined on the Unix
+        \\C files to `string.compile_c_archive` with `LUA_USE_POSIX` defined on the Unix
         \\family, add `-lm` to the link on Linux, macOS and FreeBSD, and return the
         \\bindgen output for `glosso_lua.h` bound to the archive it produced.
     );
@@ -1824,7 +1822,7 @@ render_section_137 :: () {
     subheading(37, "Linking an application-owned Lua");
     paragraph(38, #string,oneline
         \\A program that ships its own Lua shared library imports `Lua/Build` instead
-        \\of `Lua` and inserts `dynamic_bindings_source(path)` from its own bindings
+        \\of `Lua` and inserts `path.dynamic_bindings_source()` from its own bindings
         \\module. No C is compiled; bindgen runs against the same header and binds a
         \\`#library,dyn` descriptor instead of the cached archive. The path is
         \\required, so the empty call below is rejected by the same generated-stub
@@ -1834,7 +1832,7 @@ render_section_137 :: () {
         \\#import "Io";
         \\#import "Lua/Build";
         \\
-        \\#insert dynamic_bindings_source("");
+        \\#insert ("").dynamic_bindings_source();
         \\
         \\main :: () {}
     );
@@ -1858,4 +1856,6 @@ render_section_137 :: () {
         \\different Lua version will link and then misbehave, because nothing in the
         \\build checks the library against the header it was described by.
     );
+}
+
 }

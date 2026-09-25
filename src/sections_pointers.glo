@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 49-55: pointers and collections.
 
 render_section_49 :: () {
@@ -126,9 +128,9 @@ render_section_49 :: () {
         \\    n: s64 = 42;
         \\    c: *const s64 = *n;          // the pointee is read-only
         \\    b: **const s64 = *c;
-        \\    print("plain:  %\n", type_name(type_of(*n)));
-        \\    print("const:  %\n", type_name(type_of(c)));
-        \\    print("nested: %\n", type_name(type_of(b)));
+        \\    print("plain:  %\n", type_name((*n).type_of()));
+        \\    print("const:  %\n", type_name(c.type_of()));
+        \\    print("nested: %\n", type_name(b.type_of()));
         \\    print("value:  %\n", b.*.*);
         \\}
     );
@@ -341,8 +343,8 @@ render_section_50 :: () {
         \\main :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
         \\    d: [..]s64;
-        \\    defer array_free(*d);
-        \\    array_add(*d, 7, 8, 9);
+        \\    defer d.free();
+        \\    d.add(7, 8, 9);
         \\    s := "hey";
         \\    print("from [N]T: %\n", a.data[0]);
         \\    print("from []T:  %\n", a[..].data[1]);
@@ -418,7 +420,7 @@ render_section_50 :: () {
         \\    omp: ?[*]s64;
         \\    ov:  ?[]s64;
         \\    print("?*s64=%  ?[*]s64=%  ?Handler=%  ?[]s64=%\n",
-        \\        size_of(?*s64), size_of(type_of(omp)), size_of(?Handler), size_of(type_of(ov)));
+        \\        size_of(?*s64), size_of(omp.type_of()), size_of(?Handler), size_of(ov.type_of()));
         \\    print("a fresh ?[*]s64 is absent: %\n", omp == null);
         \\}
     );
@@ -532,10 +534,10 @@ render_section_51 :: () {
         \\    a: [3]s64 = .[10, 20, 30];
         \\    v := a[..];
         \\    d: [..]s64;
-        \\    defer array_free(*d);
-        \\    array_add(*d, 1, 2, 3, 4, 5);
+        \\    defer d.free();
+        \\    d.add(1, 2, 3, 4, 5);
         \\    print("sizes: [3]s64=% []s64=% [..]s64=%\n",
-        \\        size_of(type_of(a)), size_of(type_of(v)), size_of(type_of(d)));
+        \\        size_of(a.type_of()), size_of(v.type_of()), size_of(d.type_of()));
         \\    words := cast([*]usize) cast(*usize) *d;
         \\    print("descriptor words: % % %\n", words[0], words[1] == cast(usize) d.data, words[2]);
         \\    print("fields: a.count=% v.count=% d.count=% d.capacity=%\n",
@@ -550,7 +552,7 @@ render_section_51 :: () {
     paragraph(8, #string,oneline
         \\A bracket type is written in annotation position only; it is not an
         \\expression. `size_of([3]s64)` is `error: unexpected token '['`, which is
-        \\why the program above spells the sizes as `size_of(type_of(a))`.
+        \\why the program above spells the sizes as `size_of(a.type_of())`.
     );
 
     subheading(9, "The fields each shape exposes");
@@ -577,8 +579,8 @@ render_section_51 :: () {
         \\main :: () {
         \\    a: [M]s64;
         \\    b: [N]s64 = .[1, 2, 3];
-        \\    print("a: count=% size=%\n", a.count, size_of(type_of(a)));
-        \\    print("b: count=% size=%\n", b.count, size_of(type_of(b)));
+        \\    print("a: count=% size=%\n", a.count, size_of(a.type_of()));
+        \\    print("b: count=% size=%\n", b.count, size_of(b.type_of()));
         \\    #assert b.count == 3, "count is a compile-time constant";
         \\    print("zero initialized: % % %\n", a[0], a[1], a[4]);
         \\}
@@ -629,7 +631,7 @@ render_section_51 :: () {
     subheading(22, "Growth and the allocator");
     paragraph(23, #string,oneline
         \\A fresh `[..]T` is `count = 0`, `capacity = 0`, and holds no allocation at
-        \\all; `array_add` or `array_reserve` acquires its backing storage.
+        \\all; `array.add` or `array.reserve` acquires its backing storage.
         \\Appending grows capacity from zero to eight and doubles it from there.
         \\The storage comes from `context.allocator`, so a
         \\`#push_allocator` region redirects it without any change at the call site.
@@ -640,15 +642,15 @@ render_section_51 :: () {
         \\
         \\main :: () {
         \\    d: [..]s64;
-        \\    defer array_free(*d);
+        \\    defer d.free();
         \\    print("fresh: count=% capacity=%\n", d.count, d.capacity);
         \\    for i: 0..20 {
         \\        before := d.capacity;
-        \\        array_add(*d, i);
+        \\        d.add(i);
         \\        if d.capacity != before
         \\            print("count %: capacity % -> %\n", d.count, before, d.capacity);
         \\    }
-        \\    array_reset(*d);
+        \\    d.reset();
         \\    print("after array_reset: count=% capacity=%\n", d.count, d.capacity);
         \\}
     );
@@ -660,14 +662,14 @@ render_section_51 :: () {
         \\after array_reset: count=0 capacity=32
     );
     paragraph(26, #string,oneline
-        \\`array_reserve(*d, capacity)` ensures room for at least that many elements
+        \\`d.reserve(capacity)` ensures room for at least that many elements
         \\without changing the count or existing values. A request within the
         \\current capacity does nothing; a larger request allocates that capacity.
         \\The extra storage is uninitialized. Negative capacities and byte-size
         \\overflow are rejected before allocation. Reservation also works at compile
         \\time and on structure-of-arrays dynamic arrays.
-        \\`array_reset` sets the count to zero and keeps the allocation, which is
-        \\what makes a reused buffer cheap. `array_free` goes further and restores
+        \\`array.reset` sets the count to zero and keeps the allocation, which is
+        \\what makes a reused buffer cheap. `array.free` goes further and restores
         \\the descriptor a fresh array has, sentinel data pointer included, so a
         \\freed array is indistinguishable from one that was never grown.
     );
@@ -677,9 +679,9 @@ render_section_51 :: () {
         \\main :: () {
         \\    d: [..]s64;
         \\    print("fresh:      count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
-        \\    array_add(*d, 1, 2, 3);
+        \\    d.add(1, 2, 3);
         \\    print("after adds: count=% capacity=%\n", d.count, d.capacity);
-        \\    array_free(*d);
+        \\    d.free();
         \\    print("after free: count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
         \\}
     );
@@ -691,33 +693,29 @@ render_section_51 :: () {
 
     subheading(29, "The dynamic-array procedures");
     paragraph(30, #string,oneline
-        \\The whole `[..]T` surface is five procedures and two aliases, declared in
-        \\the prelude with hand-written `#memory` contracts. The mutators take a
-        \\pointer to the descriptor and update it in place.
+        \\Dynamic arrays expose `add`, `append`, `reserve`, `reset`, `free`, and
+        \\`deinit` as inherent methods in the Prelude. Their mutable receivers borrow
+        \\the descriptor automatically. `view` is also available on arrays and views;
+        \\it returns a borrowed view without copying elements.
     );
     table_header(31, "Declaration   —   Effect   —   `#memory`");
-    table_row(32, "`array_add(a: *[..]$T, value: ...T)`   |   appends, growing if needed; aliased as `array_append`   |   `invalidates(a), writes(a), noescape(a), owns(value, into: a)`");
-    table_row(58, "`array_reserve(a: *[..]$T, capacity: ssize)`   |   reserves storage without changing count   |   `invalidates(a), writes(a), noescape(a)`");
-    table_row(33, "`array_reset(a: *[..]$T)`   |   count to zero, allocation retained   |   `writes(a), noescape(a)`");
-    table_row(34, "`array_free(a: *[..]$T)`   |   releases the allocation; aliased as `array_deinit`   |   `kills(a), noescape(a)`");
-    table_row(35, "`array_view(a: [..]$T) -> []T`   |   a view over the current elements   |   `returns_borrow(a), reads(a), noescape(a)`");
+    table_row(32, "`a.add(value, ...)`, `a.append(value, ...)`   |   appends and grows if needed   |   `invalidates(#self), writes(#self), noescape(#self), owns(value, into: #self)`");
+    table_row(58, "`a.reserve(capacity)`   |   reserves storage without changing count   |   `invalidates(#self), writes(#self), noescape(#self)`");
+    table_row(33, "`a.reset()`   |   count to zero, allocation retained   |   `writes(#self), noescape(#self)`");
+    table_row(34, "`a.free()`, `a.deinit()`   |   releases the backing allocation   |   `kills(#self), noescape(#self)`");
+    table_row(35, "`a.view()`   |   a view over the current elements   |   `returns_borrow(#self), reads(#self), noescape(#self)`");
     paragraph(36, #string,oneline
-        \\Those contracts are what the compiler's memory analysis reads. Growing
-        \\with `array_add` or `array_reserve` makes an array owned. Acquiring storage
-        \\without releasing it produces `warning: [memory.leak] resource must be released by 'array_free' before leaving scope`.
-        \\`invalidates(a)` means a view taken before a growth is reported stale:
-        \\reading it after a later `array_add` or `array_reserve` is
-        \\`warning: stale reference used after storage invalidation`. Ownership and
-        \\Release Obligations and Aliasing, Invalidation, and Storage Generations
-        \\cover both.
+        \\The memory checker reads these contracts. Growing an array makes its
+        \\backing storage owned and creates a release obligation. A view taken before
+        \\`add` or `reserve` can become stale when growth moves the allocation.
+        \\Release the array with `free()` after its final use. Ownership and Release
+        \\Obligations and Aliasing, Invalidation, and Storage Generations cover both.
     );
     paragraph(37, #string,oneline
-        \\`array_add` is variadic in its element type, so several values append in
-        \\one call, but argument expansion does not reach it: `array_add(*d, xs...)`
-        \\for `xs: [4]s64` is `error: got [4]s64, expected s64`, and a loop is how
-        \\an existing run is appended. All five take the dynamic array itself, never
-        \\a view: `array_free(*v)` for a `v: []s64` is
-        \\`error: array_free expects a mutable *[..]T dynamic array pointer`.
+        \\`add` is variadic in its element type and appends several written-out
+        \\values in one call. A loop can append the elements of an existing array.
+        \\Mutating operations require a writable dynamic array descriptor; a borrowed
+        \\view does not own the allocation and cannot call `free()`.
     );
 
     subheading(38, "Converting between the three");
@@ -733,12 +731,12 @@ render_section_51 :: () {
     );
     table_header(40, "From   —   To   —   Written");
     table_row(41, "`[N]T`   |   `[]T`   |   `a[..]`, or any other slice of `a`");
-    table_row(42, "`[..]T`   |   `[]T`   |   `array_view(d)` or `d[..]`");
+    table_row(42, "`[..]T`   |   `[]T`   |   `d.view()` or `d[..]`");
     table_row(43, "`[]T`   |   `[]T` over fewer elements   |   `v[lo..hi]`");
     table_row(44, "`[]T`   |   `[]const T`   |   implicit at an assignment or a call");
     table_row(54, "`*[N]T` from `*.[...]`   |   `[]T`   |   implicit in an expected slice context; temporary borrow");
     table_row(45, "`[]T`   |   `[N]T`   |   no conversion; copy element by element");
-    table_row(46, "`[]T` or `[N]T`   |   `[..]T`   |   no conversion; `array_add` the elements");
+    table_row(46, "`[]T` or `[N]T`   |   `[..]T`   |   no conversion; `array.add` the elements");
     code_block(47, "glosso", #string
         \\#import "Io";
         \\
@@ -751,13 +749,13 @@ render_section_51 :: () {
         \\main :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
         \\    d: [..]s64;
-        \\    defer array_free(*d);
-        \\    for x: a array_add(*d, x * 10);
+        \\    defer d.free();
+        \\    for x: a d.add(x * 10);
         \\    print("from a fixed array: %\n", total(a[..]));
         \\    print("from a dynamic array: %\n", total(d[..]));
-        \\    print("through array_view:  %\n", total(array_view(d)));
+        \\    print("through array_view:  %\n", total(d.view()));
         \\    print("a sub-range: %\n", total(a[1..3]));
-        \\    print("from temporary storage: %\n", total(*.[5, 6, 7]));
+        \\    print("from temporary storage: %\n", total(*.[cast(s64)5, cast(s64)6, cast(s64)7]));
         \\}
     );
     code_block(48, "text", #string
@@ -775,7 +773,7 @@ render_section_51 :: () {
     note(55, #string,oneline
         \\`*.[...]` materialises an anonymous fixed array whose lifetime is only
         \\the surrounding expression. That is long enough for an immediate call
-        \\such as `total(*.[5, 6, 7])`. Do not store or return the resulting slice,
+        \\such as `total(*.[cast(s64)5, cast(s64)6, cast(s64)7])`. Do not store or return the resulting slice,
         \\or otherwise let it escape; use a named fixed array when the borrow must
         \\live longer.
     );
@@ -838,15 +836,15 @@ render_section_52 :: () {
         \\    rt  := ..5;
         \\    rti := ..=5;
         \\    print("2..5   % start=% end=% size=%\n",
-        \\        type_name(type_of(r)), r.start, r.end, size_of(type_of(r)));
+        \\        type_name(r.type_of()), r.start, r.end, size_of(r.type_of()));
         \\    print("2..=5  % start=% end=% size=%\n",
-        \\        type_name(type_of(ri)), ri.start, ri.end, size_of(type_of(ri)));
+        \\        type_name(ri.type_of()), ri.start, ri.end, size_of(ri.type_of()));
         \\    print("2..    % start=% size=%\n",
-        \\        type_name(type_of(rf)), rf.start, size_of(type_of(rf)));
+        \\        type_name(rf.type_of()), rf.start, size_of(rf.type_of()));
         \\    print("..5    % end=% size=%\n",
-        \\        type_name(type_of(rt)), rt.end, size_of(type_of(rt)));
+        \\        type_name(rt.type_of()), rt.end, size_of(rt.type_of()));
         \\    print("..=5   % end=% size=%\n",
-        \\        type_name(type_of(rti)), rti.end, size_of(type_of(rti)));
+        \\        type_name(rti.type_of()), rti.end, size_of(rti.type_of()));
         \\}
     );
     code_block(10, "text", #string
@@ -896,11 +894,11 @@ render_section_52 :: () {
         \\    r := 1..4;
         \\    print("stored Range: count=% first=%\n", a[r].count, a[r][0]);
         \\    full: RangeFull(s64);
-        \\    print("stored RangeFull: count=% size=%\n", a[full].count, size_of(type_of(full)));
+        \\    print("stored RangeFull: count=% size=%\n", a[full].count, size_of(full.type_of()));
         \\    lo: u8 = 1;
         \\    hi: u8 = 4;
         \\    typed := lo..hi;
-        \\    print("% count=%\n", type_name(type_of(typed)), a[typed].count);
+        \\    print("% count=%\n", type_name(typed.type_of()), a[typed].count);
         \\}
     );
     code_block(17, "text", #string
@@ -973,12 +971,12 @@ render_section_52 :: () {
         \\    a: [6]s64 = .[10, 20, 30, 40, 50, 60];
         \\    v := a[..];
         \\    d: [..]s64;
-        \\    defer array_free(*d);
-        \\    array_add(*d, 1, 2, 3, 4);
+        \\    defer d.free();
+        \\    d.add(1, 2, 3, 4);
         \\    s := "hello world";
-        \\    print("view sliced:   count=% type=%\n", v[2..4].count, type_name(type_of(v[2..4])));
-        \\    print("dyn sliced:    count=% type=%\n", d[1..].count, type_name(type_of(d[1..])));
-        \\    print("string sliced: '%' type=%\n", s[0..5], type_name(type_of(s[0..5])));
+        \\    print("view sliced:   count=% type=%\n", v[2..4].count, type_name((v[2..4]).type_of()));
+        \\    print("dyn sliced:    count=% type=%\n", d[1..].count, type_name((d[1..]).type_of()));
+        \\    print("string sliced: '%' type=%\n", s[0..5], type_name((s[0..5]).type_of()));
         \\}
     );
     code_block(33, "text", #string
@@ -989,7 +987,7 @@ render_section_52 :: () {
     paragraph(34, #string,oneline
         \\`type_name` and diagnostics preserve `[]s64`; a slice whose element is
         \\the native integer instead prints `[]ssize`.
-        \\A slice of a dynamic array is a borrow, so a later `array_add`
+        \\A slice of a dynamic array is a borrow, so a later `array.add`
         \\invalidates it: see Aliasing, Invalidation, and Storage Generations.
     );
 
@@ -1092,17 +1090,17 @@ render_section_53 :: () {
         \\main :: () {
         \\    aos: #aos [..]Particle;
         \\    soa: #soa [..]Particle;
-        \\    defer array_free(*aos);
-        \\    defer array_free(*soa);
+        \\    defer aos.free();
+        \\    defer soa.free();
         \\
-        \\    array_add(*aos, Particle.{ 1, 10, 20 });
-        \\    array_add(*soa, Particle.{ 1, 10, 20 });
-        \\    array_add(*aos, Particle.{ 2, 30, 40 });
-        \\    array_add(*soa, Particle.{ 2, 30, 40 });
+        \\    aos.add(Particle.{ 1, 10, 20 });
+        \\    soa.add(Particle.{ 1, 10, 20 });
+        \\    aos.add(Particle.{ 2, 30, 40 });
+        \\    soa.add(Particle.{ 2, 30, 40 });
         \\
         \\    print("aos: count=% [1].y=%\n", aos.count, aos[1].y);
         \\    print("soa: count=% x[1]=%\n", soa.count, soa.x[1]);
-        \\    print("descriptors: aos=% soa=%\n", size_of(type_of(aos)), size_of(type_of(soa)));
+        \\    print("descriptors: aos=% soa=%\n", size_of(aos.type_of()), size_of(soa.type_of()));
         \\}
     );
     code_block(3, "text", #string
@@ -1144,7 +1142,7 @@ render_section_53 :: () {
     subheading(18, "Element syntax is unchanged");
     paragraph(19, #string,oneline
         \\Nothing at a use site distinguishes the two layouts. Elements are appended
-        \\with `array_add` and a whole element value, read back with `array[i]`, and
+        \\with `array.add` and a whole element value, read back with `array[i]`, and
         \\iterated with `for`, which yields reassembled elements and an optional
         \\index. A `#soa [..]T` is also an ordinary struct field type.
     );
@@ -1155,9 +1153,9 @@ render_section_53 :: () {
         \\
         \\main :: () {
         \\    w: World;
-        \\    defer array_free(*w.particles);
-        \\    array_add(*w.particles, Particle.{ 1, 10, 20 });
-        \\    array_add(*w.particles, Particle.{ 2, 30, 40 });
+        \\    defer w.particles.free();
+        \\    w.particles.add(Particle.{ 1, 10, 20 });
+        \\    w.particles.add(Particle.{ 2, 30, 40 });
         \\
         \\    for e: w.particles print("elem % %\n", e.id, e.x);
         \\    for e, i: w.particles print("[%] %\n", i, e.y);
@@ -1186,13 +1184,13 @@ render_section_53 :: () {
         \\
         \\main :: () {
         \\    soa: #soa [..]Particle;
-        \\    defer array_free(*soa);
-        \\    array_add(*soa, Particle.{ 1, 10, 20 });
-        \\    array_add(*soa, Particle.{ 2, 30, 40 });
+        \\    defer soa.free();
+        \\    soa.add(Particle.{ 1, 10, 20 });
+        \\    soa.add(Particle.{ 2, 30, 40 });
         \\
         \\    xs := soa.x;
         \\    print("field view: type=% count=% size=%\n",
-        \\          type_name(type_of(xs)), xs.count, size_of(type_of(xs)));
+        \\          type_name(xs.type_of()), xs.count, size_of(xs.type_of()));
         \\
         \\    soa.y[1] = 99;             // write through the field view
         \\    e := soa[1];               // gather one whole element
@@ -1228,12 +1226,12 @@ render_section_53 :: () {
         \\
         \\main :: () {
         \\    bodies: #soa [..]Body;
-        \\    defer array_free(*bodies);
-        \\    array_add(*bodies, Body.{ V2.{ 1.0, 2.0 }, 10.0 });
-        \\    array_add(*bodies, Body.{ V2.{ 3.0, 4.0 }, 20.0 });
+        \\    defer bodies.free();
+        \\    bodies.add(Body.{ V2.{ 1.0, 2.0 }, 10.0 });
+        \\    bodies.add(Body.{ V2.{ 3.0, 4.0 }, 20.0 });
         \\
         \\    print("pos view: % / mass view: %\n",
-        \\          type_name(type_of(bodies.pos)), type_name(type_of(bodies.mass)));
+        \\          type_name(bodies.pos.type_of()), type_name(bodies.mass.type_of()));
         \\    print("bodies.pos[1].x=%\n", bodies.pos[1].x);
         \\}
     );
@@ -1250,7 +1248,7 @@ render_section_53 :: () {
     );
     subheading(31, "`#soa []T` as a parameter");
     paragraph(32, #string,oneline
-        \\`array_view` on a `#soa [..]T` yields a `#soa []T`, and a parameter
+        \\`array.view` on a `#soa [..]T` yields a `#soa []T`, and a parameter
         \\declared `#soa []T` receives it. The prefix is part of the parameter type,
         \\so a routine written against per-field views states that in its signature,
         \\and a plain `[]T` parameter will not accept the value.
@@ -1273,12 +1271,12 @@ render_section_53 :: () {
         \\
         \\main :: () {
         \\    soa: #soa [..]Particle;
-        \\    defer array_free(*soa);
-        \\    array_add(*soa, Particle.{ 1, 10, 20 });
-        \\    array_add(*soa, Particle.{ 2, 30, 40 });
+        \\    defer soa.free();
+        \\    soa.add(Particle.{ 1, 10, 20 });
+        \\    soa.add(Particle.{ 2, 30, 40 });
         \\
-        \\    v := array_view(soa);
-        \\    print("view type=% size=%\n", type_name(type_of(v)), size_of(type_of(v)));
+        \\    v := soa.view();
+        \\    print("view type=% size=%\n", type_name(v.type_of()), size_of(v.type_of()));
         \\    print("total_x=%\n", total_x(v));
         \\    scale_y(v, 10);
         \\    print("y=% %\n", soa.y[0], soa.y[1]);
@@ -1300,7 +1298,7 @@ render_section_53 :: () {
         \\A range slice of a `#soa` array is not an SoA view. `soa[..]` and
         \\`soa[1..3]` produce a plain `[]T` over the first field's run, silently
         \\reinterpreting that run as whole elements, and nothing rejects it. Build
-        \\SoA views with `array_view`; slicing itself is covered in the chapter on
+        \\SoA views with `array.view`; slicing itself is covered in the chapter on
         \\ranges and slicing.
     );
     code_block(37, "glosso", #string
@@ -1311,13 +1309,13 @@ render_section_53 :: () {
         \\
         \\main :: () {
         \\    soa: #soa [..]Particle;
-        \\    defer array_free(*soa);
-        \\    array_add(*soa, Particle.{ 1, 10, 20 });
-        \\    array_add(*soa, Particle.{ 2, 30, 40 });
-        \\    array_add(*soa, Particle.{ 3, 50, 60 });
+        \\    defer soa.free();
+        \\    soa.add(Particle.{ 1, 10, 20 });
+        \\    soa.add(Particle.{ 2, 30, 40 });
+        \\    soa.add(Particle.{ 3, 50, 60 });
         \\
         \\    bad := soa[..];
-        \\    print("type=% count=%\n", type_name(type_of(bad)), bad.count);
+        \\    print("type=% count=%\n", type_name(bad.type_of()), bad.count);
         \\    print("bad[0]: id=% x=% y=%\n", bad[0].id, bad[0].x, bad[0].y);
         \\}
     );
@@ -1350,7 +1348,7 @@ render_section_54 :: () {
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
-        \\Vec2 :: struct #derive(Show) { x: s64 = 0; y: s64 = 0; }
+        \\Vec2 :: struct { x: s64 = 0; y: s64 = 0; }
         \\
         \\main :: () {
         \\    a := Vec2.{ 10, 20 };        // qualified: the type is written
@@ -1397,13 +1395,13 @@ render_section_54 :: () {
     table_row(17, "An element of an enclosing literal   |   `.[ .{ 1, 1 }, .{ 2, 2 } ]`");
     table_row(18, "A union variant payload   |   `o: ?Vec2 = .Some(.{ 5, 5 });`");
     table_row(19, "An ifx arm with a typed target   |   `ifx flag then .{ 1, 0 } else .{ 0, 1 }`");
-    table_row(20, "A variadic argument of known element type   |   `array_add(*d, .{ 1, 2 })`");
+    table_row(20, "A variadic argument of known element type   |   `d.add(.{ 1, 2 })`");
     code_block(21, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\Vec2 :: struct #derive(Show) { x: s64; y: s64; }
-        \\Line :: struct #derive(Show) { a: Vec2; b: Vec2; }
+        \\Vec2 :: struct { x: s64; y: s64; }
+        \\Line :: struct { a: Vec2; b: Vec2; }
         \\Grid :: struct { cells: [3]s64; name: string; }
         \\
         \\ORIGIN :: Vec2.{ 0, 0 };
@@ -1414,29 +1412,29 @@ render_section_54 :: () {
         \\
         \\main :: () {
         \\    print("argument: %\n", span(.{ 5, 5 }));
-        \\    print("return: %\n", diagonal());
-        \\    print("constant: % global: %\n", ORIGIN, CAMERA);
+        \\    print("return endpoints: % %\n", diagonal().a.x, diagonal().b.y);
+        \\    print("constant x: % global x: %\n", ORIGIN.x, CAMERA.x);
         \\
         \\    pts: [2]Vec2 = .[ .{ 1, 1 }, .{ 2, 2 } ];
         \\    g: Grid = .{ .cells = .[ 7, 8, 9 ], .name = "g" };
         \\    m: [2][3]s64 = .[ .[ 1, 2, 3 ], .[ 4, 5, 6 ] ];
-        \\    print("nested: % % % %\n", pts[1], g.cells[2], g.name, m[1][0]);
+        \\    print("nested: % % % %\n", pts[1].x, g.cells[2], g.name, m[1][0]);
         \\
         \\    o: ?Vec2 = .Some(.{ 5, 5 });
-        \\    print("union payload: %\n", type_name(type_of(o)));
+        \\    print("union payload: %\n", type_name(o.type_of()));
         \\
         \\    v: Vec2;
         \\    v = .{ 50, 60 };
-        \\    print("assignment: %\n", v);
+        \\    print("assignment: % %\n", v.x, v.y);
         \\}
     );
     code_block(22, "text", #string
         \\argument: 10
-        \\return: {{1, 2}, {3, 4}}
-        \\constant: {0, 0} global: {8, 9}
-        \\nested: {2, 2} 9 g 4
+        \\return endpoints: 1 4
+        \\constant x: 0 global x: 8
+        \\nested: 2 9 g 4
         \\union payload: Option_Vec2
-        \\assignment: {50, 60}
+        \\assignment: 50 60
     );
     paragraph(23, #string,oneline
         \\Nesting works because each inner literal is checked against the field or
@@ -1446,33 +1444,33 @@ render_section_54 :: () {
     );
     code_block(24, "glosso", #string
         \\#import "Io";
-        \\Vec2 :: struct #derive(Show) { x: s64; y: s64; }
+        \\Vec2 :: struct { x: s64; y: s64; }
         \\
         \\with_default :: (v: Vec2 = .{ 0, 0 }) -> s64 { return v.x; }
         \\
         \\main :: () {
         \\    d: [..]Vec2;
-        \\    defer array_free(*d);
-        \\    array_add(*d, .{ 1, 2 }, .{ 3, 4 });
+        \\    defer d.free();
+        \\    d.add(.{ 1, 2 }, .{ 3, 4 });
         \\
         \\    s: #soa [..]Vec2;
-        \\    defer array_free(*s);
-        \\    array_add(*s, .{ 7, 8 });
+        \\    defer s.free();
+        \\    s.add(.{ 7, 8 });
         \\
-        \\    print("variadic: % %\n", d[0], d[1]);
+        \\    print("variadic x: % %\n", d[0].x, d[1].x);
         \\    print("soa: %\n", s.x[0]);
         \\    print("default parameter: % %\n", with_default(), with_default(.{ 42, 0 }));
         \\
         \\    flag := true;
         \\    w: Vec2 = ifx flag then .{ 1, 0 } else .{ 0, 1 };
-        \\    print("ifx arm: %\n", w);
+        \\    print("ifx arm: % %\n", w.x, w.y);
         \\}
     );
     code_block(25, "text", #string
-        \\variadic: {1, 2} {3, 4}
+        \\variadic x: 1 3
         \\soa: 7
         \\default parameter: 0 42
-        \\ifx arm: {1, 0}
+        \\ifx arm: 1 0
     );
     subheading(26, "Where the qualified form is required");
     paragraph(27, #string,oneline
@@ -1532,7 +1530,7 @@ render_section_54 :: () {
         \\    c: Cfg;
         \\
         \\    print("fixed=% named=% lane0=%\n", fixed[2], named[0], lanes[0]);
-        \\    print("inferred: count=% type=%\n", inferred.count, type_name(type_of(inferred)));
+        \\    print("inferred: count=% type=%\n", inferred.count, type_name(inferred.type_of()));
         \\    print("trailing=% field default=%\n", trailing[2], c.origin[1]);
         \\}
     );
@@ -1553,7 +1551,7 @@ render_section_54 :: () {
         \\A view or a dynamic array cannot be initialized from a collection literal.
         \\`a: []s64 = .[ 1, 2, 3 ];` is `error: runtime array literals require a
         \\fixed array, Simd, or Matrix context`. Build a fixed array and take
-        \\`a[..]`, or grow a `[..]T` with `array_add`. For an immediate borrowed
+        \\`a[..]`, or grow a `[..]T` with `array.add`. For an immediate borrowed
         \\view, `*.[1, 2, 3]` instead creates a pointer to temporary fixed-array
         \\storage that can coerce to an expected `[]s64`; that storage lasts only
         \\for the surrounding expression.
@@ -1588,10 +1586,10 @@ render_section_54 :: () {
 
 render_section_55 :: () {
     paragraph(0, #string,oneline
-        \\A dot followed by a name is member access. It is one expression form with
-        \\a different member set for each kind of object, and it resolves against
-        \\the object's type alone: there is no fallback that turns an unrecognized
-        \\member into something else.
+        \\A dot followed by a name selects a member. Fields resolve against the
+        \\object's type. Calls can also resolve inherent methods and named typeclass
+        \\operations, with an implicit receiver argument. An ordinary free function
+        \\does not become a method merely because its first parameter has this type.
     );
     table_header(1, "Object   —   Members");
     table_row(2, "`struct`   |   Its declared fields, by name.");
@@ -1649,7 +1647,7 @@ render_section_55 :: () {
         \\for a number. `any` reports its whole member set: `error: any has fields
         \\type and value, not 'size'`.
     );
-    subheading(12, "Pointers are never followed implicitly");
+    subheading(12, "Field access follows pointers explicitly");
     paragraph(13, #string,oneline
         \\A pointer is not one of the objects in that table, so `p.x` where `p` is a
         \\`*Vec2` is `error: member of non-struct`. The dereference is written: the
@@ -1695,40 +1693,45 @@ render_section_55 :: () {
         \\so does `.count` on a `[*]T`, which carries no length at all. The first is
         \\written `p.*.count`; for the second there is nothing to write.
     );
-    subheading(18, "There is no method syntax");
+    subheading(18, "Inherent methods and associated functions");
     paragraph(19, #string,oneline
-        \\A free function is not reachable through a value. `v.length2()` where
-        \\`length2 :: (v: Vec2) -> s64` is `error: no field 'length2' in 'Vec2'`,
-        \\because the dot resolved against the field set and found nothing.
-        \\Typeclass methods are ordinary calls that dispatch on their arguments, as
-        \\the chapter on how an instance is chosen describes.
+        \\Attach methods to an owned type with `Vec2 ::: { ... }`. The first
+        \\parameter `#self` receives a value, `*#self` a mutable pointer, and
+        \\`*const #self` a read-only pointer. `#Self_Type` names the complete owner
+        \\type. A function without a receiver is an associated function, called
+        \\through the type. The block below makes its members public explicitly.
     );
     paragraph(20, #string,oneline
-        \\What does read like a method is a struct field holding a function pointer.
-        \\The dot is member access and the parentheses are a call on its result, so
-        \\the two compose with no special rule, including through a dereference.
+        \\`v.length2()` inserts the receiver; `Vec2.length2(v)` spells it explicitly.
+        \\A pointer receiver can use an existing pointer or borrow an addressable
+        \\value automatically. Mutable receivers cannot borrow a temporary or discard
+        \\`const`. Field access inside a pointer receiver still writes `#self.*.x`.
     );
     code_block(21, "glosso", #string
         \\#import "Io";
-        \\Bin :: #fn_ptr (a: s64, b: s64) -> s64;
-        \\Ops :: struct { apply: Bin; }
-        \\plus :: (a: s64, b: s64) -> s64 { return a + b; }
-        \\
+        \\Vec2 :: struct { x: s64; y: s64; }
+        \\Vec2 ::: #public {
+        \\    make :: (x: s64, y: s64) -> #Self_Type { return .{ x, y }; }
+        \\    length2 :: (#self) -> s64 { return #self.x * #self.x + #self.y * #self.y; }
+        \\    shift :: (*#self, amount: s64) { #self.*.x += amount; }
+        \\}
         \\main :: () {
-        \\    o := Ops.{ .apply = plus };
-        \\    print("through a field: %\n", o.apply(2, 3));
-        \\    p := *o;
-        \\    print("through a pointer: %\n", p.*.apply(4, 5));
+        \\    v := Vec2.make(3, 4);
+        \\    print("length2=%\n", v.length2());
+        \\    v.shift(1);
+        \\    print("shifted=%\n", Vec2.length2(v));
         \\}
     );
     code_block(22, "text", #string
-        \\through a field: 5
-        \\through a pointer: 9
+        \\length2=25
+        \\shifted=32
     );
     paragraph(23, #string,oneline
-        \\The function-pointer type is declared first; an inline `#fn_ptr` written
-        \\directly as a field annotation is `error: unexpected token 'fn_ptr'`.
-        \\Function pointers have their own chapter.
+        \\Methods live in the owner's namespace and do not create unqualified
+        \\functions. `v.make(...)` is invalid for an associated function, and
+        \\`v.length2` or `Vec2.length2` cannot be stored as a first-class method
+        \\reference. A function-pointer field remains a normal field whose value can
+        \\be called; function pointers have their own chapter.
     );
     subheading(24, "Calls");
     paragraph(25, #string,oneline
@@ -1751,8 +1754,8 @@ render_section_55 :: () {
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\pack :: (values: ...s64) { print("% count=%\n", type_name(type_of(values)), values.count); }
-        \\mixed :: (values: ...any) { print("% count=%\n", type_name(type_of(values)), values.count); }
+        \\pack :: (values: ...s64) { print("% count=%\n", type_name(values.type_of()), values.count); }
+        \\mixed :: (values: ...any) { print("% count=%\n", type_name(values.type_of()), values.count); }
         \\
         \\main :: () {
         \\    xs: [3]s64 = .[ 7, 8, 9 ];
@@ -1785,8 +1788,8 @@ render_section_55 :: () {
         \\main :: () {
         \\    xs: [4]s64 = .[ 1, 2, 3, 4 ];
         \\    d: [..]s64;
-        \\    defer array_free(*d);
-        \\    array_add(*d, 5, 6);
+        \\    defer d.free();
+        \\    d.add(5, 6);
         \\
         \\    print("written out: %\n", label_sum("t", 1, 2, 3));
         \\    print("fixed array: %\n", label_sum("t", xs...));
@@ -1829,12 +1832,30 @@ render_section_55 :: () {
         \\`error: unexpected token '...'`.
     );
     note(44, #string,oneline
-        \\`array_add` does not accept an expanded argument. Its variadic parameter
+        \\`array.add` does not accept an expanded argument. Its variadic parameter
         \\is served by a `#magic` implementation that expansion does not reach, so
-        \\`array_add(*d, xs...)` is `error: got [4]s64, expected s64`; append in a
+        \\`d.add(xs...)` is `error: got [4]s64, expected s64`; append in a
         \\loop, or route through an ordinary variadic. `print` does accept expansion
         \\but counts the pack as one argument when it checks placeholders, so
         \\`print("% %\n", ss...)` is `error: print: format has 2 '%' placeholder(s)
         \\but 1 argument(s) given`.
     );
+    paragraph(44, #string,oneline
+        \\A generic owner head such as `Box($T) ::: { ... }` binds `T` from the
+        \\receiver or concrete type. Methods may add their own generic parameters.
+        \\An inherent block must be defined in the ownership unit that owns its type;
+        \\importing a type or aliasing it does not transfer ownership. User code cannot
+        \\add inherent blocks to primitives, arrays, pointers, options, or results.
+        \\Wrap a dependency's type in a locally owned type to add behavior.
+    );
+    paragraph(45, #string,oneline
+        \\Named typeclass operations also support receiver syntax. `reader.read(buffer)`
+        \\uses the first non-erased argument of `Reader.read(reader, buffer)` as its
+        \\receiver. Fields and applicable inherent methods take precedence. If more
+        \\than one class applies, qualify the class explicitly. Standard-library
+        \\operations on existing values use methods, including `array.add(...)`,
+        \\`value.sin()`, and `value.type_of()`.
+    );
+}
+
 }

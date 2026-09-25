@@ -4,7 +4,7 @@ reference_json_field :: (
     value: ?*Serialization_Value,
     name: string,
 ) -> ?*Serialization_Value {
-    if #pattern .Some(present) = value return serialization_field_value(present, name);
+    if #pattern .Some(present) = value return present.field_value(name);
     return .None;
 }
 
@@ -56,7 +56,7 @@ reference_json_array :: (
     empty: []Serialization_Value;
     if #pattern .Some(field) = reference_json_field(value, name) {
         if #partial field.* == {
-            case .sequence(sequence); return array_view(sequence);
+            case .sequence(sequence); return sequence.view();
         }
     }
     return empty;
@@ -76,14 +76,14 @@ MANUAL_TEXT_CALLS :: .[
 
 reference_read_file_text :: (path: string) -> string {
     size: s64;
-    if file_size(path) == {
+    if path.file_size() == {
         case .Ok(measured); size = measured;
         case .Err(reason);
             report_error(reason);
             return "";
     }
     if size < 0 return "";
-    if read_file(path, cast(ssize)(size + 1)) == {
+    if path.read_file(cast(ssize)(size + 1)) == {
         case .Ok(text); return text;
         case .Err; return "";
     }
@@ -122,7 +122,7 @@ reference_leading_number :: (value: string) -> ssize {
 // The text of a call written on one line, as in `table_row(3, "a | b");`.
 reference_quoted_argument :: (line: string) -> string {
     open: ssize = -1;
-    if #pattern .Some(found) = index_of(line, "\"") open = found;
+    if #pattern .Some(found) = line.index_of("\"") open = found;
     if open < 0 return "";
     close := line.count - 1;
     while close > open && line[close] != cast(u8)(#char "\"") close -= 1;
@@ -141,15 +141,15 @@ reference_append_prose :: (out: *String_Builder, value: string) {
         if byte == cast(u8)(#char "\\") && i + 1 < value.count {
             next := value[i + 1];
             if next == cast(u8)(#char "\"") || next == cast(u8)(#char "\\") {
-                builder_write_byte(out, next);
+                out.write_byte(next);
                 i += 2;
                 continue;
             }
         }
-        builder_write_byte(out, byte);
+        out.write_byte(byte);
         i += 1;
     }
-    builder_write_byte(out, cast(u8)(#char " "));
+    out.write_byte(cast(u8)(#char " "));
 }
 
 reference_manual_titles :: () -> [..]string {
@@ -160,14 +160,14 @@ reference_manual_titles :: () -> [..]string {
         finish := reference_line_end(source, position);
         line := reference_trim_line(source[position..finish]);
         position = finish + 1;
-        if !starts_with(line, "case ") continue;
+        if !line.starts_with("case ") continue;
         rest := line[5..line.count];
         index := reference_leading_number(rest);
         if index < 0 continue;
         title := reference_quoted_argument(rest);
         if title.count == 0 continue;
-        while titles.count <= index array_add(*titles, "");
-        titles[index] = clone(title);
+        while titles.count <= index titles.add("");
+        titles[index] = title.clone();
     }
     return titles;
 }
@@ -183,9 +183,9 @@ reference_manual_section_files :: () -> [..]string {
         finish := reference_line_end(source, position);
         line := reference_trim_line(source[position..finish]);
         position = finish + 1;
-        if !starts_with(line, marker) continue;
+        if !line.starts_with(marker) continue;
         path := reference_quoted_argument(line);
-        if starts_with(path, "src/sections_") array_add(*files, clone(path));
+        if path.starts_with("src/sections_") files.add(path.clone());
     }
     return files;
 }
@@ -196,7 +196,7 @@ MANUAL_SCAN_CODE :: 2;
 
 reference_collect_manual_text :: (path: string, texts: *[..]string) {
     source := reference_read_file_text(path);
-    out := builder_make_len_cap(0, 8 * 1024);
+    out := String_Builder.make_len_cap(0, 8 * 1024);
     current: ssize = -1;
     mode := MANUAL_SCAN_IDLE;
     position: ssize = 0;
@@ -208,34 +208,34 @@ reference_collect_manual_text :: (path: string, texts: *[..]string) {
         if mode != MANUAL_SCAN_IDLE {
             // A continuation line of a #string block starts with its marker;
             // the call's own closing parenthesis is the only other shape.
-            if starts_with(line, ")") {
+            if line.starts_with(")") {
                 mode = MANUAL_SCAN_IDLE;
-            } else if mode == MANUAL_SCAN_PROSE && starts_with(line, "\\\\") {
+            } else if mode == MANUAL_SCAN_PROSE && line.starts_with("\\\\") {
                 reference_append_prose(*out, line[2..line.count]);
             }
             continue;
         }
 
-        if starts_with(line, "render_section_") {
+        if line.starts_with("render_section_") {
             if current >= 0 && current < texts.*.count {
-                texts.*[current] = builder_into_string(out);
-                out = builder_make_len_cap(0, 8 * 1024);
+                texts.*[current] = out.to_string();
+                out.reset();
             }
             current = reference_leading_number(line["render_section_".count..line.count]);
             continue;
         }
         if current < 0 continue;
 
-        is_code := starts_with(line, "code_block(");
+        is_code := line.starts_with("code_block(");
         is_text := false;
         for name: MANUAL_TEXT_CALLS {
-            if starts_with(line, name) { is_text = true; break; }
+            if line.starts_with(name) { is_text = true; break; }
         }
         if !is_code && !is_text continue;
 
         // A call closed on its own line carries an ordinary literal; anything
         // else opens a #string block that runs to a lone closing parenthesis.
-        if !ends_with(line, ");") {
+        if !line.ends_with(");") {
             if is_code mode = MANUAL_SCAN_CODE;
             else mode = MANUAL_SCAN_PROSE;
             continue;
@@ -243,26 +243,26 @@ reference_collect_manual_text :: (path: string, texts: *[..]string) {
         if is_text reference_append_prose(*out, reference_quoted_argument(line));
     }
     if current >= 0 && current < texts.*.count {
-        texts.*[current] = builder_into_string(out);
+        texts.*[current] = out.into_string();
     } else {
-        builder_free(*out);
+        out.free();
     }
 }
 
 reference_manual_json :: () -> string {
     titles := reference_manual_titles();
-    defer array_free(*titles);
+    defer titles.free();
     if titles.count == 0 {
         print("src/section_catalog.glo yielded no section titles\n");
         return "";
     }
 
     texts: [..]string;
-    defer array_free(*texts);
-    while texts.count < titles.count array_add(*texts, "");
+    defer texts.free();
+    while texts.count < titles.count texts.add("");
 
     files := reference_manual_section_files();
-    defer array_free(*files);
+    defer files.free();
     if files.count == 0 {
         print("main.glo lists no src/sections_*.glo chapter files\n");
         return "";
@@ -273,18 +273,18 @@ reference_manual_json :: () -> string {
     for text: texts if text.count == 0 empty += 1;
     if empty != 0 print("manual index: % of % chapters have no prose\n", empty, titles.count);
 
-    out := builder_make_len_cap(0, 1024 * 1024);
-    builder_write_byte(*out, cast(u8)(#char "["));
+    out := String_Builder.make_len_cap(0, 1024 * 1024);
+    out.write_byte(cast(u8)(#char "["));
     for i: 0..titles.count {
-        if i != 0 builder_write_byte(*out, cast(u8)(#char ","));
-        builder_write_byte(*out, cast(u8)(#char "["));
+        if i != 0 out.write_byte(cast(u8)(#char ","));
+        out.write_byte(cast(u8)(#char "["));
         reference_write_escaped_string(*out, titles[i], false);
-        builder_write_byte(*out, cast(u8)(#char ","));
+        out.write_byte(cast(u8)(#char ","));
         reference_write_escaped_string(*out, reference_one_line(texts[i]), false);
-        builder_write_byte(*out, cast(u8)(#char "]"));
+        out.write_byte(cast(u8)(#char "]"));
     }
-    builder_write_byte(*out, cast(u8)(#char "]"));
-    return builder_into_string(out);
+    out.write_byte(cast(u8)(#char "]"));
+    return out.into_string();
 }
 
 reference_is_space :: (byte: u8) -> bool {
@@ -316,7 +316,7 @@ reference_is_rule_token :: (value: string) -> bool {
 }
 
 reference_one_line :: (value: string) -> string {
-    out := builder_make_len_cap(0, value.count);
+    out := String_Builder.make_len_cap(0, value.count);
     wrote := false;
     start: ssize = 0;
     i: ssize = 0;
@@ -328,15 +328,15 @@ reference_one_line :: (value: string) -> string {
         if i > start {
             token := value[start..i];
             if !reference_is_rule_token(token) {
-                if wrote builder_write_byte(*out, cast(u8)(#char " "));
-                write_string(*out, token);
+                if wrote out.write_byte(cast(u8)(#char " "));
+                out.write_string(token);
                 wrote = true;
             }
         }
         start = i + 1;
         i += 1;
     }
-    return builder_into_string(out);
+    return out.into_string();
 }
 
 reference_compact_summary :: (value: string, limit: ssize = 150) -> string {
@@ -351,17 +351,17 @@ reference_compact_summary :: (value: string, limit: ssize = 150) -> string {
         }
         i -= 1;
     }
-    out := builder_make_len_cap(0, cut + 3);
-    write_string(*out, summary[0..cut]);
-    write_string(*out, "...");
-    return builder_into_string(out);
+    out := String_Builder.make_len_cap(0, cut + 3);
+    out.write_string(summary[0..cut]);
+    out.write_string("...");
+    return out.into_string();
 }
 
 reference_join_json_texts :: (
     values: []Serialization_Value,
     separator: string,
 ) -> string {
-    out := builder_make_len_cap(0, values.count * 8);
+    out := String_Builder.make_len_cap(0, values.count * 8);
     wrote := false;
     for i: 0..values.count {
         value := *values[i];
@@ -372,37 +372,37 @@ reference_join_json_texts :: (
             }
         }
         if text.count == 0 continue;
-        if wrote write_string(*out, separator);
-        write_string(*out, text);
+        if wrote out.write_string(separator);
+        out.write_string(text);
         wrote = true;
     }
-    return builder_into_string(out);
+    return out.into_string();
 }
 
 reference_details_cell :: (value: *Serialization_Value) -> string {
-    out := builder_make_len_cap(0, 32);
+    out := String_Builder.make_len_cap(0, 32);
     wrote := false;
     modifiers := reference_json_array(value, "modifiers");
     if modifiers.count > 0 {
-        write_string(*out, reference_join_json_texts(modifiers, ", "));
+        out.write_string(reference_join_json_texts(modifiers, ", "));
         wrote = true;
     }
     default_value := reference_json_text(value, "default_value");
     if default_value.count > 0 {
-        if wrote write_string(*out, " / ");
-        write_string(*out, "Default: ");
-        write_string(*out, default_value);
+        if wrote out.write_string(" / ");
+        out.write_string("Default: ");
+        out.write_string(default_value);
         wrote = true;
     }
     constraints := reference_json_array(value, "constraints");
     if constraints.count > 0 {
-        if wrote write_string(*out, " / ");
-        write_string(*out, "Constraint: ");
-        write_string(*out, reference_join_json_texts(constraints, " && "));
+        if wrote out.write_string(" / ");
+        out.write_string("Constraint: ");
+        out.write_string(reference_join_json_texts(constraints, " && "));
         wrote = true;
     }
-    if !wrote write_string(*out, "-");
-    return builder_into_string(out);
+    if !wrote out.write_string("-");
+    return out.into_string();
 }
 
 reference_kind_order :: (kind: string) -> ssize {
@@ -472,12 +472,12 @@ reference_compare_symbols :: (
 }
 
 reference_write_integer :: (out: *String_Builder, value: ssize) {
-    write_string(out, format_int(value, 10));
+    out.write_string(value.format_int(10));
 }
 
 reference_write_boolean :: (out: *String_Builder, value: bool) {
-    if value write_string(out, "true");
-    else write_string(out, "false");
+    if value out.write_string("true");
+    else out.write_string("false");
 }
 
 reference_write_escaped_string :: (
@@ -485,39 +485,39 @@ reference_write_escaped_string :: (
     value: string,
     glosso: bool,
 ) {
-    builder_write_byte(out, cast(u8)(#char "\""));
+    out.write_byte(cast(u8)(#char "\""));
     i: ssize = 0;
     while i < value.count {
         byte := value[i];
         if byte == cast(u8)(#char "\"") {
-            write_string(out, "\\\"");
+            out.write_string("\\\"");
         } else if byte == cast(u8)(#char "\\") {
-            write_string(out, "\\\\");
+            out.write_string("\\\\");
         } else if byte == cast(u8)(#char "\n") {
-            write_string(out, "\\n");
+            out.write_string("\\n");
         } else if byte == cast(u8)(#char "\r") {
-            write_string(out, "\\r");
+            out.write_string("\\r");
         } else if byte == cast(u8)(#char "\t") {
-            write_string(out, "\\t");
+            out.write_string("\\t");
         } else if byte < 32 {
-            write_string(out, " ");
+            out.write_string(" ");
         } else if i + 2 < value.count && byte == 16#e2 &&
                   value[i + 1] == 16#80 &&
                   (value[i + 2] == 16#a8 || value[i + 2] == 16#a9) {
             if glosso {
-                if value[i + 2] == 16#a8 write_string(out, "\\u{2028}");
-                else write_string(out, "\\u{2029}");
+                if value[i + 2] == 16#a8 out.write_string("\\u{2028}");
+                else out.write_string("\\u{2029}");
             } else {
-                if value[i + 2] == 16#a8 write_string(out, "\\u2028");
-                else write_string(out, "\\u2029");
+                if value[i + 2] == 16#a8 out.write_string("\\u2028");
+                else out.write_string("\\u2029");
             }
             i += 2;
         } else {
-            builder_write_byte(out, byte);
+            out.write_byte(byte);
         }
         i += 1;
     }
-    builder_write_byte(out, cast(u8)(#char "\""));
+    out.write_byte(cast(u8)(#char "\""));
 }
 
 reference_stream_detail_row :: (
@@ -526,13 +526,13 @@ reference_stream_detail_row :: (
     second: string,
     third: string = "",
 ) {
-    write_string(out, "    .{ .first = ");
+    out.write_string("    .{ .first = ");
     reference_write_escaped_string(out, first, true);
-    write_string(out, ", .second = ");
+    out.write_string(", .second = ");
     reference_write_escaped_string(out, second, true);
-    write_string(out, ", .third = ");
+    out.write_string(", .third = ");
     reference_write_escaped_string(out, third, true);
-    write_string(out, " },\n");
+    out.write_string(" },\n");
 }
 
 reference_stream_function_rows :: (
@@ -659,26 +659,26 @@ reference_stream_typeclass_members :: (
                 details,
                 detail_count,
             );
-        write_string(members_out, "    .{ .name = ");
+        members_out.write_string("    .{ .name = ");
         reference_write_escaped_string(members_out, reference_json_text(member, "name"), true);
-        write_string(members_out, ", .signature = ");
+        members_out.write_string(", .signature = ");
         member_signature := reference_json_text(member, "display_signature");
         if member_signature.count == 0
             member_signature = reference_json_text(member, "signature");
         reference_write_escaped_string(members_out, member_signature, true);
-        write_string(members_out, ", .summary = ");
+        members_out.write_string(", .summary = ");
         reference_write_escaped_string(members_out, reference_one_line(reference_json_text(member, "summary")), true);
-        write_string(members_out, ", .source_path = ");
+        members_out.write_string(", .source_path = ");
         reference_write_escaped_string(members_out, reference_json_text(member, "source_path"), true);
-        write_string(members_out, ", .source_line = "); reference_write_integer(members_out, reference_json_int(member, "source_line"));
-        write_string(members_out, ", .kind = "); reference_write_escaped_string(members_out, kind, true);
-        write_string(members_out, ", .has_default = "); reference_write_boolean(members_out, reference_json_bool(member, "has_default"));
-        write_string(members_out, ", .first_parameter = "); reference_write_integer(members_out, first_parameter);
-        write_string(members_out, ", .parameter_count = "); reference_write_integer(members_out, parameter_count);
-        write_string(members_out, ", .return_type = "); reference_write_escaped_string(members_out, return_type, true);
-        write_string(members_out, ", .first_memory = "); reference_write_integer(members_out, first_memory);
-        write_string(members_out, ", .memory_count = "); reference_write_integer(members_out, memory_count);
-        write_string(members_out, " },\n");
+        members_out.write_string(", .source_line = "); reference_write_integer(members_out, reference_json_int(member, "source_line"));
+        members_out.write_string(", .kind = "); reference_write_escaped_string(members_out, kind, true);
+        members_out.write_string(", .has_default = "); reference_write_boolean(members_out, reference_json_bool(member, "has_default"));
+        members_out.write_string(", .first_parameter = "); reference_write_integer(members_out, first_parameter);
+        members_out.write_string(", .parameter_count = "); reference_write_integer(members_out, parameter_count);
+        members_out.write_string(", .return_type = "); reference_write_escaped_string(members_out, return_type, true);
+        members_out.write_string(", .first_memory = "); reference_write_integer(members_out, first_memory);
+        members_out.write_string(", .memory_count = "); reference_write_integer(members_out, memory_count);
+        members_out.write_string(" },\n");
         member_count.* += 1;
     }
     return minimal, explicit, first, member_count.* - first, associated, methods;
@@ -696,51 +696,51 @@ reference_stream_instances :: (
     for i: 0..all_instances.count {
         instance := *all_instances[i];
         if reference_json_text(instance, "class_name") != typeclass continue;
-        write_string(instances_out, "    .{ .head = ");
+        instances_out.write_string("    .{ .head = ");
         reference_write_escaped_string(instances_out, reference_json_text(instance, "head"), true);
-        write_string(instances_out, ", .signature = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "signature"), true);
-        write_string(instances_out, ", .module = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "module"), true);
-        write_string(instances_out, ", .source_path = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "source_path"), true);
-        write_string(instances_out, ", .source_line = "); reference_write_integer(instances_out, reference_json_int(instance, "source_line"));
-        write_string(instances_out, ", .negative = "); reference_write_boolean(instances_out, reference_json_bool(instance, "negative"));
-        write_string(instances_out, " },\n");
+        instances_out.write_string(", .signature = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "signature"), true);
+        instances_out.write_string(", .module = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "module"), true);
+        instances_out.write_string(", .source_path = "); reference_write_escaped_string(instances_out, reference_json_text(instance, "source_path"), true);
+        instances_out.write_string(", .source_line = "); reference_write_integer(instances_out, reference_json_int(instance, "source_line"));
+        instances_out.write_string(", .negative = "); reference_write_boolean(instances_out, reference_json_bool(instance, "negative"));
+        instances_out.write_string(" },\n");
         instance_count.* += 1;
     }
     return first, instance_count.* - first;
 }
 
 reference_flush_builder_to_file :: (
-    file: File,
+    path: string,
     builder: *String_Builder,
-) -> bool {
-    if builder_len(builder.*) == 0 return true;
-    if write(file, to_string(builder.*)) == {
-    case .Ok(written); if written != builder_len(builder.*) return false;
-    case .Err; return false;
-    }
-    builder_reset(builder);
-    return true;
+) -> Fs_Error!bool {
+    if builder.len() == 0 return .Ok(true);
+    file := File.open(path, .Write, .Open_Existing, .flags = .Append)?;
+    written := file.write(builder.to_string())?;
+    _ := file.close()?;
+    if written != builder.len() return .Ok(false);
+    builder.reset();
+    return .Ok(true);
 }
 
 reference_flush_large_builder_to_file :: (
-    file: File,
+    path: string,
     builder: *String_Builder,
-) -> bool {
-    if builder_len(builder.*) < 96 * 1024 return true;
-    return reference_flush_builder_to_file(file, builder);
+) -> Fs_Error!bool {
+    if builder.len() < 96 * 1024 return .Ok(true);
+    return reference_flush_builder_to_file(path, builder);
 }
 
 reference_generate_outputs :: (
     modules: []Serialization_Value,
     instances: []Serialization_Value,
-) -> bool {
-    glo_modules := builder_make_len_cap(0, 128 * 1024);
-    glo_symbols := builder_make_len_cap(0, 128 * 1024);
-    glo_details := builder_make_len_cap(0, 128 * 1024);
-    glo_members := builder_make_len_cap(0, 128 * 1024);
-    glo_instances := builder_make_len_cap(0, 128 * 1024);
-    js_modules := builder_make_len_cap(0, 128 * 1024);
-    js_symbols := builder_make_len_cap(0, 128 * 1024);
+) -> Fs_Error!bool {
+    glo_modules := String_Builder.make_len_cap(0, 128 * 1024);
+    glo_symbols := String_Builder.make_len_cap(0, 128 * 1024);
+    glo_details := String_Builder.make_len_cap(0, 128 * 1024);
+    glo_members := String_Builder.make_len_cap(0, 128 * 1024);
+    glo_instances := String_Builder.make_len_cap(0, 128 * 1024);
+    js_modules := String_Builder.make_len_cap(0, 128 * 1024);
+    js_symbols := String_Builder.make_len_cap(0, 128 * 1024);
     part_paths: [7]string = .[
         "build/reference-modules.glo.part",
         "build/reference-symbols.glo.part",
@@ -750,12 +750,8 @@ reference_generate_outputs :: (
         "build/reference-modules.js.part",
         "build/reference-symbols.js.part",
     ];
-    part_files: [7]File;
     for i: 0..part_paths.count {
-        if open(part_paths[i], .Write, .Create_Always) == {
-        case .Ok(opened); part_files[i] = opened;
-        case .Err; return false;
-        }
+        _ := part_paths[i].write_file("")?;
     }
     symbol_count: ssize = 0;
     detail_count: ssize = 0;
@@ -767,8 +763,8 @@ reference_generate_outputs :: (
         first_symbol := symbol_count;
         raw_symbols := reference_json_array(module, "symbols");
         ordered: [..]*Serialization_Value;
-        for i: 0..raw_symbols.count array_add(*ordered, *raw_symbols[i]);
-        _ := sort_by(array_view(ordered), reference_compare_symbols);
+        for i: 0..raw_symbols.count ordered.add(*raw_symbols[i]);
+        _ := (ordered.view()).sort_by(reference_compare_symbols);
         for i: 0..ordered.count {
             symbol := ordered[i];
             detail_kind, first_detail, type_detail_count :=
@@ -801,90 +797,85 @@ reference_generate_outputs :: (
             summary := reference_one_line(reference_json_text(symbol, "summary"));
             kind := reference_json_text(symbol, "kind");
 
-            write_string(*glo_symbols, "    .{ .name = "); reference_write_escaped_string(*glo_symbols, name, true);
-            write_string(*glo_symbols, ", .signature = "); reference_write_escaped_string(*glo_symbols, display_signature, true);
-            write_string(*glo_symbols, ", .searchable_signature = "); reference_write_escaped_string(*glo_symbols, searchable_signature, true);
-            write_string(*glo_symbols, ", .summary = "); reference_write_escaped_string(*glo_symbols, summary, true);
-            write_string(*glo_symbols, ", .source_path = "); reference_write_escaped_string(*glo_symbols, reference_json_text(symbol, "source_path"), true);
-            write_string(*glo_symbols, ", .source_line = "); reference_write_integer(*glo_symbols, reference_json_int(symbol, "source_line"));
-            write_string(*glo_symbols, ", .kind = "); reference_write_escaped_string(*glo_symbols, kind, true);
-            write_string(*glo_symbols, ", .module_index = "); reference_write_integer(*glo_symbols, module_index);
-            write_string(*glo_symbols, ", .first_instance = "); reference_write_integer(*glo_symbols, first_instance);
-            write_string(*glo_symbols, ", .instance_count = "); reference_write_integer(*glo_symbols, symbol_instance_count);
-            write_string(*glo_symbols, ", .detail_kind = "); reference_write_escaped_string(*glo_symbols, detail_kind, true);
-            write_string(*glo_symbols, ", .first_detail = "); reference_write_integer(*glo_symbols, first_detail);
-            write_string(*glo_symbols, ", .detail_count = "); reference_write_integer(*glo_symbols, type_detail_count);
-            write_string(*glo_symbols, ", .first_parameter = "); reference_write_integer(*glo_symbols, first_parameter);
-            write_string(*glo_symbols, ", .parameter_count = "); reference_write_integer(*glo_symbols, parameter_count);
-            write_string(*glo_symbols, ", .return_type = "); reference_write_escaped_string(*glo_symbols, return_type, true);
-            write_string(*glo_symbols, ", .first_memory = "); reference_write_integer(*glo_symbols, first_memory);
-            write_string(*glo_symbols, ", .memory_count = "); reference_write_integer(*glo_symbols, memory_count);
-            write_string(*glo_symbols, ", .minimal = "); reference_write_escaped_string(*glo_symbols, minimal, true);
-            write_string(*glo_symbols, ", .minimal_explicit = "); reference_write_boolean(*glo_symbols, minimal_explicit);
-            write_string(*glo_symbols, ", .first_member = "); reference_write_integer(*glo_symbols, first_member);
-            write_string(*glo_symbols, ", .member_count = "); reference_write_integer(*glo_symbols, symbol_member_count);
-            write_string(*glo_symbols, ", .associated_count = "); reference_write_integer(*glo_symbols, associated_count);
-            write_string(*glo_symbols, ", .method_count = "); reference_write_integer(*glo_symbols, method_count);
-            write_string(*glo_symbols, " },\n");
+            glo_symbols.write_string("    .{ .name = "); reference_write_escaped_string(*glo_symbols, name, true);
+            glo_symbols.write_string(", .signature = "); reference_write_escaped_string(*glo_symbols, display_signature, true);
+            glo_symbols.write_string(", .searchable_signature = "); reference_write_escaped_string(*glo_symbols, searchable_signature, true);
+            glo_symbols.write_string(", .owner_typeclass = "); reference_write_escaped_string(*glo_symbols, reference_json_text(symbol, "owner_typeclass"), true);
+            glo_symbols.write_string(", .summary = "); reference_write_escaped_string(*glo_symbols, summary, true);
+            glo_symbols.write_string(", .source_path = "); reference_write_escaped_string(*glo_symbols, reference_json_text(symbol, "source_path"), true);
+            glo_symbols.write_string(", .source_line = "); reference_write_integer(*glo_symbols, reference_json_int(symbol, "source_line"));
+            glo_symbols.write_string(", .kind = "); reference_write_escaped_string(*glo_symbols, kind, true);
+            glo_symbols.write_string(", .module_index = "); reference_write_integer(*glo_symbols, module_index);
+            glo_symbols.write_string(", .first_instance = "); reference_write_integer(*glo_symbols, first_instance);
+            glo_symbols.write_string(", .instance_count = "); reference_write_integer(*glo_symbols, symbol_instance_count);
+            glo_symbols.write_string(", .detail_kind = "); reference_write_escaped_string(*glo_symbols, detail_kind, true);
+            glo_symbols.write_string(", .first_detail = "); reference_write_integer(*glo_symbols, first_detail);
+            glo_symbols.write_string(", .detail_count = "); reference_write_integer(*glo_symbols, type_detail_count);
+            glo_symbols.write_string(", .first_parameter = "); reference_write_integer(*glo_symbols, first_parameter);
+            glo_symbols.write_string(", .parameter_count = "); reference_write_integer(*glo_symbols, parameter_count);
+            glo_symbols.write_string(", .return_type = "); reference_write_escaped_string(*glo_symbols, return_type, true);
+            glo_symbols.write_string(", .first_memory = "); reference_write_integer(*glo_symbols, first_memory);
+            glo_symbols.write_string(", .memory_count = "); reference_write_integer(*glo_symbols, memory_count);
+            glo_symbols.write_string(", .minimal = "); reference_write_escaped_string(*glo_symbols, minimal, true);
+            glo_symbols.write_string(", .minimal_explicit = "); reference_write_boolean(*glo_symbols, minimal_explicit);
+            glo_symbols.write_string(", .first_member = "); reference_write_integer(*glo_symbols, first_member);
+            glo_symbols.write_string(", .member_count = "); reference_write_integer(*glo_symbols, symbol_member_count);
+            glo_symbols.write_string(", .associated_count = "); reference_write_integer(*glo_symbols, associated_count);
+            glo_symbols.write_string(", .method_count = "); reference_write_integer(*glo_symbols, method_count);
+            glo_symbols.write_string(" },\n");
 
-            if symbol_count > 0 builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            builder_write_byte(*js_symbols, cast(u8)(#char "["));
-            reference_write_escaped_string(*js_symbols, name, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            reference_write_escaped_string(*js_symbols, signature, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            reference_write_escaped_string(*js_symbols, searchable_signature, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            reference_write_escaped_string(*js_symbols, summary, false); builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            reference_write_integer(*js_symbols, module_index); builder_write_byte(*js_symbols, cast(u8)(#char ","));
-            reference_write_escaped_string(*js_symbols, kind, false); builder_write_byte(*js_symbols, cast(u8)(#char "]"));
+            if symbol_count > 0 js_symbols.write_byte(cast(u8)(#char ","));
+            js_symbols.write_byte(cast(u8)(#char "["));
+            reference_write_escaped_string(*js_symbols, name, false); js_symbols.write_byte(cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, signature, false); js_symbols.write_byte(cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, searchable_signature, false); js_symbols.write_byte(cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, summary, false); js_symbols.write_byte(cast(u8)(#char ","));
+            reference_write_integer(*js_symbols, module_index); js_symbols.write_byte(cast(u8)(#char ","));
+            reference_write_escaped_string(*js_symbols, kind, false); js_symbols.write_byte(cast(u8)(#char "]"));
             symbol_count += 1;
-            if !reference_flush_large_builder_to_file(part_files[1], *glo_symbols) ||
-               !reference_flush_large_builder_to_file(part_files[2], *glo_details) ||
-               !reference_flush_large_builder_to_file(part_files[3], *glo_members) ||
-               !reference_flush_large_builder_to_file(part_files[4], *glo_instances) ||
-               !reference_flush_large_builder_to_file(part_files[6], *js_symbols)
-                return false;
+            if !reference_flush_large_builder_to_file(part_paths[1], *glo_symbols)? ||
+               !reference_flush_large_builder_to_file(part_paths[2], *glo_details)? ||
+               !reference_flush_large_builder_to_file(part_paths[3], *glo_members)? ||
+               !reference_flush_large_builder_to_file(part_paths[4], *glo_instances)? ||
+               !reference_flush_large_builder_to_file(part_paths[6], *js_symbols)?
+                return .Ok(false);
         }
-        array_free(*ordered);
+        ordered.free();
         module_summary := reference_one_line(reference_json_text(module, "summary"));
         module_name := reference_json_text(module, "name");
         module_symbol_count := symbol_count - first_symbol;
-        write_string(*glo_modules, "    .{ .name = "); reference_write_escaped_string(*glo_modules, module_name, true);
-        write_string(*glo_modules, ", .summary = "); reference_write_escaped_string(*glo_modules, module_summary, true);
-        write_string(*glo_modules, ", .compact_summary = "); reference_write_escaped_string(*glo_modules, reference_compact_summary(module_summary), true);
-        write_string(*glo_modules, ", .source_path = "); reference_write_escaped_string(*glo_modules, reference_json_text(module, "source_path"), true);
-        write_string(*glo_modules, ", .first_symbol = "); reference_write_integer(*glo_modules, first_symbol);
-        write_string(*glo_modules, ", .symbol_count = "); reference_write_integer(*glo_modules, module_symbol_count);
-        write_string(*glo_modules, " },\n");
+        glo_modules.write_string("    .{ .name = "); reference_write_escaped_string(*glo_modules, module_name, true);
+        glo_modules.write_string(", .summary = "); reference_write_escaped_string(*glo_modules, module_summary, true);
+        glo_modules.write_string(", .compact_summary = "); reference_write_escaped_string(*glo_modules, reference_compact_summary(module_summary), true);
+        glo_modules.write_string(", .source_path = "); reference_write_escaped_string(*glo_modules, reference_json_text(module, "source_path"), true);
+        glo_modules.write_string(", .first_symbol = "); reference_write_integer(*glo_modules, first_symbol);
+        glo_modules.write_string(", .symbol_count = "); reference_write_integer(*glo_modules, module_symbol_count);
+        glo_modules.write_string(" },\n");
 
-        if module_index > 0 builder_write_byte(*js_modules, cast(u8)(#char ","));
-        builder_write_byte(*js_modules, cast(u8)(#char "["));
-        reference_write_escaped_string(*js_modules, module_name, false); builder_write_byte(*js_modules, cast(u8)(#char ","));
-        reference_write_escaped_string(*js_modules, module_summary, false); builder_write_byte(*js_modules, cast(u8)(#char ","));
-        reference_write_integer(*js_modules, first_symbol); builder_write_byte(*js_modules, cast(u8)(#char ","));
-        reference_write_integer(*js_modules, module_symbol_count); builder_write_byte(*js_modules, cast(u8)(#char "]"));
-        if !reference_flush_large_builder_to_file(part_files[0], *glo_modules) ||
-           !reference_flush_large_builder_to_file(part_files[5], *js_modules)
-            return false;
+        if module_index > 0 js_modules.write_byte(cast(u8)(#char ","));
+        js_modules.write_byte(cast(u8)(#char "["));
+        reference_write_escaped_string(*js_modules, module_name, false); js_modules.write_byte(cast(u8)(#char ","));
+        reference_write_escaped_string(*js_modules, module_summary, false); js_modules.write_byte(cast(u8)(#char ","));
+        reference_write_integer(*js_modules, first_symbol); js_modules.write_byte(cast(u8)(#char ","));
+        reference_write_integer(*js_modules, module_symbol_count); js_modules.write_byte(cast(u8)(#char "]"));
+        if !reference_flush_large_builder_to_file(part_paths[0], *glo_modules)? ||
+           !reference_flush_large_builder_to_file(part_paths[5], *js_modules)?
+            return .Ok(false);
     }
 
-    part_builders: [7]*String_Builder = .[
-        *glo_modules,
-        *glo_symbols,
-        *glo_details,
-        *glo_members,
-        *glo_instances,
-        *js_modules,
-        *js_symbols,
-    ];
-    for i: 0..part_paths.count {
-        if !reference_flush_builder_to_file(part_files[i], part_builders[i])
-            return false;
-        closed := close(*part_files[i]);
-        if result_is_err(closed) return false;
-    }
+    if !reference_flush_builder_to_file(part_paths[0], *glo_modules)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[1], *glo_symbols)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[2], *glo_details)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[3], *glo_members)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[4], *glo_instances)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[5], *js_modules)? return .Ok(false);
+    if !reference_flush_builder_to_file(part_paths[6], *js_symbols)? return .Ok(false);
 
-    glo := builder_make_len_cap(0, 16 * 1024);
-    write_string(*glo, #string
+    glo := String_Builder.make_len_cap(0, 16 * 1024);
+    glo.write_string(#string
         \\// Generated by `glosso first.glo -- gen-reference`. Do not edit by hand.
+        \\
+        \\#public(unit) {
         \\
         \\Std_Module_Doc :: struct {
         \\    name: string;
@@ -899,6 +890,7 @@ reference_generate_outputs :: (
         \\    name: string;
         \\    signature: string;
         \\    searchable_signature: string;
+        \\    owner_typeclass: string;
         \\    summary: string;
         \\    source_path: string;
         \\    source_line: s32;
@@ -953,40 +945,40 @@ reference_generate_outputs :: (
         \\}
         \\
     );
-    write_string(*glo, "\n");
-    write_string(*glo, "STD_MODULE_COUNT :: "); reference_write_integer(*glo, modules.count); write_string(*glo, ";\n");
-    write_string(*glo, "STD_SYMBOL_COUNT :: "); reference_write_integer(*glo, symbol_count); write_string(*glo, ";\n");
-    write_string(*glo, "STD_INSTANCE_COUNT :: "); reference_write_integer(*glo, instance_count); write_string(*glo, ";\n");
-    write_string(*glo, "STD_DETAIL_ROW_COUNT :: "); reference_write_integer(*glo, detail_count); write_string(*glo, ";\n");
-    write_string(*glo, "STD_MEMBER_COUNT :: "); reference_write_integer(*glo, member_count); write_string(*glo, ";\n\n");
-    write_string(*glo, "STD_MODULE_DOCS: ["); reference_write_integer(*glo, modules.count); write_string(*glo, "]Std_Module_Doc = .[\n");
-    layout_ok := result_is_ok(write_file("build/reference-glo-header.part", to_string(glo)));
-    separator := builder_make_len_cap(0, 256);
-    write_string(*separator, "];\n\nSTD_SYMBOL_DOCS: ["); reference_write_integer(*separator, symbol_count); write_string(*separator, "]Std_Symbol_Doc = .[\n");
-    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-modules.part", to_string(separator)));
-    builder_reset(*separator);
-    write_string(*separator, "];\n\nSTD_DETAIL_ROWS: ["); reference_write_integer(*separator, detail_count); write_string(*separator, "]Std_Detail_Row_Doc = .[\n");
-    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-symbols.part", to_string(separator)));
-    builder_reset(*separator);
-    write_string(*separator, "];\n\nSTD_MEMBER_DOCS: ["); reference_write_integer(*separator, member_count); write_string(*separator, "]Std_Member_Doc = .[\n");
-    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-details.part", to_string(separator)));
-    builder_reset(*separator);
-    write_string(*separator, "];\n\nSTD_INSTANCE_DOCS: ["); reference_write_integer(*separator, instance_count); write_string(*separator, "]Std_Instance_Doc = .[\n");
-    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-after-members.part", to_string(separator)));
-    layout_ok = layout_ok && result_is_ok(write_file("build/reference-glo-footer.part", "];\n\n"));
-    if !layout_ok return false;
+    glo.write_string("\n");
+    glo.write_string("STD_MODULE_COUNT :: "); reference_write_integer(*glo, modules.count); glo.write_string(";\n");
+    glo.write_string("STD_SYMBOL_COUNT :: "); reference_write_integer(*glo, symbol_count); glo.write_string(";\n");
+    glo.write_string("STD_INSTANCE_COUNT :: "); reference_write_integer(*glo, instance_count); glo.write_string(";\n");
+    glo.write_string("STD_DETAIL_ROW_COUNT :: "); reference_write_integer(*glo, detail_count); glo.write_string(";\n");
+    glo.write_string("STD_MEMBER_COUNT :: "); reference_write_integer(*glo, member_count); glo.write_string(";\n\n");
+    glo.write_string("STD_MODULE_DOCS: ["); reference_write_integer(*glo, modules.count); glo.write_string("]Std_Module_Doc = .[\n");
+    layout_ok := (("build/reference-glo-header.part").write_file(glo.to_string())).is_ok();
+    separator := String_Builder.make_len_cap(0, 256);
+    separator.write_string("];\n\nSTD_SYMBOL_DOCS: ["); reference_write_integer(*separator, symbol_count); separator.write_string("]Std_Symbol_Doc = .[\n");
+    layout_ok = layout_ok && (("build/reference-glo-after-modules.part").write_file(separator.to_string())).is_ok();
+    separator.reset();
+    separator.write_string("];\n\nSTD_DETAIL_ROWS: ["); reference_write_integer(*separator, detail_count); separator.write_string("]Std_Detail_Row_Doc = .[\n");
+    layout_ok = layout_ok && (("build/reference-glo-after-symbols.part").write_file(separator.to_string())).is_ok();
+    separator.reset();
+    separator.write_string("];\n\nSTD_MEMBER_DOCS: ["); reference_write_integer(*separator, member_count); separator.write_string("]Std_Member_Doc = .[\n");
+    layout_ok = layout_ok && (("build/reference-glo-after-details.part").write_file(separator.to_string())).is_ok();
+    separator.reset();
+    separator.write_string("];\n\nSTD_INSTANCE_DOCS: ["); reference_write_integer(*separator, instance_count); separator.write_string("]Std_Instance_Doc = .[\n");
+    layout_ok = layout_ok && (("build/reference-glo-after-members.part").write_file(separator.to_string())).is_ok();
+    layout_ok = layout_ok && (("build/reference-glo-footer.part").write_file("];\n\n}\n")).is_ok();
+    if !layout_ok return .Ok(false);
     print(
         "Generated % modules, % symbols, and % typeclass instances.\n",
         modules.count,
         symbol_count,
         instance_count,
     );
-    return true;
+    return .Ok(true);
 }
 
 generate_reference :: (source_path: string) -> bool {
     size: s64;
-    if file_size(source_path) == {
+    if source_path.file_size() == {
         case .Ok(measured); size = measured;
         case .Err(reason);
             report_error(reason);
@@ -998,14 +990,14 @@ generate_reference :: (source_path: string) -> bool {
         return false;
     }
     source: string;
-    if read_file(source_path, cast(ssize)(size + 1)) == {
+    if source_path.read_file(cast(ssize)(size + 1)) == {
         case .Err;
             print("could not read generated reference source %\n", source_path);
             return false;
         case .Ok(text); source = text;
     }
     root: Serialization_Value;
-    if json_value_from_string(source, .max_depth = 256) == {
+    if source.json_value_from_string(.max_depth = 256) == {
         case .Err(failure);
             print("reference JSON: % at %\n", failure.message, failure.offset);
             return false;
@@ -1018,20 +1010,20 @@ generate_reference :: (source_path: string) -> bool {
         return false;
     }
 
-    if !is_directory("src/generated") {
-        created := create_directory("src/generated", .make_parent = true);
-        if result_is_err(created) {
+    if !("src/generated").is_directory().unwrap_or(false) {
+        created := ("src/generated").create_directory(.make_parent = true);
+        if created.is_err() {
             print("could not create src/generated\n");
             return false;
         }
     }
-    if !reference_generate_outputs(modules, instances) return false;
+    if !reference_generate_outputs(modules, instances).unwrap_or(false) return false;
     manual_json := reference_manual_json();
     if manual_json.count == 0 {
         print("could not build the manual search index from the chapter sources\n");
         return false;
     }
-    return result_is_ok(write_file("build/reference-manual.js.part", manual_json));
+    return (("build/reference-manual.js.part").write_file(manual_json)).is_ok();
 }
 
 main :: () {

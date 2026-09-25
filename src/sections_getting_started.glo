@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 0-5: getting started.
 
 render_section_0 :: () {
@@ -148,11 +150,9 @@ render_section_0 :: () {
     );
     paragraph(28, #string,oneline
         \\The protocol is open. Declaring an instance for an application's own
-        \\result type makes that type a legal return type for `main`, and puts
-        \\the mapping from outcome to status in one place instead of scattering
-        \\numeric literals through the program. `Termination` comes from
-        \\`Typeclass`, which the Prelude imports for itself and not for the
-        \\program, so declaring an instance takes `#import "Typeclass";`.
+        \\result type makes it a legal return type for `main` and centralizes the
+        \\conversion to a process status. `Termination` is exported through the
+        \\Prelude; the class itself requires no explicit import.
     );
     code_block(29, "glosso", #string
         \\#import "Io";
@@ -199,7 +199,7 @@ render_section_0 :: () {
         \\
         \\App_Error ::: instance Error {
         \\    report_error :: (error: App_Error) {
-        \\        error_report_line("app", error.message);
+        \\        ("app").error_report_line(error.message);
         \\    }
         \\}
         \\
@@ -357,6 +357,7 @@ render_section_1 :: () {
         \\                           color diagnostics          (default: auto)
         \\  --std <dir>              standard library directory (default: auto-discovered)
         \\  --module-path <dir>      add a #import search directory (repeatable)
+        \\  --unit-source UNIT=FILE  assign a source to a build ownership unit (repeatable)
         \\  -- <args...>             expose trailing arguments to get_cmdline_args()
         \\                           during compile-time execution
         \\  -h, --help               show this help
@@ -522,7 +523,7 @@ render_section_1 :: () {
         \\vector begins with the executable path, and the compile-time one does
         \\not. `--` also swallows the whole rest of the command line,
         \\so the source file and every driver option have to appear before it.
-        \\For a nested `add_build_file` or `add_build_string` call, the elements
+        \\For a nested `string.add_build_file` or `string.add_build_string` call, the elements
         \\of `Build_Options.compile_time_command_line` occupy this same tail,
         \\one argument per element and after an implicit `--`.
     );
@@ -578,6 +579,7 @@ render_section_1 :: () {
         \\`--memory-sanitizer` and `--thread-sanitizer` are mutually exclusive
         \\rather than last-wins; asking for both is a command-line error.
     );
+    table_row(69, "`--unit-source UNIT=FILE`   |   exact source ownership mapping; repeatable; enables explicit mapping for all non-standard files   |   inferred from project and module directories");
 }
 
 render_section_2 :: () {
@@ -756,7 +758,7 @@ render_section_2 :: () {
         \\main :: () {
         \\    storage: [3]s32;
         \\    storage[0] = 10; storage[1] = 20; storage[2] = 30;
-        \\    view := array_view(storage);
+        \\    view := storage.view();
         \\    print("in range: %\n", element(view, 1));
         \\    print("out of range: %\n", element(view, 7));
         \\    print("survived\n");
@@ -813,7 +815,7 @@ render_section_2 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    print("allocated\n");
         \\}
     );
@@ -861,7 +863,7 @@ render_section_2 :: () {
         \\`Build_Options.optimization_level`: `Optimized_Small`,
         \\`Optimized_Very_Small`, and `Optimized_Tiny` become `-Os`, `-Oz`, and
         \\`-Ozz`. Use `Optimization.Optimized` (`-O2`) when an artifact is
-        \\required. `compile_c_archive` takes its own `optimization_level`
+        \\required. `string.compile_c_archive` takes its own `optimization_level`
         \\parameter and accepts only the numeric levels `Debug` through
         \\`Very_Optimized`, defaulting to `.Optimized`.
     );
@@ -1042,7 +1044,7 @@ render_section_3 :: () {
     paragraph(31, #string,oneline
         \\Resolution assembles the program: it installs the compiler-owned
         \\declarations, loads `std/Prelude`, expands `#load`, resolves `#import`,
-        \\applies private sections, and appends the root file, producing a single
+        \\applies declaration visibility, and appends the root file, producing a single
         \\declaration list with no ordering rule inside it. A module that cannot
         \\be found is reported here, as is a `#load` path that does not exist.
         \\Resolution failures do not stop the checker: both sets of diagnostics
@@ -1204,12 +1206,11 @@ render_section_4 :: () {
         \\manhattan = 7
     );
     paragraph(3, #string,oneline
-        \\The reason is that resolution assembles the entire program's
-        \\declaration list before checking begins, so by the time any name is
-        \\looked up every declaration of every file in the build is already
-        \\present. Order matters for exactly two things: the file-name order in
-        \\which a directory module's files are loaded, and the declaration order
-        \\in which top-level `#comptime` blocks run.
+        \\The resolver assembles declarations before ordinary name checking, so
+        \\forward references in one module work. Each dependency still has its own
+        \\imports and visibility. Module-level `#if` selects declarations using
+        \\compile-time conditions; those conditions need already available imports.
+        \\Top-level `#comptime` steps retain their declaration order.
     );
     paragraph(4, #string,oneline
         \\`#import` and `#load` are declarations, not statements. Written inside
@@ -1225,23 +1226,21 @@ render_section_4 :: () {
     );
     table_header(7, "Form   —   Effect");
     table_row(8, "`#import \"Io\";`   |   Public names enter the importing file's scope unqualified.");
-    table_row(9, "`M :: #import \"Math/Core\";`   |   Names are reachable only as `M.abs`, `M.clamp`.");
-    table_row(10, "`#import,only(clamp) \"Math/Core\";`   |   Exactly the listed names enter scope.");
-    table_row(11, "`#import,hide(clamp) \"Math/Core\";`   |   Everything except the listed names enters scope.");
-    table_row(12, "`M :: #import,only(clamp) \"Math/Core\";`   |   Both at once: a namespace holding a selection.");
+    table_row(9, "`M :: #import \"Math/Constants\";`   |   Names are reachable through the namespace, such as `M.S32_MAX`.");
+    table_row(10, "`#import,only(S32_MAX) \"Math/Constants\";`   |   Exactly the listed public names enter scope.");
+    table_row(11, "`#import,hide(S32_MAX) \"Math/Constants\";`   |   Everything except the listed names enters scope.");
+    table_row(12, "`M :: #import,only(S32_MAX) \"Math/Constants\";`   |   A namespace holding a selection.");
     code_block(13, "glosso", #string
         \\#import "Io";
-        \\M :: #import "Math/Core";
-        \\#import,only(clamp) "Math/Core";
+        \\M :: #import "Math/Constants";
+        \\#import,only(S32_MAX) "Math/Constants";
         \\
         \\main :: () {
-        \\    print("M.abs = %\n", M.abs(-3.5));
-        \\    print("clamp = %\n", clamp(9.0, 0.0, 5.0));
+        \\    print("qualified=% selected=%\n", M.S32_MAX == S32_MAX, S32_MAX > 0);
         \\}
     );
     code_block(14, "text", #string
-        \\M.abs = 3.5
-        \\clamp = 5
+        \\qualified=1 selected=1
     );
     paragraph(15, #string,oneline
         \\A name in an `only` or `hide` list must be a public module-level
@@ -1254,19 +1253,16 @@ render_section_4 :: () {
         \\`#import,only() "Io";`, is legal and imports nothing at all.
     );
     paragraph(16, #string,oneline
-        \\Hiding removes the name outright: after
-        \\`#import,hide(clamp) "Math/Core";` a call to `clamp` is
-        \\`error: unknown function clamp` with `help: did you mean 'lerp'?`.
-        \\Importing the same module twice is harmless. Names beginning with `_`
-        \\are imported by a plain `#import` but are excluded from `only` and
-        \\`hide` lists; Visibility and Private Sections has that rule.
+        \\`hide` removes the selected declaration from this import's unqualified
+        \\surface. Repeating an import is harmless. Visibility controls selection,
+        \\not a name's spelling: an explicitly public `_helper` can be named in
+        \\`only` and `hide`, while a private declaration cannot.
     );
     note(17, #string,oneline
-        \\`#import "Math"` is rewritten to `Math/Core`; there is no
-        \\`std/Math.glo`, and no other directory gets this treatment. The rewrite
-        \\happens where the module is loaded, so the aliased form gets it too:
-        \\`M :: #import "Math";` names the same module as
-        \\`M :: #import "Math/Core";`.
+        \\Use the explicit `Math/Core` module name for scalar mathematics and
+        \\`Math/Constants` for constants. A `Math` compatibility shorthand exists
+        \\only in full-standard-library conformance mode; ordinary source imports
+        \\should name the component directly.
     );
     subheading(18, "How a module name resolves");
     paragraph(19, #string,oneline
@@ -1300,7 +1296,7 @@ render_section_4 :: () {
         \\#import "File_System/Metadata";
         \\
         \\main :: () {
-        \\    if #pattern .Ok(found) = exists("lookup.glo") {
+        \\    if #pattern .Ok(found) = ("lookup.glo").exists() {
         \\        print("exists = %\n", found);
         \\    }
         \\}
@@ -1323,7 +1319,7 @@ render_section_4 :: () {
         \\#import "Strings/Utf8";
         \\
         \\main :: () {
-        \\    print("%\n", substring("compiler", 0, 4));
+        \\    print("%\n", ("compiler").substring(0, 4));
         \\}
     );
     code_block(32, "text", #string
@@ -1375,8 +1371,9 @@ render_section_4 :: () {
         \\dependency loaded only by its caller or by another sibling module.
     );
     bullet(42, #string,oneline
-        \\Declarations in a private section of a loaded file stay invisible to
-        \\the loader; Visibility and Private Sections has the rules.
+        \\Declarations are private by default. A loaded file must mark its API
+        \\`#public`, or use `#public(unit)` for callers in the same ownership unit.
+        \\Visibility and Ownership Units explains both audiences.
     );
     note(43, #string,oneline
         \\The operator prescan follows relative `#load` and `#export`
@@ -1404,11 +1401,11 @@ render_section_4 :: () {
     );
     subheading(47, "`#load,embed`: shared source fragments");
     paragraph(48, #string,oneline
-        \\`#load,embed "path";` keeps the source-splicing behavior: the loaded
-        \\fragment shares its containing module's declarations and dependencies.
-        \\Use it when files deliberately implement one shared compilation unit,
-        \\such as this manual's chapter and UI fragments. The path is still
-        \\relative to the file containing the directive.
+        \\`#load,embed "path";` places a source fragment in its containing logical
+        \\module and shares the module's dependencies. Each fragment retains its
+        \\physical source identity, so cross-file declarations still need
+        \\`#public(unit)` or `#public`. This manual uses unit-visible chapter and UI
+        \\fragments. Nested paths remain relative to the directive's physical file.
     );
     code_block(49, "glosso", #string
         \\#import "Io";
@@ -1422,7 +1419,7 @@ render_section_5 :: () {
         \\Every compilation begins with names already in scope. Nothing in the
         \\program declares them and no import produces them. They arrive in three
         \\layers, in this order: type spellings the parser recognises,
-        \\declarations the compiler injects, and the twelve public components of
+        \\declarations the compiler injects, and the thirteen public components of
         \\`std/Prelude`.
     );
     paragraph(1, #string,oneline
@@ -1442,7 +1439,7 @@ render_section_5 :: () {
     table_row(7, "Floating point   |   `f16`, `f32`, `f64`, `f80`, `f128`");
     table_row(8, "Complex   |   `c32`, `c64`, `c128`, `c160`, `c256`");
     table_row(9, "Characters and text   |   `rune`, `string`, `cstring`, `string16`, `cstring16`");
-    table_row(10, "Other   |   `bool`, `void`, `any`, `type`, `label`, `Code`, `Pattern`, `Namespace`, `Library`");
+    table_row(10, "Other   |   `bool`, `void`, `#Never`, `any`, `type`, `label`, `Code`, `Pattern`, `Namespace`, `Library`");
     table_row(65, "Type constructors   |   `Simd(T, N)`, `Matrix(T, Rows, Cols)`");
     table_row(67, "Declaration annotations   |   `Typeclass(T, …)`, `Macro(signature)`");
     paragraph(11, #string,oneline
@@ -1518,7 +1515,7 @@ render_section_5 :: () {
         \\message asks for `#import "Context";`. The Implicit Context and
         \\Allocators cover what the fields do.
     );
-    subheading(21, "The twelve Prelude components");
+    subheading(21, "The thirteen Prelude components");
     paragraph(22, #string,oneline
         \\`std/Prelude/module.glo` explicitly assembles the Prelude. Everything its public
         \\components declare is in scope for every program.
@@ -1528,11 +1525,11 @@ render_section_5 :: () {
     table_row(68, "`Formatters.glo`   |   The default, integer-radix, and character `Formatter` instances. The `Formatter` protocol itself lives in `Format`.");
     table_row(25, "`Primitive_Typeclasses.glo`   |   `AsView`, `PartialEq`, `Eq`, `PartialOrd`, `Ordering`, `Num`, `Iterable`, and `PointerIterable`.");
     table_row(26, "`Primitive_Operators.glo`   |   The operator typeclasses and their primitive instances, plus `Indexable`, `Step`, the range classes, and `ToPattern`.");
-    table_row(27, "`Option.glo`   |   `option_some`, `option_none`, `option_is_some`, `option_is_none`, `option_unwrap_or`, `Option_Residual`, the instances for `?T`.");
-    table_row(28, "`Result.glo`   |   `result_ok`, `result_err`, `result_is_ok`, `result_is_err`, `result_unwrap_or`, `map_error`, `bind_error`, `ap_error`, `Result_Residual`.");
+    table_row(27, "`Option.glo`   |   `?T` constructors and methods: `make_some`, `make_none`, `is_some`, `is_none`, `unwrap_or`, `map`, `and_then`, and `Option_Residual`.");
+    table_row(28, "`Result.glo`   |   `E!T` constructors and methods: `make_ok`, `make_err`, `is_ok`, `is_err`, `unwrap_or`, `map`, `E1!T.map_error`, `E1!T.bind_error`, `((E1) -> E2)!T.ap_error`, and `Result_Residual`.");
     table_row(69, "`Try.glo`   |   `Try`, `Try_Branch`, and `Propagate`, the protocols behind postfix `?` and residual conversion.");
     table_row(70, "`Termination.glo`   |   `Termination(T)`, which converts a value returned by `main` into a process status.");
-    table_row(29, "`Array.glo`   |   `array_add`, `array_append`, `array_reset`, `array_free`, `array_deinit`, `array_view`.");
+    table_row(29, "`Array.glo`   |   Array methods `add`, `append`, `reserve`, `reset`, `free`, `deinit`, and `view`.");
     table_row(30, "`Assembly.glo`   |   `Asm_Constraint`, `Asm_Operand_Flags`, `Asm_Clobber`, the vocabulary `#asm` operands are written in.");
     table_row(71, "`Source_Location.glo`   |   `Source_Location`, with `filename: string`, `line: ssize`, and `column: ssize`; its `Show` instance renders `filename:line:column`.");
     table_row(31, "`Utilities.glo`   |   `Target_OS`, `Target_CPU`, `Target_ABI`, `Target_Endian`, `Output_Target`, `Host_Target`, `target_endian`, `get_cmdline_args`, `exit`.");
@@ -1552,8 +1549,8 @@ render_section_5 :: () {
         \\main :: () {
         \\    print("type_name = %\n", type_name(s32));
         \\    print("size_of   = %\n", size_of(f64));
-        \\    print("str_cat   = %\n", str_cat("a", "b"));
-        \\    print("format    = %\n", format_int(255, 16));
+        \\    print("str_cat   = %\n", ("a").cat("b"));
+        \\    print("format    = %\n", (255).format_int(16));
         \\    print("tprint    = %\n", tprint("% + %", 1, 2));
         \\}
     );
@@ -1583,13 +1580,13 @@ render_section_5 :: () {
         \\main :: () {
         \\    maybe: ?ssize = .Some(21);
         \\    outcome: string!ssize = .Ok(42);
-        \\    print("% %\n", option_is_some(maybe), result_is_ok(outcome));
+        \\    print("% %\n", maybe.is_some(), outcome.is_ok());
         \\
         \\    xs: [..]ssize;
-        \\    array_add(*xs, 3);
-        \\    array_add(*xs, 4);
+        \\    xs.add(3);
+        \\    xs.add(4);
         \\    print("count=% sum=%\n", xs.count, xs[0] + xs[1]);
-        \\    array_free(*xs);
+        \\    xs.free();
         \\
         \\    print("ordering=% show=%\n", 1 <=> 2, show(7));
         \\    print("os=% endian=% args=%\n", OUT.os, target_endian(), get_cmdline_args().count);
@@ -1642,7 +1639,7 @@ render_section_5 :: () {
     code_block(58, "glosso", #string
         \\get_cmdline_args :: () -> []const string #magic "get_cmdline_args"
         \\    #memory returns_static;
-        \\exit :: (status: ssize) #noreturn #magic "exit";
+        \\exit :: (status: ssize) -> #Never #magic "exit";
     );
     paragraph(59, #string,oneline
         \\`get_cmdline_args` returns the process argument vector at run time,
@@ -1671,11 +1668,12 @@ render_section_5 :: () {
         \\help: did you mean 'tprint'?
     );
     note(64, #string,oneline
-        \\Numeric constants are not in the Prelude either. `PI`, `S64_MAX`,
-        \\`F64_MAX` and the rest live in `Math/Constants`; with no import at all
-        \\`S64_MAX` is `error: unbound 'S64_MAX'`. `#import "Io"` reaches them
-        \\transitively without putting them in scope, so beside that import `PI`
-        \\is `error: unknown identifier PI` while a top-level `PI :: 3.14;` is
-        \\still `error: constant 'PI' is already declared`.
+        \\Numeric constants are not supplied by the Prelude. `PI`, `S64_MAX`,
+        \\`F64_MAX`, and the other numeric limits belong to `Math/Constants`.
+        \\Import that component directly; a dependency's private import does not
+        \\bring its names into the caller's scope.
     );
+    table_row(73, "`Drop.glo`   |   `Drop(T)` and its associated `Error`, the protocol for automatic resource cleanup.");
+}
+
 }

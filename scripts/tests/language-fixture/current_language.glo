@@ -1,0 +1,56 @@
+#import "Io";
+#import "Strings/Utf8";
+#import "String_Builder";
+#load "current_language_module.glo";
+
+Trace_Owner :: struct { trace: *ssize; digit: ssize; }
+Trace_Owner ::: instance Drop {
+    Error :: #Never;
+    drop :: (value: *Trace_Owner) -> #Never!void {
+        value.*.trace.* = value.*.trace.* * 10 + value.*.digit;
+        return .Ok;
+    }
+}
+
+Fallible_Owner :: struct { trace: *ssize; }
+Fallible_Owner ::: instance Drop {
+    Error :: string;
+    drop :: (value: *Fallible_Owner) -> string!void {
+        value.*.trace.* = value.*.trace.* * 10 + 9;
+        return .Err("cleanup");
+    }
+}
+
+main :: () {
+    counter := Counter.make();
+    counter.increment();
+    #assert counter.get() == 41;
+    #assert exported_answer() == 42;
+
+    builder := String_Builder.make_len_cap(0, 32);
+    builder.write_string("  methods  ");
+    text := builder.to_string().trim();
+    #assert text.starts_with("method");
+    values: [..]ssize;
+    defer values.free();
+    values.add(counter.get(), exported_answer());
+    #assert values.view().count == 2;
+    present: ?ssize = .Some(values[1]);
+    #assert present.unwrap_or(0) == 42;
+
+    trace: ssize = 0;
+    {
+        first := Trace_Owner.{ .trace = *trace, .digit = 1 };
+        second := Trace_Owner.{ .trace = *trace, .digit = 2 };
+    }
+    #assert trace == 21;
+    {
+        owner := Fallible_Owner.{ .trace = *trace };
+        #on_drop_error(owner, error) {
+            #assert error == "cleanup";
+            trace += 100;
+        }
+    }
+    #assert trace == 319;
+    print("current language passed\n");
+}

@@ -1,5 +1,7 @@
 // Sections 116-127: memory and context.
 
+#public(unit) {
+
 render_section_116 :: () {
     paragraph(0, #string,oneline
         \\Every procedure body sees one implicit value named `context`. It takes
@@ -26,7 +28,7 @@ render_section_116 :: () {
         \\}
     );
     table_header(3, "Field   —   What reads it");
-    table_row(5, "`allocator`   |   `alloc`, `free`, `array_add`, `format`, and every standard-library call that defaults its allocator parameter");
+    table_row(5, "`allocator`   |   `alloc`, `free`, `array.add`, `format`, and every standard-library call that defaults its allocator parameter");
     table_row(6, "`temp_allocator`   |   `tprint`, and everything else that returns arena-backed storage");
     table_row(7, "`logger`   |   structured logging; the vtable is zeroed in the default context");
     table_row(8, "`random_generator`   |   the random-number vtable; also zeroed in the default context");
@@ -125,9 +127,9 @@ render_section_116 :: () {
         \\#import "Context";
         \\
         \\served :: () -> bool {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    if #pattern .Some(raw) = p {
-        \\        free(p);
+        \\        p.free();
         \\        return true;
         \\    }
         \\    return false;
@@ -217,7 +219,7 @@ render_section_116 :: () {
         \\The compile-time VM has its own readable and writable `context`.
         \\Changing it does not initialize the native program's runtime context.
         \\This does not make every context operation available in the VM:
-        \\a direct `alloc(16)` still stops with `#magic 'ctx_alloc' has no VM
+        \\a direct `(16).alloc()` still stops with `#magic 'ctx_alloc' has no VM
         \\implementation`. Check the operation, rather than assuming that
         \\reading an allocator record makes its native allocation path usable.
         \\Compile-time evaluation is described in `#comptime`.
@@ -289,8 +291,8 @@ render_section_117 :: () {
     paragraph(14, #string,oneline
         \\An allocator may implement a subset and return `.None` for the rest;
         \\that is what the supplied ones do. `Resize` is not optional in
-        \\practice, because a dynamic array grown by `array_add` and a
-        \\`String_Builder` grown by `write_string` both issue it, and an
+        \\practice, because a dynamic array grown by `array.add` and a
+        \\`String_Builder` grown by `String_Builder.write_string` both issue it, and an
         \\allocator that answers `.None` there hands the caller no memory to
         \\write into.
     );
@@ -298,7 +300,7 @@ render_section_117 :: () {
     paragraph(16, #string,oneline
         \\`Allocator_Error` names the ways a request can fail. Its variants
         \\carry explicit values so that the enum is stable across versions, and
-        \\`allocator_error_reason` turns one into a message.
+        \\`Allocator_Error.reason` turns one into a message.
     );
     table_header(17, "Variant   —   Reason string   —   Value");
     table_row(18, "`None`   |   `no error`   |   0");
@@ -311,7 +313,7 @@ render_section_117 :: () {
         \\propagates one gets the reporting described in `Error`,
         \\`Termination`, and `main`. No entry point in the allocation API
         \\returns one today: an `Allocator_Proc` signals failure by returning
-        \\`.None`, and so do `alloc` and `mem_alloc`.
+        \\`.None`, and so do `alloc` and `ssize.mem_alloc`.
     );
     subheading(24, "The supplied allocators");
     paragraph(25, #string,oneline
@@ -340,16 +342,16 @@ render_section_117 :: () {
         \\the argument is omitted.
     );
     table_header(34, "Call   —   What it does");
-    table_row(35, "`alloc`   |   `alloc(n) -> ?*void`; `Alloc` through `context.allocator` at alignment 16");
-    table_row(36, "`free`   |   `free(p)`; `Free` through `context.allocator`");
-    table_row(37, "`mem_alloc`   |   `mem_alloc(size, allocator := context.allocator)`; `Alloc` at alignment 16");
-    table_row(38, "`mem_resize`   |   `mem_resize(old, old_size, size, allocator := context.allocator)`; the old pointer is invalidated");
-    table_row(39, "`mem_free`   |   `mem_free(p, allocator := context.allocator)`");
-    table_row(40, "`free_all`   |   `free_all(allocator := context.allocator)`; sends `Free_All`");
-    table_row(41, "`allocator_mem_alloc`, `allocator_mem_free`   |   the same allocate and release operations with the allocator written first");
+    table_row(35, "`alloc`   |   `n.alloc() -> ?*void`; `Alloc` through `context.allocator` at alignment 16");
+    table_row(36, "`free`   |   `p.free()`; `Free` through `context.allocator`");
+    table_row(37, "`ssize.mem_alloc`   |   `size.mem_alloc(allocator)`; allocator defaults to `context.allocator`; `Alloc` at alignment 16");
+    table_row(38, "`pointer.mem_resize`   |   `old.mem_resize(old_size, size, allocator)`; allocator defaults to `context.allocator`; the old pointer is invalidated");
+    table_row(39, "`optional.mem_free`   |   `p.mem_free(allocator)`; allocator defaults to `context.allocator`");
+    table_row(40, "`Allocator.free_all`   |   `context.allocator.free_all()`; sends `Free_All`");
+    table_row(41, "`Allocator.mem_alloc`, `Allocator.mem_free`   |   the same allocate and release operations with the allocator written first");
     paragraph(42, #string,oneline
-        \\`mem_free` accepts a `?*void`, so an allocation result is handed
-        \\straight back to it; `mem_resize` requires a plain `*void`, so the
+        \\`optional.mem_free` accepts a `?*void`, so an allocation result is handed
+        \\straight back to it; `pointer.mem_resize` requires a plain `*void`, so the
         \\result has to be matched first. An `Allocator` whose `procedure` slot
         \\is empty serves nothing and releases nothing rather than calling
         \\through it.
@@ -359,19 +361,19 @@ render_section_117 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := mem_alloc(8, heap_allocator());
+        \\    p := (8).mem_alloc(heap_allocator());
         \\    if #pattern .Some(raw) = p {
         \\        cell := cast(*s64) raw;
         \\        cell.* = 42;
         \\        print("cell %\n", cell.*);
         \\    }
-        \\    mem_free(p, heap_allocator());
+        \\    p.mem_free(heap_allocator());
         \\
-        \\    q := mem_alloc(8, nil_allocator());
+        \\    q := (8).mem_alloc(nil_allocator());
         \\    served := false;
         \\    if #pattern .Some(raw) = q served = true;
         \\    print("nil served %\n", served);
-        \\    mem_free(q, nil_allocator());
+        \\    q.mem_free(nil_allocator());
         \\}
     );
     code_block(44, "text", #string
@@ -407,15 +409,15 @@ render_section_117 :: () {
         \\    if mode == {
         \\        case .Alloc, .Alloc_Non_Zeroed;
         \\            requests += 1;
-        \\            return mem_alloc(size, heap);
+        \\            return size.mem_alloc(heap);
         \\        case .Resize, .Resize_Non_Zeroed;
         \\            requests += 1;
         \\            if #pattern .Some(old) = old_memory {
-        \\                return mem_resize(old, old_size, size, heap);
+        \\                return old.mem_resize(old_size, size, heap);
         \\            }
-        \\            return mem_alloc(size, heap);
+        \\            return size.mem_alloc(heap);
         \\        case .Free;
-        \\            mem_free(old_memory, heap);
+        \\            old_memory.mem_free(heap);
         \\            return .None;
         \\        else;
         \\            return .None;
@@ -433,7 +435,7 @@ render_section_117 :: () {
         \\    #push_allocator(tracking_allocator());
         \\    text := format("%-%", 1, 2);
         \\    print("% after % request(s)\n", text, requests);
-        \\    string_free(text);
+        \\    text.free();
         \\}
     );
     code_block(48, "text", #string
@@ -454,7 +456,7 @@ render_section_117 :: () {
     note(50, #string,oneline
         \\The standard library's convention for a routine that allocates is a
         \\trailing `allocator: Allocator = context.allocator` parameter, as in
-        \\`clone`, `builder_make_len_cap` and the `Container` constructors. A
+        \\`clone`, `String_Builder.make_len_cap` and the `Container` constructors. A
         \\caller that wants a different allocator for one call passes it; a
         \\caller that wants it for a region uses `#push_allocator`.
     );
@@ -607,7 +609,7 @@ render_section_118 :: () {
     );
     subheading(21, "`reset_temporary_storage`");
     paragraph(22, #string,oneline
-        \\`reset_temporary_storage()` calls `free_all(context.temp_allocator)`,
+        \\`reset_temporary_storage()` calls `context.temp_allocator.free_all()`,
         \\which sends `Free_All` to the arena: overflow blocks are released and
         \\the mark returns to the start of the static block. It is the explicit
         \\spelling of what the compiler already does at a frame boundary.
@@ -617,7 +619,7 @@ render_section_118 :: () {
         \\the reset arena becomes invalid. The memory checker follows recognized
         \\temporary allocator origins through scoped `#push_allocator`, Context
         \\allocation calls, dynamic-array growth, and returned values. A later use
-        \\is diagnosed as stale when `reset_temporary_storage` or `free_all` resets
+        \\is diagnosed as stale when `reset_temporary_storage` or `Allocator.free_all` resets
         \\that arena. Allocations from the ordinary heap remain live, and new
         \\allocations after the reset belong to a new storage generation.
         \\Arbitrary allocator procedures and direct replacement of context fields
@@ -627,30 +629,29 @@ render_section_118 :: () {
     subheading(24, "What comes from temporary storage");
     paragraph(25, #string,oneline
         \\A value backed by the arena carries no release obligation and must not
-        \\be passed to `free` or `string_free`. These are the standard-library
+        \\be passed to `free` or `string.free`. These are the standard-library
         \\entry points that produce one.
     );
     table_header(26, "Call   —   Result");
     table_row(27, "`tprint`   |   the formatted string, in the arena");
-    table_row(28, "`read_line`   |   the `text` field of its `Read_Line`, in the arena");
-    table_row(29, "`c_string`   |   a NUL-terminated copy of the string, in the arena");
-    table_row(30, "`format`   |   the formatted string, when it is passed `.allocator = context.temp_allocator` and transferred with `string_into_temporary`");
-    table_row(31, "`builder_into_temporary_string`   |   the builder's arena-backed bytes as a string");
-    table_row(32, "`string_into_temporary`   |   the same string with its release obligation dropped");
+    table_row(28, "`File.read_line`   |   the `text` field of its `Read_Line`, in the arena");
+    table_row(29, "`string.c_string`   |   a NUL-terminated copy of the string, in the arena");
+    table_row(30, "`format`   |   the formatted string, when it is passed `.allocator = context.temp_allocator` and transferred with `string.into_temporary`");
+    table_row(31, "`String_Builder.into_temporary_string`   |   the builder's arena-backed bytes as a string");
+    table_row(32, "`string.into_temporary`   |   the same string with its release obligation dropped");
     paragraph(33, #string,oneline
-        \\`print` and `writef` build their output with `tprint`, and `write_int`
+        \\`print` and `writef` build their output with `tprint`, and `File.write_int`
         \\formats through the arena as well, so a procedure that prints is
         \\already using temporary storage even if it never names it. `format` is
         \\the owning counterpart: it allocates from `context.allocator` and its
-        \\result is released with `string_free`.
+        \\result is released with `string.free`.
     );
     note(34, #string,oneline
-        \\A temporary value that has to outlive its frame is copied, not
-        \\retained. `clone(text)` and `format("%", value)` both produce an owned
-        \\string from `context.allocator`; writing `kept = clone(tprint(...))`
-        \\inside the inner block above makes the earlier example print
-        \\`kept=inner-1`. Built-in Strings covers the string representation
-        \\itself.
+        \\A temporary value that has to outlive its frame is copied, not retained.
+        \\`text.clone()` and `format("%", value)` both produce an owned string from
+        \\`context.allocator`; writing `kept = (tprint(...)).clone()` inside the inner
+        \\block above makes the earlier example print `kept=inner-1`. Built-in Strings
+        \\covers the string representation itself.
     );
 }
 
@@ -681,9 +682,9 @@ render_section_119 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    kept := alloc(64) #memory leak;
-        \\    scratch := alloc(32);
-        \\    free(scratch);
+        \\    kept := (64).alloc() #memory leak;
+        \\    scratch := (32).alloc();
+        \\    scratch.free();
         \\    print("done\n");
         \\}
     );
@@ -701,7 +702,7 @@ render_section_119 :: () {
     paragraph(4, #string,oneline
         \\The report gives one `leak:` entry per block still live at exit, with
         \\the byte count and the trace of the call that produced it. A dynamic
-        \\array is reported at its `array_add`, because that is the call that
+        \\array is reported at its `array.add`, because that is the call that
         \\asked the allocator for storage.
     );
     subheading(5, "Double free");
@@ -715,9 +716,9 @@ render_section_119 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := alloc(64);
-        \\    free(p);
-        \\    free(p);
+        \\    p := (64).alloc();
+        \\    p.free();
+        \\    p.free();
         \\    print("still running\n");
         \\}
     );
@@ -755,11 +756,11 @@ render_section_119 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    if #pattern .Some(raw) = p {
         \\        bytes := cast([*]u8) raw;
         \\        bytes[0] = 7;
-        \\        free(p);
+        \\        p.free();
         \\        print("value=%\n", bytes[0]);
         \\    }
         \\}
@@ -788,7 +789,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    free(cast(*void) *slot);
+        \\    (cast(*void) *slot).free();
         \\    print("continued\n");
         \\}
     );
@@ -813,7 +814,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    fresh := mem_resize(cast(*void) *slot, 8, 32);
+        \\    fresh := (cast(*void) *slot).mem_resize(8, 32);
         \\    print("continued\n");
         \\}
     );
@@ -839,12 +840,12 @@ render_section_119 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := alloc(16);
+        \\    p := (16).alloc();
         \\    if #pattern .Some(raw) = p {
         \\        bytes := cast([*]u8) raw;
         \\        bytes[16] = 1;
         \\    }
-        \\    free(p);
+        \\    p.free();
         \\    print("continued\n");
         \\}
     );
@@ -876,7 +877,7 @@ render_section_119 :: () {
         \\reported. The magic behind it, `__debug_report_leaks`, sits in a
         \\private section of the `Context` module and naming it directly is
         \\`error: unknown function __debug_report_leaks`. The same report is
-        \\what `free_all(context.allocator)` triggers while the debug allocator
+        \\what `context.allocator.free_all()` triggers while the debug allocator
         \\is installed, because `Free_All` is the mode it maps to.
     );
     code_block(29, "glosso", #string
@@ -884,9 +885,9 @@ render_section_119 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    first := alloc(64) #memory leak;
+        \\    first := (64).alloc() #memory leak;
         \\    debug_allocator_report_leaks();
-        \\    second := alloc(32) #memory leak;
+        \\    second := (32).alloc() #memory leak;
         \\    print("done\n");
         \\}
     );
@@ -923,11 +924,13 @@ render_section_119 :: () {
 
 render_section_120 :: () {
     paragraph(0, #string,oneline
-        \\Glosso has no garbage collector, no destructors, and no ownership in
-        \\its type system. Every allocation is released by an explicit call, and
-        \\the compiler's work is to say when that call is missing, duplicated, or
-        \\made too early. Five separate machineries do it: three during
-        \\compilation and two inside the emitted program.
+        \\Glosso has no garbage collector. Values implementing `Drop`, and
+        \\aggregates containing managed fields, receive automatic destruction
+        \\when ownership ends. Passing or returning an owned managed value by
+        \\value moves it; borrow it through a pointer when ownership should stay
+        \\with the caller. Raw strings and dynamic arrays still need an explicit
+        \\release, usually registered with `defer`. Five diagnostic mechanisms
+        \\check resource use: three during compilation and two at runtime.
     );
     paragraph(1, #string,oneline
         \\Acting on a memory diagnostic starts with deciding which of the five
@@ -986,8 +989,8 @@ render_section_120 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    array_add(*values, 2);
+        \\    values.add(1);
+        \\    values.add(2);
         \\    print("count=%\n", values.count);
         \\}
     );
@@ -1031,9 +1034,9 @@ render_section_120 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    print("%\n", p.Some);
-        \\    free(p);
+        \\    p.free();
         \\}
     );
     code_block(22, "text", #string
@@ -1077,7 +1080,7 @@ render_section_120 :: () {
         \\#import "Context";
         \\
         \\main :: () {
-        \\    table := alloc(64) #memory leak;
+        \\    table := (64).alloc() #memory leak;
         \\    print("interned for the life of the process\n");
         \\}
     );
@@ -1135,8 +1138,8 @@ render_section_120 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\concrete :: (x: s64) -> s64 { p := alloc(64); return x; }
-        \\generic  :: (x: $T) -> T    { p := alloc(64); return x; }
+        \\concrete :: (x: s64) -> s64 { p := (64).alloc(); return x; }
+        \\generic  :: (x: $T) -> T    { p := (64).alloc(); return x; }
         \\
         \\main :: () {
         \\    print("% %\n", concrete(1), generic(2));
@@ -1178,6 +1181,49 @@ render_section_120 :: () {
         \\only the warnings their own statements would raise are suppressed.
         \\Without that rule every program would open with the library's own
         \\findings.
+    );
+    subheading(42, "Automatic destruction with `Drop`");
+    paragraph(43, #string,oneline
+        \\`Drop` is supplied by the Prelude. An instance chooses an associated
+        \\`Error` type and implements `drop(value: *T) -> Error!void`. The
+        \\compiler invokes this hook when an owner dies, then destroys its
+        \\remaining owned fields even if the hook failed. Ordinary code cannot
+        \\call the hook or take its address; use a nested scope to end ownership
+        \\early. Automatic cleanup and explicit `defer` entries share reverse
+        \\scope order.
+    );
+    code_block(44, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Cleanup_Error :: enum { Failed; }
+        \\Resource :: struct { id: s64; }
+        \\Resource ::: instance Drop {
+        \\    Error :: Cleanup_Error;
+        \\    drop :: (value: *#Self_Type) -> Cleanup_Error!void {
+        \\        print("drop %\n", value.*.id);
+        \\        return .Err(.Failed);
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    resource: Resource = .{ .id = 7 };
+        \\    #on_drop_error(resource, error) { print("cleanup handled\n"); }
+        \\    print("body\n");
+        \\}
+    );
+    code_block(45, "text", #string
+        \\body
+        \\drop 7
+        \\cleanup handled
+    );
+    paragraph(46, #string,oneline
+        \\Register `#on_drop_error(owner, error) { ... }` immediately after the
+        \\owning declaration to handle an implicit cleanup failure locally.
+        \\Without a handler the failure propagates to a compatible result
+        \\boundary. An infallible instance uses `Error :: #Never` and returns
+        \\`#Never!void`; it needs neither a handler nor a fallible boundary.
+        \\`File` and `String_Builder` are managed types. A raw owned string or
+        \\dynamic array still needs `.free()`, commonly in `defer`.
     );
 }
 
@@ -1312,7 +1358,7 @@ render_section_121 :: () {
     code_block(34, "glosso", #string
         \\copy  := c_strdup(cast(*const s8) *text) #memory released_by(c_free);
         \\same  := c_strdup(cast(*const s8) *text) #memory released_by(by: c_free);
-        \\table := alloc(64) #memory leak;
+        \\table := (64).alloc() #memory leak;
         \\c_puts(cast(*const s8) *text) #memory(reads(s), noescape(s));
     );
     paragraph(35, #string,oneline
@@ -1453,15 +1499,15 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
+        \\    values.add(1);
         \\    print("%\n", values.count);
         \\}
     );
     paragraph(3, #string,oneline
         \\That program warns. The declaration `values: [..]s64` carries no
-        \\contract of its own and creates nothing; the `array_add` call is what
+        \\contract of its own and creates nothing; the `array.add` call is what
         \\makes the array owned, because every such call attaches a release
-        \\requirement naming `array_free`. A dynamic array that is declared and
+        \\requirement naming `array.free`. A dynamic array that is declared and
         \\never grown owns no storage and is not reported.
     );
 
@@ -1477,13 +1523,13 @@ render_section_122 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\make_buffer :: (n: ssize) -> ?*void #memory(returns_fresh, released_by(free)) {
-        \\    return alloc(n);
+        \\make_buffer :: (n: ssize) -> ?*void #memory(returns_fresh, released_by(Option.free)) {
+        \\    return n.alloc();
         \\}
         \\
         \\main :: () {
         \\    b := make_buffer(64);
-        \\    defer free(b);
+        \\    defer b.free();
         \\    print("owned by main\n");
         \\}
     );
@@ -1499,9 +1545,9 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
+        \\    values.add(1);
         \\    defer print("%\n", values[0]);
-        \\    defer array_free(*values);
+        \\    defer values.free();
         \\}
     );
     code_block(9, "text", #string
@@ -1541,8 +1587,8 @@ render_section_122 :: () {
         \\#import "Context";
         \\
         \\work :: (flag: bool) {
-        \\    p := alloc(64);
-        \\    if flag { free(p); }
+        \\    p := (64).alloc();
+        \\    if flag { p.free(); }
         \\}
         \\
         \\main :: () {
@@ -1582,7 +1628,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    a: Holder;
-        \\    array_add(*a.values, 1);
+        \\    a.values.add(1);
         \\    print("%\n", a.values.count);
         \\}
     );
@@ -1610,7 +1656,7 @@ render_section_122 :: () {
         \\Buffer :: struct { values: [..]s64; label: string; }
         \\
         \\buffer_free :: (b: *Buffer) #memory(kills(b), reads(b), noescape(b)) {
-        \\    array_free(*b.*.values);
+        \\    b.*.values.free();
         \\}
         \\
         \\buffer_make :: () -> Buffer #memory(returns_fresh, released_by(buffer_free)) {
@@ -1622,7 +1668,7 @@ render_section_122 :: () {
         \\main :: () {
         \\    b := buffer_make();
         \\    defer buffer_free(*b);
-        \\    array_add(*b.values, 7);
+        \\    b.values.add(7);
         \\    print("% %\n", b.label, b.values.count);
         \\}
     );
@@ -1642,7 +1688,7 @@ render_section_122 :: () {
         \\#import "Context";
         \\
         \\make_buffer :: (n: ssize) -> ?*void {
-        \\    return alloc(n);
+        \\    return n.alloc();
         \\}
         \\
         \\main :: () {
@@ -1679,7 +1725,7 @@ render_section_122 :: () {
     code_block(28, "glosso", #string
         \\#import "Io";
         \\
-        \\my_free :: (a: *[..]s64) #memory(kills(a), noescape(a)) { array_free(a); }
+        \\my_free :: (a: *[..]s64) #memory(kills(a), noescape(a)) { a.free(); }
         \\
         \\make :: () -> [..]s64 #memory(returns_fresh, released_by(my_free)) {
         \\    v: [..]s64 #memory leak;
@@ -1688,7 +1734,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    v := make();
-        \\    array_add(*v, 1);
+        \\    v.add(1);
         \\    my_free(*v);
         \\}
     );
@@ -1721,7 +1767,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    c: Holder #memory leak;
-        \\    array_add(*c.values, 3);
+        \\    c.values.add(3);
         \\    print("%\n", c.values.count);
         \\}
     );
@@ -1772,12 +1818,16 @@ render_section_123 :: () {
         \\descriptor valid and every view of the old block dangling.
     );
     code_block(2, "glosso", #string
-        \\array_add   :: (a: *[..]$T, value: ...T) #magic "array_add"
-        \\    #memory{invalidates(a), writes(a), noescape(a), owns(value, into: a)};
-        \\array_free  :: (a: *[..]$T) #magic "array_free"
-        \\    #memory{kills(a), noescape(a)};
-        \\array_view  :: (a: [..]$T) -> []T #magic "array_view"
-        \\    #memory{returns_borrow(a), reads(a), noescape(a)};
+        \\[..]$T ::: #public {
+        \\    add :: (*#self, value: ...T) #magic "array_add"
+        \\        #memory{invalidates(#self), writes(#self), noescape(#self), owns(value, into: #self)};
+        \\    free :: (*#self) #magic "array_free"
+        \\        #memory{kills(#self), noescape(#self)};
+        \\}
+        \\[]$T ::: #public {
+        \\    view :: (#self) -> []T #magic "array_view"
+        \\        #memory{returns_borrow(#self), reads(#self), noescape(#self)};
+        \\}
     );
     paragraph(3, #string,oneline
         \\Those three prelude declarations are the whole model in miniature:
@@ -1791,11 +1841,11 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    view := array_view(values);
-        \\    array_add(*values, 2);
+        \\    values.add(1);
+        \\    view := values.view();
+        \\    values.add(2);
         \\    print("%\n", view[0]);
-        \\    array_free(*values);
+        \\    values.free();
         \\}
     );
     code_block(5, "text", #string
@@ -1818,14 +1868,14 @@ render_section_123 :: () {
 
     subheading(6, "Why the owner survives");
     paragraph(7, #string,oneline
-        \\Only `view` is reported. The second `array_add` and the `array_free`
+        \\Only `view` is reported. The second `array.add` and the `array.free`
         \\after it both go through `values`, and both are clean, even though the
         \\same call raised the generation. When a call invalidates a parameter the
         \\analyser bumps the generation and then refreshes the root expression
         \\that was passed as that argument.
     );
     paragraph(8, #string,oneline
-        \\The reason is that the owner is the thing being updated. `array_add`
+        \\The reason is that the owner is the thing being updated. `array.add`
         \\writes the new block's address back into the descriptor it was handed,
         \\so `values` is current by construction while every reference derived
         \\earlier from the old block is not. Refreshing exactly the argument root
@@ -1842,19 +1892,19 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    old := array_view(values);
-        \\    array_add(*values, 2);
-        \\    fresh := array_view(values);
+        \\    values.add(1);
+        \\    old := values.view();
+        \\    values.add(2);
+        \\    fresh := values.view();
         \\    print("% %\n", fresh[0], fresh[1]);
-        \\    array_free(*values);
+        \\    values.free();
         \\}
     );
     note(11, #string,oneline
         \\The refresh follows the argument expression, not the type. A pointer
         \\copied out of the owner before the call, such as `alias := *values`, is
         \\a separate reference and does go stale, even though it has exactly the
-        \\type `array_add` expects. An alias of an owner is not an owner.
+        \\type `array.add` expects. An alias of an owner is not an owner.
     );
 
     subheading(12, "Releasing through a stale reference");
@@ -1868,10 +1918,10 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
+        \\    values.add(1);
         \\    alias := *values;
-        \\    array_add(*values, 2);
-        \\    array_free(alias);
+        \\    values.add(2);
+        \\    alias.free();
         \\}
     );
     code_block(15, "text", #string
@@ -1914,11 +1964,11 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    view := array_view(values);
-        \\    if values.count == 1 { array_add(*values, 2); }
+        \\    values.add(1);
+        \\    view := values.view();
+        \\    if values.count == 1 { values.add(2); }
         \\    print("%\n", view[0]);
-        \\    array_free(*values);
+        \\    values.free();
         \\}
     );
     code_block(19, "text", #string
@@ -1953,9 +2003,9 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    view := array_view(values);
-        \\    array_free(*values);
+        \\    values.add(1);
+        \\    view := values.view();
+        \\    values.free();
         \\    print("%\n", view[0]);
         \\}
     );
@@ -2436,12 +2486,12 @@ render_section_125 :: () {
         \\#import "Context";
         \\
         \\concrete :: (x: s64) -> s64 {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    return x;
         \\}
         \\
         \\generic :: (x: $T) -> T {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    return x;
         \\}
         \\
@@ -2488,28 +2538,28 @@ render_section_125 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\gen_free :: (p: $T) { free(p); }
+        \\gen_free :: (p: $T) { p.free(); }
         \\
         \\main :: () {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    gen_free(p);
         \\}
     );
     paragraph(14, #string,oneline
-        \\That is `warning: [memory.maybe_leak] resource in 'returned.Some' may
-        \\not be released by 'free' on every path`, on a program with no leak.
-        \\Writing the contract out does not fix it. Because nothing is inferred
-        \\for the body, `gen_free :: (p: $T) #memory(kills(p), noescape(p)) {
-        \\free(p); }` is `warning: [memory.I5] #memory kills(p) over-claims an
-        \\every-path release in 'gen_free'` at the contract and `warning:
-        \\[memory.wrong_releaser] resource requires release by 'free', but
-        \\'gen_free' was called` at the call. The same wrapper written with a
-        \\concrete parameter type is clean with or without a contract.
+        \\That is `warning: [memory.maybe_leak] resource in 'returned.Some' may not be
+        \\released by 'free' on every path`, on a program with no leak. Writing the
+        \\contract out does not fix it. Because nothing is inferred for the body,
+        \\`gen_free :: (p: $T) #memory(kills(p), noescape(p)) { p.free(); }` is
+        \\`warning: [memory.I5] #memory kills(p) over-claims an every-path release in
+        \\'gen_free'` at the contract and `warning: [memory.wrong_releaser] resource
+        \\requires release by 'free', but 'gen_free' was called` at the call. The same
+        \\wrapper written with a concrete parameter type is clean with or without a
+        \\contract.
     );
     note(15, #string,oneline
         \\A generic function that acquires or releases memory has no spelling
         \\that satisfies both its own body check and its callers. The standard
-        \\library's `array_add`, `array_free`, and `array_view` avoid the
+        \\library's `array.add`, `array.free`, and `array.view` avoid the
         \\problem by being `#magic` declarations with hand-written contracts
         \\and no Glosso body.
     );
@@ -2541,17 +2591,17 @@ render_section_125 :: () {
         \\E :: enum { Bad; }
         \\
         \\plain :: (fail: bool) -> E!s64 {
-        \\    p := alloc(64);
-        \\    defer free(p);
+        \\    p := (64).alloc();
+        \\    defer p.free();
         \\    if fail return .Err(.Bad);
         \\    return .Ok(1);
         \\}
         \\
         \\trying :: (fail: bool) -> E!s64 {
-        \\    p := alloc(64);
-        \\    #try defer free(p);
+        \\    p := (64).alloc();
+        \\    #try defer p.free();
         \\    if fail return .Err(.Bad);
-        \\    free(p);
+        \\    p.free();
         \\    return .Ok(1);
         \\}
     );
@@ -2560,7 +2610,7 @@ render_section_125 :: () {
         \\`return .Err(.Bad)` skips the try-only cleanup. The possible-leak
         \\diagnostic describes that real missing release. If the failure instead
         \\arrives through `operation()?`, the `#try defer` runs and the analyser
-        \\counts its release. Success still reaches the explicit `free(p)`.
+        \\counts its release. Success still reaches the explicit `p.free()`.
     );
 
     subheading(22, "What is outside the analysis entirely");
@@ -2576,7 +2626,7 @@ render_section_125 :: () {
     bullet(24, #string,oneline
         \\`#push_allocator` selects the allocator; leaving that scope alone
         \\does not discharge an allocation's release obligation. A recognized
-        \\`reset_temporary_storage` or `free_all` of that arena does discharge
+        \\`reset_temporary_storage` or `Allocator.free_all` of that arena does discharge
         \\its tracked obligations and invalidates surviving references. Otherwise
         \\release or transfer the resource normally.
     );
@@ -2604,10 +2654,10 @@ render_section_125 :: () {
         \\#import "Io";
         \\#import "Context";
         \\
-        \\gen_free :: (p: $T) { free(p); }
+        \\gen_free :: (p: $T) { p.free(); }
         \\
         \\main :: () {
-        \\    p := alloc(64);
+        \\    p := (64).alloc();
         \\    gen_free(p);
         \\    gen_free(p);
         \\    print("done\n");
@@ -2662,7 +2712,7 @@ render_section_126 :: () {
     subheading(5, "The three modes on one leak");
     paragraph(6, #string,oneline
         \\A dynamic array that is grown and never freed is the shortest real
-        \\finding. The obligation comes from the `array_add` call, not from
+        \\finding. The obligation comes from the `array.add` call, not from
         \\the declaration: growing an array is what makes it owned.
     );
     code_block(7, "glosso", #string
@@ -2670,8 +2720,8 @@ render_section_126 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    array_add(*values, 1);
-        \\    array_add(*values, 2);
+        \\    values.add(1);
+        \\    values.add(2);
         \\    print("count=%\n", values.count);
         \\}
     );
@@ -2778,7 +2828,7 @@ render_section_126 :: () {
         \\workspace's `Build_Options`, whose type is `Compiler_Borrow_Check`
         \\with variants `Off`, `Warning`, and `Error`. The field defaults to
         \\`Warning`, matching the command line. Edit the detached options
-        \\record, then install it with `set_build_options` before compiling.
+        \\record, then install it with `Build_Options.set_build_options` before compiling.
     );
     code_block(28, "glosso", #string
         \\#import "Io";
@@ -2786,12 +2836,12 @@ render_section_126 :: () {
         \\
         \\build :: () {
         \\    set_build_options_dc(.do_output = false);
-        \\    workspace := compiler_create_workspace("memory-check");
-        \\    options := get_build_options(workspace);
+        \\    workspace := ("memory-check").compiler_create_workspace();
+        \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "leaky_child.exe";
-        \\    set_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\    set_build_options(options, workspace);
-        \\    if add_build_file("leaky_child.glo", workspace) == {
+        \\    options.set_borrow_check(Compiler_Borrow_Check.Error);
+        \\    options.set_build_options(workspace);
+        \\    if ("leaky_child.glo").add_build_file(workspace) == {
         \\    case .Ok(log);    print("[build] ok\n%", log);
         \\    case .Err(error); print("[build] memory diagnostics are fatal here\n"); exit(1);
         \\    }
@@ -2876,9 +2926,9 @@ render_section_126 :: () {
 render_section_127 :: () {
     paragraph(0, #string,oneline
         \\`#enable(...)` and `#disable(...)` open and close a feature gate.
-        \\Four of the gates relax a rule the language otherwise enforces and
+        \\Three of the gates relax a rule the language otherwise enforces and
         \\one, `memory_strict`, adds rules instead. The set is closed: the
-        \\parser recognises exactly five names, and anything else is
+        \\parser recognises these four names, and anything else is
         \\`error: unknown feature 'nonsense'`.
     );
     table_header(1, "Gate   —   What `#enable` permits");
@@ -2886,15 +2936,15 @@ render_section_127 :: () {
     table_row(3, "`pointer_punning`   |   Pointee-unchecked pointer conversions, and `*T` interchangeable with `[*]T`.");
     table_row(4, "`memory_strict`   |   Nothing. It requires a `#memory` contract where one is otherwise optional, and forbids overlaying an imported function.");
     table_row(5, "`allow_union_unwrap`   |   Direct tagged-union payload access outside a pattern match.");
-    table_row(6, "`private_section`, `private_sections`   |   Declaration visibility. Accepts a second argument, `siblings`. Not a safety gate.");
+    table_row(6, "`#public`, `#public(unit)`, `#private`   |   Declaration visibility prefixes; these are not feature gates.");
     paragraph(7, #string,oneline
-        \\The two spellings `private_section` and `private_sections` are
-        \\synonyms, and the second argument is legal only on them: any other
-        \\pairing is `error: unknown feature 'lossy_numerics,siblings'`.
-        \\Visibility is covered in the chapter on visibility and private
-        \\sections; the four remaining gates are the subject here, three of
-        \\them relaxations of static semantics and one a tightening of the
-        \\memory analysis.
+        \\The old `private_section`, `private_sections`, and `siblings` forms
+        \\have been removed and report a migration diagnostic. Declarations
+        \\are private to their source file by default. Use `#public` for an
+        \\exported API or `#public(unit)` for sharing within an ownership unit;
+        \\a visibility prefix may apply to one declaration or a braced group.
+        \\The four feature gates above control static semantics and memory
+        \\analysis independently of visibility.
     );
     subheading(8, "Form and placement");
     paragraph(9, #string,oneline
@@ -3174,4 +3224,6 @@ render_section_127 :: () {
         \\nothing at run time and is paid entirely in contracts that have to
         \\be written.
     );
+}
+
 }

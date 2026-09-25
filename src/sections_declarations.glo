@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 16-21: declarations and scope.
 
 render_section_16 :: () {
@@ -309,11 +311,13 @@ render_section_17 :: () {
     table_row(24, "`#memory name { … }`   |   A memory contract attached to a function declared elsewhere.");
     table_row(25, "`#enable(feature);`, `#disable(feature);`   |   A feature gate, sticky to the end of the file.");
     paragraph(26, #string,oneline
-        \\Two directives that look like they belong here do not. `#if` and
-        \\`#assert` are statements, not declarations: at file scope they are
-        \\`error: bad decl name 'if'` and `error: bad decl name 'assert'`. A
-        \\target-conditional constant is written inside a procedure body or a
-        \\`#comptime` block instead.
+        \\`#if`, `else #if`, and `else` also select declarations at module scope.
+        \\The condition must be a compile-time boolean. Only the chosen branch adds
+        \\declarations or loads dependencies, so an inactive platform branch need not
+        \\have its files or foreign libraries installed. Custom operator declarations
+        \\and dependencies that provide operator syntax must stay unconditional,
+        \\because parsing precedes branch selection. `#assert` remains a statement;
+        \\use a `#comptime` block for a file-level assertion.
     );
     subheading(46, "Named definitions are values too");
     paragraph(47, #string,oneline
@@ -372,12 +376,11 @@ render_section_17 :: () {
 
     subheading(28, "Globals and their initialisers");
     paragraph(29, #string,oneline
-        \\A global is a mutable binding with static storage and a name visible
-        \\to the whole compilation unit, unless a private section narrows it;
-        \\Visibility and Private Sections covers that. Its initialiser is
-        \\evaluated by the compiler, not by the program: the expression is folded
-        \\during checking and the result is emitted as the symbol's static
-        \\initial value.
+        \\A global is a mutable binding with static storage. Its name is private
+        \\by default; use `#public` or `#public(unit)` when another source file
+        \\needs it. Its initializer is evaluated during compilation and emitted as
+        \\the symbol's static initial value. Visibility and Ownership Units covers
+        \\which callers can reach the binding.
     );
     paragraph(30, #string,oneline
         \\That is a hard requirement, not an optimisation. An initialiser the
@@ -483,6 +486,9 @@ render_section_17 :: () {
         \\runtime is built around. Targets and Cross-Compilation covers the
         \\target list.
     );
+    table_row(53, "`Type ::: [#public] { ... }`   |   An inherent method or associated-function block.");
+    table_row(54, "`#public`, `#public(unit)`, `#private`   |   A declaration visibility prefix or transparent group.");
+    table_row(55, "`#if condition { ... } else { ... }`   |   Compile-time selection of module declarations.");
 }
 
 render_section_18 :: () {
@@ -917,278 +923,126 @@ render_section_19 :: () {
         \\scope is left. See `defer` and `#try defer`.
     );
     bullet(43, #string,oneline
-        \\Visibility is not scoped by blocks at all: `#enable(private_section)`
-        \\runs to the end of the file. See Visibility and Private Sections.
+        \\Visibility groups are transparent and restore the enclosing audience when
+        \\their braces close. See Visibility and Ownership Units.
     );
 }
 
 render_section_20 :: () {
     paragraph(0, #string,oneline
-        \\Every top-level declaration is public by default. There is no `pub`
-        \\modifier and no per-declaration visibility syntax; visibility is
-        \\controlled by a pair of file-scoped directives that apply to every
-        \\declaration parsed while they are in effect.
+        \\Functions, types, constants, globals, methods, and named module bindings are
+        \\private by default. A private declaration is accessible only in its defining
+        \\physical source file and logical module. Struct fields and enum or union
+        \\variants start public, subject to the visibility of their enclosing type.
     );
-    code_block(1, "glosso", #string
-        \\#enable(private_section);            // file-private from here on
-        \\#disable(private_section);
+    paragraph(1, #string,oneline
+        \\Use `#public` to expose an API, `#public(unit)` to share declarations within
+        \\one ownership unit, and `#private` to make file privacy explicit. Each
+        \\directive prefixes one named declaration or a transparent group. Groups
+        \\introduce no namespace and restore the enclosing default when they end.
+    );
+    code_block(2, "glosso", #string
+        \\#public Counter :: struct {
+        \\    value: s64;
+        \\    #private cached: s64;
+        \\}
         \\
-        \\#enable(private_section,siblings);   // module-private from here on
-        \\#disable(private_section);
+        \\Counter ::: #public {
+        \\    make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
+        \\    read :: (#self) -> s64 { return #self.value; }
+        \\    #private reset_cache :: (*#self) { #self.*.cached = 0; }
+        \\    #public(unit) refresh_cache :: (*#self) { #self.*.cached = #self.*.value; }
+        \\}
+        \\
+        \\#public(unit) {
+        \\    refresh :: () {}
+        \\    #private scratch: s64;
+        \\}
     );
-    paragraph(2, #string,oneline
-        \\The state is sticky from the directive to the end of the file. The
-        \\parser stamps the currently open visibility onto each declaration as
-        \\it reads it, so a region is closed by writing `#disable`, not by
-        \\reaching the end of a block.
+    paragraph(3, #string,oneline
+        \\The visibility after `:::` sets an inherent block's default member audience.
+        \\`Counter ::: #public { ... }` is equivalent to
+        \\`Counter ::: { #public { ... } }`. A method without an explicit audience in
+        \\a plain `Counter ::: { ... }` block remains private, even if the type or
+        \\surrounding declaration group is public. Put a block visibility before its
+        \\optional `where` clause.
     );
-    table_header(3, "Directive   —   Effect on declarations that follow");
-    table_row(4, "`#enable(private_section);`   |   Reachable only from this one source file.");
-    table_row(5, "`#enable(private_section,siblings);`   |   Reachable from any file with the same module identity.");
-    table_row(6, "`#disable(private_section);`   |   Public again.");
-    paragraph(7, #string,oneline
-        \\`private_sections` is an accepted synonym of `private_section` in
-        \\either directive. `siblings` is the only second argument and it is
-        \\valid only on this feature: `#enable(private_section,bogus);` is
-        \\`error: unknown feature 'private_section,bogus'`, and an unrecognized
-        \\feature name is `error: unknown feature 'bogus_feature'`. The other
-        \\three gates that share this syntax are covered in Feature Gates.
+    paragraph(4, #string,oneline
+        \\Visibility on locals or parameters is rejected. An inherent block takes its
+        \\visibility after `:::`, not before the owner type name. Typeclass requirements
+        \\and instance slots follow the class contract. A public name beginning with
+        \\`_` is still public; its spelling does not hide it from imports.
     );
-    subheading(8, "File-sticky, not block-scoped");
+    paragraph(5, #string,oneline
+        \\The former `#enable(private_section)`, `#disable(private_section)`,
+        \\`private_sections`, and `siblings` forms have been removed and produce a
+        \\migration diagnostic. Replace them with declaration prefixes or visibility
+        \\groups. Other feature gates keep their file-scoped behavior.
+    );
+    paragraph(6, #string,oneline
+        \\Imports, loads, and reexports never widen an item's audience. Each module
+        \\still declares its own dependencies. `#load,embed` shares a logical module
+        \\but preserves each physical file's private identity: declarations used by
+        \\another embedded file need `#public(unit)` or `#public`.
+    );
+    code_block(7, "glosso", #string
+        \\// parts/store.glo
+        \\#public STORE_PUBLIC :: 1;
+        \\#private key :: 2;
+        \\#public(unit) STORE_SHARED :: 3;
+        \\#public read_key :: () -> s64 { return key; }
+        \\
+        \\// app.glo
+        \\#import "Io";
+        \\#load "parts/store.glo";
+        \\main :: () {
+        \\    print("% % %\n", STORE_PUBLIC, read_key(), STORE_SHARED);
+        \\}
+    );
+    paragraph(8, #string,oneline
+        \\In this example both files are in the entry file's project directory and
+        \\therefore share an ownership unit by default. The caller can use
+        \\`STORE_SHARED` through its explicit load, while `key` remains accessible
+        \\only inside `store.glo`. Loading a file alone never makes its private
+        \\declarations callable.
+    );
     paragraph(9, #string,oneline
-        \\`#enable` and `#disable` are section directives, handled before the
-        \\declaration parser runs; they are not statements. Writing one inside a
-        \\procedure body is `error: unexpected directive 'enable'`. There is no
-        \\way to scope a private region to a block.
+        \\Ownership controls who may add inherent methods and use unit-visible names.
+        \\It is separate from module scope. Without explicit mappings, the entry file
+        \\and other files under its source directory form a project unit. A configured
+        \\`--module-path` directory creates dependency boundaries by its first relative
+        \\path component. Other external files get separate file units.
     );
     paragraph(10, #string,oneline
-        \\The stickiness stops at the file boundary, because a fresh parser is
-        \\created for each source file. A gate left open across a `#load` does
-        \\not reach into the loaded file, and the loaded file's own gates do not
-        \\leak back into the loader.
+        \\Repeated `--unit-source UNIT=FILE` options configure ownership explicitly.
+        \\Once any mapping is given, every loaded non-standard source, including the
+        \\entry file, requires an exact mapping. Canonical paths keep their unit across
+        \\aliases, reexports, and embedded loads. Standard sources belong to the
+        \\reserved `builtin:std` unit, and names starting with `builtin:` are reserved.
     );
     code_block(11, "glosso", #string
-        \\// parts/extra.glo
-        \\EXTRA_PUBLIC :: 1;
-        \\
-        \\// app.glo
-        \\#import "Io";
-        \\#enable(private_section);
-        \\#load "parts/extra.glo";
-        \\#disable(private_section);
-        \\
-        \\main :: () { print("%\n", EXTRA_PUBLIC); }
+        \\// app and its implementation share a unit; the dependency has its own.
+        \\// glosso --unit-source app=app.glo --unit-source app=parts/store.glo app.glo
     );
-    code_block(12, "text", "1");
+    paragraph(12, #string,oneline
+        \\Private fields cannot be read by a method in another file, even in the same
+        \\unit. An inaccessible field also blocks external aggregate literals, spread
+        \\construction, and recursive default initialization. Expose a factory such as
+        \\`Counter.make()` to construct the value. Copying an existing value and
+        \\updating its accessible fields remain permitted.
+    );
     paragraph(13, #string,oneline
-        \\Because the region ends only at the end of the file, an unclosed one
-        \\swallows `main`. The entry point is renamed along with everything
-        \\else and then cannot be found. Nothing in the compile step mentions
-        \\visibility; the build reaches the link step and fails there with
-        \\whatever the platform linker reports for a missing entry point.
+        \\Public signatures cannot expose less-visible types. Generic bodies and
+        \\default expressions retain the access rights of their defining file;
+        \\specialization does not grant access to the caller's private members.
+        \\Reflection omits inaccessible fields and variants without changing layout
+        \\or discriminants. Matching a type with hidden variants requires a catch-all.
     );
-    code_block(14, "glosso", #string
-        \\// app.glo
-        \\#import "Io";
-        \\#enable(private_section);
-        \\
-        \\main :: () { print("hello\n"); }
-    );
-    code_block(15, "text", #string
-        \\glosso: compile app.glo (target=x86_64-pc-windows-msvc)
-        \\glosso: link app.exe (target=x86_64-pc-windows-msvc, -O1)
-        \\error: lld-link: error: could not open 'pthread.lib': no such file or directory
-    );
-    note(16, #string,oneline
-        \\Close a private region with `#disable` before `main`, or place `main`
-        \\above the region. A linker error naming a C runtime library, with no
-        \\compile diagnostic before it, is the signature of this mistake.
-    );
-    subheading(17, "The mangled private name");
-    paragraph(18, #string,oneline
-        \\Privacy is implemented by renaming. A private declaration becomes
-        \\`$private$<hash>$<name>`, where the hash is sixteen hexadecimal digits
-        \\of an FNV-1a hash of the declaring file's path with backslashes
-        \\normalized to forward slashes. References from the same file are
-        \\rewritten to the mangled name; references from anywhere else keep
-        \\looking for the original and never find it, which is why the failure
-        \\reads as an unbound name rather than as a visibility error.
-    );
-    code_block(19, "glosso", #string
-        \\#import "Io";
-        \\#enable(private_section);
-        \\secret :: (a: ssize) -> ssize #dump { return a + 1; }
-        \\#disable(private_section);
-        \\
-        \\main :: () { print("%\n", secret(1)); }
-    );
-    code_block(20, "text", #string
-        \\; ---- #dump typed-ir $private$47244d184ab1756c$secret(a: ssize) -> ssize  [5 ins] ----
-        \\   0  temp_mark v1
-        \\   1  const v2 =1
-        \\   2  magic v3 'int_add' [v0,v2]
-        \\   3  temp_restore v1
-        \\   4  ret v3
-        \\; ---- end $private$47244d184ab1756c$secret ----
-    );
-    paragraph(21, #string,oneline
-        \\Because the hash comes from the path, the same private name may be
-        \\declared in as many files as needed without collision; each file gets
-        \\its own symbol and its own references resolve to it. An isolated
-        \\`#load` also preserves each module's identity. Removing the gates
-        \\exports both helpers. To call them directly from a common caller,
-        \\use qualified loads and names such as `Left.helper()` and
-        \\`Right.helper()`; each module's own calls keep their local meaning.
-    );
-    code_block(22, "glosso", #string
-        \\// parts/left.glo
-        \\#enable(private_section);
-        \\helper :: () -> ssize { return 1; }
-        \\#disable(private_section);
-        \\
-        \\left_value :: () -> ssize { return helper(); }
-        \\
-        \\// parts/right.glo
-        \\#enable(private_section);
-        \\helper :: () -> ssize { return 2; }
-        \\#disable(private_section);
-        \\
-        \\right_value :: () -> ssize { return helper(); }
-        \\
-        \\// app.glo
-        \\#import "Io";
-        \\#load "parts/left.glo";
-        \\#load "parts/right.glo";
-        \\
-        \\main :: () { print("left=% right=%\n", left_value(), right_value()); }
-    );
-    code_block(23, "text", "left=1 right=2");
-    subheading(24, "File scope versus module identity");
-    paragraph(25, #string,oneline
-        \\There are two levels of restriction and they answer different
-        \\questions. `private_section` asks whether the reference is in the same
-        \\source file; `private_section,siblings` asks whether it is in the same
-        \\module.
-    );
-    table_header(26, "Visibility   —   Reachable from");
-    table_row(27, "Public   |   The declaring module and files that explicitly load, import, or receive its reexports.");
-    table_row(28, "Private   |   The one source file that declares it.");
-    table_row(29, "Siblings   |   An explicit dependency from the same directory, or a shared embedded unit.");
-    paragraph(30, #string,oneline
-        \\Files in the same directory can share sibling-private declarations
-        \\through explicit dependencies. An ordinary `#load` does not merge
-        \\their dependencies or give a file access to unrelated siblings.
-        \\`#load,embed` deliberately shares the containing compilation unit.
-        \\Module resolution is covered in Source Files, Imports, and Loads.
-    );
-    code_block(31, "glosso", #string
-        \\// std/Demo/module.glo
-        \\#load,embed "other.glo";
-        \\DEMO_PUBLIC :: 1;
-        \\_demo_internal :: 9;
-        \\
-        \\#enable(private_section);
-        \\DEMO_PRIVATE :: 2;
-        \\#disable(private_section);
-        \\
-        \\demo_use_private :: () -> ssize { return DEMO_PRIVATE + 1; }
-        \\
-        \\#enable(private_section,siblings);
-        \\DEMO_SIBLING :: 3;
-        \\#disable(private_section);
-        \\
-        \\// std/Demo/other.glo
-        \\demo_sibling_reader :: () -> ssize { return DEMO_SIBLING + 1; }
-    );
-    code_block(32, "glosso", #string
-        \\#import "Io";
-        \\#import "Demo";
-        \\
-        \\main :: () {
-        \\    print("public=%\n", DEMO_PUBLIC);
-        \\    print("through the module=%\n", demo_use_private());
-        \\    print("sibling file=%\n", demo_sibling_reader());
-        \\}
-    );
-    code_block(33, "text", #string
-        \\public=1
-        \\through the module=3
-        \\sibling file=4
-    );
-    paragraph(34, #string,oneline
-        \\Both restricted names work from inside the module and neither works
-        \\from the importer, where each is `error: unbound '<name>'`. Moving the
-        \\reference one file across separates them: a use of `DEMO_SIBLING`
-        \\added to `Demo/other.glo` compiles, while a use of `DEMO_PRIVATE`
-        \\added there is `error: unbound 'DEMO_PRIVATE'`, reported against
-        \\`Demo/other.glo`.
-    );
-    paragraph(35, #string,oneline
-        \\The same two levels apply to a user program built from `#load`. A
-        \\private declaration in a loaded file is invisible to the file that
-        \\loaded it. A `siblings` declaration is available through an explicit
-        \\dependency from the same directory, or inside a shared embedded unit.
-    );
-    code_block(36, "glosso", #string
-        \\// parts/store.glo
-        \\STORE_PUBLIC :: 1;
-        \\
-        \\#enable(private_section);
-        \\STORE_KEY :: 2;
-        \\#disable(private_section);
-        \\
-        \\store_read_key :: () -> ssize { return STORE_KEY; }
-        \\
-        \\#enable(private_section,siblings);
-        \\STORE_SHARED :: 3;
-        \\#disable(private_section);
-        \\
-        \\// app.glo
-        \\#import "Io";
-        \\#load,embed "parts/store.glo";
-        \\
-        \\main :: () {
-        \\    print("public=% accessor=% shared=%\n",
-        \\          STORE_PUBLIC, store_read_key(), STORE_SHARED);
-        \\}
-    );
-    code_block(37, "text", "public=1 accessor=2 shared=3");
-    paragraph(38, #string,oneline
-        \\Naming `STORE_KEY` from `app.glo` is `error: unbound 'STORE_KEY'`,
-        \\even though `store_read_key` in the same loaded file reads it without
-        \\difficulty. Types are diagnosed through the type namespace instead: a
-        \\private `struct` named from another file is `error: unknown type
-        \\'Hidden_Point'`.
-    );
-    subheading(39, "Private names and imports");
-    paragraph(40, #string,oneline
-        \\Restricted declarations are not part of a module's public surface, so
-        \\they cannot be named in an `#import` selector. The diagnostic prints
-        \\the surface that remains, which is a convenient way to see what a
-        \\module actually exports.
-    );
-    code_block(41, "text", #string
-        \\error: #import,only names unknown public declaration '_demo_internal' in module "Demo"
-        \\note: public names: DEMO_PUBLIC, demo_sibling_reader, demo_use_private
-    );
-    paragraph(42, #string,oneline
-        \\That listing also shows the leading-underscore rule. A name beginning
-        \\with `_` or `$` counts as non-public for the purposes of `only` and
-        \\`hide` selection only: `_demo_internal` cannot be selected by name,
-        \\yet a plain `#import "Demo";` still brings it in and reading it prints
-        \\`9`. The selectors themselves are covered in Source Files, Imports,
-        \\and Loads.
-    );
-    bullet(43, #string,oneline
-        \\Visibility is a name-resolution mechanism, not an access-control one:
-        \\a private declaration is still compiled and still linked, and it stays
-        \\reachable through any public procedure that calls it or returns its
-        \\value.
-    );
-    bullet(44, #string,oneline
-        \\Because the mangled symbol embeds the file path, moving a file changes
-        \\the symbols its private declarations produce. No source refers to
-        \\those symbols, so only build artifacts and `#dump` output change.
+    note(14, #string,oneline
+        \\Language visibility is independent of native symbol export. A defined
+        \\`#c_call` function can retain its external linker name while remaining
+        \\private to Glosso callers. An ordinary private `main` is a valid entry point;
+        \\it does not need a public annotation.
     );
 }
 
@@ -1459,10 +1313,10 @@ render_section_21 :: () {
         \\Fault :: enum { Bad; }
         \\
         \\work :: (fail: bool) -> Fault!ssize {
-        \\    p := alloc(64);
-        \\    #try defer free(p);
+        \\    p := (64).alloc();
+        \\    #try defer p.free();
         \\    if fail return .Err(.Bad);
-        \\    free(p);
+        \\    p.free();
         \\    return .Ok(1);
         \\}
         \\
@@ -1472,19 +1326,19 @@ render_section_21 :: () {
         \\warning: [memory.maybe_leak] resource in 'returned.Some' may not be released by 'free' on every path
         \\  --> work.glo:7:10
         \\  |
-        \\7 |     p := alloc(64);
+        \\7 |     p := (64).alloc();
         \\  |          ^^^^^
         \\note: release obligation was created here
         \\  --> work.glo:7:10
         \\  |
-        \\7 |     p := alloc(64);
+        \\7 |     p := (64).alloc();
         \\  |          ^^^^^
     );
     paragraph(38, #string,oneline
         \\The warning is accurate here. `return .Err(.Bad);` is not a `?`
-        \\propagation, so `#try defer free(p)` never runs on that path and the
+        \\propagation, so `#try defer p.free()` never runs on that path and the
         \\allocation really does leak. Replacing it with a plain
-        \\`defer free(p);` and dropping the later `free(p);` makes the procedure
+        \\`defer p.free();` and dropping the later `p.free();` makes the procedure
         \\correct and the warning disappear. Release obligations are covered in
         \\Ownership and Release Obligations.
     );
@@ -1502,4 +1356,6 @@ render_section_21 :: () {
         \\is discarded when the block is left normally, so a failure that
         \\happens after the block does not run it.
     );
+}
+
 }

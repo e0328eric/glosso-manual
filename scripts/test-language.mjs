@@ -1,4 +1,4 @@
-// Check documented language behavior against the sibling compiler:
+// Check documented language behavior with the installed compiler:
 // node scripts/test-language.mjs [path/to/glosso]
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -10,7 +10,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const compiler = process.argv[2]
   ? resolve(process.argv[2])
-  : resolve(root, "..", "glosso", "build", "bin", `glosso${executableSuffix}`);
+  : `glosso${executableSuffix}`;
 const fixtures = join(root, "scripts", "tests", "language-fixture");
 const outputDirectory = join(root, "build", "language-tests");
 const cacheDirectory = join(outputDirectory, "cache");
@@ -51,6 +51,7 @@ assert.equal(compileAndRun("operators"), [
 
 assert.equal(compileAndRun("try_operator"), "try operator passed\n");
 assert.equal(compileAndRun("array_reserve"), "array reserve passed\n");
+assert.equal(compileAndRun("current_language"), "current language passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -91,4 +92,10 @@ const diagnostics = `${rejected.stdout}\n${rejected.stderr}`;
 assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).length, 3,
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
-console.log("Language checks passed: operators, Try boundary contracts and overrides, array reserve capacity, lexical source locations, and rejected obsolete or invalid syntax.");
+for (const name of ["removed_noreturn", "removed_private_section", "private_declaration"]) {
+  const rejected = compile(name, "object");
+  assert.notEqual(rejected.status, 0, `${name}: obsolete syntax or private access compiled successfully`);
+  assert.match(`${rejected.stdout}\n${rejected.stderr}`, /error:/, `${name}: missing diagnostic`);
+}
+
+console.log("Language checks passed: visibility, inherent methods, receiver helpers, automatic Drop and cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

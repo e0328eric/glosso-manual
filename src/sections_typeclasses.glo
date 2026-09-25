@@ -1,5 +1,7 @@
 // Sections 68-82: typeclasses.
 
+#public(unit) {
+
 render_section_68 :: () {
     paragraph(0, #string,oneline
         \\A typeclass is a named contract over one or more type parameters. It is
@@ -672,7 +674,7 @@ render_section_70 :: () {
         \\#import "Meta";
         \\
         \\Convert :: typeclass (From: type, To: type) #minimal(convert) {
-        \\    convert :: (value: From, #empty: To) -> To;
+        \\    convert :: (#empty: To, value: From) -> To;
         \\}
         \\
         \\Route :: typeclass (A: type, B: type, C: type) #minimal(route) {
@@ -682,15 +684,15 @@ render_section_70 :: () {
         \\Flag :: struct { on: bool; }
         \\
         \\(s64, string) ::: instance Convert {
-        \\    convert :: (value: s64, #empty: string) -> string { return "n" + show(value); }
+        \\    convert :: (#empty: string, value: s64) -> string { return "n" + show(value); }
         \\}
         \\
         \\($T, T) ::: instance Convert where Is_Float(T) {
-        \\    convert :: (value: T, #empty: T) -> T { return value + value; }
+        \\    convert :: (#empty: T, value: T) -> T { return value + value; }
         \\}
         \\
         \\(Flag, $T) ::: instance Convert where Is_Integer(T) {
-        \\    convert :: (value: Flag, #empty: T) -> T { if value.on return cast(T)1; return cast(T)0; }
+        \\    convert :: (#empty: T, value: Flag) -> T { if value.on return cast(T)1; return cast(T)0; }
         \\}
         \\
         \\(s64, string, Flag) ::: instance Route {
@@ -698,10 +700,10 @@ render_section_70 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", convert(7, string));
-        \\    print("%\n", convert(1.5, f64));
+        \\    print("%\n", convert(string, 7));
+        \\    print("%\n", convert(f64, 1.5));
         \\    f: Flag = .{ .on = true };
-        \\    print("%\n", convert(f, s64));
+        \\    print("%\n", convert(s64, f));
         \\    print("%\n", route(2, "-", f));
         \\}
     );
@@ -1052,7 +1054,7 @@ render_section_71 :: () {
         \\method: `t := Registry(Session).Key;` is
         \\`error: typeclass 'Registry' has no method 'Key'`. Where the projected type
         \\is wanted as a value, declare a binding with the projection as its
-        \\annotation and take `type_of` of the binding.
+        \\annotation and take `value.type_of` of the binding.
     );
     subheading(27, "Projecting another class");
     paragraph(28, #string,oneline
@@ -1163,26 +1165,25 @@ render_section_72 :: () {
         \\`error: constraint failed for use_it`.
     );
     note(14, #string,oneline
-        \\The expression form takes exactly one type argument, whatever the class's
-        \\arity. A multi-parameter class queried this way answers `0` rather than
-        \\reporting anything, so `PartialEq(s64)` is `0` even though `s64` compares
-        \\with `==`; supplying both arguments is
-        \\`error: PartialEq(T) expects one type argument`. Query a multi-parameter
-        \\class inside a `where` clause, where the full argument list is accepted.
+        \\An evidence query supplies the class's full compile-time argument
+        \\list. `PartialEq(s64, s64)` asks about both operand types, just as it
+        \\does in a `where` clause. Omitting an argument is diagnosed as
+        \\`PartialEq expects 2 compile-time argument(s)`; it does not silently
+        \\produce false evidence.
     );
     code_block(15, "glosso", #string
         \\#import "Io";
         \\
         \\EQ_S64        :: Eq(s64);
         \\EQ_F64        :: Eq(f64);
-        \\PARTIAL_EQ_S64 :: PartialEq(s64);
+        \\PARTIAL_EQ_S64 :: PartialEq(s64, s64);
         \\
         \\main :: () {
-        \\    print("Eq(s64)=% Eq(f64)=% PartialEq(s64)=%\n", EQ_S64, EQ_F64, PARTIAL_EQ_S64);
+        \\    print("Eq(s64)=% Eq(f64)=% PartialEq(s64,s64)=%\n", EQ_S64, EQ_F64, PARTIAL_EQ_S64);
         \\}
     );
     code_block(16, "text", #string
-        \\Eq(s64)=1 Eq(f64)=0 PartialEq(s64)=0
+        \\Eq(s64)=1 Eq(f64)=0 PartialEq(s64,s64)=1
     );
     subheading(17, "Negative instances");
     paragraph(18, #string,oneline
@@ -1541,10 +1542,10 @@ render_section_73 :: () {
         \\The narrowing prefers a candidate whose return type equals the expected
         \\type exactly; if exactly one candidate's return type merely converts to
         \\it, that one is taken instead, and two exact matches leave the tie
-        \\standing. Compile-time-number defaulting is the second tie-breaker: an
-        \\undecided numeric literal matches every numeric instance with a conversion
-        \\and never exactly, so it would otherwise read as ambiguous. Nothing
-        \\decided the literal, so its default type dispatches.
+        \\standing. An undecided numeric literal can match several numeric
+        \\instances and leave a call ambiguous. Give the argument an explicit
+        \\type when the overload set accepts both integers and floats; this
+        \\fixes the instance before the call is checked.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
@@ -1555,7 +1556,7 @@ render_section_73 :: () {
         \\f64 ::: instance Twice { twice :: (v: f64) -> f64 { return v * 2.0; } }
         \\
         \\main :: () {
-        \\    print("twice(3)   = %\n", twice(3));
+        \\    print("twice(3)   = %\n", twice(cast(s64)3));
         \\    print("twice(2.5) = %\n", twice(2.5));
         \\}
     );
@@ -1645,6 +1646,24 @@ render_section_73 :: () {
         \\This relation never crosses width or signedness, never removes a nominal
         \\`distinct` boundary, and never treats `rune` as its `u32` storage type.
         \\It exists only for protocol instance heads.
+    );
+    subheading(50, "Receiver calls and explicit class selection");
+    paragraph(51, #string,oneline
+        \\A named typeclass operation may be called through its first
+        \\non-erased parameter: `value.show()` uses the same evidence as
+        \\`Show.show(value)`, and `reader.read(buffer)` dispatches through
+        \\`Reader`. A storage field or applicable inherent method takes
+        \\precedence over this lookup. When the intended class is ambiguous,
+        \\write `Reader.read(reader, buffer)` or
+        \\`Reader(T).read(reader, buffer)` explicitly.
+    );
+    paragraph(52, #string,oneline
+        \\Receiver syntax does not change defaults, associated types, or
+        \\instance selection. In instance signatures, associated type
+        \\definitions, and bodies, `#Self_Type` denotes the complete matched
+        \\type. For `?$T ::: instance Try` it denotes `?T`, including the
+        \\option wrapper. Typeclass requirements and instance slots follow
+        \\the class contract's visibility.
     );
 }
 
@@ -1895,7 +1914,7 @@ render_section_74 :: () {
         \\to_option :: (x: s64) -> Foo(s64) { return Foo.Some(x + 10); }
         \\
         \\main :: () {
-        \\    o := Foo.Some(42);
+        \\    o: Foo(s64) = .Some(42);
         \\    mapped := fmap(o, inc);
         \\    chained := bind(mapped, to_option);
         \\    if #pattern Foo.Some(total) = mapped && #pattern Foo.Some(chained_total) = chained
@@ -1925,6 +1944,14 @@ render_section_74 :: () {
 }
 
 render_section_75 :: () {
+    note(36, #string,oneline
+        \\Current-toolchain limitation: the standard `Show` derive macro uses
+        \\compile-time formatting, which creates a managed `String_Builder`.
+        \\The installed compiler rejects that path because its constant
+        \\evaluator cannot run destructors. The examples here document the
+        \\derive contract; until that library/compiler issue is resolved, use
+        \\an explicit `Show` instance for structs and tagged unions.
+    );
     paragraph(0, #string,oneline
         \\A `struct` or `union` declaration may carry `#derive(Class, ...)` between
         \\the keyword and the body. Each named class must itself declare a derive
@@ -2102,8 +2129,8 @@ render_section_75 :: () {
         \\    print("scale * a = %\n", show(scale * a));
         \\    ratio := a / b;
         \\    print("a / b     = %\n", show(ratio));
-        \\    print("ratio type= %\n", type_name(type_of(ratio)));
-        \\    print("cmp  type = %\n", type_name(type_of(a == b)));
+        \\    print("ratio type= %\n", type_name(ratio.type_of()));
+        \\    print("cmp  type = %\n", type_name((a == b).type_of()));
         \\}
     );
     code_block(33, "text", #string
@@ -2154,8 +2181,8 @@ render_section_76 :: () {
         \\    if !Is_Struct(T) #compile_error "Arity can only be derived for structs";
         \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
-        \\    section    := derive_type_section(info, empty_focuses);
-        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    section    := info.type_section(empty_focuses);
+        \\    input_type := info.type_apply(empty_focuses, empty_replacements);
         \\    count      := info.fields.count;
         \\    #insert #code {
         \\        ``section ::: instance Arity {
@@ -2211,7 +2238,7 @@ render_section_76 :: () {
     table_row(16, "`Derive_Options`   |   `focus_params`   |   Requested focus parameter names. Always empty in current source.");
     paragraph(17, #string,oneline
         \\Because there is no syntax for passing options in `#derive(...)`, a macro
-        \\that calls `derive_focus_params(info, opts, n)` always gets the default:
+        \\that calls `info.focus_params(opts, n)` always gets the default:
         \\the final `n` type parameters. A macro with no use for `opts` may leave the
         \\parameter untouched; `derive_error` writes `_ := opts;` to record the
         \\intent, and the other standard derives that ignore it write nothing.
@@ -2219,13 +2246,13 @@ render_section_76 :: () {
     subheading(18, "The code-building intrinsics");
     table_header(19, "Call   —   Result");
     table_row(20, "`derive_type_info(T)`   |   The `Derive_Type_Info` for `T`. The compiler supplies it to a derive macro already.");
-    table_row(21, "`derive_type_section(info, focuses)`   |   The instance head, with focused parameters left as holes: `Pair($K, _)`.");
-    table_row(22, "`derive_type_apply(info, focuses, reps)`   |   A concrete type expression, substituting `reps` for the focused parameters.");
-    table_row(23, "`derive_type_fn(params, ret)`   |   A function-type expression, for building `F(($A) -> $B)`.");
+    table_row(21, "`info.type_section(focuses)`   |   The instance head, with focused parameters left as holes: `Pair($K, _)`.");
+    table_row(22, "`info.type_apply(focuses, reps)`   |   A concrete type expression, substituting `reps` for the focused parameters.");
+    table_row(23, "`params.derive_type_fn(ret)`   |   A function-type expression, for building `F(($A) -> $B)`.");
     table_row(24, "`type_uses_param(T, i)`   |   True when `T` mentions parameter `i` anywhere.");
     table_row(25, "`type_is_param(T, i)`   |   True when `T` is exactly parameter `i`: true for `A`, false for `[]A`.");
     table_row(26, "`type_occurs_covariantly(T, i)`   |   True when every occurrence of parameter `i` in `T` is covariant.");
-    table_row(27, "`derive_focus_params(info, opts, n)`   |   The `n` focused parameter indexes, defaulting to the final `n`.");
+    table_row(27, "`info.focus_params(opts, n)`   |   The `n` focused parameter indexes, defaulting to the final `n`.");
     paragraph(28, #string,oneline
         \\The head shape a macro must emit depends on the arity of the class. A
         \\one-parameter class takes the section alone; a two-parameter class such as
@@ -2246,8 +2273,8 @@ render_section_76 :: () {
         \\    _ := opts;
         \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
-        \\    section := derive_type_section(info, empty_focuses);
-        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    section := info.type_section(empty_focuses);
+        \\    input_type := info.type_apply(empty_focuses, empty_replacements);
         \\    #insert #code {
         \\        (``section, ``input_type) ::: instance Same_Shape {
         \\            same_shape :: (a: ``input_type, b: ``input_type) -> bool {
@@ -2290,22 +2317,22 @@ render_section_76 :: () {
         \\members_body :: (info: Derive_Type_Info) -> string
         \\    #memory{returns_fresh, reads(info), noescape(info)}
         \\{
-        \\    source := sb_new();
-        \\    sb_append(*source, "return \"");
+        \\    source := String_Builder.source_new();
+        \\    source.append("return \"");
         \\    first := true;
         \\    for field: info.fields {
-        \\        if !first sb_append(*source, ", ");
-        \\        sb_append(*source, field.name);
+        \\        if !first source.append(", ");
+        \\        source.append(field.name);
         \\        first = false;
         \\    }
         \\    for variant: info.variants {
-        \\        if !first sb_append(*source, ", ");
-        \\        sb_append(*source, variant.name);
-        \\        if variant.payload != void sb_append(*source, "(_)");
+        \\        if !first source.append(", ");
+        \\        source.append(variant.name);
+        \\        if variant.payload != void source.append("(_)");
         \\        first = false;
         \\    }
-        \\    sb_append(*source, "\";");
-        \\    return sb_to_string(source);
+        \\    source.append("\";");
+        \\    return source.finish_source();
         \\}
         \\
         \\derive_members :: (T: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
@@ -2318,8 +2345,8 @@ render_section_76 :: () {
         \\    _ := opts;
         \\    empty_focuses: []ssize;
         \\    empty_replacements: []Code;
-        \\    section := derive_type_section(info, empty_focuses);
-        \\    input_type := derive_type_apply(info, empty_focuses, empty_replacements);
+        \\    section := info.type_section(empty_focuses);
+        \\    input_type := info.type_apply(empty_focuses, empty_replacements);
         \\    #insert #code {
         \\        ``section ::: instance Members {
         \\            member_names :: (value: ``input_type) -> string {
@@ -2349,15 +2376,15 @@ render_section_76 :: () {
     );
     paragraph(35, #string,oneline
         \\Deriving `Members` for `Cell` produces one instance covering every
-        \\application, because `derive_type_section` with an empty focus list is the
-        \\type name alone and `derive_type_apply` reproduces the declared
+        \\application, because `Derive_Type_Info.type_section` with an empty focus list is the
+        \\type name alone and `Derive_Type_Info.type_apply` reproduces the declared
         \\parameters.
     );
     subheading(36, "Focused type parameters");
     paragraph(37, #string,oneline
         \\A class that transforms one type parameter needs the head to leave that
-        \\parameter open. `derive_focus_params` chooses which parameter that is,
-        \\`derive_type_section` turns it into a hole, and `derive_type_apply`
+        \\parameter open. `Derive_Type_Info.focus_params` chooses which parameter that is,
+        \\`Derive_Type_Info.type_section` turns it into a hole, and `Derive_Type_Info.type_apply`
         \\substitutes a replacement for it in each method signature. For a
         \\two-parameter `Cell(K, V)` focused on the last parameter, the head becomes
         \\`Cell($K, _)`, the input type `Cell(K, $A)`, and the output `Cell(K, B)`.
@@ -2383,12 +2410,12 @@ render_section_76 :: () {
         \\
         \\derive_map_last :: (F: type, info: Derive_Type_Info, opts: Derive_Options) #expand {
         \\    if !Is_Struct(F) #compile_error "Map_Last can only be derived for structs";
-        \\    focuses := derive_focus_params(info, opts, 1);
+        \\    focuses := info.focus_params(opts, 1);
         \\    if focuses.count != 1 #compile_error "Map_Last needs exactly one focused type parameter";
         \\    focus := focuses[0];
-        \\    section     := derive_type_section(info, focuses);
-        \\    input_type  := derive_type_apply(info, focuses, .[#code { $A }]);
-        \\    output_type := derive_type_apply(info, focuses, .[#code { B }]);
+        \\    section     := info.type_section(focuses);
+        \\    input_type  := info.type_apply(focuses, .[#code { $A }]);
+        \\    output_type := info.type_apply(focuses, .[#code { B }]);
         \\    #insert #code {
         \\        ``section ::: instance Map_Last {
         \\            map_last :: (fa: ``input_type, f: (A) -> $B) -> ``output_type {
@@ -2410,7 +2437,7 @@ render_section_76 :: () {
         \\    c: Cell(string, string) = .{ .key = "id", .value = "hello" };
         \\    d := map_last(c, length);
         \\    print("key = % value = %\n", d.key, d.value);
-        \\    print("type = %\n", type_name(type_of(d)));
+        \\    print("type = %\n", type_name(d.type_of()));
         \\}
     );
     code_block(39, "text", #string
@@ -2680,17 +2707,17 @@ render_section_77 :: () {
         \\
         \\main :: () {
         \\    good: [4]f64 = .[3.0, 1.0, 2.0, 0.5];
-        \\    r1 := sort(good[..]);
+        \\    r1 := (good[..]).sort();
         \\    if r1 == {
         \\        case .Ok;         print("sorted = % % % %\n", good[0], good[1], good[2], good[3]);
-        \\        case .Err(error); print("sort err = %\n", sort_error_reason(error));
+        \\        case .Err(error); print("sort err = %\n", error.reason());
         \\    }
         \\
         \\    bad: [3]f64 = .[1.0, quiet_nan(), 2.0];
-        \\    r2 := sort(bad[..]);
+        \\    r2 := (bad[..]).sort();
         \\    if r2 == {
         \\        case .Ok;         print("nan sort ok\n");
-        \\        case .Err(error); print("nan sort err = %\n", sort_error_reason(error));
+        \\        case .Err(error); print("nan sort err = %\n", error.reason());
         \\    }
         \\
         \\    cmp := 1.0 <=> quiet_nan();
@@ -2846,7 +2873,7 @@ render_section_78 :: () {
     paragraph(24, #string,oneline
         \\Formatting entry points take a `#comptime fmt: string` followed by
         \\`args: ...any`. The pack preserves each argument's concrete type.
-        \\`format_to_writer` parses the format string at compile time and checks
+        \\`value.format_to_writer` parses the format string at compile time and checks
         \\`Formatter(Value_Type, spec, Writer_Type)` for each substitution.
         \\Every argument is evaluated once; only the selected writes run at runtime.
     );
@@ -2891,11 +2918,11 @@ render_section_78 :: () {
     subheading(31, "The `Format` helpers");
     table_header(32, "Call   —   Result   —   Allocator");
     table_row(33, "`print(fmt, args)`   |   written to standard output   |   temporary; `print` formats through `tprint`");
-    table_row(34, "`format(fmt, args)`   |   an owned `string`; release with `string_free`   |   `context.allocator`");
+    table_row(34, "`format(fmt, args)`   |   an owned `string`; release with `string.free`   |   `context.allocator`");
     table_row(35, "`tprint(fmt, args)`   |   a temporary `string`   |   `context.temp_allocator`");
     table_row(36, "`format(fmt, args, .allocator = a)`   |   an owned `string`; free with the same allocator   |   the named allocator; replaces removed `format_args`");
-    table_row(37, "`format_int(value, base)`   |   digits in `base`; do not free individually   |   temporary arena; also usable at compile time");
-    table_row(38, "`format_int_with_allocator(value, base, a)`   |   digits in `base`   |   the explicit allocator");
+    table_row(37, "`value.format_int(base)`   |   digits in `base`; do not free individually   |   temporary arena; also usable at compile time");
+    table_row(38, "`value.format_int_with_allocator(base, a)`   |   digits in `base`   |   the explicit allocator");
     code_block(39, "glosso", #string
         \\#import "Io";
         \\#import "Format";
@@ -2904,15 +2931,15 @@ render_section_78 :: () {
         \\
         \\main :: () {
         \\    heap := format("% and %", 1, "two");
-        \\    defer string_free(heap);
+        \\    defer heap.free();
         \\    temp := tprint("% and %", 3, "four");
         \\    explicit := format("%-%", 5, 6, .allocator = context.allocator);
-        \\    defer string_free(explicit, .allocator = context.allocator);
+        \\    defer explicit.free(.allocator = context.allocator);
         \\    print("format     = %\n", heap);
         \\    print("tprint     = %\n", temp);
         \\    print("explicit   = %\n", explicit);
-        \\    print("hex        = %\n", format_int(255, 16));
-        \\    print("binary     = %\n", format_int(10, 2));
+        \\    print("hex        = %\n", (255).format_int(16));
+        \\    print("binary     = %\n", (10).format_int(2));
         \\}
     );
     code_block(40, "text", #string
@@ -3021,7 +3048,7 @@ render_section_78 :: () {
         \\
         \\(Token, "token", $W) ::: instance Formatter where Writer(W) {
         \\    format_to :: (writer: *W, value: Token) -> Io_Error!ssize {
-        \\        return io_write_format(writer, "<%X>", value.value);
+        \\        return writer.write_format("<%X>", value.value);
         \\    }
         \\}
         \\
@@ -3040,7 +3067,7 @@ render_section_78 :: () {
         \\and forward `args: ...any` as `args...` to preserve this dispatch.
     );
     paragraph(58, #string,oneline
-        \\For fallible output, `io_write_format` formats directly to any
+        \\For fallible output, `value.write_format` formats directly to any
         \\`Writer` and returns `Io_Error!ssize`. Its success count measures
         \\bytes, not characters. An error includes the bytes completed before
         \\and inside the failing formatter, so custom instances must preserve
@@ -3122,11 +3149,13 @@ render_section_79 :: () {
     );
     subheading(10, "How `x?` is checked");
     paragraph(11, #string,oneline
-        \\`?` needs a boundary that can absorb a `Break`. That is either an
+        \\A potentially failing `?` needs a boundary that can absorb a `Break`. That is either an
         \\enclosing function whose return type implements `Try`, or an enclosing
         \\`#try` block. Without one the operator is `error: postfix '?' requires
         \\a Try-returning function or an enclosing #try block`. With one, the
-        \\checker performs these steps.
+        \\checker performs these steps. An infallible `#Never!T` operand
+        \\cannot take the failure branch, so its `?` also works in an ordinary
+        \\non-fallible function and yields `T` directly.
     );
     bullet(12, #string,oneline
         \\The operand and boundary types must implement `Try`. The operand
@@ -3660,22 +3689,24 @@ render_section_81 :: () {
         \\`Io`.
     );
     code_block(5, "glosso", #string
-        \\error_report_write :: (text: string) {
-        \\    written, code := __error_file_write_result(2, text);
-        \\    _ := written;
-        \\    _ := code;
-        \\}
+        \\string ::: #public {
+        \\    error_report_write :: (#self) {
+        \\        written, code := __error_file_write_result(2, #self);
+        \\        _ := written;
+        \\        _ := code;
+        \\    }
         \\
-        \\error_report_line :: (category: string, message: string) {
-        \\    error_report_write(category);
-        \\    error_report_write(": ");
-        \\    error_report_write(message);
-        \\    error_report_write("\n");
+        \\    error_report_line :: (#self, message: string) {
+        \\        #self.error_report_write();
+        \\        (": ").error_report_write();
+        \\        message.error_report_write();
+        \\        ("\n").error_report_write();
+        \\    }
         \\}
     );
     table_header(6, "Helper   —   Writes");
-    table_row(7, "`error_report_write(text)`   |   `text`, exactly, with no newline");
-    table_row(8, "`error_report_line(category, message)`   |   `category`, `\": \"`, `message`, newline");
+    table_row(7, "`text.error_report_write()`   |   `text`, exactly, with no newline");
+    table_row(8, "`category.error_report_line(message)`   |   `category`, `\": \"`, `message`, newline");
     paragraph(9, #string,oneline
         \\Both ignore the write result. A report that cannot be written has
         \\nowhere left to report that fact, so the failure is dropped rather
@@ -3748,7 +3779,7 @@ render_section_81 :: () {
     );
     code_block(29, "glosso", #string
         \\#import "Io";
-        \\#import "Typeclass/Termination";
+        \\// Termination is supplied by the Prelude.
         \\
         \\Exit_Report :: struct { failures: s64; }
         \\
@@ -3784,16 +3815,16 @@ render_section_81 :: () {
         \\Disk_Full :: struct { path: string; bytes: s64; }
         \\Disk_Full ::: instance Error {
         \\    report_error :: (error: Disk_Full) -> void {
-        \\        error_report_write("disk full writing ");
-        \\        error_report_write(error.path);
-        \\        error_report_write("\n");
+        \\        ("disk full writing ").error_report_write();
+        \\        error.path.error_report_write();
+        \\        ("\n").error_report_write();
         \\    }
         \\}
         \\
         \\Timed_Out :: struct { seconds: s64; }
         \\Timed_Out ::: instance Error {
         \\    report_error :: (error: Timed_Out) -> void {
-        \\        error_report_line("timed out", "the request took too long");
+        \\        ("timed out").error_report_line("the request took too long");
         \\    }
         \\}
         \\
@@ -3931,7 +3962,7 @@ render_section_82 :: () {
     );
     subheading(10, "The pack inside the callee");
     paragraph(11, #string,oneline
-        \\The pack is a heterogeneous, read-only view. `type_of` on the pack
+        \\The pack is a heterogeneous, read-only view. `value.type_of` on the pack
         \\itself answers `tuple`; each element is boxed so it can be indexed
         \\with a runtime index, which is what makes the `[]any` view real and
         \\what `__format` relies on when it walks `args[ai]`. Indexing with a
@@ -3942,8 +3973,8 @@ render_section_82 :: () {
         \\#import "Meta";
         \\
         \\inspect :: (values: ...Show) {
-        \\    pack_type :: type_of(values);
-        \\    elem_type :: type_of(values[1]);
+        \\    pack_type :: values.type_of();
+        \\    elem_type :: values[1].type_of();
         \\    print("pack type = %\n", pack_type);
         \\    print("elem type = %\n", elem_type);
         \\    print("count     = %\n", values.count);
@@ -3986,7 +4017,7 @@ render_section_82 :: () {
     paragraph(19, #string,oneline
         \\`#inline for` over a pack is the tool for code that must differ per
         \\element. The body is expanded once per argument with the element's
-        \\type known, so `type_of(it)` can be bound to a compile-time constant
+        \\type known, so `it.type_of()` can be bound to a compile-time constant
         \\and that constant used in an evidence query. `#if Class(T)` answers
         \\whether `T` has an instance, and only the taken branch is checked.
     );
@@ -4007,7 +4038,7 @@ render_section_82 :: () {
         \\
         \\label_all :: (values: ...Unit) {
         \\    #inline for values {
-        \\        elem :: type_of(it);
+        \\        elem :: it.type_of();
         \\        #if Show(elem) {
         \\            print("  % (%) shows as %\n", elem, unit_of(it), Show(elem).show(it));
         \\        } else {
@@ -4043,10 +4074,11 @@ render_section_82 :: () {
         \\An evidence query is compile-time only. `Class(T)` in a runtime
         \\expression is `error: internal error: 'Marker' is called but was
         \\never lowered`; bind it to a constant or use it directly in `#if`.
-        \\The expression form also takes exactly one type argument:
-        \\`Convert(s64, string)` for a two-parameter class is `error:
-        \\Convert(T) expects one type argument`, and the one-argument form
-        \\answers `false` for such a class rather than reporting anything. A
-        \\multi-parameter class can only be queried usefully inside a `where`.
+        \\Supply every declared compile-time argument: a two-parameter class
+        \\is queried as `Convert(s64, string)`. The same full argument list
+        \\works in constant expressions and `where` clauses; a missing
+        \\argument produces an arity diagnostic.
     );
+}
+
 }

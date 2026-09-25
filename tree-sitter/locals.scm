@@ -8,6 +8,8 @@
 ] @local.scope
 
 ; Parameters
+(receiver_parameter
+  (self_expression) @local.definition)
 (parameter
   name: (binding_list [
     (identifier)
@@ -51,4 +53,5 @@
   (identifier)
   (code_splice_identifier)
   (non_hygienic_identifier)
+  (self_expression)
 ] @local.reference

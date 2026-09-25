@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 22-36: primitive types.
 
 render_section_22 :: () {
@@ -30,7 +32,7 @@ render_section_22 :: () {
     table_row(6, "Boolean   |   `bool`   |   Booleans and Truthiness");
     table_row(7, "Strings   |   `string` `cstring` `string16` `cstring16`   |   Built-in Strings");
     table_row(48, "Definition declarations   |   `Namespace` `Library` `Typeclass(...)` `Macro(...)`   |   this chapter");
-    table_row(8, "Other   |   `void` `type` `any` `label` `Code` `Pattern`   |   this chapter");
+    table_row(8, "Other   |   `void` `#Never` `type` `any` `label` `Code` `Pattern`   |   this chapter");
     subheading(9, "Sizes and alignments");
     paragraph(10, #string,oneline
         \\Both numbers come from `type_info(T)`, whose result carries
@@ -149,7 +151,7 @@ render_section_22 :: () {
         \\    print("ssize == s64      %\n", ssize == s64);
         \\    print("usize == u64     %\n", usize == u64);
         \\    print("s64 == int64_t    %\n", s64 == int64_t);
-        \\    print("ASCII literal == u8 %\n", type_of(#char "A") == u8);
+        \\    print("ASCII literal == u8 %\n", (#char "A").type_of() == u8);
         \\    print("rune == u32       %\n", rune == u32);
         \\}
     );
@@ -183,7 +185,7 @@ render_section_22 :: () {
     paragraph(58, #string,oneline
         \\An ASCII `#char` literal may adopt `u8`, `s8`, or `rune`; a non-ASCII
         \\literal may adopt only `rune`. A stored byte does not convert
-        \\implicitly to a rune. Use `char_to_rune(c)` for the safe widening,
+        \\implicitly to a rune. Use `c.char_to_rune()` for the safe widening,
         \\while `cast` is the explicit low-level bridge to integer storage. The
         \\literal rules and exact diagnostics are in `#char` Character Literals.
     );
@@ -299,6 +301,13 @@ render_section_22 :: () {
         \\or array is not supported yet; remove the member, or wrap it in a
         \\single-field struct`. `show(a)` works, because that is an ordinary
         \\call.
+    );
+    paragraph(56, #string,oneline
+        \\`#Never` is the uninhabited type: no expression can produce a value of
+        \\that type and complete normally. Declare a nonreturning function with
+        \\`-> #Never`; the old `#noreturn` directive is rejected. `#Never!T` is an
+        \\infallible result, whose `?` needs no fallible enclosing boundary. It is
+        \\also the `Drop.Error` type for cleanup that cannot fail.
     );
 }
 
@@ -856,16 +865,17 @@ render_section_25 :: () {
         \\  |          ^^^^^^^^^^
     );
     paragraph(13, #string,oneline
-        \\With the import, the operators and the accessor functions are both
-        \\available. There is one function per width, named with the number
-        \\of semantic bits.
+        \\Importing `Math/Complex` supplies the operators and inherent methods.
+        \\Constructors such as `complex128(real, imaginary)` keep their width-specific
+        \\free-function names; accessors use receiver calls such as `z.real_part()`
+        \\and infer the matching component width from `z`.
     );
     table_header(14, "Function   —   Widths   —   Result");
     table_row(15, "`complex32` … `complex256`   |   32, 64, 128, 160, 256   |   a complex value from a real and an imaginary component");
-    table_row(16, "`real_part32` … `real_part256`   |   32, 64, 128, 160, 256   |   the real component, as the matching float type");
-    table_row(17, "`imaginary_part32` … `imaginary_part256`   |   32, 64, 128, 160, 256   |   the imaginary component");
-    table_row(18, "`conjugate32` … `conjugate256`   |   32, 64, 128, 160, 256   |   the complex conjugate");
-    table_row(19, "`norm32` … `norm256`   |   32, 64, 128, 160, 256   |   the Euclidean magnitude, as the matching float type");
+    table_row(16, "`value.real_part()`   |   every complex width   |   the real component, as the matching float type");
+    table_row(17, "`value.imaginary_part()`   |   every complex width   |   the imaginary component");
+    table_row(18, "`value.conjugate()`   |   every complex width   |   the complex conjugate");
+    table_row(19, "`value.norm()`   |   every complex width   |   the Euclidean magnitude, as the matching float type");
     code_block(20, "glosso", #string
         \\#import "Io";
         \\#import "Math/Complex";
@@ -875,13 +885,13 @@ render_section_25 :: () {
         \\    b := complex128(3.0, -4.0);
         \\    sum := a + b;
         \\    prod := a * b;
-        \\    print("sum  re % im %\n", real_part128(sum), imaginary_part128(sum));
-        \\    print("prod re % im %\n", real_part128(prod), imaginary_part128(prod));
-        \\    print("conj re % im %\n", real_part128(conjugate128(a)), imaginary_part128(conjugate128(a)));
-        \\    print("norm b  %\n", norm128(b));
+        \\    print("sum  re % im %\n", sum.real_part(), sum.imaginary_part());
+        \\    print("prod re % im %\n", prod.real_part(), prod.imaginary_part());
+        \\    print("conj re % im %\n", (a.conjugate()).real_part(), (a.conjugate()).imaginary_part());
+        \\    print("norm b  %\n", b.norm());
         \\    print("a == a  %\n", a == a);
         \\    z: c128;
-        \\    print("default re % im %\n", real_part128(z), imaginary_part128(z));
+        \\    print("default re % im %\n", z.real_part(), z.imaginary_part());
         \\}
     );
     code_block(21, "text", #string
@@ -893,11 +903,9 @@ render_section_25 :: () {
         \\default re 0 im 0
     );
     note(22, #string,oneline
-        \\Importing `Math/Complex` currently also emits a warning from
-        \\inside the library itself, `warning: no '*' for <T>: the
-        \\where-clause only provides nothing`, pointing at
-        \\`std/Math/Complex.glo`. It is harmless and comes from the library,
-        \\not from the importing program.
+        \\Complex accessors belong to their owning type. They are not namespace
+        \\functions such as `Math.real_part128`: call `z.real_part()`, `z.norm()`,
+        \\or the explicit receiver form `c128.real_part(z)`.
     );
     subheading(23, "There is no imaginary literal");
     paragraph(24, #string,oneline
@@ -934,10 +942,10 @@ render_section_25 :: () {
         \\
         \\main :: () {
         \\    z: c128 = 3;
-        \\    print("from comptime_int re % im %\n", real_part128(z), imaginary_part128(z));
+        \\    print("from comptime_int re % im %\n", z.real_part(), z.imaginary_part());
         \\    r: f64 = 1.5;
         \\    w := complex128(r, 0.0);
-        \\    print("built re % im %\n", real_part128(w), imaginary_part128(w));
+        \\    print("built re % im %\n", w.real_part(), w.imaginary_part());
         \\}
     );
     code_block(29, "text", #string
@@ -1249,7 +1257,7 @@ render_section_27 :: () {
         \\    print("units % %\n", text.count, wide.count);
         \\    for value: text print("%:% ", it_index, cast(u32)value);
         \\    print("\n");
-        \\    for value: utf8_bytes(text) print("% ", value);
+        \\    for value: text.bytes() print("% ", value);
         \\    print("\n");
         \\    for < value: wide print("%:% ", it_index, cast(u32)value);
         \\    print("\n");
@@ -1262,7 +1270,7 @@ render_section_27 :: () {
         \\0:128512 1:233 2:65
     );
     paragraph(42, #string,oneline
-        \\Use `utf8_bytes` when the algorithm operates on encoded bytes, and
+        \\Use `string.bytes` when the algorithm operates on encoded bytes, and
         \\iterate the string itself when it operates on Unicode scalars. The
         \\explicit rune-to-`u32` cast above asks the formatter for numeric code
         \\points instead of displaying the characters. A reverse string walk
@@ -1310,9 +1318,9 @@ render_section_27 :: () {
         \\buffer.
     );
     note(21, #string,oneline
-        \\Never assume a `string` is terminated. Convert with `cstring_from_string`
-        \\or `c_string` from `Strings/Utf8` when a terminator is required; the
-        \\first takes an allocator and must be released with `cstring_free`, the
+        \\Never assume a `string` is terminated. Convert with `string.cstring_from_string`
+        \\or `string.c_string` from `Strings/Utf8` when a terminator is required; the
+        \\first takes an allocator and must be released with `cstring.free`, the
         \\second allocates from the temporary allocator.
     );
     subheading(22, "Reaching C");
@@ -1332,8 +1340,9 @@ render_section_27 :: () {
         \\#import "Meta";
         \\
         \\W16 : string16 : "hi";
-        \\Bytes :: type_of(("hi").data);
-        \\Units :: type_of(W16.data);
+        \\B8 : string : "hi";
+        \\Bytes :: B8.data.type_of();
+        \\Units :: W16.data.type_of();
         \\
         \\first_byte :: (p: [*]const u8) -> u8 { return p[0]; }
         \\first_char :: (p: [*]const s8) -> s8 { return p[0]; }
@@ -1372,12 +1381,12 @@ render_section_27 :: () {
         \\
         \\main :: () {
         \\    s: string = "hi";
-        \\    c := c_string(s);
+        \\    c := s.c_string();
         \\    print("cstring count % terminator %\n", c.count, c.data[c.count]);
-        \\    print("back to string %\n", cstring_to_string(c));
-        \\    bytes := utf8_bytes(s);
+        \\    print("back to string %\n", c.to_string());
+        \\    bytes := s.bytes();
         \\    print("view count % first %\n", bytes.count, bytes[0]);
-        \\    print("round trip %\n", byte_slice_to_string(bytes));
+        \\    print("round trip %\n", bytes.byte_slice_to_string());
         \\}
     );
     code_block(32, "text", #string
@@ -1411,7 +1420,7 @@ render_section_27 :: () {
         \\`cstring` and `cstring16` do not implement `Show`. Passing one to
         \\`print` with a default `%` reports a missing `Formatter` instance.
         \\`string` and `string16` implement `Show` and support that selector;
-        \\convert with `cstring_to_string` before printing.
+        \\convert with `cstring.to_string` before printing.
     );
 }
 
@@ -1496,7 +1505,7 @@ render_section_28 :: () {
     );
     note(22, #string,oneline
         \\The internal vector ABI is not a C ABI. Cross a foreign boundary with
-        \\ordinary scalar memory and move lanes with `simd_load` and `simd_store`,
+        \\ordinary scalar memory and move lanes with `simd_load` and `array.simd_store`,
         \\which accept unaligned addresses and lower with alignment 1.
     );
     code_block(23, "glosso", #string
@@ -1516,10 +1525,10 @@ render_section_28 :: () {
         \\
         \\    loaded := simd_load(V4, lanes.data);
         \\    out: [4]s32;
-        \\    simd_store(out.data, loaded + loaded);
+        \\    out.data.simd_store(loaded + loaded);
         \\    print("loaded % stored %\n", loaded[1], out[1]);
         \\    print("reduce % reversed %\n",
-        \\        simd_reduce_add(loaded, cast(s32) 0), simd_reverse(loaded)[0]);
+        \\        loaded.simd_reduce_add(cast(s32) 0), loaded.simd_reverse()[0]);
         \\}
     );
     code_block(24, "text", #string
@@ -1550,8 +1559,8 @@ render_section_28 :: () {
     table_header(29, "Helper   —   Meaning");
     table_row(30, "`simd_zero(V)`   |   all lanes zero");
     table_row(31, "`simd_splat(V, value)`   |   every lane set to `value`, which must already be the lane type");
-    table_row(32, "`simd_load(V, source)` / `simd_store(dest, value)`   |   move every lane to or from contiguous scalar memory");
-    table_row(33, "`simd_reverse(value)`   |   lanes in reverse order");
+    table_row(32, "`simd_load(V, source)` / `dest.simd_store(value)`   |   move every lane to or from contiguous scalar memory");
+    table_row(33, "`value.simd_reverse()`   |   lanes in reverse order");
     table_row(34, "`simd_reduce_add/mul/xor/or(value, initial)`   |   fold every lane into one scalar");
     table_row(35, "`simd_lane_count(V)` / `simd_element_type(V)`   |   compile-time shape queries");
     subheading(36, "Matrices");
@@ -1579,11 +1588,11 @@ render_section_28 :: () {
         \\        matrix_row_count(M23), matrix_column_count(M23),
         \\        matrix_element_count(M23), size_of(M23));
         \\    print("flat m[4] % kind %\n", m[4], cast(s64) type_kind(M23));
-        \\    value, ok := matrix_get(m, 1, 2);
+        \\    value, ok := m.get(1, 2);
         \\    print("get(1, 2) % ok %\n", value, ok);
-        \\    missing, found := matrix_get(m, 5, 0);
+        \\    missing, found := m.get(5, 0);
         \\    print("get(5, 0) % ok %\n", missing, found);
-        \\    n, stored := matrix_set(m, 0, 0, 99);
+        \\    n, stored := m.set(0, 0, cast(s64)99);
         \\    print("set -> % original % ok %\n", n[0], m[0], stored);
         \\    print("name % transpose %\n",
         \\        type_name(M23), type_name(matrix_transpose_type(M23)));
@@ -1598,8 +1607,8 @@ render_section_28 :: () {
         \\name Matrix(ssize, 2, 3) transpose Matrix(ssize, 3, 2)
     );
     paragraph(40, #string,oneline
-        \\`matrix_get` returns a `(value, ok)` tuple rather than trapping, and
-        \\`matrix_set` is functional: it returns a new matrix and leaves its
+        \\`value.get` returns a `(value, ok)` tuple rather than trapping, and
+        \\`value.set` is functional: it returns a new matrix and leaves its
         \\argument alone, which is what keeps matrix values ordinary values in
         \\both the compile-time evaluator and native code. The shape intrinsics
         \\`matrix_transpose_type`, `matrix_product_type` and
@@ -1643,7 +1652,7 @@ render_section_29 :: () {
         \\    print("% is % bytes, kind %\n",
         \\        type_name(Vec2), size_of(Vec2), cast(s64) type_kind(Vec2));
         \\    x: u16 = 3;
-        \\    X :: type_of(x);
+        \\    X :: x.type_of();
         \\    print("type_of(x) is %\n", type_name(X));
         \\    info :: type_info(f80);
         \\    print("f80: name % size % alignment % tag %\n",
@@ -1657,7 +1666,7 @@ render_section_29 :: () {
         \\f80: name f80 size 16 alignment 16 tag 2
     );
     paragraph(4, #string,oneline
-        \\`type_of(value)` is the static type of an expression, `type_name(T)` its
+        \\`value.type_of()` is the static type of an expression, `type_name(T)` its
         \\printed spelling, `size_of(T)` its size in bytes under natural C layout,
         \\`type_kind(T)` its `Type_Info_Tag`, and `type_info(T)` a record holding
         \\all of that at once. There is no `align_of`: writing one is `unknown
@@ -1846,10 +1855,10 @@ render_section_29 :: () {
         \\A type value may be stored in a runtime local and shown, as the last
         \\line above does, but it cannot then be fed back to a compile-time
         \\intrinsic: `type_kind(t)` on such a local is `unknown const t`. For the
-        \\same reason `type_of` has to fold before lowering; using its result
+        \\same reason `value.type_of` has to fold before lowering; using its result
         \\where a runtime value is expected gives `#magic 'type_of' must not reach
         \\native LLVM lowering: type introspection query must be folded before
-        \\native lowering`. Binding it to a constant first, as `X :: type_of(x);`,
+        \\native lowering`. Binding it to a constant first, as `X :: x.type_of();`,
         \\is the spelling that always works.
     );
 }
@@ -1896,12 +1905,12 @@ render_section_30 :: () {
         \\    a := 5;
         \\    b := 5.0;
         \\    c := 1 + 2;
-        \\    A :: type_of(a); B :: type_of(b); C :: type_of(c);
+        \\    A :: a.type_of(); B :: b.type_of(); C :: c.type_of();
         \\    print("5 -> % / 5.0 -> % / 1 + 2 -> % (%)\n",
         \\        type_name(A), type_name(B), type_name(C), c);
         \\    f: f64 = 5;
         \\    z: c128 = 3;
-        \\    Z :: type_of(z);
+        \\    Z :: z.type_of();
         \\    print("f64 from an integer literal % ; c128 from one is %\n",
         \\        f, type_name(Z));
         \\}
@@ -3074,4 +3083,6 @@ render_section_36 :: () {
         \\spellings are reserved and how ownership is keyed by name, arity, and
         \\fixity, belong to the chapter on the operator system.
     );
+}
+
 }

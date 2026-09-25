@@ -23,7 +23,19 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 6, "private names, their members, and private sections must be excluded");
+assert.equal(symbols.size, 12, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
+assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
+for (const name of ["Box.make", "Box.get", "Box.set"]) {
+  assert.equal(symbols.get(name).kind, "method");
+  assert.equal(symbols.get(name).owner_typeclass, "");
+}
+assert.equal(symbols.get("Box.get").display_signature, "Box.get :: (#self) -> ssize");
+assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*#self, value: ssize)");
+assert.deepEqual(symbols.get("Box.set").function_info.parameters[0], {
+  name: "#self", value_type: "*Box", default_value: "", modifiers: ["receiver"], constraints: [],
+});
+assert.deepEqual(symbols.get("Box").type_info.fields.map(field => field.name), ["value", "exposed"]);
 
 const open = symbols.get("open");
 assert.equal(open.display_signature,
@@ -128,4 +140,4 @@ assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.n
   "Output", "Residual", "from_output", "from_residual", "branch", "?",
 ]);
 
-console.log("Reference extraction checks passed: current open, defaults, constraints, memory forms, typed flags, lazy parameters, function pointers, source locations, private declarations, and try(Target) operators.");
+console.log("Reference extraction checks passed: visibility groups, inherent methods, defaults, constraints, memory forms, typed flags, function pointers, source locations, and try(Target) operators.");

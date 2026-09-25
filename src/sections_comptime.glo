@@ -1,5 +1,7 @@
 // Sections 105-115: compile-time programming.
 
+#public(unit) {
+
 render_section_105 :: () {
     paragraph(0, #string,oneline
         \\Glosso executes code during compilation in two different engines.
@@ -137,23 +139,19 @@ render_section_105 :: () {
 
     subheading(23, "Where the machine still falls short");
     paragraph(24, #string,oneline
-        \\Mutation through a pointer remains a boundary between the two engines.
-        \\The constant evaluator implements the standard library's compile-time
-        \\`String_Builder` intrinsics, including `sb_append(*sb, ...)`. The
-        \\register machine used by a top-level `#comptime` block has builder
-        \\support too, and `sb_new` succeeds, but the complete variadic pointer
-        \\call is not yet usable end to end: it currently panics with `value is
-        \\not a string` instead of appending or producing an empty builder.
+        \\The constant evaluator cannot execute destructors. A local whose type
+        \\has `Drop`, including `String_Builder`, is rejected with `constant
+        \\evaluation cannot run destructors`. This also affects compile-time
+        \\`tprint`, which creates a builder internally. Compose source strings
+        \\with `string.cat` and `string.repeat` when evaluating an expression
+        \\during checking.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
         \\#import "String_Builder";
         \\
         \\build_text :: () -> string {
-        \\    sb := sb_new();
-        \\    sb_append(*sb, "hello ");
-        \\    sb_append(*sb, "builder");
-        \\    return sb_to_string(sb);
+        \\    return "hello ".cat("builder");
         \\}
         \\
         \\TEXT :: #comptime build_text();
@@ -167,11 +165,11 @@ render_section_105 :: () {
         \\build_text = <hello builder>
     );
     note(27, #string,oneline
-        \\Keep `sb_append` source construction in a `#comptime` expression for
-        \\now. Inside a top-level `#comptime` block, compose strings with
-        \\`str_cat` and `str_repeat`, which behave identically in both engines.
-        \\Ordinary dynamic arrays are safe as well: `array_add` is implemented
-        \\on both sides, so this limitation is specific to the builder call.
+        \\The source-building methods remain part of the `String_Builder` API,
+        \\but the installed compiler's constant-evaluation restriction prevents
+        \\creating that managed value here. `string.cat`, `string.repeat`, and
+        \\the ordinary dynamic-array methods work without a managed builder.
+        \\A top-level `#comptime` declaration follows the separate machine path.
     );
 
     subheading(28, "What both engines refuse");
@@ -214,7 +212,7 @@ render_section_105 :: () {
         \\Vec3 :: struct { x: f32; y: f32; z: f32; }
         \\
         \\describe :: (T: type) -> string {
-        \\    return str_cat(type_name(T), str_cat(".", field_name(T, 0)));
+        \\    return (type_name(T)).cat((".").cat(field_name(T, 0)));
         \\}
         \\
         \\DESC :: #comptime describe(Vec3);
@@ -287,9 +285,9 @@ render_section_106 :: () {
         \\    local := #comptime 6 * 7;
         \\    print("Inline_Expr=% Table_Size=% local=%\n", Inline_Expr, Table_Size, local);
         \\    print("Table_Size: % (% bytes)\n",
-        \\          type_name(type_of(Table_Size)), size_of(type_of(Table_Size)));
+        \\          type_name(Table_Size.type_of()), size_of(Table_Size.type_of()));
         \\    print("Byte_Limit: % (% bytes)\n",
-        \\          type_name(type_of(Byte_Limit)), size_of(type_of(Byte_Limit)));
+        \\          type_name(Byte_Limit.type_of()), size_of(Byte_Limit.type_of()));
         \\    print("Squares = % % % %\n", Squares[0], Squares[1], Squares[2], Squares[3]);
         \\}
     );
@@ -499,7 +497,7 @@ render_section_107 :: () {
     table_row(9, "`X := e;` and `X : T = e;`   |   Not attempted.   |   No.");
     paragraph(10, #string,oneline
         \\The typed forms differ from the untyped ones only in the type they give
-        \\the name, and that difference is visible through `type_of`. An untyped
+        \\the name, and that difference is visible through `value.type_of`. An untyped
         \\integer constant keeps the literal type `comptime_int`, which has not
         \\yet been given a width; a typed one has the width it was written with.
         \\Compile-Time Numbers and Literal Defaulting explains what
@@ -516,8 +514,8 @@ render_section_107 :: () {
         \\    D : s64 := 40;
         \\    print("A=% B=% C=% D=%\n", A, B, C, D);
         \\    print("types: % % % %\n",
-        \\          type_name(type_of(A)), type_name(type_of(B)),
-        \\          type_name(type_of(C)), type_name(type_of(D)));
+        \\          type_name(A.type_of()), type_name(B.type_of()),
+        \\          type_name(C.type_of()), type_name(D.type_of()));
         \\    #if A + B + C + D == 100 print("all four are compile-time values\n");
         \\}
     );
@@ -866,7 +864,7 @@ render_section_108 :: () {
     paragraph(31, #string,oneline
         \\The message is optional, follows a comma, and must be a compile-time
         \\`string`. It need not be a literal: any expression the evaluator folds
-        \\to a string is accepted, so `str_cat` can compose one from the values
+        \\to a string is accepted, so `string.cat` can compose one from the values
         \\that made the check fail. A value of the wrong type is
         \\`error: #assert message must be a compile-time string`, and a runtime
         \\local used as the message is `error: unknown const reason`, pointing at
@@ -887,7 +885,7 @@ render_section_108 :: () {
         \\NAME :: "widget";
         \\
         \\main :: () {
-        \\    #compile_error str_cat("unsupported backend: ", NAME);
+        \\    #compile_error ("unsupported backend: ").cat(NAME);
         \\}
     );
     paragraph(35, #string,oneline
@@ -910,7 +908,7 @@ render_section_108 :: () {
         \\
         \\byte_width :: (x: $T) -> ssize {
         \\    #if !Is_Integer(T) {
-        \\        #compile_error str_cat("byte_width needs an integer, got ", type_name(T));
+        \\        #compile_error ("byte_width needs an integer, got ").cat(type_name(T));
         \\    }
         \\    return size_of(T);
         \\}
@@ -1019,11 +1017,11 @@ render_section_108 :: () {
         \\#import "Io";
         \\#import "Format";
         \\HERE :: #source_location;
-        \\MESSAGE :: #comptime tprint("%: error: generated", Source_Location.{
-        \\    .filename = "generated.glo", .line = 12, .column = 34 });
+        \\MESSAGE :: Source_Location.{
+        \\    .filename = "generated.glo", .line = 12, .column = 34 };
         \\main :: () {
         \\    #assert HERE.line == 3 && HERE.column == 9;
-        \\    print("%\n", MESSAGE);
+        \\    print("%: error: generated\n", MESSAGE);
         \\}
     );
     code_block(54, "text", #string
@@ -1251,18 +1249,13 @@ render_section_110 :: () {
         \\#import "String_Builder";
         \\
         \\struct_source :: (name: string, fields: ssize) -> string {
-        \\    builder := sb_new();
-        \\    sb_append(*builder, name);
-        \\    sb_append(*builder, " :: struct {\n");
+        \\    source := name.cat(" :: struct {\n");
         \\    i := 0;
         \\    while i < fields {
-        \\        sb_append(*builder, "    f");
-        \\        sb_append(*builder, show(i));
-        \\        sb_append(*builder, ": s32 = 0;\n");
+        \\        source = source.cat("    f").cat(show(i)).cat(": s32 = 0;\n");
         \\        i += 1;
         \\    }
-        \\    sb_append(*builder, "}\n");
-        \\    return sb_to_string(builder);
+        \\    return source.cat("}\n");
         \\}
         \\
         \\#insert struct_source("Generated", 2);
@@ -1535,7 +1528,7 @@ render_section_111 :: () {
         \\main :: () {
         \\    small: u8 = 200;
         \\    widened := widen_small(small);
-        \\    print("% %\n", widened, type_name(type_of(widened)));
+        \\    print("% %\n", widened, type_name(widened.type_of()));
         \\}
     );
     code_block(28, "text", #string
@@ -1649,7 +1642,7 @@ render_section_112 :: () {
     table_row(30, "`matrix_row_count(M)` / `matrix_column_count(M)` / `matrix_element_count(M)`   |   the shape of a `Matrix(T, R, C)`");
     table_row(31, "`matrix_element_type(M)` / `matrix_transpose_type(M)` / `matrix_product_type(A, B)`   |   matrix types computed from matrix types");
     paragraph(32, #string,oneline
-        \\`type_of`, `type_name` and `size_of` belong to the same family and are
+        \\`value.type_of`, `type_name` and `size_of` belong to the same family and are
         \\described in Types as Values; the `pattern_binder_*` and `pattern_missing*`
         \\intrinsics belong to Pattern Reflection; the `derive_type_*` intrinsics
         \\belong to Writing a Derive Macro. `simd_*` comes with `#import "Simd";`
@@ -1681,9 +1674,8 @@ render_section_112 :: () {
         \\
         \\fields_desc :: (T: type, i: ssize) -> string {
         \\    if i >= field_count(T) return "";
-        \\    one := str_cat(" ", str_cat(field_name(T, i),
-        \\        str_cat(": ", type_name(field_type(T, i)))));
-        \\    return str_cat(one, fields_desc(T, i + 1));
+        \\    one := (" ").cat((field_name(T, i)).cat((": ").cat(type_name(field_type(T, i)))));
+        \\    return one.cat(fields_desc(T, i + 1));
         \\}
         \\
         \\VEC3_FIELDS :: #comptime fields_desc(Vec3, 0);
@@ -1799,9 +1791,8 @@ render_section_112 :: () {
         \\field_print_source :: (T: type, i: ssize) -> string {
         \\    if i >= field_count(T) return "";
         \\    name := field_name(T, i);
-        \\    line := str_cat("    print(\"  ", str_cat(name,
-        \\        str_cat(" = %\\n\", value.", str_cat(name, ");\n"))));
-        \\    return str_cat(line, field_print_source(T, i + 1));
+        \\    line := ("    print(\"  ").cat(name.cat((" = %\\n\", value.").cat(name.cat(");\n"))));
+        \\    return line.cat(field_print_source(T, i + 1));
         \\}
         \\
         \\describe :: (value: $T) {
@@ -1839,6 +1830,13 @@ render_section_112 :: () {
         \\job, and it is often the only one. There is no way to index a struct's
         \\fields at run time, so a loop over `field_count(T)` has to be unrolled
         \\into text or into `#inline while` before it means anything.
+    );
+    note(53, #string,oneline
+        \\Reflection follows the visibility permissions of its defining source file.
+        \\Inaccessible fields and variants are omitted from reflected member lists,
+        \\without changing physical layout or discriminants. Generic bodies and
+        \\default expressions keep the permissions of their defining file after
+        \\specialization; they do not gain access to caller-private fields.
     );
 }
 
@@ -2151,13 +2149,13 @@ render_section_113 :: () {
         \\    if i >= pattern_missing_count(T, Ps) return "";
         \\    tail := witness_list(T, Ps, i + 1);
         \\    if tail == "" return pattern_missing(T, Ps, i);
-        \\    return str_cat(pattern_missing(T, Ps, i), str_cat(", ", tail));
+        \\    return (pattern_missing(T, Ps, i)).cat((", ").cat(tail));
         \\}
         \\
         \\REPORT :: #comptime witness_list(Token, ARMS, 0);
         \\
         \\main :: () {
-        \\    #if REPORT != "" { #compile_error str_cat("switch is not total; uncovered: ", REPORT); }
+        \\    #if REPORT != "" { #compile_error ("switch is not total; uncovered: ").cat(REPORT); }
         \\    print("ok\n");
         \\}
     );
@@ -2224,14 +2222,14 @@ render_section_114 :: () {
         \\run_build :: () {
         \\    set_build_options_dc(.do_output = false);
         \\
-        \\    workspace := compiler_create_workspace("hello");
-        \\    options := get_build_options(workspace);
+        \\    workspace := ("hello").compiler_create_workspace();
+        \\    options := workspace.get_build_options();
         \\    options.output_type = .Executable;
         \\    options.output_executable_name = "hello.exe";
-        \\    set_optimization(*options, .Optimized);
-        \\    set_build_options(options, workspace);
+        \\    options.set_optimization(.Optimized);
+        \\    options.set_build_options(workspace);
         \\
-        \\    if add_build_file("hello.glo", workspace) == {
+        \\    if ("hello.glo").add_build_file(workspace) == {
         \\    case .Ok(log);
         \\        print("[build] nested compilation said:\n%", log);
         \\    case .Err(failure);
@@ -2266,7 +2264,7 @@ render_section_114 :: () {
     paragraph(4, #string,oneline
         \\A nested compilation is a new `glosso` process, taken from
         \\`GLOSSO_COMPILER_EXE` if that is set and from the running executable
-        \\otherwise. `add_build_file` and `add_build_string` wait for that child
+        \\otherwise. `string.add_build_file` and `string.add_build_string` wait for that child
         \\and return its standard output followed by its standard error instead of
         \\passing either stream through. That is why the child's transcript appears
         \\under `[build]` above and why discarding the `.Ok` payload discards the
@@ -2277,12 +2275,13 @@ render_section_114 :: () {
     subheading(5, "`Workspace` and `Build_Options`");
     paragraph(6, #string,oneline
         \\A `Workspace` is an `s64` handle to one reusable `Build_Options`
-        \\configuration. Create one with `compiler_create_workspace`, obtain a
-        \\detached copy of its options with `get_build_options`, edit that copy,
-        \\and install it with `set_build_options`. Nothing is queued:
-        \\`add_build_file(path, workspace)` and `add_build_string(source,
-        \\workspace)` each start and await one child compilation immediately.
-        \\Omitting the workspace argument uses the shared implicit handle `-1`.
+        \\configuration. Create one with `string.compiler_create_workspace`, obtain a
+        \\detached copy of its options with `Workspace.get_build_options`, edit that
+        \\copy, and install it with `Build_Options.set_build_options`. Nothing is
+        \\queued: `path.add_build_file(workspace)` and
+        \\`source.add_build_string(workspace)` each start and await one child
+        \\compilation immediately. Omitting the workspace argument uses the shared
+        \\implicit handle `-1`.
     );
     table_header(7, "Field   —   Default   —   Child argument");
     table_row(8, "`output_type`   |   `.Executable`   |   Selects the backend when `backend` is `.Default`; `.No_Output` omits `-o` but does not suppress the child's artifact.");
@@ -2309,15 +2308,15 @@ render_section_114 :: () {
     );
     paragraph(21, #string,oneline
         \\The fields are written through mutators that take a pointer to the
-        \\record: `set_backend`, `set_target`,
-        \\`set_optimization`, `set_memory_sanitizer`,
-        \\`set_thread_sanitizer`, `set_borrow_check`,
-        \\`set_color`, `set_temp_allocator_size`,
-        \\`set_no_main`, `add_compiler_arg`,
-        \\`add_linker_arg`, `add_linker_args` and
-        \\`add_module_path`. They mutate only the detached local record;
-        \\call `set_build_options` afterwards. Direct field assignment and
-        \\`array_add` on its dynamic-array fields are equivalent.
+        \\record: `Build_Options.set_backend`, `Build_Options.set_target`,
+        \\`Build_Options.set_optimization`, `Build_Options.set_memory_sanitizer`,
+        \\`Build_Options.set_thread_sanitizer`, `Build_Options.set_borrow_check`,
+        \\`Build_Options.set_color`, `Build_Options.set_temp_allocator_size`,
+        \\`Build_Options.set_no_main`, `Build_Options.add_compiler_arg`,
+        \\`Build_Options.add_linker_arg`, `Build_Options.add_linker_args` and
+        \\`Build_Options.add_module_path`. They mutate only the detached local record;
+        \\call `Build_Options.set_build_options` afterwards. Direct field assignment and
+        \\`array.add` on its dynamic-array fields are equivalent.
     );
     paragraph(22, #string,oneline
         \\`Compiler_Backend` has seven members. `LLVM`, `Object`, `LLVM_IR`,
@@ -2355,13 +2354,13 @@ render_section_114 :: () {
         \\attributes and selects `default<Os>` or `default<Oz>`, but LLVM 23 still
         \\aborts on those pipeline-level optimization names. Use `Optimized` or
         \\`Very_Optimized` for a linked workspace build. C archive compilation is
-        \\narrower by design: `compile_c_archive` accepts only `Debug` through
+        \\narrower by design: `string.compile_c_archive` accepts only `Debug` through
         \\`Very_Optimized`; the size modes and `.Default` return a
         \\`Compiler_Error` before invoking the C compiler.
     );
     subheading(34, "Named and implicit workspaces");
     paragraph(35, #string,oneline
-        \\`compiler_create_workspace(name)` returns fresh handles numbered from
+        \\`name.compiler_create_workspace()` returns fresh handles numbered from
         \\zero for the life of the compiler process. The name is retained but is
         \\otherwise informational; it need not be unique, and there is no destroy
         \\operation. Each new handle starts with independent default options.
@@ -2376,18 +2375,18 @@ render_section_114 :: () {
         \\drive :: () {
         \\    set_build_options_dc(.do_output = false);
         \\
-        \\    defaults := get_build_options();
+        \\    defaults := (-1).get_build_options();
         \\    print("output_type=% backend=% optimization=% do_output=%\n",
         \\          defaults.output_type, defaults.backend,
         \\          defaults.optimization_level, defaults.do_output);
         \\
-        \\    space := compiler_create_workspace("tool");
-        \\    options := get_build_options(space);
+        \\    space := ("tool").compiler_create_workspace();
+        \\    options := space.get_build_options();
         \\    options.output_executable_name = "tool.exe";
-        \\    set_optimization(*options, .Optimized);
-        \\    set_build_options(options, space);
+        \\    options.set_optimization(.Optimized);
+        \\    options.set_build_options(space);
         \\
-        \\    if add_build_file("hello.glo", space) == {
+        \\    if ("hello.glo").add_build_file(space) == {
         \\    case .Ok(log);      print("[ws] built:\n%", log);
         \\    case .Err(failure); print("[ws] failed: %\n", failure.message);
         \\    }
@@ -2411,7 +2410,7 @@ render_section_114 :: () {
         \\and falls back to the source's file stem. The whole name is passed
         \\through as `-o`, so a fallback name carries no platform extension: a
         \\workspace with only `output_path = "outdir"` set produces
-        \\`glosso: done outdir\hello`. `add_build_string(source, w)`
+        \\`glosso: done outdir\hello`. `source.add_build_string(w)`
         \\is the same operation over text: the source is written to a temporary
         \\file named `glosso_build_string_<pid>_<n>.glo` and that file is
         \\compiled and left in place, which is why its diagnostics name a path in
@@ -2425,11 +2424,11 @@ render_section_114 :: () {
         \\`intermediate_path`, `do_output`, `write_added_strings`, and
         \\`text_output_flags`. In particular, changing `Build_Options.do_output`
         \\does not suppress either compilation, and `write_added_strings = false`
-        \\does not stop `add_build_string` from writing its temporary source.
+        \\does not stop `string.add_build_string` from writing its temporary source.
     );
     subheading(40, "Building C sources");
     paragraph(41, #string,oneline
-        \\`compile_c_archive(name, sources)` compiles a list of C files
+        \\`name.compile_c_archive(sources)` compiles a list of C files
         \\with the compiler's bundled native toolchain and returns
         \\`Native_Compile_Output`, whose `artifact` field is the path of the
         \\static library it produced and whose `output` field is the tool's log.
@@ -2451,18 +2450,15 @@ render_section_114 :: () {
         \\
         \\adder_bindings :: () -> string {
         \\    sources: [..]string;
-        \\    defer array_free(*sources);
-        \\    array_add(*sources, "adder.c");
+        \\    defer sources.free();
+        \\    sources.add("adder.c");
         \\
         \\    arguments: [1]string = .["-fno-builtin"];
         \\
-        \\    if compile_c_archive("adder", sources,
-        \\        .compiler_args = arguments[..]) == {
+        \\    if ("adder").compile_c_archive(sources, .compiler_args = arguments[..]) == {
         \\    case .Ok(archive);
         \\        print("[c] archive at %\n", archive.artifact);
-        \\        return str_cat(
-        \\            str_cat("adder :: #library,static \"", archive.artifact),
-        \\            "\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
+        \\        return (("adder :: #library,static \"").cat(archive.artifact)).cat("\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
         \\    case .Err(failure);
         \\        return "#comptime { #compile_error \"the adder archive did not build\"; }";
         \\    }
@@ -2490,29 +2486,28 @@ render_section_114 :: () {
     );
     subheading(45, "Other compiler services");
     paragraph(46, #string,oneline
-        \\`executable_path()` returns the absolute path of the compiler running
-        \\the script; its contract is `returns_fresh, released_by(string_free)`,
-        \\so a script that keeps the result and does not free it draws
-        \\`warning: [memory.leak] resource must be released by 'string_free'
-        \\before leaving scope`. `find_header(name, root)`, `find_library(name)` and
-        \\`find_resource(name)` search the target directories, the usual
-        \\environment variables and the project root, and return an empty string
-        \\when nothing matches; `find_resource("std")` resolves the standard
-        \\library directory. `run_command(text)` runs a shell command and returns
-        \\its captured output as `Compiler_Error!string`.
-        \\`add_current_linker_arg(arg)` appends a raw flag to the link of the
-        \\current compilation, which a bad flag proves loudly: `error: lld-link:
-        \\error: could not open '/no-such-linker-flag': no such file or
-        \\directory`.
+        \\`executable_path()` returns the absolute path of the compiler running the
+        \\script; its contract is `returns_fresh, released_by(string.free)`, so a
+        \\script that keeps the result and does not free it draws `warning:
+        \\[memory.leak] resource must be released by 'string_free' before leaving
+        \\scope`. `name.find_header(root)`, `name.find_library()` and
+        \\`name.find_resource()` search the target directories, the usual environment
+        \\variables and the project root, and return an empty string when nothing
+        \\matches; `("std").find_resource()` resolves the standard library directory.
+        \\`text.run_command()` runs a shell command and returns its captured output as
+        \\`Compiler_Error!string`. `arg.add_current_linker_arg()` appends a raw flag
+        \\to the link of the current compilation, which a bad flag proves loudly:
+        \\`error: lld-link: error: could not open '/no-such-linker-flag': no such file
+        \\or directory`.
     );
     note(74, #string,oneline
-        \\`macro_unit(path, argument)` is the native-code route for a reusable
-        \\source generator. It builds `path` as a program through a nested compiler,
-        \\benefits from the native artifact cache, runs the result with `argument`
-        \\after `--`, and returns the program's standard output as source text.
-        \\Write `#insert macro_unit("macros/derive_json.glo", "record");` at the
-        \\use site. A build or run failure is returned as diagnostic text so the
-        \\following insertion fails with the generator's error visible.
+        \\`path.macro_unit(argument)` is the native-code route for a reusable source
+        \\generator. It builds `path` as a program through a nested compiler, benefits
+        \\from the native artifact cache, runs the result with `argument` after `--`,
+        \\and returns the program's standard output as source text. Write `#insert
+        \\("macros/derive_json.glo").macro_unit("record");` at the use site. A build
+        \\or run failure is returned as diagnostic text so the following insertion
+        \\fails with the generator's error visible.
     );
     subheading(47, "The build-driver idiom");
     paragraph(48, #string,oneline
@@ -2528,14 +2523,14 @@ render_section_114 :: () {
         \\#import "Compiler";
         \\
         \\build_release :: () {
-        \\    workspace := compiler_create_workspace("release");
-        \\    options := get_build_options(workspace);
+        \\    workspace := ("release").compiler_create_workspace();
+        \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "hello.exe";
-        \\    set_optimization(*options, .Optimized);
-        \\    set_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\    set_color(*options, .Always);
-        \\    set_build_options(options, workspace);
-        \\    if #pattern .Err(failure) = add_build_file("hello.glo", workspace) {
+        \\    options.set_optimization(.Optimized);
+        \\    options.set_borrow_check(Compiler_Borrow_Check.Error);
+        \\    options.set_color(.Always);
+        \\    options.set_build_options(workspace);
+        \\    if #pattern .Err(failure) = ("hello.glo").add_build_file(workspace) {
         \\        print("release build failed:\n");
         \\        report_error(failure);
         \\        exit(failure.status);
@@ -2584,17 +2579,17 @@ render_section_114 :: () {
         \\  release   build hello.glo optimized
     );
     paragraph(51, #string,oneline
-        \\`exit(status)` from compile-time execution stops the build with that
-        \\status and writes no binary, which is what makes a build script usable
-        \\from a shell script or a continuous-integration job. Because the driver
-        \\emits nothing, the run above produces `hello.exe` and no `first.exe`.
-        \\Cross-compiling a nested build is a matter of one more setter:
-        \\`set_target(*options, .{ .os = Target_OS.Wasm, .cpu =
-        \\Target_CPU.Wasm32, .abi = Target_ABI.Freestanding })` makes the child report
-        \\`target=wasm32-unknown-unknown`. That changes only children using this
-        \\workspace. `compile_c_archive` still uses the build script's active target;
-        \\compile the script itself for the matching target when its C archive must
-        \\be link-compatible with the nested Glosso artifact.
+        \\`exit(status)` from compile-time execution stops the build with that status
+        \\and writes no binary, which is what makes a build script usable from a shell
+        \\script or a continuous-integration job. Because the driver emits nothing,
+        \\the run above produces `hello.exe` and no `first.exe`. Cross-compiling a
+        \\nested build is a matter of one more setter: `options.set_target(.{ .os =
+        \\Target_OS.Wasm, .cpu = Target_CPU.Wasm32, .abi = Target_ABI.Freestanding })`
+        \\makes the child report `target=wasm32-unknown-unknown`. That changes only
+        \\children using this workspace. `string.compile_c_archive` still uses the
+        \\build script's active target; compile the script itself for the matching
+        \\target when its C archive must be link-compatible with the nested Glosso
+        \\artifact.
     );
 }
 
@@ -2669,7 +2664,7 @@ render_section_115 :: () {
     );
     subheading(5, "Forwarding arguments to a workspace build");
     paragraph(6, #string,oneline
-        \\A child started by `add_build_file` or `add_build_string` does not inherit
+        \\A child started by `string.add_build_file` or `string.add_build_string` does not inherit
         \\the build script's own `--` arguments automatically. Put the arguments
         \\for that child in `Build_Options.compile_time_command_line`, then install
         \\the options before starting the build. The service writes one `--`
@@ -2684,14 +2679,14 @@ render_section_115 :: () {
         \\    set_build_options_dc(.do_output = false);
         \\    print("[parent] % argument(s)\n", get_cmdline_args().count);
         \\
-        \\    workspace := compiler_create_workspace("child");
-        \\    options := get_build_options(workspace);
+        \\    workspace := ("child").compiler_create_workspace();
+        \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "child.exe";
-        \\    array_add(*options.compile_time_command_line, "release");
-        \\    defer array_free(*options.compile_time_command_line);
-        \\    set_build_options(options, workspace);
+        \\    options.compile_time_command_line.add("release");
+        \\    defer options.compile_time_command_line.free();
+        \\    options.set_build_options(workspace);
         \\
-        \\    if add_build_file("child.glo", workspace) == {
+        \\    if ("child.glo").add_build_file(workspace) == {
         \\    case .Ok(log);      print("%", log);
         \\    case .Err(failure); report_error(failure);
         \\    }
@@ -2875,4 +2870,6 @@ render_section_115 :: () {
     table_row(43, "Windows   |   `%LOCALAPPDATA%\\glosso\\cache`");
     table_row(44, "macOS   |   `~/Library/Caches/glosso`");
     table_row(45, "Other Unix   |   `$XDG_CACHE_HOME/glosso`, or `~/.cache/glosso` when that is unset");
+}
+
 }

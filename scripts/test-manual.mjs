@@ -54,6 +54,24 @@ const textAt = (address, length) => {
 // Execute the real browser initialization, so this catches drift in its ABI
 // offsets too. The test context supplies only its documented runtime inputs.
 const app = read("app.js").toString("utf8");
+// A click may press and release between animation frames. Navigation still
+// needs both states, even if the browser coalesces the scheduled render.
+const pointerRelease = app.match(/window\.addEventListener\("pointerup", event => \{([\s\S]*?)\r?\n\}\);/);
+assert(pointerRelease, "Browser pointer release handler was not found");
+const observedPointerStates = [];
+const pointerHost = {
+  pointerDown: true, instance: {}, event: { target: { closest: () => null } },
+  nativeSidebar: { contains: () => false }, updatePointer() {},
+  renderFrame() { observedPointerStates.push(pointerHost.pointerDown); },
+  scheduleRender() { observedPointerStates.push(pointerHost.pointerDown); },
+};
+runInNewContext(`(() => { ${pointerRelease[1]} })()`, pointerHost);
+assert.deepEqual(observedPointerStates, [true, false], "A fast click lost its pressed state");
+observedPointerStates.length = 0;
+pointerHost.pointerDown = true;
+pointerHost.event.target.closest = () => ({});
+runInNewContext(`(() => { ${pointerRelease[1]} })()`, pointerHost);
+assert.deepEqual(observedPointerStates, [false], "A native link was replaced before its click");
 const embeddedQuery = app.match(/const GLOSSO_HIGHLIGHTS_QUERY = ("(?:\\.|[^"\\])*");/);
 assert(embeddedQuery, "Embedded highlight query was not found");
 const querySource = read("tree-sitter/highlights.scm").toString("utf8");
@@ -65,6 +83,21 @@ const parser = new Parser();
 parser.setLanguage(language);
 const tree = parser.parse(`
 #load,embed "fragment.glo";
+#public Counter :: struct { value: s64; #private cached: s64; }
+Counter ::: #public {
+    make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
+    read :: (#self) -> s64 { return #self.value; }
+    increment :: (*#self) { #self.*.value += 1; }
+}
+#public(unit) { shared :: () { value := Counter.make(); value.increment(); } }
+Cleanup ::: instance Drop {
+    Error :: #Never;
+    drop :: (value: *#Self_Type) -> #Never!void { return .Ok; }
+}
+cleanup :: () {
+    resource: Fallible;
+    #on_drop_error(resource, error) { report_error(error); }
+}
 where_am_i :: () -> Source_Location { return #source_location; }
 inspect :: (path: $P, site: Source_Location = #source_location)
     #memory{reads(path), noescape(path)} where AsView(P, Path_View) {}
@@ -77,6 +110,21 @@ assert(!tree.rootNode.hasError, "Current language syntax did not parse in Tree-s
 const query = new Query(language, querySource);
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
+for (const directive of ["#public", "#private", "#on_drop_error"])
+  assert(query.captures(tree.rootNode).some(capture =>
+    capture.node.text === directive && capture.name === "attribute"));
+assert(query.captures(tree.rootNode).some(capture =>
+  capture.node.text === "#Self_Type" && capture.name === "type.builtin"));
+assert(query.captures(tree.rootNode).some(capture =>
+  capture.node.text === "#Never" && capture.name === "type.builtin"));
+for (const source of [
+  "die :: () #noreturn { exit(1); }",
+  'die :: () #noreturn #foreign "c" "abort";',
+]) {
+  const removed = parser.parse(source);
+  assert(removed.rootNode.hasError, "Removed #noreturn still parses; use -> #Never");
+  removed.delete();
+}
 for (const effect of ["returns_fresh", "released_by", "escapes"])
   assert(query.captures(tree.rootNode).some(capture =>
     capture.node.text === effect && capture.name === "attribute"), `Unhighlighted contract: ${effect}`);
@@ -179,7 +227,10 @@ for (const width of [390, 1280]) {
   for (let index = 0; index < referenceIndex.manual.length; index += 1) {
     instance.exports.glo_manual_select_section(index);
     assert.equal(instance.exports.glo_manual_get_section(), index);
-    assert(render(width).length > 0, `Empty chapter ${index} at ${width}px`);
+    const text = render(width);
+    assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
+    if (index === 20) assert(text.includes("#public(unit)"), "Visibility chapter is stale");
+    if (index === 55) assert(text.includes("#self"), "Receiver-method chapter is stale");
   }
   for (let index = -1; index < referenceIndex.modules.length; index += 1) {
     instance.exports.glo_manual_select_module(index);

@@ -10,53 +10,49 @@ tree_sitter_write_escaped_string :: (
     out: *String_Builder,
     value: string,
 ) {
-    builder_write_byte(out, cast(u8)(#char "\""));
+    out.write_byte(cast(u8)(#char "\""));
     i: ssize = 0;
     while i < value.count {
         byte := value[i];
         if byte == cast(u8)(#char "\"") {
-            write_string(out, "\\\"");
+            out.write_string("\\\"");
         } else if byte == cast(u8)(#char "\\") {
-            write_string(out, "\\\\");
+            out.write_string("\\\\");
         } else if byte == cast(u8)(#char "\n") {
-            write_string(out, "\\n");
+            out.write_string("\\n");
         } else if byte == cast(u8)(#char "\r") {
-            write_string(out, "\\r");
+            out.write_string("\\r");
         } else if byte == cast(u8)(#char "\t") {
-            write_string(out, "\\t");
+            out.write_string("\\t");
         } else if byte < 32 {
-            write_string(out, " ");
+            out.write_string(" ");
         } else if i + 2 < value.count && byte == 16#e2 &&
                   value[i + 1] == 16#80 &&
                   (value[i + 2] == 16#a8 || value[i + 2] == 16#a9) {
-            if value[i + 2] == 16#a8 write_string(out, "\\u2028");
-            else write_string(out, "\\u2029");
+            if value[i + 2] == 16#a8 out.write_string("\\u2028");
+            else out.write_string("\\u2029");
             i += 2;
         } else {
-            builder_write_byte(out, byte);
+            out.write_byte(byte);
         }
         i += 1;
     }
-    builder_write_byte(out, cast(u8)(#char "\""));
+    out.write_byte(cast(u8)(#char "\""));
 }
 
-tree_sitter_append_text :: (path: string, text: string) -> bool {
-    file: File;
-    if open(path, .Write, .Open_Or_Create, .flags = .Append) == {
-        case .Ok(opened); file = opened;
-        case .Err; return false;
-    }
-    wrote := write(file, text);
-    closed := close(*file);
+tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
+    file := File.open(path, .Write, .Open_Or_Create, .flags = .Append)?;
+    wrote := file.write(text);
+    closed := file.close();
     if #pattern .Ok(written) = wrote {
-        return written == text.count && result_is_ok(closed);
+        return .Ok(written == text.count && closed.is_ok());
     }
-    return false;
+    return .Ok(false);
 }
 
-sync_tree_sitter :: () -> bool {
-    query_result := read_file("tree-sitter/highlights.scm", 1024 * 1024);
-    app_result := read_file("app.js", 4 * 1024 * 1024);
+#public(unit) sync_tree_sitter :: () -> bool {
+    query_result := ("tree-sitter/highlights.scm").read_file(1024 * 1024);
+    app_result := ("app.js").read_file(4 * 1024 * 1024);
     query: string;
     app: string;
     if query_result == {
@@ -73,7 +69,7 @@ sync_tree_sitter :: () -> bool {
     }
 
     begin: ssize;
-    if index_of(app, TREE_SITTER_QUERY_BEGIN) == {
+    if app.index_of(TREE_SITTER_QUERY_BEGIN) == {
         case .Some(found); begin = found;
         case .None;
             print("app.js is missing the Tree-sitter query begin marker\n");
@@ -88,23 +84,23 @@ sync_tree_sitter :: () -> bool {
     if content_start < app.count && app[content_start] == cast(u8)(#char "\n")
         content_start += 1;
     finish: ssize;
-    if index_of(app, TREE_SITTER_QUERY_END, .start = content_start) == {
+    if app.index_of(TREE_SITTER_QUERY_END, .start = content_start) == {
         case .Some(found); finish = found;
         case .None;
             print("app.js is missing the Tree-sitter query end marker\n");
             return false;
     }
 
-    replacement := builder_make_len_cap(0, query.count + 128);
-    write_string(*replacement, "const GLOSSO_HIGHLIGHTS_QUERY = ");
+    replacement := String_Builder.make_len_cap(0, query.count + 128);
+    replacement.write_string("const GLOSSO_HIGHLIGHTS_QUERY = ");
     tree_sitter_write_escaped_string(*replacement, query);
-    write_string(*replacement, ";");
-    write_string(*replacement, line_end);
-    replacement_text := builder_into_temporary_string(replacement);
-    initialized := write_file("app.js", app[0..content_start]);
-    if result_is_err(initialized) ||
-       !tree_sitter_append_text("app.js", replacement_text) ||
-       !tree_sitter_append_text("app.js", app[finish..app.count]) {
+    replacement.write_string(";");
+    replacement.write_string(line_end);
+    replacement_text := replacement.into_temporary_string();
+    initialized := ("app.js").write_file(app[0..content_start]);
+    if initialized.is_err() ||
+       !tree_sitter_append_text("app.js", replacement_text).unwrap_or(false) ||
+       !tree_sitter_append_text("app.js", app[finish..app.count]).unwrap_or(false) {
         print("could not update app.js\n");
         return false;
     }
@@ -115,3 +111,4 @@ sync_tree_sitter :: () -> bool {
 #import "String_Builder";
 #import "File_System/File";
 #import "Strings/Utf8";
+#import "Io";

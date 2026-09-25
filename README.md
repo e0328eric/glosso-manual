@@ -15,7 +15,8 @@ private Glosso repository or compile the project in GitHub Actions.
 - `first.glo` is the compile-time build driver.
 - `main.glo` is the manual compiler entry point and loads the sources under
   `src/` with `#load,embed`; these UI and chapter fragments intentionally
-  share one compilation unit.
+  share one module and ownership unit. Shared declarations use `#public(unit)`;
+  embedding preserves each fragment's private source identity.
 - `src/clay_bindings.glo` builds Clay and inserts its target-specific bindings.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
 - `src/section_catalog.glo` contains section state and titles. It is the single
@@ -44,6 +45,8 @@ private Glosso repository or compile the project in GitHub Actions.
 - `vendor/clay/clay.h` is the pinned Clay source used during compilation.
 - `vendor/web-tree-sitter/` and `tree-sitter-glosso.wasm` are the pinned syntax
   highlighting runtime and grammar.
+- `tree-sitter/README.md` documents rebuilding the grammar for the current
+  language with the accompanying source patch.
 - `index.html` and `app.js` are the browser host, search engine, theme switch,
   syntax highlighter, and Clay command renderer.
 - `dist/` contains the complete precompiled site deployed to GitHub Pages.
@@ -77,8 +80,9 @@ glosso first.glo -- tree-sitter
 glosso first.glo -- gen-reference ../glosso/std
 ```
 
-`src/clay_bindings.glo` uses the public `compile_c_archive`, `library_spec`, and
-`generate_source` APIs with named slice parameters and Result error handling.
+`src/clay_bindings.glo` uses the public string methods `compile_c_archive`,
+`library_spec`, and `generate_source` with named slice parameters and Result
+error handling.
 Use a current Glosso checkout whose Compiler/Bindgen service records preserve
 their field order on wasm32; the old local ABI adapters are no longer needed.
 Binding generation explicitly disables textual fallback so Clay uses Clang's
@@ -89,12 +93,12 @@ compact signatures, parameter constraints and defaults, `#memory` contracts,
 flag enums, lazy parameters, function-pointer declarations, private-name
 filtering, and boundary-aware `try(Target)` operators.
 
-`node scripts/test-language.mjs` checks operators, Try boundary witnesses and
-overrides, propagation cleanup, array reservation, and source locations with
-`../glosso/build/bin/glosso` (`glosso.exe` on Windows). It also checks rejection
-of removed directives and invalid Try contracts. Pass a compiler path as its
-optional first argument to test another build. All output and caches stay under
-`build/`.
+`node scripts/test-language.mjs` uses the installed `glosso` on PATH to check
+operators, Try boundary witnesses, propagation cleanup, array reservation,
+source locations, visibility, receiver methods, and managed destruction.
+It also checks rejection of removed directives and invalid Try contracts.
+Pass a compiler path as its optional first argument to test another build.
+All output and caches stay under `build/`.
 
 `node scripts/test-manual.mjs` checks staged assets and exercises the actual
 Wasm renderer for every chapter and reference module at narrow and wide widths,
@@ -112,7 +116,10 @@ ignored and is never checked in.
 
 ## Document the standard library
 
-Only marked comments reach the reference. A `///` line documents the declaration
+Only public declarations and marked comments reach the reference. Explicit
+`#public` declarations and public groups are included; private and
+`#public(unit)` declarations are excluded. Inherent methods and associated
+functions retain their qualified owner names. A `///` line documents the declaration
 written under it, and `//!` lines write the file's intro, which becomes the
 module summary. A plain `//` is an implementation note the reference never
 shows, and a further slash cancels the marker, which keeps the `////` rules
@@ -125,7 +132,7 @@ drawn above a section out of the reference:
 
 /// Whether the byte is an ASCII digit.
 // A note about the implementation, which the reference never shows.
-is_ascii_digit :: (byte: u8) -> bool { ... }
+#public is_ascii_digit :: (byte: u8) -> bool { ... }
 ```
 
 A `///` block runs for as many lines as it needs, and an unmarked note inside it
@@ -157,10 +164,13 @@ missing or misnamed `render_section_N` shows up.
 
 When updating for a new compiler checkout, check the current declarations and
 module documentation under `../glosso/std/` as well as regenerating the reference.
-The library now takes ordinary named parameters and typed flag enums instead
-of input-only option records. Compiler and Bindgen option lists are string
-slices; use `library_spec` to describe a Bindgen artifact. Chapter examples,
-the build driver, and the reference extractor must all use the same current API.
+The library uses receiver methods for operations on existing values and
+associated functions for constructors, such as `File.open` and
+`String_Builder.make`. Compiler and Bindgen option lists are string slices;
+use `"name".library_spec(...)` to describe a Bindgen artifact. Managed values
+move by value and clean up through `Drop`; fallible cleanup needs a compatible
+result boundary or `#on_drop_error`. Chapter examples, the build driver, and the
+reference extractor must all use the same current API.
 
 Adding or removing a chapter therefore means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in
@@ -177,17 +187,24 @@ Github/
 `-- glosso-manual/
 ```
 
-First build the Glosso compiler.
+Use the installed `glosso` compiler on PATH. Set `GLOSSO_STD` to the sibling
+checkout so the driver and every nested compilation use the same current
+standard library as the reference. Regenerate the ignored reference data before
+the first build and whenever the library or chapters change.
 
 ### Windows PowerShell
 
 ```powershell
-& glosso.exe first.glo -- build
+$env:GLOSSO_STD = (Resolve-Path ../glosso/std).Path
+glosso first.glo -- gen-reference ../glosso/std
+glosso first.glo -- build
 ```
 
 ### Linux or macOS
 
 ```sh
+export GLOSSO_STD="$(cd ../glosso/std && pwd)"
+glosso first.glo -- gen-reference ../glosso/std
 glosso first.glo -- build
 ```
 
