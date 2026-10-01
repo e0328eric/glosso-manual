@@ -249,13 +249,12 @@ render_section_37 :: () {
         \\size_of(Node)=16
     );
     note(32, #string,oneline
-        \\Direct by-value recursion is not diagnosed. `Node :: struct { next: Node; }`
-        \\type-checks and then overflows the compiler's own stack while the layout is
-        \\computed, reporting only `thread 'main' has overflowed its stack`. Read a
-        \\crash with no `error:` line in a file that declares a self-containing
-        \\aggregate as this case.
+        \\Direct or indirect by-value recursion has no finite layout and is
+        \\rejected. For `Node :: struct { next: Node; }`, the diagnostic identifies
+        \\the self-containing struct and its field path. A pointer breaks the
+        \\layout cycle, which is why the linked-node example is valid.
     );
-    subheading(33, "What a struct body may not contain");
+    subheading(33, "Field restrictions and zero-sized values");
     bullet(34, #string,oneline
         \\A nested named type declaration. `Inner :: struct { ... }` written inside a
         \\struct body is `error: unexpected token '::'`. An anonymous aggregate
@@ -263,10 +262,9 @@ render_section_37 :: () {
         \\on inline aggregate field types.
     );
     bullet(35, #string,oneline
-        \\A `void` field. `V :: struct { a: s64; b: void; }` is `error: a zero-sized
-        \\'void' member inside a struct, tuple, or array is not supported yet; remove
-        \\the member, or wrap it in a single-field struct`, because erasing the member
-        \\would renumber the declaration-order field indices that reflection reports.
+        \\A `void` field is allowed and occupies zero bytes. It remains a member
+        \\for reflection and declaration-order indexing, so a later field keeps
+        \\its index. The default value of that field is `.()`.
     );
     bullet(36, #string,oneline
         \\Nothing at all is fine: `Empty :: struct { }` is a legal type of size `0`.
@@ -707,8 +705,8 @@ render_section_39 :: () {
         \\not recur.
     );
     paragraph(31, #string,oneline
-        \\Two further details. Writing `#as` on more than one field is accepted and
-        \\the last marker wins, since the record keeps a single field name. `#as` and
+        \\A struct can mark only one field with `#as`; a second marker is rejected
+        \\and the diagnostic names the existing conversion field. `#as` and
         \\`using` combine on one field in either order, `#as using inner: Base;` or
         \\`using #as inner: Base;`, though the `using` half still does nothing. `#as`
         \\is a struct-only directive: on a union variant it is
@@ -727,17 +725,17 @@ render_section_39 :: () {
         \\#import "File_System/Path";
         \\
         \\is_component_path :: (value: $P) -> bool where AsView(P, Path_View) {
-        \\    return value.path_like_view().kind == Path_View_Kind.Components;
+        \\    return path_like_view(value).kind == Path_View_Kind.Components;
         \\}
         \\
         \\main :: () {
-        \\    path := ("src/./manual/../main.glo").path_from_string(Path_Style.Posix);
-        \\    defer path.free();
+        \\    path := Path.path_from_string("src/./manual/../main.glo", Path_Style.Posix);
+        \\    // Path is a managed owner; scope exit releases its storage.
         \\
         \\    print("path=% components=%\n", path, path.components.count);
         \\    print("views: text=% components=%\n",
-        \\        ("src/main.glo").path_like_view().kind == Path_View_Kind.Text,
-        \\        is_component_path(path));
+        \\        path_like_view("src/main.glo").kind == Path_View_Kind.Text,
+        \\        is_component_path(path_like_view(path)));
         \\}
     );
     code_block(34, "text", #string
@@ -1063,9 +1061,9 @@ render_section_41 :: () {
         \\void 0
     );
     bullet(28, #string,oneline
-        \\A `void` element inside a larger tuple is rejected:
-        \\`error: a zero-sized 'void' member inside a struct, tuple, or array is not supported yet; remove the member, or wrap it in a single-field struct`.
-        \\Erasing it would renumber the elements after it.
+        \\A `void` element is allowed inside a larger tuple. It occupies no
+        \\storage but remains an element for `.count` and indexing, so
+        \\`pair: (void, s64) = .(.(), 7);` has two elements and `pair.1` is 7.
     );
     subheading(29, "Current limits");
     bullet(30, #string,oneline
@@ -1080,9 +1078,9 @@ render_section_41 :: () {
         \\Build a replacement tuple instead.
     );
     bullet(32, #string,oneline
-        \\`n.0.0` does not lex: `0.0` is a float literal, and the compiler
-        \\reports `error: unexpected token '0.0'`. Bind the inner tuple to a
-        \\name first, then index it.
+        \\Nested tuple indexing composes directly: `n.0.0` means `(n.0).0`.
+        \\After a member-access dot the digits are a tuple index, so the lexer
+        \\does not combine successive indexes into a floating-point literal.
     );
     bullet(33, #string,oneline
         \\`(T)` in type position is the parenthesized type `T`, not a
@@ -1092,6 +1090,18 @@ render_section_41 :: () {
     bullet(34, #string,oneline
         \\There is no tuple pattern. `#pattern .(a, b) = t` is
         \\`error: unexpected token '('`; destructure with `a, b := t;`.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    nested := .(.(1, 2), 3);
+        \\    pair: (void, s64) = .(.(), 7);
+        \\    print("nested %; void %; members %\n", nested.0.1, pair.0, pair.count);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\nested 2; void .(); members 2
     );
 }
 
@@ -1129,16 +1139,17 @@ render_section_42 :: () {
         \\Numbering starts at zero and each member takes one more than the
         \\member before it. An explicit value resets that counter, so `Blue`
         \\above is 6 and not 2. The value after `::` is a single integer literal
-        \\token, not an expression: naming a constant, `Red :: K;`, is
-        \\`error: unexpected token 'K'`, and a negative literal, `Low :: -1;`,
-        \\is `error: unexpected token '-'`. Hexadecimal literals such as `16#1`
-        \\are accepted, and two members may carry the same value.
+        \\token, optionally preceded by `-`, not an expression: naming a constant,
+        \\`Red :: K;`, is rejected. Negative values such as `Low :: -1;` require
+        \\a signed backing type. Hexadecimal literals such as `16#1` are accepted,
+        \\and two members may carry the same value.
     );
     subheading(5, "Backing type and size");
     paragraph(6, #string,oneline
         \\The backing type is written between `enum` and the brace. It fixes
-        \\the size and the alignment of the type; with no backing type an enum
-        \\is 8 bytes.
+        \\the size and the alignment of the type and must resolve to an integer
+        \\type. With no backing type an enum uses `ssize`, so its size follows
+        \\the target's native word rather than always being eight bytes.
     );
     code_block(7, "glosso", #string
         \\#import "Io";
@@ -1146,25 +1157,29 @@ render_section_42 :: () {
         \\
         \\Byte_Code :: enum u8  { Push; Pop; Halt; }
         \\Wide_Code :: enum s32 { Push; Pop; Halt; }
+        \\Signed_Code :: enum s8 { Negative :: -1; Zero; Positive; }
         \\
         \\main :: () {
         \\    print("u8 % s32 %\n", size_of(Byte_Code), size_of(Wide_Code));
+        \\    print("signed % % %\n", cast(s64)Signed_Code.Negative,
+        \\        cast(s64)Signed_Code.Zero, cast(s64)Signed_Code.Positive);
         \\}
     );
     code_block(8, "text", #string
         \\u8 1 s32 4
+        \\signed -1 0 1
     );
     table_header(9, "Form   —   Meaning");
-    table_row(10, "`Name :: enum { A; B; }`   |   Default backing type, 8 bytes.");
+    table_row(10, "`Name :: enum { A; B; }`   |   Default `ssize` backing type, one native word.");
     table_row(11, "`Name :: enum u8 { A; B; }`   |   Size and alignment follow the named backing type.");
     table_row(12, "`Name :: enum_flags u32 { ... }`   |   Flag enum. The backing type is mandatory here.");
     table_row(13, "`A :: 5;` in the body   |   Explicit value; the next member continues from 6.");
     paragraph(14, #string,oneline
-        \\Neither the declared value nor a conversion is range-checked against
-        \\the backing type. `enum u8 { Red :: 300; }` compiles and `Red` reads
-        \\back as 44, and `cast(Color)9` produces 9 on a three-member enum. An
-        \\enum is a typed integer, not a proof that the integer is one of the
-        \\declared members.
+        \\Explicit variant values and automatically incremented values must fit
+        \\the backing type. `enum u8 { Red :: 300; }` is rejected, as is a member
+        \\following value 255 in a `u8` enum. A cast can still produce an integer
+        \\that is not a declared member, such as `cast(Color)9` for a three-member
+        \\enum; the type alone does not prove membership in the declared set.
     );
     subheading(15, "Naming a member");
     paragraph(16, #string,oneline
@@ -2327,11 +2342,10 @@ render_section_47 :: () {
         \\`?(?s64)`, and `Result_s64_Option_E1` is a result whose payload is
         \\`s64` and whose error is `?E1`. Operator precedence generally is
         \\covered in Operator Precedence and the 0-20 Scale. One further
-        \\property of `?` is that it parses where an expression is expected, so
-        \\`size_of(?s64)` works; that does not extend to type syntax in
-        \\general, since bracket types are not expressions and
-        \\`size_of(?[*]s64)` is `error: unexpected token '['`. Annotate a
-        \\variable and use `size_of(v.type_of())` for those.
+        \\property of `?` is that it parses where a type-valued expression is
+        \\expected, so both `size_of(?s64)` and `size_of(?[*]s64)` work.
+        \\Bracket types such as `[]u8`, `[4]s64`, `[*]u8`, and `[..]u8` are
+        \\accepted directly as type values too.
     );
     subheading(10, "`.Some` and `.None`");
     paragraph(11, #string,oneline
@@ -2462,7 +2476,7 @@ render_section_47 :: () {
     table_row(29, "`?*T`, `?[*]T`, `?#fn_ptr(...)`   |   8   |   Niche; `.None` is address 0.");
     table_row(30, "`?bool`, `?u8`, `?enum`   |   16   |   Tag plus payload.");
     table_row(31, "`?[]T`   |   24   |   Tag plus a 16-byte view.");
-    table_row(32, "`?string`   |   32   |   Tag plus a 24-byte string descriptor.");
+    table_row(32, "`?string`   |   24   |   Tag plus a 16-byte counted string view.");
     table_row(33, "`??*T`   |   16   |   The inner takes the niche; the outer's payload is a union.");
     paragraph(34, #string,oneline
         \\A user-written union never gets a niche, however its variants are
@@ -2768,8 +2782,8 @@ render_section_48 :: () {
     paragraph(34, #string,oneline
         \\A result is a tag word plus the larger of its two payloads. With
         \\`Small :: struct { c: s64; }`, `size_of(Small!s64)` is 16; with
-        \\`Bad :: struct { text: string; }`, whose `string` descriptor is 24
-        \\bytes, `size_of(Bad!s64)` is 32. A result takes the niche under the
+        \\`Bad :: struct { text: string; }`, whose `string` view is 16
+        \\bytes, `size_of(Bad!s64)` is 24. A result takes the niche under the
         \\same rule as an option, and either side may be the zero-sized one.
     );
     code_block(35, "glosso", #string

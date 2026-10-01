@@ -80,9 +80,9 @@ glosso first.glo -- tree-sitter
 glosso first.glo -- gen-reference ../glosso/std
 ```
 
-`src/clay_bindings.glo` uses the public string methods `compile_c_archive`,
-`library_spec`, and `generate_source` with named slice parameters and Result
-error handling.
+`src/clay_bindings.glo` uses `Native_Compile_Output.compile_c_archive`,
+`Library_Spec.library_spec`, and the free function `generate_source` with named
+slice parameters and Result error handling.
 Use a current Glosso checkout whose Compiler/Bindgen service records preserve
 their field order on wasm32; the old local ABI adapters are no longer needed.
 Binding generation explicitly disables textual fallback so Clay uses Clang's
@@ -91,12 +91,20 @@ complete C layouts.
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
 compact signatures, parameter constraints and defaults, `#memory` contracts,
 flag enums, lazy parameters, function-pointer declarations, private-name
-filtering, and boundary-aware `try(Target)` operators.
+filtering, `#Self_Type` factory results, `#Never` returns, and boundary-aware
+`try(Target)` operators.
+The reference gives each module separate Declarations and Methods sections;
+associated functions appear in Methods, while typeclass operations stay inside
+their class declaration. Search opens the matching section and page.
 
 `node scripts/test-language.mjs` uses the installed `glosso` on PATH to check
 operators, Try boundary witnesses, propagation cleanup, array reservation,
-source locations, visibility, receiver methods, and managed destruction.
-It also checks rejection of removed directives and invalid Try contracts.
+source locations, visibility, receiver methods, associated factories, domain
+free functions, managed destruction, string-view layouts and aliasing, and
+builder cloning and ownership transfer. Syntax checks cover Unicode character
+escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
+access, and generic struct literals. It also checks rejection of removed
+directives, invalid Try contracts, string capacity, and escaped builder views.
 Pass a compiler path as its optional first argument to test another build.
 All output and caches stay under `build/`.
 
@@ -119,7 +127,9 @@ ignored and is never checked in.
 Only public declarations and marked comments reach the reference. Explicit
 `#public` declarations and public groups are included; private and
 `#public(unit)` declarations are excluded. Inherent methods and associated
-functions retain their qualified owner names. A `///` line documents the declaration
+functions retain their qualified owner names. Inherent headers such as
+`Counter ::: #public { ... }` set the default visibility of their members;
+nested visibility groups and individual overrides are respected. A `///` line documents the declaration
 written under it, and `//!` lines write the file's intro, which becomes the
 module summary. A plain `//` is an implementation note the reference never
 shows, and a further slash cancels the marker, which keeps the `////` rules
@@ -164,13 +174,26 @@ missing or misnamed `render_section_N` shows up.
 
 When updating for a new compiler checkout, check the current declarations and
 module documentation under `../glosso/std/` as well as regenerating the reference.
-The library uses receiver methods for operations on existing values and
-associated functions for constructors, such as `File.open` and
-`String_Builder.make`. Compiler and Bindgen option lists are string slices;
-use `"name".library_spec(...)` to describe a Bindgen artifact. Managed values
+The library uses receiver methods for a value's own behavior, associated
+functions for constructors, and free functions for domain operations. For
+example, use `file.read()`, `File.open(path)`, and `read_file(path, max_count)`, respectively.
+Core string, numeric, and collection methods remain available. Compiler and
+Bindgen option lists are string slices; use
+`Library_Spec.library_spec("name", artifact)` to describe a Bindgen artifact,
+`Workspace.create_workspace("name")` to create a workspace, and
+`add_build_file(path, workspace)` to compile a source file. Managed values
 move by value and clean up through `Drop`; fallible cleanup needs a compatible
 result boundary or `#on_drop_error`. Chapter examples, the build driver, and the
 reference extractor must all use the same current API.
+
+Primitive `string` and `string16` values are borrowed `{data, count}` views;
+`cstring` and `cstring16` contain only a zero-terminated pointer. Slices,
+substrings, trimmed text, and split pieces borrow the original storage. Keep
+that storage alive, clone text that must outlive it, and release explicitly
+allocated strings with the allocator that created them. `String_Builder`
+owns its buffer: `to_string()` borrows it, `clone()` copies it, and
+`into_string()` transfers it to the caller. Runtime concatenation uses builders
+or `.cat()`; `+` is available for compile-time string constants.
 
 Adding or removing a chapter therefore means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in
@@ -187,10 +210,12 @@ Github/
 `-- glosso-manual/
 ```
 
-Use the installed `glosso` compiler on PATH. Set `GLOSSO_STD` to the sibling
+Use the installed `glosso` compiler on PATH. Locate it with `Get-Command glosso`
+in PowerShell or `command -v glosso` on Unix. Set `GLOSSO_STD` to the sibling
 checkout so the driver and every nested compilation use the same current
-standard library as the reference. Regenerate the ignored reference data before
-the first build and whenever the library or chapters change.
+standard library as the reference. The compiler must support that checkout's
+syntax. Regenerate the ignored reference data before the first build and
+whenever the library or chapters change.
 
 ### Windows PowerShell
 

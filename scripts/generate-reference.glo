@@ -76,14 +76,14 @@ MANUAL_TEXT_CALLS :: .[
 
 reference_read_file_text :: (path: string) -> string {
     size: s64;
-    if path.file_size() == {
+    if file_size(path) == {
         case .Ok(measured); size = measured;
         case .Err(reason);
             report_error(reason);
             return "";
     }
     if size < 0 return "";
-    if path.read_file(cast(ssize)(size + 1)) == {
+    if read_file(path, cast(ssize)(size + 1)) == {
         case .Ok(text); return text;
         case .Err; return "";
     }
@@ -218,7 +218,7 @@ reference_collect_manual_text :: (path: string, texts: *[..]string) {
 
         if line.starts_with("render_section_") {
             if current >= 0 && current < texts.*.count {
-                texts.*[current] = out.to_string();
+                texts.*[current] = out.clone();
                 out.reset();
             }
             current = reference_leading_number(line["render_section_".count..line.count]);
@@ -751,7 +751,7 @@ reference_generate_outputs :: (
         "build/reference-symbols.js.part",
     ];
     for i: 0..part_paths.count {
-        _ := part_paths[i].write_file("")?;
+        _ := write_file(part_paths[i], "")?;
     }
     symbol_count: ssize = 0;
     detail_count: ssize = 0;
@@ -952,20 +952,20 @@ reference_generate_outputs :: (
     glo.write_string("STD_DETAIL_ROW_COUNT :: "); reference_write_integer(*glo, detail_count); glo.write_string(";\n");
     glo.write_string("STD_MEMBER_COUNT :: "); reference_write_integer(*glo, member_count); glo.write_string(";\n\n");
     glo.write_string("STD_MODULE_DOCS: ["); reference_write_integer(*glo, modules.count); glo.write_string("]Std_Module_Doc = .[\n");
-    layout_ok := (("build/reference-glo-header.part").write_file(glo.to_string())).is_ok();
+    layout_ok := (write_file("build/reference-glo-header.part", glo.to_string())).is_ok();
     separator := String_Builder.make_len_cap(0, 256);
     separator.write_string("];\n\nSTD_SYMBOL_DOCS: ["); reference_write_integer(*separator, symbol_count); separator.write_string("]Std_Symbol_Doc = .[\n");
-    layout_ok = layout_ok && (("build/reference-glo-after-modules.part").write_file(separator.to_string())).is_ok();
+    layout_ok = layout_ok && (write_file("build/reference-glo-after-modules.part", separator.to_string())).is_ok();
     separator.reset();
     separator.write_string("];\n\nSTD_DETAIL_ROWS: ["); reference_write_integer(*separator, detail_count); separator.write_string("]Std_Detail_Row_Doc = .[\n");
-    layout_ok = layout_ok && (("build/reference-glo-after-symbols.part").write_file(separator.to_string())).is_ok();
+    layout_ok = layout_ok && (write_file("build/reference-glo-after-symbols.part", separator.to_string())).is_ok();
     separator.reset();
     separator.write_string("];\n\nSTD_MEMBER_DOCS: ["); reference_write_integer(*separator, member_count); separator.write_string("]Std_Member_Doc = .[\n");
-    layout_ok = layout_ok && (("build/reference-glo-after-details.part").write_file(separator.to_string())).is_ok();
+    layout_ok = layout_ok && (write_file("build/reference-glo-after-details.part", separator.to_string())).is_ok();
     separator.reset();
     separator.write_string("];\n\nSTD_INSTANCE_DOCS: ["); reference_write_integer(*separator, instance_count); separator.write_string("]Std_Instance_Doc = .[\n");
-    layout_ok = layout_ok && (("build/reference-glo-after-members.part").write_file(separator.to_string())).is_ok();
-    layout_ok = layout_ok && (("build/reference-glo-footer.part").write_file("];\n\n}\n")).is_ok();
+    layout_ok = layout_ok && (write_file("build/reference-glo-after-members.part", separator.to_string())).is_ok();
+    layout_ok = layout_ok && (write_file("build/reference-glo-footer.part", "];\n\n}\n")).is_ok();
     if !layout_ok return .Ok(false);
     print(
         "Generated % modules, % symbols, and % typeclass instances.\n",
@@ -978,7 +978,7 @@ reference_generate_outputs :: (
 
 generate_reference :: (source_path: string) -> bool {
     size: s64;
-    if source_path.file_size() == {
+    if file_size(source_path) == {
         case .Ok(measured); size = measured;
         case .Err(reason);
             report_error(reason);
@@ -990,14 +990,14 @@ generate_reference :: (source_path: string) -> bool {
         return false;
     }
     source: string;
-    if source_path.read_file(cast(ssize)(size + 1)) == {
+    if read_file(source_path, cast(ssize)(size + 1)) == {
         case .Err;
             print("could not read generated reference source %\n", source_path);
             return false;
         case .Ok(text); source = text;
     }
     root: Serialization_Value;
-    if source.json_value_from_string(.max_depth = 256) == {
+    if Serialization_Value.json_value_from_string(source, .max_depth = 256) == {
         case .Err(failure);
             print("reference JSON: % at %\n", failure.message, failure.offset);
             return false;
@@ -1010,8 +1010,8 @@ generate_reference :: (source_path: string) -> bool {
         return false;
     }
 
-    if !("src/generated").is_directory().unwrap_or(false) {
-        created := ("src/generated").create_directory(.make_parent = true);
+    if !is_directory("src/generated").unwrap_or(false) {
+        created := create_directory("src/generated", .make_parent = true);
         if created.is_err() {
             print("could not create src/generated\n");
             return false;
@@ -1023,7 +1023,7 @@ generate_reference :: (source_path: string) -> bool {
         print("could not build the manual search index from the chapter sources\n");
         return false;
     }
-    return (("build/reference-manual.js.part").write_file(manual_json)).is_ok();
+    return (write_file("build/reference-manual.js.part", manual_json)).is_ok();
 }
 
 main :: () {

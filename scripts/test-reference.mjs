@@ -23,7 +23,7 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 12, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.size, 18, "default-private declarations, unit declarations, and private groups must be excluded");
 assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
 assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
 for (const name of ["Box.make", "Box.get", "Box.set"]) {
@@ -31,11 +31,24 @@ for (const name of ["Box.make", "Box.get", "Box.set"]) {
   assert.equal(symbols.get(name).owner_typeclass, "");
 }
 assert.equal(symbols.get("Box.get").display_signature, "Box.get :: (#self) -> ssize");
+assert.equal(symbols.get("Box.make").display_signature, 'Box.make :: (value: ssize, label: string = "#Self_Type") -> Box');
+assert.equal(symbols.get("Box.make").function_info.return_type, "Box");
+assert.equal(symbols.get("Box.copy_from").function_info.return_type, "Fs_Error!Box");
+assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*const Box");
+assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*Box, *const Box) -> Fs_Error!Box");
 assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*#self, value: ssize)");
 assert.deepEqual(symbols.get("Box.set").function_info.parameters[0], {
   name: "#self", value_type: "*Box", default_value: "", modifiers: ["receiver"], constraints: [],
 });
 assert.deepEqual(symbols.get("Box").type_info.fields.map(field => field.name), ["value", "exposed"]);
+assert.equal(symbols.get("$T.inspect").kind, "method");
+assert.deepEqual(symbols.get("$T.inspect").function_info.where_clauses, ["Show(T)"]);
+assert.deepEqual(symbols.get("$T.inspect").function_info.parameters[0].constraints, ["Show(T)"]);
+assert.equal(symbols.get("abort").function_info.return_type, "#Never");
+assert.equal(symbols.get("abort").searchable_signature, "() -> #Never");
+assert.equal(symbols.get("GROUPED").kind, "constant");
+assert.equal(symbols.get("GROUPED_SIMPLE").kind, "constant");
+assert.equal(symbols.get("Signed").type_info.variants[0].value, "-1");
 
 const open = symbols.get("open");
 assert.equal(open.display_signature,

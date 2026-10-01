@@ -18,6 +18,8 @@ for (const [source, staged] of [
 
 const { referenceIndex } = await import(
   `data:text/javascript;base64,${read("dist/reference-index.js").toString("base64")}`);
+assert(referenceIndex.manual[0][1].includes("A Glosso program is one source file"),
+  "Chapter search prose was overwritten when its text builder was reused");
 const decoder = new TextDecoder("utf-8", { fatal: true });
 let instance;
 const memoryView = () => new DataView(instance.exports.memory.buffer);
@@ -107,6 +109,17 @@ open :: (path: $P, flags: Open_Flags = .None) -> Fs_Error!File
     where AsView(P, Path_View) {}
 `);
 assert(!tree.rootNode.hasError, "Current language syntax did not parse in Tree-sitter");
+for (const source of [
+  'Signed :: enum s8 { Negative :: -1; Zero; }',
+  'types :: () { Slice :: []s64; Fixed :: [2]s64; Many :: [*]u8; Dynamic :: [..]u8; }',
+  'main :: () { n := .(.(1, 2), 3); value := n.0.1; }',
+  'main :: () { b := Box(f64).{ .value = 1.5 }; }',
+  'Rune :: #char "\\u{1f642}";',
+]) {
+  const current = parser.parse(source);
+  assert(!current.rootNode.hasError, "Current syntax did not parse: " + source);
+  current.delete();
+}
 const query = new Query(language, querySource);
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
@@ -204,23 +217,88 @@ const host = {
 runInNewContext(`${initialization[0]}\ninitializeClay();`, host);
 
 let frames = 0;
-function render(width) {
-  instance.exports.glo_main(host.scratchAddress, width, 736, -1, -1, 0, 1 / 60);
+let textRuns = [];
+function render(width, { x = -1, y = -1, down = 0 } = {}) {
+  instance.exports.glo_main(host.scratchAddress, width, 736, x, y, down, 1 / 60);
   const view = memoryView();
   const count = view.getInt32(host.scratchAddress + 4, true);
   const commands = view.getUint32(host.scratchAddress + 8, true);
   assert(count > 0 && count < 100000, `Invalid render-command count: ${count}`);
   assert(commands + count * 72 <= instance.exports.memory.buffer.byteLength);
   const text = [];
+  textRuns = [];
   for (let index = 0; index < count; index += 1) {
     const command = commands + index * 72;
     for (const offset of [0, 4, 8, 12])
       assert(Number.isFinite(view.getFloat32(command + offset, true)), "Non-finite layout bounds");
-    if (view.getUint8(command + 70) === 3)
-      text.push(textAt(view.getUint32(command + 20, true), view.getInt32(command + 16, true)));
+    if (view.getUint8(command + 70) === 3) {
+      const value = textAt(view.getUint32(command + 20, true), view.getInt32(command + 16, true));
+      const marker = view.getUint32(command + 60, true);
+      text.push(value);
+      textRuns.push({
+        value,
+        x: view.getFloat32(command, true), y: view.getFloat32(command + 4, true),
+        width: view.getFloat32(command + 8, true), height: view.getFloat32(command + 12, true),
+        fontSize: view.getUint16(command + 46, true),
+        anchor: marker !== 0 && textAt(marker, 13) === "symbol-anchor",
+      });
+    }
   }
   frames += 1;
   return text.join(" ");
+}
+
+// Exercise navigation through actual Clay hit testing, using text bounds from
+// the rendered commands instead of duplicating element IDs or layout rules.
+function clickText(width, label, predicate = () => true) {
+  render(width);
+  const target = textRuns.find(run => run.value === label && predicate(run));
+  assert(target, `Could not find clickable text ${label}`);
+  const point = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+  render(width, { ...point, down: 1 });
+  return render(width, point);
+}
+
+function moduleIndex(name) {
+  const index = referenceIndex.modules.findIndex(module => module[0] === name);
+  assert(index >= 0, `Missing reference module ${name}`);
+  return index;
+}
+
+function symbolIndex(module, name) {
+  const index = referenceIndex.symbols.findIndex(symbol => symbol[4] === module && symbol[0] === name);
+  assert(index >= 0, `Missing reference symbol ${name}`);
+  return index;
+}
+
+function openSymbolSearch(width, module, name) {
+  const view = memoryView();
+  view.setInt32(host.searchBridgeAddress, 2, true);
+  view.setInt32(host.searchBridgeAddress + 4, symbolIndex(module, name), true);
+  instance.exports.glo_manual_set_search_results(host.searchBridgeAddress, 1);
+  instance.exports.glo_manual_set_view(2);
+  return clickText(width, name, run => run.fontSize === 18);
+}
+
+function browseSection(width, module, methods, expectedNames) {
+  instance.exports.glo_manual_select_module(module);
+  instance.exports.glo_manual_set_reference_methods(methods ? 1 : 0);
+  const expected = new Set(expectedNames);
+  const found = [];
+  const pages = Math.max(1, Math.ceil(expectedNames.length / 24));
+  let text = render(width);
+  for (let page = 1; page <= pages; page += 1) {
+    const cards = textRuns.filter(run => run.fontSize === 18 && expected.has(run.value))
+      .map(run => run.value);
+    assert.equal(cards.length, Math.min(24, expectedNames.length - found.length),
+      "A filtered page omitted cards or counted nested typeclass operations");
+    found.push(...cards);
+    if (pages > 1) assert(text.includes(`Page ${page} of ${pages}`));
+    else assert(!text.includes("Next page"), "Hidden typeclass operations created a spurious page");
+    if (page < pages) text = clickText(width, "Next page");
+  }
+  assert.deepEqual(found.toSorted(), expectedNames.toSorted(), "Pagination omitted or repeated declarations");
+  return text;
 }
 
 for (const width of [390, 1280]) {
@@ -238,8 +316,7 @@ for (const width of [390, 1280]) {
     const text = render(width);
     if (index >= 0 && referenceIndex.modules[index][0] === "File_System/File") {
       assert.match(text, /AsView\(P, Path_View\)/);
-      for (const effect of ["returns_fresh", "released_by", "escapes"])
-        assert(text.includes(effect), `Missing open contract ${effect}`);
+      assert(textRuns.some(run => run.value === "read_file" && run.fontSize === 18));
     }
   }
   const view = memoryView();
@@ -248,6 +325,71 @@ for (const width of [390, 1280]) {
   instance.exports.glo_manual_set_search_results(host.searchBridgeAddress, 1);
   instance.exports.glo_manual_set_view(2);
   assert(render(width).includes("Hello World"), "Search result bridge failed");
+
+  // A method-only module should open on its useful section immediately.
+  instance.exports.glo_manual_select_module(moduleIndex("Prelude/Array"));
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
+  let text = render(width);
+  assert(text.includes("Declarations") && text.includes("Methods"), "Reference section selectors are missing");
+  assert(textRuns.some(run => run.value === "[..]$T.add" && run.fontSize === 18));
+  text = clickText(width, "Declarations", run => run.fontSize === 14);
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 0);
+  assert(text.includes("no public declarations in this section"));
+  text = clickText(width, "Methods", run => run.fontSize === 14);
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
+  assert(textRuns.some(run => run.value === "[..]$T.add" && run.fontSize === 18));
+  assert.equal(instance.exports.glo_manual_get_scroll_request(), 1, "Section switch should scroll to the top");
+
+  // Paths use free functions, while handles expose receiver methods and factories.
+  instance.exports.glo_manual_select_module(moduleIndex("File_System/File"));
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 0);
+  text = render(width);
+  assert(textRuns.some(run => run.value === "read_file" && run.fontSize === 18));
+  text = clickText(width, "Methods", run => run.fontSize === 14);
+  assert(textRuns.some(run => run.value === "File.open" && run.fontSize === 18));
+  assert(!textRuns.some(run => run.value === "read_file" && run.fontSize === 18));
+  for (const effect of ["returns_fresh", "released_by", "returns_borrow", "noescape"])
+    assert(text.includes(effect), `Missing open contract ${effect}`);
+
+  // A typeclass's operations stay inside its declaration, not in Methods.
+  instance.exports.glo_manual_select_module(moduleIndex("Prelude/Drop"));
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 0);
+  text = render(width);
+  assert(textRuns.some(run => run.value === "drop" && run.fontSize === 18));
+  text = clickText(width, "Methods", run => run.fontSize === 14);
+  assert(text.includes("no public inherent methods or associated functions"));
+  assert(!textRuns.some(run => run.value === "drop" && run.fontSize === 18));
+
+  // Math/Core mixes free functions, types, inherent methods, and nested
+  // typeclass operations. Only visible cards consume pagination slots.
+  const math = moduleIndex("Math/Core");
+  const mathSymbols = referenceIndex.symbols.filter(symbol => symbol[4] === math);
+  const declarations = mathSymbols.filter(symbol => symbol[5] !== "method").map(symbol => symbol[0]);
+  const methods = mathSymbols.filter(symbol => symbol[5] === "method" && symbol[0].includes("."))
+    .map(symbol => symbol[0]);
+  browseSection(width, math, false, declarations);
+  browseSection(width, math, true, methods);
+  assert(!textRuns.some(run => run.value === "sin" && run.fontSize === 18));
+
+  // Browse a real multi-page Methods section and confirm search can navigate
+  // directly to a late method, while a typeclass operation targets its owner.
+  const utf8 = moduleIndex("Strings/Utf8");
+  const utf8Methods = referenceIndex.symbols.filter(symbol => symbol[4] === utf8 &&
+    symbol[5] === "method" && symbol[0].includes(".")).map(symbol => symbol[0]);
+  browseSection(width, utf8, true, utf8Methods);
+  text = openSymbolSearch(width, utf8, "u8.char_to_string");
+  assert.equal(instance.exports.glo_manual_get_module(), utf8);
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
+  const targetPage = Math.floor(utf8Methods.indexOf("u8.char_to_string") / 24) + 1;
+  assert(text.includes(`Page ${targetPage} of ${Math.ceil(utf8Methods.length / 24)}`));
+  assert(textRuns.some(run => run.value === "u8.char_to_string" && run.anchor),
+    "Method search did not anchor the selected method on its page");
+  text = openSymbolSearch(width, math, "sin");
+  assert.equal(instance.exports.glo_manual_get_module(), math);
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 0);
+  assert(textRuns.some(run => run.value === "Floating" && run.fontSize === 18));
+  assert(textRuns.some(run => run.value === "sin" && run.anchor),
+    "Typeclass-method search did not anchor its member inside the owning class");
 }
 console.log(`Manual smoke checks passed: ${referenceIndex.manual.length} chapters, ` +
-  `${referenceIndex.modules.length} modules, search, Tree-sitter, and ${frames} narrow/wide Wasm frames.`);
+  `${referenceIndex.modules.length} modules, Methods navigation and search, Tree-sitter, and ${frames} narrow/wide Wasm frames.`);

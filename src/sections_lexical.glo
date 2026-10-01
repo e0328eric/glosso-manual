@@ -604,7 +604,7 @@ render_section_9 :: () {
     );
     table_header(7, "Written   —   Result");
     table_row(8, "`.5`   |   A bare `.`, then `5`: `error: unexpected token '5'`");
-    table_row(9, "`1.`   |   `1`, then a bare `.`: `error: reserved operator token '.' (operator '.' cannot be overloaded)`");
+    table_row(9, "`1.`   |   `error: float literal '1.' needs a digit after the '.'; write '1.0'`");
     table_row(10, "`1.e3`   |   `1`, then `.`, then the name `e3`: `error: member of non-struct`");
     table_row(11, "`1.5e`   |   An exponent with no digits: `error: scientific number literal needs exponent digits after 'e' or 'E'`");
     paragraph(12, #string,oneline
@@ -613,15 +613,19 @@ render_section_9 :: () {
         \\dereference, so a fraction allowed to start or end with nothing would
         \\collide with all three.
     );
-    subheading(13, "Every float literal is an f64 at lex time");
+    subheading(13, "Literal precision and expected types");
     paragraph(14, #string,oneline
         \\The scanner strips the separators and parses the remaining text once,
-        \\at double precision. The token carries a single `f64` value, and a
+        \\at double precision. The token also keeps its source digits, and a
         \\literal with no annotation defaults to `f64`: `x := 1.5;` followed by
         \\`y : string = x;` reports `error: got f64, expected string`.
     );
     paragraph(15, #string,oneline
-        \\A wider annotation changes where the value lands, not how it was read.
+        \\For `f16` and `f32`, the checker rounds those original digits directly
+        \\to the expected format, avoiding a second rounding through `f64`.
+        \\A literal that overflows that format or rounds a nonzero value to zero
+        \\is rejected. A wider annotation still changes where the value lands,
+        \\not how it was read:
         \\An `f80` or `f128` literal has already been rounded to double precision
         \\by the time the type is known, so digits beyond roughly the seventeenth
         \\are gone before the annotation is ever consulted.
@@ -734,7 +738,7 @@ render_section_10 :: () {
         \\`\v`   |   U+000B, vertical tab
     );
     table_row(13, #string,oneline
-        \\`\0`   |   U+0000; it does not terminate the string
+        \\`\0`   |   U+0000; retained by a counted string, but terminates a C-string view
     );
     table_row(14, #string,oneline
         \\`\\`   |   One backslash
@@ -899,10 +903,10 @@ render_section_10 :: () {
         \\5 5 5 5
     );
     paragraph(46, #string,oneline
-        \\A `cstring` exists to be handed to C and has no `Show` instance, so it
-        \\cannot use the default `%` rendering: no matching `Formatter`
-        \\instance exists for `cstring` and the empty selector. The types
-        \\themselves are covered in Built-in Strings.
+        \\All four string types support the default `%` rendering through `Show`.
+        \\The C forms stop at their first zero unit; counted strings keep an
+        \\explicit length, including any embedded zeros. Their view layouts and
+        \\storage lifetimes are covered in Built-in Strings.
     );
 }
 
@@ -1202,7 +1206,8 @@ render_section_12 :: () {
     paragraph(3, #string,oneline
         \\The form is the directive, then optional spaces and tabs, then a quoted
         \\string holding exactly one direct code point, one fixed two-character
-        \\escape, or one exact `\xHH` escape. The separator may be empty, so
+        \\escape, one exact `\xHH` escape, or one `\u{...}` scalar escape.
+        \\The separator may be empty, so
         \\`#char"A"` is the same literal as `#char "A"`. It may not contain a
         \\newline: a string on the following line is
         \\`error: #char expects a string literal`.
@@ -1243,7 +1248,8 @@ render_section_12 :: () {
     paragraph(9, #string,oneline
         \\The scanner decodes the escape itself rather than deferring to the
         \\string machinery, so `#char` has its own closed table. It uses the
-        \\fixed C escapes plus an exact two-digit hexadecimal form.
+        \\fixed C escapes, an exact two-digit hexadecimal form, and a Unicode
+        \\scalar form with one to six hexadecimal digits inside braces.
     );
     table_header(10, "Escape   —   Value   —   Character");
     table_row(11, "`\\a`   |   7   |   alert");
@@ -1259,6 +1265,7 @@ render_section_12 :: () {
     table_row(21, "`\\'`   |   39   |   apostrophe");
     table_row(22, "`\\?`   |   63   |   question mark");
     table_row(36, "`\\xHH`   |   0 through 255   |   exactly two hexadecimal digits");
+    table_row(37, "`\\u{H...}`   |   Unicode scalar   |   one to six hexadecimal digits; no surrogates or values above U+10FFFF");
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
@@ -1269,11 +1276,13 @@ render_section_12 :: () {
         \\    print("0=% backslash=% quote=% apostrophe=% question=% hex=%\n",
         \\        #char "\0", #char "\\", #char "\"", #char "\'", #char "\?",
         \\        #char "\x41");
+        \\    print("unicode=%\n", cast(u32)(#char "\u{1F600}"));
         \\}
     );
     code_block(24, "text", #string
         \\a=7 b=8 f=12 n=10 r=13 t=9 v=11
         \\0=0 backslash=92 quote=34 apostrophe=39 question=63 hex=65
+        \\unicode=128512
     );
     paragraph(25, #string,oneline
         \\An escape outside the table is rejected instead of dropping its
@@ -1282,9 +1291,10 @@ render_section_12 :: () {
         \\character is rejected too rather than truncating the code point.
     );
     paragraph(26, #string,oneline
-        \\`\xHH` requires exactly two hexadecimal digits and produces that byte
-        \\value. There is no `\u{...}` form for `#char`; write a non-ASCII code
-        \\point directly between the quotes instead.
+        \\`\xHH` requires exactly two hexadecimal digits. `\u{...}` accepts one
+        \\to six hexadecimal digits and must name a Unicode scalar, excluding
+        \\surrogates and values above U+10FFFF. A non-ASCII result has type
+        \\`rune`, just as if that code point had been written directly.
     );
     code_block(27, "text", #string
         \\main :: () { c := #char "\x41"; }

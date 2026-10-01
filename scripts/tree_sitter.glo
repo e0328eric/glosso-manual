@@ -40,7 +40,8 @@ tree_sitter_write_escaped_string :: (
     out.write_byte(cast(u8)(#char "\""));
 }
 
-tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
+tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool
+    #memory{reads(path, text), noescape(text)} {
     file := File.open(path, .Write, .Open_Or_Create, .flags = .Append)?;
     wrote := file.write(text);
     closed := file.close();
@@ -51,8 +52,7 @@ tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
 }
 
 #public(unit) sync_tree_sitter :: () -> bool {
-    query_result := ("tree-sitter/highlights.scm").read_file(1024 * 1024);
-    app_result := ("app.js").read_file(4 * 1024 * 1024);
+    query_result := read_file("tree-sitter/highlights.scm", 1024 * 1024);
     query: string;
     app: string;
     if query_result == {
@@ -61,12 +61,15 @@ tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
             return false;
         case .Ok(text); query = text;
     }
+    defer query.free();
+    app_result := read_file("app.js", 4 * 1024 * 1024);
     if app_result == {
         case .Err;
             print("could not read app.js\n");
             return false;
         case .Ok(text); app = text;
     }
+    defer app.free();
 
     begin: ssize;
     if app.index_of(TREE_SITTER_QUERY_BEGIN) == {
@@ -96,8 +99,9 @@ tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
     tree_sitter_write_escaped_string(*replacement, query);
     replacement.write_string(";");
     replacement.write_string(line_end);
-    replacement_text := replacement.into_temporary_string();
-    initialized := ("app.js").write_file(app[0..content_start]);
+    replacement_text := replacement.into_string();
+    defer replacement_text.free();
+    initialized := write_file("app.js", app[0..content_start]);
     if initialized.is_err() ||
        !tree_sitter_append_text("app.js", replacement_text).unwrap_or(false) ||
        !tree_sitter_append_text("app.js", app[finish..app.count]).unwrap_or(false) {

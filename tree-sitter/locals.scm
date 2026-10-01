@@ -5,6 +5,7 @@
   (block)
   (for_statement)
   (pattern_arm)
+  (on_drop_error_statement)
 ] @local.scope
 
 ; Parameters
@@ -30,6 +31,8 @@
   ] @local.definition))
 (lambda_parameter
   name: (identifier) @local.definition)
+(on_drop_error_statement
+  error: (identifier) @local.definition)
 
 ; Local bindings prevent a same-named outer parameter from leaking through a
 ; shadowing declaration.

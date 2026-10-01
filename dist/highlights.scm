@@ -50,6 +50,7 @@
   "#no_context"
   "#dump"
   "#must"
+  "#on_drop_error"
   "#returns_twice"
   "#inline"
   "#bytes"
@@ -73,7 +74,6 @@
   "#assert"
   "#public"
   "#private"
-  "#on_drop_error"
 ] @attribute
 
 (from_directive) @attribute
@@ -197,6 +197,7 @@
 (named_argument name: (identifier) @variable.parameter)
 (typeclass_parameter name: (identifier) @variable.parameter)
 (lambda_parameter name: (identifier) @variable.parameter)
+(on_drop_error_statement error: (identifier) @variable.parameter)
 (parameter
   name: (binding_list [
     (identifier)

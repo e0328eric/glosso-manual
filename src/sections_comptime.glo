@@ -4,21 +4,24 @@
 
 render_section_105 :: () {
     paragraph(0, #string,oneline
-        \\Glosso executes code during compilation in two different engines.
-        \\Which one a construct reaches is decided by where the construct is
-        \\written, not by what it does, and the two do not have the same
-        \\capabilities: each accepts programs the other refuses.
+        \\Glosso executes code during compilation with a constant interpreter
+        \\and a register-based machine. Position decides when an answer is
+        \\needed, while the body's operations also decide how it executes.
+        \\Code that needs memory or managed cleanup can use the machine even
+        \\when the checker needs its result as a constant.
     );
     paragraph(1, #string,oneline
         \\The constant evaluator lives inside the type checker. It walks the
         \\syntax tree of the expression it has been asked to fold, at the moment
         \\the checker reaches that expression, and interprets the program
-        \\directly from that tree. Everything it produces is a value the checker
+        \\directly from that tree. Before running a body, it can instead select
+        \\VM-backed evaluation for pointer writes, view mutation, procedure-value
+        \\calls, allocator access, or managed owners. Everything it produces is a value the checker
         \\then uses immediately: an array length, a branch decision, a spliced
         \\constant.
     );
     paragraph(2, #string,oneline
-        \\The compile-time machine runs later and only for one construct. Each
+        \\Top-level compile-time work runs later. Each
         \\top-level `#comptime` declaration is lowered into an ordinary IR
         \\function alongside the rest of the program, and once checking and
         \\lowering are finished the machine executes that function as bytecode,
@@ -28,14 +31,15 @@ render_section_105 :: () {
 
     subheading(3, "Which engine runs which construct");
     paragraph(4, #string,oneline
-        \\The split is one line long: a top-level `#comptime` declaration goes to
-        \\the machine, and everything else goes to the constant evaluator.
-        \\Everything else means every construct that needs an answer while the
-        \\checker is still running, which is most of the compile-time surface.
+        \\A top-level `#comptime` declaration goes to the machine after checking.
+        \\Constructs that need an answer during checking go through constant
+        \\evaluation, which can run a checked body in the VM when required.
+        \\The engine is selected before execution, rather than retrying after
+        \\a partially executed body and repeating its effects.
     );
-    table_header(5, "Construct   —   Engine");
+    table_header(5, "Construct   —   Evaluation phase");
     table_row(6, "`X :: e;` and `X ::= e;` initialisers, and every global initialiser   |   Constant evaluator.");
-    table_row(7, "`#comptime e` and `#comptime { … }` in an expression or statement position   |   Constant evaluator.");
+    table_row(7, "`#comptime e` and `#comptime { … }` in a value position   |   During checking; the interpreter or VM is selected for the body.");
     table_row(8, "The condition of `#if`, `#assert`, and `#inline while`, and every `where` clause   |   Constant evaluator.");
     table_row(9, "The operand of `#insert`, and the argument for a `#comptime` parameter   |   Constant evaluator.");
     table_row(10, "`#modify` blocks, `#code` materialisation, and derive macro bodies   |   Constant evaluator.");
@@ -44,11 +48,10 @@ render_section_105 :: () {
     subheading(12, "How often each one runs");
     paragraph(13, #string,oneline
         \\The machine runs each top-level `#comptime` exactly once, in
-        \\declaration order. The constant evaluator makes no such promise. It
-        \\runs whenever the checker visits the node, and the checker visits a
-        \\body more than once: every body is checked even when nothing calls it,
-        \\the checker makes more than one pass over the program, and a generic
-        \\body is checked once per instantiation on each pass.
+        \\declaration order. Evaluation during checking makes no such execution
+        \\count or output promise. Bodies can be checked repeatedly, and a
+        \\VM-backed value evaluation can discard its captured output. Use these
+        \\forms to compute values, and put observable build steps at top level.
     );
     code_block(14, "glosso", #string
         \\#import "Io";
@@ -68,26 +71,16 @@ render_section_105 :: () {
     );
     code_block(15, "text", #string
         \\glosso: compile program.glo (target=x86_64-pc-windows-msvc)
-        \\[ct] never_called
-        \\[ct] main body
-        \\[ct] generic_fn
-        \\[ct] generic_fn
-        \\[ct] never_called
-        \\[ct] main body
-        \\[ct] generic_fn
-        \\[ct] generic_fn
         \\[ct] top-level block
         \\glosso: link program.exe (target=x86_64-pc-windows-msvc, -O1)
         \\glosso: done program.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
         \\runtime main
     );
     paragraph(16, #string,oneline
-        \\Each in-body block ran twice, `generic_fn` ran twice per pass because
-        \\two instantiations exist, and the body of `never_called` ran despite
-        \\never being called. The top-level block ran last and once, after
-        \\checking was complete. The rule this forces is the one worth
-        \\remembering: a side effect belongs in a top-level `#comptime`, and an
-        \\in-body `#comptime` should be used only for the value it produces.
+        \\The installed compiler prints the top-level block's output; the
+        \\in-body blocks produce no visible lines in this example. That is not
+        \\an execution-count API. A side effect belongs in a top-level
+        \\`#comptime`, and an in-body block should be used for the value it produces.
     );
 
     subheading(17, "What the constant evaluator refuses");
@@ -137,21 +130,23 @@ render_section_105 :: () {
         \\top-level `#comptime` block simply runs to completion.
     );
 
-    subheading(23, "Where the machine still falls short");
+    subheading(23, "Managed builders at compile time");
     paragraph(24, #string,oneline
-        \\The constant evaluator cannot execute destructors. A local whose type
-        \\has `Drop`, including `String_Builder`, is rejected with `constant
-        \\evaluation cannot run destructors`. This also affects compile-time
-        \\`tprint`, which creates a builder internally. Compose source strings
-        \\with `string.cat` and `string.repeat` when evaluating an expression
-        \\during checking.
+        \\The constant evaluator supports managed `String_Builder` values and
+        \\compile-time formatting. Use the ordinary builder operations to collect
+        \\text. `to_string()` only borrows the builder's buffer, so returning that
+        \\view from a local builder would outlive its owner. `into_string()` consumes
+        \\the builder and transfers the allocation to the result.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
         \\#import "String_Builder";
         \\
         \\build_text :: () -> string {
-        \\    return "hello ".cat("builder");
+        \\    text := String_Builder.make_len_cap();
+        \\    text.write_string("hello ");
+        \\    text.write_string("builder");
+        \\    return text.into_string();
         \\}
         \\
         \\TEXT :: #comptime build_text();
@@ -165,23 +160,23 @@ render_section_105 :: () {
         \\build_text = <hello builder>
     );
     note(27, #string,oneline
-        \\The source-building methods remain part of the `String_Builder` API,
-        \\but the installed compiler's constant-evaluation restriction prevents
-        \\creating that managed value here. `string.cat`, `string.repeat`, and
-        \\the ordinary dynamic-array methods work without a managed builder.
-        \\A top-level `#comptime` declaration follows the separate machine path.
+        \\A top-level `#comptime` declaration follows the machine path and also
+        \\supports the ordinary builder operations. The older `source_new`,
+        \\`append`, and `finish_source` intrinsics still have a string-view
+        \\compatibility issue in the installed compiler. Prefer `make_len_cap`,
+        \\`write_string`, and `into_string`, or the allocating `string.cat` and
+        \\`string.repeat` helpers.
     );
 
-    subheading(28, "What both engines refuse");
+    subheading(28, "Globals, memory, and foreign calls");
     paragraph(29, #string,oneline
-        \\Neither engine runs arbitrary target code. A `#foreign` function has
-        \\no body to interpret, and a runtime global is not a constant. A
-        \\compile-time context does exist, so reading `context.allocator` is
-        \\allowed; that does not make every allocator intrinsic executable.
-        \\The direct `alloc` and `free` routes require `ctx_alloc` and
-        \\`ctx_free`, which the compile-time engines do not implement. Library
-        \\operations with dedicated compile-time implementations, such as
-        \\dynamic-array growth and string construction, have separate support.
+        \\Neither engine runs arbitrary target foreign code: a `#foreign`
+        \\function has no body to interpret. Compile-time code does have its own
+        \\globals initialized from the program's declarations. Reading or writing
+        \\them affects that compile-time execution, not the eventual program's
+        \\runtime storage. Its `context.allocator` can serve VM heap blocks,
+        \\including typed loads and stores through pointers. Each raw heap block
+        \\is limited to 4 MiB in the compile-time VM.
     );
     code_block(30, "glosso", #string
         \\libc :: #library,system "c";
@@ -192,9 +187,9 @@ render_section_105 :: () {
     table_header(31, "Situation   —   Diagnostic");
     table_row(32, "`now_c()` under the constant evaluator   |   `error: 'now_c' is foreign, so its result is not compile-time known`");
     table_row(33, "`now_c()` under the machine   |   `error: #comptime stopped: VM cannot call foreign/undeclared function 'now_c'; use the LLVM backend`");
-    table_row(34, "`alloc` under the constant evaluator   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`");
-    table_row(35, "`alloc` under the machine   |   `error: #comptime stopped: #magic ctx_alloc has no VM implementation`");
-    table_row(36, "Reading `counter` in either engine   |   `error: unknown const counter`");
+    table_row(34, "Allocation and pointer writes   |   Supported through VM-backed compile-time execution; the compiler chooses the required engine.");
+    table_row(35, "A raw VM heap block larger than 4 MiB   |   Compilation stops at the VM's allocation limit.");
+    table_row(36, "Reading `counter` during compile-time execution   |   Observes its compile-time initial value, `5`, independently of later runtime writes.");
     paragraph(37, #string,oneline
         \\Reflection is the case that looks as though it should differ and does
         \\not. `size_of`, `type_name`, `field_name` and the rest of `std/Meta`
@@ -242,6 +237,29 @@ render_section_105 :: () {
         \\has finished, so where it lands relative to the progress lines is not
         \\something to depend on.
     );
+    code_block(42, "glosso", #string
+        \\#import "Context";
+        \\#import "Io";
+        \\
+        \\counter: s64 = 3;
+        \\read_counter :: () -> s64 { return counter; }
+        \\SNAP :: #comptime read_counter();
+        \\
+        \\allocated_value :: () -> s64 {
+        \\    p := alloc(8);
+        \\    if #pattern .Some(raw) = p {
+        \\        cell := cast(*s64)raw;
+        \\        cell.* = 42;
+        \\        value := cell.*;
+        \\        p.free();
+        \\        return value;
+        \\    }
+        \\    return 0;
+        \\}
+        \\VALUE :: #comptime allocated_value();
+        \\main :: () { print("% %\n", SNAP, VALUE); }
+    );
+    code_block(43, "text", "3 42");
 }
 
 render_section_106 :: () {
@@ -402,12 +420,10 @@ render_section_106 :: () {
 
     subheading(26, "Inside a function body");
     paragraph(27, #string,oneline
-        \\In a body, `#comptime` is handled by the constant evaluator, and the
-        \\checker visits a body more than once. A `#comptime` block written as a
-        \\statement therefore runs an unpredictable number of times: at least
-        \\twice, once more for each generic instantiation, and at least once even
-        \\when nothing calls the enclosing procedure. What Runs When shows the
-        \\counts for a small program.
+        \\In a body, a `#comptime` block is evaluated while checking. The compiler
+        \\can use its VM for that value calculation, and output produced there
+        \\is not a reliable observable effect. What Runs When compares this with
+        \\top-level compile-time declarations.
     );
     paragraph(28, #string,oneline
         \\The consequence is a rule rather than a number. An in-body `#comptime`
@@ -434,8 +450,6 @@ render_section_106 :: () {
     );
     code_block(31, "text", #string
         \\glosso: compile program.glo (target=x86_64-pc-windows-msvc)
-        \\B: statement-level #comptime block
-        \\B: statement-level #comptime block
         \\glosso: link program.exe (target=x86_64-pc-windows-msvc, -O1)
         \\glosso: done program.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
         \\runtime start
@@ -451,13 +465,12 @@ render_section_106 :: () {
         \\Compile-time context reads and compiler-provided build, file, and
         \\string services are a different matter: they have explicit host
         \\implementations. What Runs When compares the two engines' answers;
-        \\the table below lists refusals in a value position, reported by the
-        \\constant evaluator.
+        \\the table below contrasts supported state with remaining limits.
     );
-    table_header(34, "Refused   —   Diagnostic");
+    table_header(34, "Case   —   Current behavior");
     table_row(35, "A `#foreign` function   |   `error: 'now_c' is foreign, so its result is not compile-time known`");
-    table_row(36, "Direct `alloc` through `Context`   |   `error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation`; other memory APIs depend on their own compile-time support");
-    table_row(37, "Reading a mutable global   |   `error: unknown const counter`");
+    table_row(36, "Allocation through `Context`   |   VM-backed evaluation supports heap blocks and typed pointer access, subject to its 4 MiB block limit.");
+    table_row(37, "Reading a mutable global   |   Supported in the compile-time program; it does not observe later runtime writes.");
     table_row(38, "Reading a runtime local or parameter   |   `error: unknown const x`");
     table_row(39, "`goto`, a label, `#asm`, and other unsupported statements   |   `error: statement is not available at compile time`");
     table_row(40, "A loop that does not terminate quickly   |   `error: compile-time while exceeded 1000000 iterations`");
@@ -1748,7 +1761,7 @@ render_section_112 :: () {
         \\string!s32  kind 9 variants 2 : Ok:s32 Err:string
         \\Simd(f32,4) kind 16 lanes 4 element f32
         \\Matrix      kind 17 rows 2 cols 3 elements 6 transpose Matrix(f32, 3, 2)
-        \\names: Option_s32 Result_s32_string Simd(f32, 4)
+        \\names: ?s32 string!s32 Simd(f32, 4)
     );
     bullet(43, #string,oneline
         \\`?T` has `None: void` at index `0` and `Some: T` at index `1`. `E!T` has
@@ -1756,15 +1769,16 @@ render_section_112 :: () {
         \\the reverse of the spelling.
     );
     bullet(44, #string,oneline
-        \\`type_name` of an optional or a result gives the internal name,
-        \\`Option_s32` and `Result_s32_string`. Those names have no source
-        \\spelling; `?T` and `E!T` are the whole surface syntax.
+        \\`type_name` of an optional or a result gives its source spelling,
+        \\such as `?s32` and `string!s32`. Nested types include parentheses
+        \\where needed, as in `?(string!s64)`.
     );
     bullet(45, #string,oneline
-        \\`type_name` of a structural type is the mangled C spelling the backend
-        \\uses: `[]s32` prints as `glo_Arr_int32_t` and `#fn_ptr(a: s32) -> s32`
-        \\as `glo_fn_int32_t__int32_t`. Named types, `Simd` and `Matrix` print as
-        \\they are written.
+        \\Structural types also use source spellings: `[]s32`, `[*]u8`,
+        \\`(s64, string)`, and `(s32) -> s32`. Instantiated aggregates include
+        \\their arguments, such as `Box(s64)`. `Type_Info.name` and the static
+        \\record carried by `any` agree with `type_name` in native and
+        \\compile-time execution.
     );
     bullet(46, #string,oneline
         \\Native and fixed integers retain their identities, so `variant_type` on
@@ -2218,18 +2232,19 @@ render_section_114 :: () {
     code_block(1, "glosso", #string
         \\#import "Io";
         \\#import "Compiler";
+        \\#import "Typeclass";
         \\
         \\run_build :: () {
         \\    set_build_options_dc(.do_output = false);
         \\
-        \\    workspace := ("hello").compiler_create_workspace();
+        \\    workspace := Workspace.create_workspace("hello");
         \\    options := workspace.get_build_options();
         \\    options.output_type = .Executable;
         \\    options.output_executable_name = "hello.exe";
         \\    options.set_optimization(.Optimized);
         \\    options.set_build_options(workspace);
         \\
-        \\    if ("hello.glo").add_build_file(workspace) == {
+        \\    if add_build_file("hello.glo", workspace) == {
         \\    case .Ok(log);
         \\        print("[build] nested compilation said:\n%", log);
         \\    case .Err(failure);
@@ -2264,7 +2279,7 @@ render_section_114 :: () {
     paragraph(4, #string,oneline
         \\A nested compilation is a new `glosso` process, taken from
         \\`GLOSSO_COMPILER_EXE` if that is set and from the running executable
-        \\otherwise. `string.add_build_file` and `string.add_build_string` wait for that child
+        \\otherwise. `add_build_file` and `add_build_string` wait for that child
         \\and return its standard output followed by its standard error instead of
         \\passing either stream through. That is why the child's transcript appears
         \\under `[build]` above and why discarding the `.Ok` payload discards the
@@ -2274,12 +2289,12 @@ render_section_114 :: () {
     );
     subheading(5, "`Workspace` and `Build_Options`");
     paragraph(6, #string,oneline
-        \\A `Workspace` is an `s64` handle to one reusable `Build_Options`
-        \\configuration. Create one with `string.compiler_create_workspace`, obtain a
+        \\A `Workspace` is a `distinct s64` handle to one reusable `Build_Options`
+        \\configuration. Create one with `Workspace.create_workspace`, obtain a
         \\detached copy of its options with `Workspace.get_build_options`, edit that
         \\copy, and install it with `Build_Options.set_build_options`. Nothing is
-        \\queued: `path.add_build_file(workspace)` and
-        \\`source.add_build_string(workspace)` each start and await one child
+        \\queued: `add_build_file(path, workspace)` and
+        \\`add_build_string(source, workspace)` each start and await one child
         \\compilation immediately. Omitting the workspace argument uses the shared
         \\implicit handle `-1`.
     );
@@ -2354,13 +2369,13 @@ render_section_114 :: () {
         \\attributes and selects `default<Os>` or `default<Oz>`, but LLVM 23 still
         \\aborts on those pipeline-level optimization names. Use `Optimized` or
         \\`Very_Optimized` for a linked workspace build. C archive compilation is
-        \\narrower by design: `string.compile_c_archive` accepts only `Debug` through
+        \\narrower by design: `Native_Compile_Output.compile_c_archive` accepts only `Debug` through
         \\`Very_Optimized`; the size modes and `.Default` return a
         \\`Compiler_Error` before invoking the C compiler.
     );
     subheading(34, "Named and implicit workspaces");
     paragraph(35, #string,oneline
-        \\`name.compiler_create_workspace()` returns fresh handles numbered from
+        \\`Workspace.create_workspace(name)` returns fresh handles numbered from
         \\zero for the life of the compiler process. The name is retained but is
         \\otherwise informational; it need not be unique, and there is no destroy
         \\operation. Each new handle starts with independent default options.
@@ -2375,18 +2390,19 @@ render_section_114 :: () {
         \\drive :: () {
         \\    set_build_options_dc(.do_output = false);
         \\
-        \\    defaults := (-1).get_build_options();
+        \\    implicit: Workspace = -1;
+        \\    defaults := implicit.get_build_options();
         \\    print("output_type=% backend=% optimization=% do_output=%\n",
         \\          defaults.output_type, defaults.backend,
         \\          defaults.optimization_level, defaults.do_output);
         \\
-        \\    space := ("tool").compiler_create_workspace();
+        \\    space := Workspace.create_workspace("tool");
         \\    options := space.get_build_options();
         \\    options.output_executable_name = "tool.exe";
         \\    options.set_optimization(.Optimized);
         \\    options.set_build_options(space);
         \\
-        \\    if ("hello.glo").add_build_file(space) == {
+        \\    if add_build_file("hello.glo", space) == {
         \\    case .Ok(log);      print("[ws] built:\n%", log);
         \\    case .Err(failure); print("[ws] failed: %\n", failure.message);
         \\    }
@@ -2410,7 +2426,7 @@ render_section_114 :: () {
         \\and falls back to the source's file stem. The whole name is passed
         \\through as `-o`, so a fallback name carries no platform extension: a
         \\workspace with only `output_path = "outdir"` set produces
-        \\`glosso: done outdir\hello`. `source.add_build_string(w)`
+        \\`glosso: done outdir\hello`. `add_build_string(source, w)`
         \\is the same operation over text: the source is written to a temporary
         \\file named `glosso_build_string_<pid>_<n>.glo` and that file is
         \\compiled and left in place, which is why its diagnostics name a path in
@@ -2424,11 +2440,11 @@ render_section_114 :: () {
         \\`intermediate_path`, `do_output`, `write_added_strings`, and
         \\`text_output_flags`. In particular, changing `Build_Options.do_output`
         \\does not suppress either compilation, and `write_added_strings = false`
-        \\does not stop `string.add_build_string` from writing its temporary source.
+        \\does not stop `add_build_string` from writing its temporary source.
     );
     subheading(40, "Building C sources");
     paragraph(41, #string,oneline
-        \\`name.compile_c_archive(sources)` compiles a list of C files
+        \\`Native_Compile_Output.compile_c_archive(name, sources)` compiles a list of C files
         \\with the compiler's bundled native toolchain and returns
         \\`Native_Compile_Output`, whose `artifact` field is the path of the
         \\static library it produced and whose `output` field is the tool's log.
@@ -2455,7 +2471,7 @@ render_section_114 :: () {
         \\
         \\    arguments: [1]string = .["-fno-builtin"];
         \\
-        \\    if ("adder").compile_c_archive(sources, .compiler_args = arguments[..]) == {
+        \\    if Native_Compile_Output.compile_c_archive("adder", sources, .compiler_args = arguments[..]) == {
         \\    case .Ok(archive);
         \\        print("[c] archive at %\n", archive.artifact);
         \\        return (("adder :: #library,static \"").cat(archive.artifact)).cat("\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
@@ -2490,22 +2506,22 @@ render_section_114 :: () {
         \\script; its contract is `returns_fresh, released_by(string.free)`, so a
         \\script that keeps the result and does not free it draws `warning:
         \\[memory.leak] resource must be released by 'string_free' before leaving
-        \\scope`. `name.find_header(root)`, `name.find_library()` and
-        \\`name.find_resource()` search the target directories, the usual environment
+        \\scope`. `find_header(name, root)`, `find_library(name)` and
+        \\`find_resource(name)` search the target directories, the usual environment
         \\variables and the project root, and return an empty string when nothing
-        \\matches; `("std").find_resource()` resolves the standard library directory.
-        \\`text.run_command()` runs a shell command and returns its captured output as
-        \\`Compiler_Error!string`. `arg.add_current_linker_arg()` appends a raw flag
+        \\matches; `find_resource("std")` resolves the standard library directory.
+        \\`run_command(text)` runs a shell command and returns its captured output as
+        \\`Compiler_Error!string`. `add_current_linker_arg(arg)` appends a raw flag
         \\to the link of the current compilation, which a bad flag proves loudly:
         \\`error: lld-link: error: could not open '/no-such-linker-flag': no such file
         \\or directory`.
     );
     note(74, #string,oneline
-        \\`path.macro_unit(argument)` is the native-code route for a reusable source
+        \\`macro_unit(path, argument)` is the native-code route for a reusable source
         \\generator. It builds `path` as a program through a nested compiler, benefits
         \\from the native artifact cache, runs the result with `argument` after `--`,
         \\and returns the program's standard output as source text. Write `#insert
-        \\("macros/derive_json.glo").macro_unit("record");` at the use site. A build
+        \\macro_unit("macros/derive_json.glo", "record");` at the use site. A build
         \\or run failure is returned as diagnostic text so the following insertion
         \\fails with the generator's error visible.
     );
@@ -2521,16 +2537,17 @@ render_section_114 :: () {
     code_block(49, "glosso", #string
         \\#import "Io";
         \\#import "Compiler";
+        \\#import "Typeclass";
         \\
         \\build_release :: () {
-        \\    workspace := ("release").compiler_create_workspace();
+        \\    workspace := Workspace.create_workspace("release");
         \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "hello.exe";
         \\    options.set_optimization(.Optimized);
         \\    options.set_borrow_check(Compiler_Borrow_Check.Error);
         \\    options.set_color(.Always);
         \\    options.set_build_options(workspace);
-        \\    if #pattern .Err(failure) = ("hello.glo").add_build_file(workspace) {
+        \\    if #pattern .Err(failure) = add_build_file("hello.glo", workspace) {
         \\        print("release build failed:\n");
         \\        report_error(failure);
         \\        exit(failure.status);
@@ -2586,7 +2603,7 @@ render_section_114 :: () {
         \\nested build is a matter of one more setter: `options.set_target(.{ .os =
         \\Target_OS.Wasm, .cpu = Target_CPU.Wasm32, .abi = Target_ABI.Freestanding })`
         \\makes the child report `target=wasm32-unknown-unknown`. That changes only
-        \\children using this workspace. `string.compile_c_archive` still uses the
+        \\children using this workspace. `Native_Compile_Output.compile_c_archive` still uses the
         \\build script's active target; compile the script itself for the matching
         \\target when its C archive must be link-compatible with the nested Glosso
         \\artifact.
@@ -2664,7 +2681,7 @@ render_section_115 :: () {
     );
     subheading(5, "Forwarding arguments to a workspace build");
     paragraph(6, #string,oneline
-        \\A child started by `string.add_build_file` or `string.add_build_string` does not inherit
+        \\A child started by `add_build_file` or `add_build_string` does not inherit
         \\the build script's own `--` arguments automatically. Put the arguments
         \\for that child in `Build_Options.compile_time_command_line`, then install
         \\the options before starting the build. The service writes one `--`
@@ -2674,19 +2691,20 @@ render_section_115 :: () {
     code_block(7, "glosso", #string
         \\#import "Io";
         \\#import "Compiler";
+        \\#import "Typeclass";
         \\
         \\drive :: () {
         \\    set_build_options_dc(.do_output = false);
         \\    print("[parent] % argument(s)\n", get_cmdline_args().count);
         \\
-        \\    workspace := ("child").compiler_create_workspace();
+        \\    workspace := Workspace.create_workspace("child");
         \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "child.exe";
         \\    options.compile_time_command_line.add("release");
         \\    defer options.compile_time_command_line.free();
         \\    options.set_build_options(workspace);
         \\
-        \\    if ("child.glo").add_build_file(workspace) == {
+        \\    if add_build_file("child.glo", workspace) == {
         \\    case .Ok(log);      print("%", log);
         \\    case .Err(failure); report_error(failure);
         \\    }

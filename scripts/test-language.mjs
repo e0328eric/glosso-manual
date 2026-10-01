@@ -52,6 +52,9 @@ assert.equal(compileAndRun("operators"), [
 assert.equal(compileAndRun("try_operator"), "try operator passed\n");
 assert.equal(compileAndRun("array_reserve"), "array reserve passed\n");
 assert.equal(compileAndRun("current_language"), "current language passed\n");
+assert.equal(compileAndRun("current_std_api"), "current std APIs passed\n");
+assert.equal(compileAndRun("string_views"), "string views passed\n");
+assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -98,4 +101,13 @@ for (const name of ["removed_noreturn", "removed_private_section", "private_decl
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, /error:/, `${name}: missing diagnostic`);
 }
 
-console.log("Language checks passed: visibility, inherent methods, receiver helpers, automatic Drop and cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+for (const [name, diagnostic] of [
+  ["string_view_escape", /borrowed from managed value.*cannot escape/s],
+  ["string_capacity", /capacity/],
+]) {
+  const rejected = compile(name, "object");
+  assert.notEqual(rejected.status, 0, `${name}: invalid string-view use compiled successfully`);
+  assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
+}
+
+console.log("Language checks passed: string views and builder ownership, visibility, inherent methods, current std functions and factories, automatic Drop and cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

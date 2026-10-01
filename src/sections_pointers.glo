@@ -522,9 +522,10 @@ render_section_51 :: () {
     paragraph(5, #string,oneline
         \\The descriptor fields are in that order and at those offsets. Reading the
         \\three words of a `[..]s64` back as `usize` shows the count first, the data
-        \\pointer second, and the capacity third. `string` has the same
-        \\three-word shape as `[..]u8`, so it is 24 bytes on a 64-bit target and
-        \\12 on a 32-bit target; Built-in Strings covers it.
+        \\pointer second, and the capacity third. `string` instead stores a data
+        \\pointer followed by a count: 16 bytes on a 64-bit target and 8 on a
+        \\32-bit target. It has no capacity or ownership; Built-in Strings covers
+        \\its lifetime and the one-pointer C-string representation.
     );
     code_block(6, "glosso", #string
         \\#import "Io";
@@ -550,16 +551,16 @@ render_section_51 :: () {
         \\fields: a.count=3 v.count=3 d.count=5 d.capacity=8
     );
     paragraph(8, #string,oneline
-        \\A bracket type is written in annotation position only; it is not an
-        \\expression. `size_of([3]s64)` is `error: unexpected token '['`, which is
-        \\why the program above spells the sizes as `size_of(a.type_of())`.
+        \\Bracket types are also type-valued expressions. Write `size_of([3]s64)`,
+        \\`size_of([]s64)`, or `size_of([..]s64)` directly, or use
+        \\`size_of(a.type_of())` when the value already supplies its type.
     );
 
     subheading(9, "The fields each shape exposes");
     table_header(10, "Field   —   Available on   —   Meaning");
     table_row(11, "`.count`   |   `[N]T`, `[]T`, `[..]T`, `string`   |   elements in use; on `[N]T` it is the constant `N`");
     table_row(12, "`.data`   |   `[N]T`, `[]T`, `[..]T`, `string`   |   a `[*]T` at the first element");
-    table_row(13, "`.capacity`   |   `[..]T`, `string`   |   elements the allocation can hold");
+    table_row(13, "`.capacity`   |   `[..]T`   |   elements the allocation can hold");
     paragraph(14, #string,oneline
         \\`.capacity` on a view is `error: []s64 has no field capacity`: a view does
         \\not own its storage, so it has nothing to report. On a fixed array
@@ -959,7 +960,8 @@ render_section_52 :: () {
     paragraph(31, #string,oneline
         \\Slicing a fixed array, a view, or a dynamic array all give `[]T`, and none
         \\of the three copies an element: the result is a count and a pointer into
-        \\the original storage. Slicing a `string` gives a `string`. A many-pointer
+        \\the original storage. Slicing `string` or `cstring` gives a borrowed
+        \\`string`; slicing either UTF-16 form gives `string16`. A many-pointer
         \\cannot be sliced at all, because it has no length to bound the result:
         \\`mp[1..3]` is `error: no operator '[]' for [*]s64, Range_ssize`.
     );
@@ -1344,6 +1346,8 @@ render_section_54 :: () {
         \\named elements are written `.field = value`. A literal may stop early, may
         \\mix the two so long as no field is written twice, and may be empty, in
         \\which case every field takes its declared default.
+        \\Separate elements with commas; a trailing comma is allowed. Array
+        \\literals likewise require a comma between elements.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -1482,11 +1486,11 @@ render_section_54 :: () {
         \\accepts these arguments`.
     );
     note(28, #string,oneline
-        \\`T.{ }` accepts only a bare identifier that names a declared struct.
-        \\`Box(f64).{ .value = 1.5 }` is `error: struct literal needs a type`, and a
-        \\constant bound to a type, such as `Alias :: Pair;`, is `error: unknown
-        \\struct type 'Alias' in struct literal`. Both are written by annotating the
-        \\target and using the inferred form.
+        \\A qualified literal accepts a struct type value, including a generic
+        \\application such as `Box(f64).{ .value = 1.5 }` or an alias such as
+        \\`Alias.{ 1, 2 }`. The qualifier fixes the type without an annotation
+        \\on the variable. An annotation with the inferred `.{ ... }` form
+        \\remains useful when the surrounding declaration already names the type.
     );
     code_block(29, "glosso", #string
         \\#import "Io";
@@ -1495,8 +1499,8 @@ render_section_54 :: () {
         \\Alias :: Pair;
         \\
         \\main :: () {
-        \\    b: Box(f64) = .{ .value = 1.5 };
-        \\    p: Alias = .{ 1, 2 };
+        \\    b := Box(f64).{ .value = 1.5 };
+        \\    p := Alias.{ 1, 2 };
         \\    print("% % %\n", b.value, p.a, p.b);
         \\}
     );
@@ -1594,8 +1598,9 @@ render_section_55 :: () {
     table_header(1, "Object   —   Members");
     table_row(2, "`struct`   |   Its declared fields, by name.");
     table_row(3, "Tuple   |   `.0`, `.1`, and so on, plus `.count`.");
-    table_row(4, "`[N]T`, `[]T`, `[..]T`, `string`   |   `.count`, `.data`, `.capacity`");
-    table_row(5, "SoA array or view   |   `.count`, `.capacity`, one view per element field");
+    table_row(4, "`[N]T`, `[]T`, `[..]T`   |   `.count`, `.data`; only `[..]T` also has `.capacity`");
+    table_row(5, "SoA array or view   |   `.count`, one view per element field; dynamic arrays also have `.capacity`");
+    table_row(47, "`string`, `string16`, `cstring`, `cstring16`   |   read-only `.count` and `.data`; no `.capacity`");
     table_row(6, "`any`   |   `.type` and `.value`");
     table_row(7, "Tagged union   |   Variant names, bound by a pattern.");
     paragraph(8, #string,oneline
@@ -1706,6 +1711,8 @@ render_section_55 :: () {
         \\A pointer receiver can use an existing pointer or borrow an addressable
         \\value automatically. Mutable receivers cannot borrow a temporary or discard
         \\`const`. Field access inside a pointer receiver still writes `#self.*.x`.
+        \\A parameter default cannot refer to `#self`: defaults are evaluated at
+        \\the call site, where the receiver binding is not in scope.
     );
     code_block(21, "glosso", #string
         \\#import "Io";
@@ -1766,7 +1773,7 @@ render_section_55 :: () {
     );
     code_block(29, "text", #string
         \\[]ssize count=3
-        \\glo_tup_long_glo_string count=2
+        \\(ssize, string) count=2
         \\[]any count=3
     );
     subheading(30, "Argument expansion");
@@ -1852,9 +1859,19 @@ render_section_55 :: () {
         \\Named typeclass operations also support receiver syntax. `reader.read(buffer)`
         \\uses the first non-erased argument of `Reader.read(reader, buffer)` as its
         \\receiver. Fields and applicable inherent methods take precedence. If more
-        \\than one class applies, qualify the class explicitly. Standard-library
-        \\operations on existing values use methods, including `array.add(...)`,
-        \\`value.sin()`, and `value.type_of()`.
+        \\than one class applies, qualify the class explicitly. Core standard-library
+        \\behavior uses methods, including `array.add(...)`, `text.substring(...)`, and
+        \\`value.type_of()`. Domain operations with independent inputs use free
+        \\functions, such as `alloc(size)`, `exists(path)`, and
+        \\`simd_store(destination, value)`.
+    );
+    paragraph(46, #string,oneline
+        \\Factories belong to the type they construct. For example,
+        \\`Path.path_from_string(text)` creates a path and `f64.from_bits(bits)`
+        \\creates a float; neither operation is a method on its input string or
+        \\integer. Once constructed, a resource's own operations remain methods,
+        \\such as `file.read()` and `file.close()`. Import the component that
+        \\declares each factory, function, or method.
     );
 }
 

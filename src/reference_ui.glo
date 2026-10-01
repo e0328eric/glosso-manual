@@ -20,6 +20,7 @@ app_view: s32 = APP_VIEW_MANUAL;
 selected_module: s32 = -1;
 module_page: s32 = 0;
 symbol_page: s32 = 0;
+reference_methods: bool = false;
 search_page: s32 = 0;
 search_result_count: s32 = 0;
 search_results: [MAX_SEARCH_RESULTS]Search_Result;
@@ -51,6 +52,7 @@ manual_set_view :: (view: s32) #c_call {
         selected_module = -1;
         module_page = 0;
         symbol_page = 0;
+        reference_methods = false;
     }
     if view == APP_VIEW_SEARCH search_page = 0;
 }
@@ -65,6 +67,7 @@ manual_select_section :: (section: s32) #c_call {
 manual_select_module :: (module: s32) #c_call {
     clear_scroll_target();
     app_view = APP_VIEW_STANDARD_LIBRARY;
+    reference_methods = false;
     if module < 0 || module >= STD_MODULE_COUNT {
         selected_module = -1;
         module_page = 0;
@@ -74,7 +77,20 @@ manual_select_module :: (module: s32) #c_call {
     selected_module = module;
     module_page = module / MODULES_PER_PAGE;
     symbol_page = 0;
+    // Modules made entirely of inherent APIs open directly on Methods.
+    reference_methods = module_section_count(STD_MODULE_DOCS[module], false) == 0 &&
+                        module_section_count(STD_MODULE_DOCS[module], true) > 0;
 }
+
+manual_set_reference_methods :: (methods: bool) #c_call {
+    if selected_module < 0 return;
+    reference_methods = methods;
+    symbol_page = 0;
+    clear_scroll_target();
+    scroll_request = SCROLL_REQUEST_TOP;
+}
+
+manual_get_reference_methods :: () -> bool #c_call { return reference_methods; }
 
 manual_set_search_results :: (data: [*]const s32, count: s32) #c_call
     #memory{reads(data), noescape(data)} {
@@ -106,6 +122,8 @@ manual_keep_browser_exports_reachable :: () {
     manual_set_view(APP_VIEW_MANUAL);
     manual_select_section(0);
     manual_select_module(-1);
+    manual_set_reference_methods(false);
+    manual_get_reference_methods();
     manual_set_search_results(cast([*]const s32)*empty_result_storage, 0);
     manual_get_view();
     manual_get_section();
@@ -440,7 +458,7 @@ render_standard_index :: () {
     close_element();
     close_element();
     paragraph(9000, #string,oneline
-        \\The index is generated from public declarations before each module's private section. Open a module to browse types, typeclasses, constants, functions, and typeclass methods with direct source links.
+        \\The index includes public declarations and public visibility groups. Open a module's Declarations section for types, typeclasses, constants, and free functions, or its Methods section for inherent methods and associated functions. Every entry links to its source.
     );
     module_page = clamp_page(module_page, STD_MODULE_COUNT, MODULES_PER_PAGE);
     start := module_page * MODULES_PER_PAGE;
@@ -707,7 +725,7 @@ symbol_group_title :: (kind: string) -> string {
     if kind == "typeclass" return "Typeclasses";
     if kind == "constant" return "Constants";
     if kind == "function" return "Functions";
-    if kind == "method" return "Methods and Associated Functions";
+    if kind == "method" return "Methods";
     return "Declarations";
 }
 
@@ -722,6 +740,56 @@ module_kind_count :: (module: Std_Module_Doc, kind: string) -> s32 {
         relative = relative + 1;
     }
     return count;
+}
+
+symbol_in_reference_section :: (symbol: Std_Symbol_Doc, methods: bool) -> bool {
+    if methods return symbol.kind == "method" && symbol.owner_typeclass.count == 0;
+    // Typeclass operations are shown inside their class's declaration card.
+    return symbol.kind != "method";
+}
+
+module_section_count :: (module: Std_Module_Doc, methods: bool) -> s32 {
+    count: s32 = 0;
+    for relative: 0..module.symbol_count {
+        if symbol_in_reference_section(STD_SYMBOL_DOCS[module.first_symbol + relative], methods)
+            count += 1;
+    }
+    return count;
+}
+
+reference_symbol_page :: (module: Std_Module_Doc, symbol_index: s32) -> s32 {
+    position: s32 = 0;
+    for index: module.first_symbol..symbol_index {
+        if symbol_in_reference_section(STD_SYMBOL_DOCS[index], reference_methods)
+            position += 1;
+    }
+    return position / SYMBOLS_PER_PAGE;
+}
+
+render_reference_section_selector :: (module: Std_Module_Doc) {
+    row := column_box(12);
+    row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+    open_element("reference-sections", row);
+    for section: 0..2 {
+        methods := section == 1;
+        selected := reference_methods == methods;
+        button := column_box(4);
+        button.layout.padding = padding(12, 12);
+        button.border.color = color(216, 209, 197);
+        button.border.width.bottom = 2;
+        if selected {
+            button.backgroundColor = color(244, 241, 234);
+            button.border.color = color(36, 73, 216);
+        }
+        open_indexed("reference-section", cast(s32)section, button);
+        title := "Declarations";
+        if methods title = "Methods";
+        emit_text(title, text_style(14, color(36, 73, 216), FONT_SANS_BOLD, 22));
+        emit_text(tprint("% entries", module_section_count(module, methods)),
+                  text_style(11, color(109, 107, 102), FONT_MONO, 18));
+        close_element();
+    }
+    close_element();
 }
 
 render_standard_module :: () {
@@ -742,16 +810,22 @@ render_standard_module :: () {
     );
     render_source_link(9101, module.source_path, 0);
     close_element();
+    render_reference_section_selector(module);
     paragraph(9100, module.summary);
-    symbol_page = clamp_page(symbol_page, module.symbol_count, SYMBOLS_PER_PAGE);
+    if reference_methods paragraph(9103, "Public inherent methods and associated functions, listed by their owning type. Receiver parameters appear as #self in the signatures.");
+    visible_count := module_section_count(module, reference_methods);
+    symbol_page = clamp_page(symbol_page, visible_count, SYMBOLS_PER_PAGE);
     relative_start := symbol_page * SYMBOLS_PER_PAGE;
-    relative := relative_start;
+    relative: s32 = 0;
+    position: s32 = 0;
     previous_kind := "";
-    while relative < relative_start + SYMBOLS_PER_PAGE && relative < module.symbol_count {
+    while position < relative_start + SYMBOLS_PER_PAGE && relative < module.symbol_count {
         symbol := STD_SYMBOL_DOCS[module.first_symbol + relative];
         // Typeclass methods are rendered inside their owning typeclass, just
         // like the original reference. They remain indexed for search.
-        if symbol.kind != "method" || symbol.owner_typeclass.count == 0 {
+        if symbol_in_reference_section(symbol, reference_methods) {
+            position += 1;
+            if position <= relative_start { relative += 1; continue; }
             if symbol.kind != previous_kind {
                 render_section_heading(
                     500000 + module.first_symbol + relative,
@@ -764,10 +838,13 @@ render_standard_module :: () {
         }
         relative = relative + 1;
     }
-    if module.symbol_count == 0 paragraph(9102, "This module has no public declarations.");
+    if visible_count == 0 {
+        if reference_methods paragraph(9102, "This module has no public inherent methods or associated functions.");
+        else paragraph(9102, "This module has no public declarations in this section. See Methods for its inherent APIs.");
+    }
     render_reference_pager(
         "previous-symbol-page", "next-symbol-page",
-        symbol_page, module.symbol_count, SYMBOLS_PER_PAGE,
+        symbol_page, visible_count, SYMBOLS_PER_PAGE,
     );
 }
 
@@ -852,9 +929,7 @@ handle_standard_navigation :: () {
     while i < STD_MODULE_COUNT {
         id := Clay_GetElementIdWithIndex(clay_string("module-nav-row"), cast(u32)i);
         if Clay_PointerOver(id) {
-            selected_module = i;
-            module_page = i / MODULES_PER_PAGE;
-            symbol_page = 0;
+            manual_select_module(i);
             return;
         }
         i = i + 1;
@@ -866,8 +941,7 @@ handle_standard_navigation :: () {
         while i < card_start + MODULES_PER_PAGE && i < STD_MODULE_COUNT {
             id := Clay_GetElementIdWithIndex(clay_string("module-card"), cast(u32)i);
             if Clay_PointerOver(id) {
-                selected_module = i;
-                symbol_page = 0;
+                manual_select_module(i);
                 return;
             }
             i = i + 1;
@@ -883,10 +957,16 @@ handle_standard_navigation :: () {
     }
 
     module := STD_MODULE_DOCS[selected_module];
+    for section: 0..2 {
+        if Clay_PointerOver(Clay_GetElementIdWithIndex(clay_string("reference-section"), cast(u32)section)) {
+            manual_set_reference_methods(section == 1);
+            return;
+        }
+    }
     if symbol_page > 0 && Clay_PointerOver(Clay_GetElementId(clay_string("previous-symbol-page"))) {
         symbol_page = symbol_page - 1;
     }
-    if (symbol_page + 1) * SYMBOLS_PER_PAGE < module.symbol_count &&
+    if (symbol_page + 1) * SYMBOLS_PER_PAGE < module_section_count(module, reference_methods) &&
        Clay_PointerOver(Clay_GetElementId(clay_string("next-symbol-page"))) {
         symbol_page = symbol_page + 1;
     }
@@ -938,17 +1018,15 @@ handle_search_navigation :: () {
                 selected_section = result.index;
                 app_view = APP_VIEW_MANUAL;
             } else if result.kind == 1 {
-                selected_module = result.index;
-                module_page = result.index / MODULES_PER_PAGE;
-                symbol_page = 0;
-                app_view = APP_VIEW_STANDARD_LIBRARY;
+                manual_select_module(result.index);
             } else {
                 symbol := STD_SYMBOL_DOCS[result.index];
                 selected_module = symbol.module_index;
                 module_page = selected_module / MODULES_PER_PAGE;
                 module := STD_MODULE_DOCS[selected_module];
                 target := resolve_search_symbol_target(result.index);
-                symbol_page = (target - module.first_symbol) / SYMBOLS_PER_PAGE;
+                reference_methods = symbol.kind == "method" && symbol.owner_typeclass.count == 0;
+                symbol_page = reference_symbol_page(module, target);
                 app_view = APP_VIEW_STANDARD_LIBRARY;
                 scroll_request = SCROLL_REQUEST_ANCHOR;
             }

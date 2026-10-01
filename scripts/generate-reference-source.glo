@@ -108,7 +108,7 @@ Reference_Parameter ::: instance Serialize {
         fields.add(.{ .name = "default_value", .value = serialize(value.default_value) });
         fields.add(.{ .name = "modifiers", .value = serialize(value.modifiers) });
         fields.add(.{ .name = "constraints", .value = serialize(value.constraints) });
-        return ("Reference_Parameter").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Parameter", fields);
     }
 }
 
@@ -117,7 +117,7 @@ Reference_Memory_Contract ::: instance Serialize {
         fields: [..]Serialization_Field;
         fields.add(.{ .name = "effect", .value = serialize(value.effect) });
         fields.add(.{ .name = "arguments", .value = serialize(value.arguments) });
-        return ("Reference_Memory_Contract").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Memory_Contract", fields);
     }
 }
 
@@ -128,7 +128,7 @@ Reference_Function ::: instance Serialize {
         fields.add(.{ .name = "return_type", .value = serialize(value.return_type) });
         fields.add(.{ .name = "memory_contracts", .value = serialize(value.memory_contracts) });
         fields.add(.{ .name = "where_clauses", .value = serialize(value.where_clauses) });
-        return ("Reference_Function").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Function", fields);
     }
 }
 
@@ -139,7 +139,7 @@ Reference_Type_Field ::: instance Serialize {
         fields.add(.{ .name = "value_type", .value = serialize(value.value_type) });
         fields.add(.{ .name = "default_value", .value = serialize(value.default_value) });
         fields.add(.{ .name = "modifiers", .value = serialize(value.modifiers) });
-        return ("Reference_Type_Field").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Type_Field", fields);
     }
 }
 
@@ -149,7 +149,7 @@ Reference_Type_Variant ::: instance Serialize {
         fields.add(.{ .name = "name", .value = serialize(value.name) });
         fields.add(.{ .name = "variant_type", .value = serialize(value.variant_type) });
         fields.add(.{ .name = "value", .value = serialize(value.value) });
-        return ("Reference_Type_Variant").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Type_Variant", fields);
     }
 }
 
@@ -159,7 +159,7 @@ Reference_Type_Info ::: instance Serialize {
         fields.add(.{ .name = "kind", .value = serialize(value.kind) });
         fields.add(.{ .name = "fields", .value = serialize(value.fields) });
         fields.add(.{ .name = "variants", .value = serialize(value.variants) });
-        return ("Reference_Type_Info").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Type_Info", fields);
     }
 }
 
@@ -175,7 +175,7 @@ Reference_Member ::: instance Serialize {
         fields.add(.{ .name = "source_line", .value = serialize(value.source_line) });
         fields.add(.{ .name = "has_default", .value = serialize(value.has_default) });
         fields.add(.{ .name = "function_info", .value = serialize(value.function_info) });
-        return ("Reference_Member").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Member", fields);
     }
 }
 
@@ -185,7 +185,7 @@ Reference_Class_Info ::: instance Serialize {
         fields.add(.{ .name = "minimal", .value = serialize(value.minimal) });
         fields.add(.{ .name = "minimal_explicit", .value = serialize(value.minimal_explicit) });
         fields.add(.{ .name = "members", .value = serialize(value.members) });
-        return ("Reference_Class_Info").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Class_Info", fields);
     }
 }
 
@@ -205,7 +205,7 @@ Reference_Symbol ::: instance Serialize {
         fields.add(.{ .name = "function_info", .value = serialize(value.function_info) });
         fields.add(.{ .name = "type_info", .value = serialize(value.type_info) });
         fields.add(.{ .name = "class_info", .value = serialize(value.class_info) });
-        return ("Reference_Symbol").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Symbol", fields);
     }
 }
 
@@ -216,7 +216,7 @@ Reference_Module ::: instance Serialize {
         fields.add(.{ .name = "summary", .value = serialize(value.summary) });
         fields.add(.{ .name = "source_path", .value = serialize(value.source_path) });
         fields.add(.{ .name = "symbols", .value = serialize(value.symbols) });
-        return ("Reference_Module").serialization_structure_value(fields);
+        return Serialization_Value.serialization_structure_value("Reference_Module", fields);
     }
 }
 
@@ -325,11 +325,11 @@ reference_collect_paths :: (
     directory_path: string,
     paths: *[..]string,
 ) -> Fs_Error!ssize {
-    entries := directory_path.os_fs_directory_entries();
+    entries := os_fs_directory_entries(directory_path);
     for child: entries {
-        if child.os_fs_is_directory() {
+        if os_fs_is_directory(child) {
             _ := reference_collect_paths(child, paths)?;
-        } else if child.os_fs_is_regular_file() && child.ends_with(".glo") {
+        } else if os_fs_is_regular_file(child) && child.ends_with(".glo") {
             paths.add(reference_copy_string(child));
         }
     }
@@ -651,6 +651,19 @@ reference_matching_paren :: (value: string, open: ssize) -> ssize {
     return -1;
 }
 
+reference_is_function_header :: (value: string, terminator: u8) -> bool {
+    if !value.starts_with("(") return false;
+    close := reference_matching_paren(value, 0);
+    if close < 0 return false;
+    tail := value[close + 1..value.count].trim();
+    if tail.starts_with("->") || tail.starts_with("#") || tail.starts_with("where ") return true;
+    if tail.count > 0 return false;
+    parameters := value[1..close].trim();
+    return terminator == cast(u8)(#char "{") || parameters.count == 0 ||
+        reference_top_level_index(parameters, cast(u8)(#char ":")) >= 0 ||
+        parameters == "#self" || parameters == "*#self" || parameters == "*const #self";
+}
+
 reference_matching_brace :: (value: string, open: ssize) -> ssize {
     depth: ssize = 0;
     quote: u8 = 0;
@@ -967,6 +980,35 @@ reference_matches_at :: (value: string, offset: ssize, needle: string) -> bool {
     return true;
 }
 
+// Factory signatures use #Self_Type for their enclosing inherent type. Resolve
+// the type in the displayed/searchable signature, but retain the original
+// source signature. Quoted defaults must stay literal.
+reference_resolve_self_type :: (value: string, owner: string) -> string {
+    if reference_index_of(value, "#Self_Type") < 0 return value;
+    out := String_Builder.make_len_cap(0, value.count + owner.count);
+    quote: u8 = 0;
+    i: ssize = 0;
+    while i < value.count {
+        byte := value[i];
+        if quote != 0 {
+            out.write_byte(byte);
+            if byte == cast(u8)(#char "\\") && i + 1 < value.count {
+                i += 1;
+                out.write_byte(value[i]);
+            } else if byte == quote quote = 0;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") {
+            quote = byte;
+            out.write_byte(byte);
+        } else if reference_matches_at(value, i, "#Self_Type") &&
+                  (i + 10 == value.count || !reference_is_identifier_continue(value[i + 10])) {
+            out.write_string(owner);
+            i += 9;
+        } else out.write_byte(byte);
+        i += 1;
+    }
+    return out.into_temporary_string();
+}
+
 // Context's checked-in docs still describe the former -O0 allocator default.
 // Correct only those exact fragments while the implementation uses the
 // GLOSSO_DEBUG_ALLOCATOR switch.  Once upstream wording changes, none of the
@@ -1147,6 +1189,16 @@ reference_return_type :: (tail: string) -> string {
     if arrow < 0 return "void";
     value := tail[arrow + 2..tail.count].trim();
     directive := reference_top_level_index(value, cast(u8)(#char "#"));
+    while directive >= 0 {
+        end := directive + 1;
+        while end < value.count && reference_is_identifier_continue(value[end]) end += 1;
+        marker := value[directive..end];
+        if marker != "#Never" && marker != "#Self_Type" && marker != "#soa" &&
+           marker != "#aos" && marker != "#simd" break;
+        next := reference_top_level_index(value[end..value.count], cast(u8)(#char "#"));
+        if next < 0 { directive = -1; break; }
+        directive = end + next;
+    }
     if directive >= 0 value = value[0..directive].trim();
     where_index := reference_index_of(value, " where ");
     if where_index >= 0 value = value[0..where_index].trim();
@@ -1540,7 +1592,7 @@ reference_parse_file :: (
     // Filesystem byte counts are fixed-width metadata; convert only after the
     // value has been checked, because `read_file` indexes host memory.
     size: s64;
-    if path.file_size() == {
+    if file_size(path) == {
         case .Ok(measured); size = measured;
         case .Err(reason);
             report_error(reason);
@@ -1552,7 +1604,7 @@ reference_parse_file :: (
         return false;
     }
     source: string;
-    if path.read_file(cast(ssize)(size + 1)) == {
+    if read_file(path, cast(ssize)(size + 1)) == {
         case .Err(reason);
             print("could not read %: ", path);
             report_error(reason);
@@ -1712,7 +1764,7 @@ reference_parse_file :: (
                             .negative = negative,
                         };
                         all_instances.add(instance);
-                    } else if owner_typeclass.count > 0 && !right.starts_with("(") {
+                    } else if owner_typeclass.count > 0 && !reference_is_function_header(right, header.terminator) {
                         reference_add_associated_member(
                             module, owner_typeclass, header_left, right,
                             summary, source_path, line_number);
@@ -1739,9 +1791,10 @@ reference_parse_file :: (
                             .owner_typeclass = reference_copy_string(owner_typeclass),
                             .has_default = header.terminator == cast(u8)(#char "{") || reference_index_of(right, "#magic") >= 0,
                         };
-                        if right.starts_with("(") {
+                        if reference_is_function_header(right, header.terminator) {
                             if owner_typeclass.count > 0 || owner_inherent.count > 0 symbol.kind = "method";
                             else symbol.kind = "function";
+                            if owner_inherent.count > 0 right = reference_resolve_self_type(right, owner_inherent);
                             symbol.function_info = reference_function_info(right);
                             if owner_inherent.count > 0 {
                                 for parameter_index: 0..symbol.function_info.parameters.count {
@@ -1835,7 +1888,7 @@ reference_write_source :: (
     out.write_string("{\"modules\":[");
     for i: 0..modules.count {
         if i > 0 out.write_byte(cast(u8)(#char ","));
-        if modules[i].json_serialize() == {
+        if json_serialize(modules[i]) == {
         case .Ok(encoded_module); out.write_string(encoded_module);
         case .Err;
             print("could not serialize reference module %\n", modules[i].name);
@@ -1860,19 +1913,19 @@ reference_write_source :: (
         for j: 0..fields.count {
             if j > 0 {
                 out.write_byte(cast(u8)(#char ","));
-                if names[j].json_serialize() == {
+                if json_serialize(names[j]) == {
                 case .Ok(encoded_name); out.write_string(encoded_name);
                 case .Err; return false;
                 }
                 out.write_byte(cast(u8)(#char ":"));
             }
-            if fields[j].json_serialize() == {
+            if json_serialize(fields[j]) == {
             case .Ok(encoded); out.write_string(encoded);
             case .Err; return false;
             }
         }
         out.write_string(",\"source_path\":");
-        if instance.source_path.json_serialize() == {
+        if json_serialize(instance.source_path) == {
         case .Ok(encoded_path); out.write_string(encoded_path);
         case .Err; return false;
         }
@@ -1884,7 +1937,7 @@ reference_write_source :: (
         out.write_byte(cast(u8)(#char "}"));
     }
     out.write_string("]}\n");
-    result := output_path.write_file(out.into_string());
+    result := write_file(output_path, out.into_string());
     return result.is_ok();
 }
 
@@ -1895,7 +1948,7 @@ main :: () {
         exit(1);
     }
     std_directory := args[1].trim_right();
-    if !std_directory.os_fs_is_directory() {
+    if !os_fs_is_directory(std_directory) {
         print("standard-library directory does not exist: %\n", std_directory);
         exit(1);
     }
