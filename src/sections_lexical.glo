@@ -805,9 +805,9 @@ render_section_10 :: () {
     );
     note(28, #string,oneline
         \\`\xff` is U+00FF encoded as the two bytes 195 and 191, not the single
-        \\byte 255. A string literal always produces valid UTF-8, so there is no
-        \\literal spelling that yields an arbitrary byte; build such data as an
-        \\array of `u8` instead.
+        \\byte 255. An ordinary string literal produces valid UTF-8. To write
+        \\arbitrary bytes, use a byte-array literal such as `b"\xff"`, whose
+        \\hexadecimal escape contributes the single byte 255.
     );
     subheading(29, #string,oneline
         \\`\%` and the runtime formatter
@@ -907,6 +907,49 @@ render_section_10 :: () {
         \\The C forms stop at their first zero unit; counted strings keep an
         \\explicit length, including any embedded zeros. Their view layouts and
         \\storage lifetimes are covered in Built-in Strings.
+    );
+    subheading(48, "C-string and byte-array literals");
+    paragraph(49, #string,oneline
+        \\The adjacent lowercase prefix `c` makes a UTF-8 C-string literal:
+        \\`c"hello"` has type `cstring` without an annotation. Its static storage
+        \\has a trailing zero and is borrowed; never free it. An embedded zero
+        \\ends its visible length. The prefix fixes the type: it does not adapt
+        \\to `cstring16`. Use `cast(string)` to make a counted view of its visible
+        \\bytes, or use an ordinary literal for contextual UTF-16 conversion.
+    );
+    paragraph(50, #string,oneline
+        \\The prefix `b` instead makes a fixed `[N]u8` array, with no added
+        \\terminator. Text and Unicode escapes are encoded as UTF-8, while each
+        \\`\xNN` contributes exactly one byte. A local array can be modified;
+        \\copying it copies its bytes. `b""` has type `[0]u8`. The element type
+        \\stays `u8`, and an explicit length must match. `[_]u8` infers the length
+        \\from the initializer; `[*]u8` remains a many-pointer type.
+    );
+    code_block(51, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    text := c"A\0tail";
+        \\    bytes: [_]u8 = b"é\xFF\0";
+        \\    copy := bytes;
+        \\    bytes[0] = 65;
+        \\    print("C: % count=% terminator=%\n", type_name(text.type_of()), text.count, text.data[text.count]);
+        \\    print("bytes: % count=% values=% % % %\n", type_name(bytes.type_of()), bytes.count,
+        \\        bytes[0], bytes[1], bytes[2], bytes[3]);
+        \\    print("copy first=% empty count=%\n", copy[0], b"".count);
+        \\}
+    );
+    code_block(52, "text", #string
+        \\C: cstring count=1 terminator=0
+        \\bytes: [4]u8 count=4 values=65 169 255 0
+        \\copy first=195 empty count=0
+    );
+    note(53, #string,oneline
+        \\The prefix must be one lowercase letter immediately before the quote.
+        \\`c "text"`, `B"text"`, and `name"text"` are an identifier followed by
+        \\an ordinary string, not prefixed literals. Both prefixed forms use the
+        \\same escape validation as ordinary strings.
     );
 }
 
@@ -1368,8 +1411,8 @@ render_section_13 :: () {
 
     subheading(1, "The punctuation table");
     paragraph(2, #string,oneline
-        \\The middle column names the token kind the scanner emits. Two of these
-        \\spellings, `.*` and `?`, are emitted as operator tokens rather than
+        \\The middle column names the token kind the scanner emits. Some of these
+        \\spellings, including `.*`, `.&`, `?`, and `@`, are operator tokens rather than
         \\dedicated kinds, but they are punctuation in practice and are listed
         \\here with the rest.
     );
@@ -1380,6 +1423,7 @@ render_section_13 :: () {
     table_row(7, "`.`   |   Dot   |   member access");
     table_row(8, "`.{` `.[`   |   DotBrace, DotBracket   |   aggregate literal, array literal");
     table_row(9, "`.*`   |   Op   |   pointer dereference, written after the pointer");
+    table_row(44, "`.&`   |   Op   |   address of the preceding value");
     table_row(10, "`..` `..=`   |   Range, RangeInclusive   |   exclusive and inclusive ranges");
     table_row(11, "`...`   |   Ellipsis   |   variadic parameter and the rest pattern");
     table_row(12, "`:`   |   Colon   |   type annotation");
@@ -1398,7 +1442,7 @@ render_section_13 :: () {
         \\not one token: it is `Dot` followed by `LParen`. And `x : := e` is not
         \\a third form; the scanner emits `Colon` and then `ColonEqual`, and the
         \\parser reads that pair as `::=`. The remaining token kinds carry text
-        \\rather than punctuation: `Ident`, `Int`, `Float`, `Str`, `MlStr`,
+        \\rather than punctuation: `Ident`, `Int`, `Float`, `Str`, `CStr`, `BStr`, `MlStr`,
         \\`Directive`, `Op`, `OpName`, `Backtick`, `DoubleBacktick` and `Label`,
         \\each covered by the chapter that owns its construct.
     );
@@ -1426,7 +1470,7 @@ render_section_13 :: () {
         \\    print("full=% tail=% head=% mid=%\n",
         \\        a[..].count, a[2..].count, a[..2].count, a[1..=3].count);
         \\    print("varargs=%\n", sum_all(1, 2, 3));
-        \\    r := *p;
+        \\    r := &p;
         \\    print("deref x=%\n", r.*.x);
         \\}
     );
@@ -1471,7 +1515,8 @@ render_section_13 :: () {
         \\constant-binding token followed by a colon. After `=` it falls into the
         \\general scan whenever another operator character follows. A trailing
         \\`.` is handed back when the character after it could start a
-        \\non-operator token, which is what makes `p.*.b` parse; if a token still
+        \\non-operator token. The pointer suffixes `.*` and `.&` are recognized
+        \\as separate tokens, so `p.*.field.&` chains without spaces. If a token still
         \\ends in `.` it is `error: operator token cannot end with '.'`.
     );
     table_header(31, "Written   —   Lexes as   —   Result");
@@ -1483,7 +1528,7 @@ render_section_13 :: () {
     table_row(37, "`p:*ssize`   |   `:` `*`   |   works, by the `*` exception");
     table_row(38, "`Err! *ssize`   |   `!` `*`   |   a result of a pointer");
     table_row(39, "`Err!*ssize`   |   `!*`   |   `error: unexpected token '!*'`");
-    table_row(40, "`2 * p.*.b`   |   `*` `.` `*` `.` `b`   |   works, by the trailing-dot rule");
+    table_row(40, "`2 * p.*.b`   |   `2` `*` `p` `.*` `.` `b`   |   explicit dereference before the field");
     table_row(41, "`2 *. 3`   |   `*.`   |   `error: operator token cannot end with '.'`");
     note(42, #string,oneline
         \\Whitespace between two operator characters is load-bearing. The two
@@ -1496,7 +1541,7 @@ render_section_13 :: () {
 
 render_section_14 :: () {
     paragraph(0, #string,oneline
-        \\Fifteen operator spellings are reserved. The check lives in the
+        \\The punctuation spellings below are reserved. The check lives in the
         \\scanner and fires on the token, not on the declaration, so it catches a
         \\reserved spelling written as a quoted operator name and a reserved
         \\spelling that reaches operator position by accident with the same
@@ -1529,16 +1574,17 @@ render_section_14 :: () {
     table_row(13, "`->`   |   return-type arrow");
     table_row(14, "`::=`   |   compile-time binding");
     table_row(15, "`.*`   |   pointer dereference");
+    table_row(43, "`.&`   |   address of the preceding value");
     table_row(16, "`...`   |   varargs and the rest pattern");
     table_row(17, "`@`   |   pattern binder");
     table_row(18, "backtick   |   hygiene escape");
     table_row(19, "double backtick   |   code splice");
     paragraph(20, #string,oneline
         \\Because the check is on the token, a mistyped expression can produce
-        \\it. `x := 1.;` is not a float, so the trailing `.` reaches the operator
-        \\scanner and reports `error: reserved operator token '.' (operator '.'
-        \\cannot be overloaded)`. So does `. {`, written with a space, which is
-        \\why `.{` has to be spelled without one.
+        \\it. Writing `. {` with a space reaches the operator scanner and reports
+        \\`error: reserved operator token '.' (operator '.' cannot be overloaded)`.
+        \\Write `.{` without a space to begin a struct literal. A trailing decimal
+        \\point such as `1.` instead receives a float-literal diagnostic.
     );
     note(42, #string,oneline
         \\The instance separator is reserved all the way down in the lexer.
@@ -1624,13 +1670,14 @@ render_section_14 :: () {
     table_row(35, "must belong to a typeclass   |   `operator '<~>' must be declared by a typeclass and implemented by its instances`");
     table_row(36, "one owning class per spelling   |   `operator '+' is already owned by typeclass 'Add'`");
     table_row(37, "`'[]'` takes exactly two   |   `operator '[]' must have arity 2`");
-    table_row(38, "an all-stars name is never prefix   |   `operator '**' cannot be overloaded as a prefix operator`");
+    table_row(38, "an all-stars or all-ampersands name is never prefix   |   `operator '**' cannot be overloaded as a prefix operator`");
     note(39, #string,oneline
-        \\The all-stars rule exists because `*`, `**`, `***` and so on are the
-        \\pointer sigils in type position. A prefix instance of one of them would
-        \\make `**T` ambiguous between a pointer to a pointer and an application
-        \\of a user operator, so the prefix fixity is refused while the binary
-        \\one stays available.
+        \\Prefix `*`, `**`, and longer all-stars spellings are built-in
+        \\dereferences, or pointer constructors when their operand is a type.
+        \\Prefix `&`, `&&`, and longer all-ampersands spellings are built-in
+        \\address operations. They cannot be overloaded as prefix operators,
+        \\including through macros; binary uses remain available. The suffixes
+        \\`.*` and `.&` are reserved and cannot be overloaded in any fixity.
     );
 }
 

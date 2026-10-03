@@ -23,7 +23,7 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 18, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.size, 21, "default-private declarations, unit declarations, and private groups must be excluded");
 assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
 assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
 for (const name of ["Box.make", "Box.get", "Box.set"]) {
@@ -49,6 +49,12 @@ assert.equal(symbols.get("abort").searchable_signature, "() -> #Never");
 assert.equal(symbols.get("GROUPED").kind, "constant");
 assert.equal(symbols.get("GROUPED_SIMPLE").kind, "constant");
 assert.equal(symbols.get("Signed").type_info.variants[0].value, "-1");
+assert.equal(symbols.get("C_TEXT").signature, 'C_TEXT :: c"// { ; }"');
+assert.equal(symbols.get("BYTE_TEXT").signature, 'BYTE_TEXT :: b"\\xFF; // }"');
+assert.deepEqual(symbols.get("literal_defaults").function_info.parameters.map(parameter => parameter.default_value), [
+  'c"// { ; }"', 'b"\\xFF;"',
+]);
+assert.equal(symbols.get("literal_defaults").function_info.return_type, "*u8");
 
 const open = symbols.get("open");
 assert.equal(open.display_signature,
@@ -153,4 +159,4 @@ assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.n
   "Output", "Residual", "from_output", "from_residual", "branch", "?",
 ]);
 
-console.log("Reference extraction checks passed: visibility groups, inherent methods, defaults, constraints, memory forms, typed flags, function pointers, source locations, and try(Target) operators.");
+console.log("Reference extraction checks passed: visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, memory forms, typed flags, function pointers, source locations, and try(Target) operators.");

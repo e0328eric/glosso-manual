@@ -620,7 +620,7 @@ render_section_107 :: () {
         \\`i := 0` would not serve here: the condition would not be compile-time
         \\evaluable and `field_name(Vec3, i)` would not have an index. `while`
         \\and `#inline while` covers the loop itself. A compile-time binding has
-        \\no runtime storage and therefore no address, so `p := *i;` is
+        \\no runtime storage and therefore no address, so `p := &i;` is
         \\`error: cannot take pointer to i`.
     );
     note(25, #string,oneline
@@ -2331,7 +2331,7 @@ render_section_114 :: () {
         \\`Build_Options.add_linker_arg`, `Build_Options.add_linker_args` and
         \\`Build_Options.add_module_path`. They mutate only the detached local record;
         \\call `Build_Options.set_build_options` afterwards. Direct field assignment and
-        \\`array.add` on its dynamic-array fields are equivalent.
+        \\`array.push` on its dynamic-array fields are equivalent.
     );
     paragraph(22, #string,oneline
         \\`Compiler_Backend` has seven members. `LLVM`, `Object`, `LLVM_IR`,
@@ -2462,19 +2462,24 @@ render_section_114 :: () {
     code_block(42, "glosso", #string
         \\#import "Io";
         \\#import "Compiler";
+        \\#import "Strings/Utf8";
         \\#import "String_Builder";
         \\
         \\adder_bindings :: () -> string {
         \\    sources: [..]string;
         \\    defer sources.free();
-        \\    sources.add("adder.c");
+        \\    sources.push("adder.c");
         \\
         \\    arguments: [1]string = .["-fno-builtin"];
         \\
         \\    if Native_Compile_Output.compile_c_archive("adder", sources, .compiler_args = arguments[..]) == {
         \\    case .Ok(archive);
         \\        print("[c] archive at %\n", archive.artifact);
-        \\        return (("adder :: #library,static \"").cat(archive.artifact)).cat("\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
+        \\        slashes := archive.artifact.replace("\\", "\\\\");
+        \\        defer slashes.free();
+        \\        escaped := slashes.replace("\"", "\\\"");
+        \\        defer escaped.free();
+        \\        return (("adder :: #library,static \"").cat(escaped)).cat("\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
         \\    case .Err(failure);
         \\        return "#comptime { #compile_error \"the adder archive did not build\"; }";
         \\    }
@@ -2499,6 +2504,9 @@ render_section_114 :: () {
         \\#library)`. Handing `archive.artifact` to Bindgen's `library_spec`
         \\and inserting the generated source does the same job for a real header;
         \\that route is covered in Generating Bindings with Bindgen.
+        \\A path inserted into a quoted source literal must escape backslashes
+        \\and quotes, as above; printing a native Windows path verbatim does not
+        \\produce a valid Glosso string literal.
     );
     subheading(45, "Other compiler services");
     paragraph(46, #string,oneline
@@ -2700,7 +2708,7 @@ render_section_115 :: () {
         \\    workspace := Workspace.create_workspace("child");
         \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "child.exe";
-        \\    options.compile_time_command_line.add("release");
+        \\    options.compile_time_command_line.push("release");
         \\    defer options.compile_time_command_line.free();
         \\    options.set_build_options(workspace);
         \\

@@ -3,7 +3,8 @@
 The query files and Wasm parser are used by the manual's browser highlighter.
 The parser uses the sibling `../tree-sitter-glosso` grammar, including visibility
 on inherent block headers, receiver syntax, `#Never`, and `#on_drop_error`.
-`current-language.patch` adds custom `!!` suffix parsing, negative enum values,
+`current-language.patch` adds `c"..."` and `b"..."` literals, suffix address-of
+(`value.&`), repeated prefix `&`, custom `!!` suffix parsing, negative enum values,
 and bracket types in expression positions, which the current compiler accepts
 but the upstream grammar does not yet recognize. Rebuild in a local copy so the
 sibling repository stays unchanged.

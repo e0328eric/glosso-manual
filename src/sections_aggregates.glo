@@ -204,7 +204,7 @@ render_section_37 :: () {
         \\    p := Plain.{ 1, 2, 3 };
         \\    print("positional: a=% b=% c=%\n", p.a, p.b, p.c);
         \\    print("offsets:     a=% b=% c=%\n",
-        \\          offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
+        \\          offset(&p, &p.a), offset(&p, &p.b), offset(&p, &p.c));
         \\}
     );
     code_block(26, "text", #string
@@ -238,7 +238,7 @@ render_section_37 :: () {
         \\
         \\main :: () {
         \\    tail: Node = .{ .value = 2, .next = .None };
-        \\    head: Node = .{ .value = 1, .next = *tail };
+        \\    head: Node = .{ .value = 1, .next = &tail };
         \\    #pattern .Some(p) := head.next else { print("end\n"); return; };
         \\    print("% %\n", head.value, p.*.value);
         \\    print("size_of(Node)=%\n", size_of(Node));
@@ -312,12 +312,12 @@ render_section_38 :: () {
         \\main :: () {
         \\    x: Bytes; y: Tie; m: Mixed;
         \\    print("Bytes size=% a=% b=% c=%\n", size_of(Bytes),
-        \\          offset(*x, *x.a), offset(*x, *x.b), offset(*x, *x.c));
+        \\          offset(&x, &x.a), offset(&x, &x.b), offset(&x, &x.c));
         \\    print("Tie   size=% a=% b=%\n", size_of(Tie),
-        \\          offset(*y, *y.a), offset(*y, *y.b));
+        \\          offset(&y, &y.a), offset(&y, &y.b));
         \\    print("Mixed size=% id=% ratio=% code=% flag=%\n", size_of(Mixed),
-        \\          offset(*m, *m.id), offset(*m, *m.ratio),
-        \\          offset(*m, *m.code), offset(*m, *m.flag));
+        \\          offset(&m, &m.id), offset(&m, &m.ratio),
+        \\          offset(&m, &m.code), offset(&m, &m.flag));
         \\}
     );
     code_block(7, "text", #string
@@ -398,13 +398,13 @@ render_section_38 :: () {
         \\    p: Plain; q: C_Aln; r: Packed;
         \\    print("Plain  size=% align=% a=% b=% c=%\n", size_of(Plain),
         \\          type_info(Plain).alignment,
-        \\          offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
+        \\          offset(&p, &p.a), offset(&p, &p.b), offset(&p, &p.c));
         \\    print("C_Aln  size=% align=% a=% b=% c=%\n", size_of(C_Aln),
         \\          type_info(C_Aln).alignment,
-        \\          offset(*q, *q.a), offset(*q, *q.b), offset(*q, *q.c));
+        \\          offset(&q, &q.a), offset(&q, &q.b), offset(&q, &q.c));
         \\    print("Packed size=% align=% a=% b=% c=%\n", size_of(Packed),
         \\          type_info(Packed).alignment,
-        \\          offset(*r, *r.a), offset(*r, *r.b), offset(*r, *r.c));
+        \\          offset(&r, &r.a), offset(&r, &r.b), offset(&r, &r.c));
         \\}
     );
     code_block(26, "text", #string
@@ -441,7 +441,7 @@ render_section_38 :: () {
         \\main :: () {
         \\    h: Header;
         \\    print("Header size=% magic=% version=% length=%\n", size_of(Header),
-        \\          offset(*h, *h.magic), offset(*h, *h.version), offset(*h, *h.length));
+        \\          offset(&h, &h.magic), offset(&h, &h.version), offset(&h, &h.length));
         \\    h.magic = 1; h.version = 2; h.length = 3;
         \\    print("read back: % % %\n", h.magic, h.version, h.length);
         \\    print("Inner=% Nested=%\n", size_of(Inner), size_of(Nested));
@@ -718,13 +718,15 @@ render_section_39 :: () {
         \\has no `.value` text field, and does not convert implicitly to `string`.
         \\Path-taking APIs instead accept a generic `P` constrained by
         \\`AsView(P, Path_View)`. The standard library supplies that zero-copy
-        \\view for `string`, `Path`, and `Path_View`.
+        \\view for `string`, pointers to `Path`, and `Path_View`. An owning
+        \\path's `as_view()` method borrows its components without moving it.
     );
     code_block(33, "glosso", #string
         \\#import "Io";
         \\#import "File_System/Path";
         \\
-        \\is_component_path :: (value: $P) -> bool where AsView(P, Path_View) {
+        \\is_component_path :: (value: $P) -> bool
+        \\    #memory{reads(value), noescape(value)} where AsView(P, Path_View) {
         \\    return path_like_view(value).kind == Path_View_Kind.Components;
         \\}
         \\
@@ -732,10 +734,11 @@ render_section_39 :: () {
         \\    path := Path.path_from_string("src/./manual/../main.glo", Path_Style.Posix);
         \\    // Path is a managed owner; scope exit releases its storage.
         \\
-        \\    print("path=% components=%\n", path, path.components.count);
+        \\    text := path.to_string(Path_Style.Posix, context.temp_allocator);
+        \\    print("path=% components=%\n", text, path.components.count);
         \\    print("views: text=% components=%\n",
         \\        path_like_view("src/main.glo").kind == Path_View_Kind.Text,
-        \\        is_component_path(path_like_view(path)));
+        \\        is_component_path(path.as_view()));
         \\}
     );
     code_block(34, "text", #string
@@ -2450,13 +2453,13 @@ render_section_47 :: () {
         \\    b.opt = .None;
         \\    print("None bits = %\n", b.raw);
         \\
-        \\    b.opt = *n;
+        \\    b.opt = &n;
         \\    print("Some bits = zero? %\n", b.raw == 0);
         \\
         \\    print("sizes: ?*s64=% *s64=% ?s64=% s64=%\n",
         \\        size_of(?*s64), size_of(*s64), size_of(?s64), size_of(s64));
         \\
-        \\    p: ?*s64 = *n;
+        \\    p: ?*s64 = &n;
         \\    q: ?*s64 = .None;
         \\    print("null test: % %\n", p == null, q == null);
         \\}

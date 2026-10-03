@@ -10,11 +10,11 @@ render_section_49 :: () {
         \\unbounded run, `[]T` for a run whose length travels with it.
     );
     paragraph(1, #string,oneline
-        \\One character spells both operations and position decides which. A
-        \\prefix `*` takes the address of an addressable expression; a suffix `.*`
-        \\reads through a pointer. The dereference is a suffix so that a chain
-        \\applies in the order it is written: `pp.*.*` steps out through the outer
-        \\pointer first, left to right, with no parentheses.
+        \\Both operations have prefix and suffix spellings. `&value` and
+        \\`value.&` take an address; `*pointer` and `pointer.*` dereference it.
+        \\Both dereference spellings produce the same assignable storage.
+        \\`**pp` and `pp.*.*` follow two pointers. When the operand is a type,
+        \\prefix `*` still forms a pointer type: `*s64` and `**s64`.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -22,11 +22,11 @@ render_section_49 :: () {
         \\
         \\main :: () {
         \\    n: s64 = 10;
-        \\    p := *n;                     // p is *s64
-        \\    print("read: %\n", p.*);
-        \\    p.* = 11;
+        \\    p := &n;                     // p is *s64
+        \\    print("read: %\n", *p);
+        \\    *p = 11;
         \\    print("after the store: %\n", n);
-        \\    pp := *p;                    // pp is **s64
+        \\    pp := p.&;                   // pp is **s64
         \\    print("through two: %\n", pp.*.*);
         \\    print("sizes: % %\n", size_of(*s64), size_of(**s64));
         \\}
@@ -40,15 +40,15 @@ render_section_49 :: () {
 
     subheading(4, "Taking an address");
     paragraph(5, #string,oneline
-        \\Prefix `*` applies only to an expression that has storage: a local, a
+        \\Prefix `&` and suffix `.&` apply only to an expression that has storage: a local, a
         \\global, a struct field, an array element, or a dereference of another
         \\pointer. A computed value has no address, and asking for one names the
-        \\node kind that failed: `*(1 + 2)` is
+        \\node kind that failed: `&(1 + 2)` is
         \\`error: cannot take a pointer to a non-addressable expression: 'Binary'`.
     );
     paragraph(6, #string,oneline
         \\`void` is a real type with a single value and no storage, so it has no
-        \\address either. `*x` on a `void` local is
+        \\address either. `&x` on a `void` local is
         \\`error: pointer to the zero sized type is not allowed`, with
         \\`note: 'void' holds no storage; '*void' spells the type-erased pointer instead`.
     );
@@ -61,14 +61,14 @@ render_section_49 :: () {
         \\
         \\main :: () {
         \\    v := Vec.{ 1, 2 };
-        \\    p := *v;
+        \\    p := &v;
         \\    print("fields: % %\n", p.*.x, p.*.y);
         \\    shift(p, 10);
         \\    print("after the call: %\n", v.x);
-        \\    px := *v.x;                  // a pointer to one field
+        \\    px := &v.x;                  // a pointer to one field
         \\    px.* = 100;
         \\    a: [3]s64 = .[1, 2, 3];
-        \\    pe := *a[1];                 // a pointer to one element
+        \\    pe := &a[1];                 // a pointer to one element
         \\    pe.* = 20;
         \\    print("field: % element: %\n", v.x, a[1]);
         \\}
@@ -84,8 +84,8 @@ render_section_49 :: () {
         \\There is no implicit dereference on `.`. Given `p: *Vec`, the expression
         \\`p.x` is `error: member of non-struct`, because `p` is a pointer and a
         \\pointer has no members. The field is reached by dereferencing first:
-        \\`p.*.x`. The rule keeps `.` meaning one thing, and it is why the suffix
-        \\dereference is worth its two characters.
+        \\`p.*.x`, or `(*p).x` with the prefix spelling. Parentheses in the latter
+        \\form make the dereference happen before member access.
     );
     note(11, #string,oneline
         \\A reader arriving from C or Go will write `p.x` and get
@@ -126,9 +126,9 @@ render_section_49 :: () {
         \\
         \\main :: () {
         \\    n: s64 = 42;
-        \\    c: *const s64 = *n;          // the pointee is read-only
-        \\    b: **const s64 = *c;
-        \\    print("plain:  %\n", type_name((*n).type_of()));
+        \\    c: *const s64 = &n;          // the pointee is read-only
+        \\    b: **const s64 = &c;
+        \\    print("plain:  %\n", type_name((&n).type_of()));
         \\    print("const:  %\n", type_name(c.type_of()));
         \\    print("nested: %\n", type_name(b.type_of()));
         \\    print("value:  %\n", b.*.*);
@@ -229,11 +229,11 @@ render_section_49 :: () {
         \\
         \\main :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p := *a[0];
-        \\    q := *a[2];
+        \\    p := &a[0];
+        \\    q := &a[2];
         \\    print("== %  != %\n", p == q, p != q);
         \\    print("<  %  >  %\n", p < q, p > q);
-        \\    r := *a[0];
+        \\    r := &a[0];
         \\    print("same object: %\n", p == r);
         \\}
     );
@@ -253,8 +253,8 @@ render_section_49 :: () {
     table_header(41, "Written   —   Diagnostic");
     table_row(42, "`p + 1`   |   `error: no operator '+' for *s64, ssize`");
     table_row(43, "`p[1]`   |   `error: no operator '[]' for *s64, ssize`");
-    table_row(44, "`mp: [*]s64 = *a[0];`   |   `error: got *s64, expected [*]s64`");
-    table_row(45, "`p := *(1 + 2);`   |   `error: cannot take a pointer to a non-addressable expression: 'Binary'`");
+    table_row(44, "`mp: [*]s64 = &a[0];`   |   `error: got *s64, expected [*]s64`");
+    table_row(45, "`p := &(1 + 2);`   |   `error: cannot take a pointer to a non-addressable expression: 'Binary'`");
     paragraph(46, #string,oneline
         \\A pointer has a `Show` instance, but it is deliberately uninformative:
         \\`print("%\n", p)` prints `<pointer>`. Printing the address means casting
@@ -344,7 +344,7 @@ render_section_50 :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
         \\    d: [..]s64;
         \\    defer d.free();
-        \\    d.add(7, 8, 9);
+        \\    d.push(7, 8, 9);
         \\    s := "hey";
         \\    print("from [N]T: %\n", a.data[0]);
         \\    print("from []T:  %\n", a[..].data[1]);
@@ -456,7 +456,7 @@ render_section_50 :: () {
         \\
         \\main :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p: *s64 = *a[0];
+        \\    p: *s64 = &a[0];
         \\    mp := cast([*]s64) p;
         \\    print("as a many-pointer: % %\n", mp[0], mp[2]);
         \\    back := cast(*s64) mp;
@@ -485,7 +485,7 @@ render_section_50 :: () {
         \\
         \\main :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p: *s64 = *a[0];
+        \\    p: *s64 = &a[0];
         \\    mp: [*]s64 = p;              // implicit under the gate
         \\    back: *s64 = mp;
         \\    print("% %\n", mp[3], back.*);
@@ -536,10 +536,10 @@ render_section_51 :: () {
         \\    v := a[..];
         \\    d: [..]s64;
         \\    defer d.free();
-        \\    d.add(1, 2, 3, 4, 5);
+        \\    d.push(1, 2, 3, 4, 5);
         \\    print("sizes: [3]s64=% []s64=% [..]s64=%\n",
         \\        size_of(a.type_of()), size_of(v.type_of()), size_of(d.type_of()));
-        \\    words := cast([*]usize) cast(*usize) *d;
+        \\    words := cast([*]usize) cast(*usize) &d;
         \\    print("descriptor words: % % %\n", words[0], words[1] == cast(usize) d.data, words[2]);
         \\    print("fields: a.count=% v.count=% d.count=% d.capacity=%\n",
         \\        a.count, v.count, d.count, d.capacity);
@@ -566,8 +566,10 @@ render_section_51 :: () {
         \\not own its storage, so it has nothing to report. On a fixed array
         \\`.count` is a compile-time constant and usable wherever one is, including
         \\in `#assert`. The length in `[N]T` must itself be an integer literal or a
-        \\plain identifier naming a constant; anything else is
-        \\`error: bracket type expects [], [*], [..], or [N]`, and an expression in
+        \\plain identifier naming a constant. `[_]T` infers the length from its
+        \\array-literal initializer, including a `b"..."` literal for `u8`.
+        \\It requires an initializer and still produces a fixed array. Other forms give
+        \\`error: bracket type expects [], [*], [..], [N], or [_]`, and an expression in
         \\the brackets fails earlier still, at the operator.
     );
     code_block(15, "glosso", #string
@@ -590,6 +592,22 @@ render_section_51 :: () {
         \\a: count=5 size=40
         \\b: count=3 size=24
         \\zero initialized: 0 0 0
+    );
+    code_block(59, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    values: [_]s64 = .[10, 20, 30];
+        \\    bytes: [_]u8 = b"hi";
+        \\    bytes[0] = 72;
+        \\    print("% count=%\n", type_name(values.type_of()), values.count);
+        \\    print("% bytes=% %\n", type_name(bytes.type_of()), bytes[0], bytes[1]);
+        \\}
+    );
+    code_block(60, "text", #string
+        \\[3]s64 count=3
+        \\[2]u8 bytes=72 105
     );
 
     subheading(17, "Value and reference semantics");
@@ -632,7 +650,7 @@ render_section_51 :: () {
     subheading(22, "Growth and the allocator");
     paragraph(23, #string,oneline
         \\A fresh `[..]T` is `count = 0`, `capacity = 0`, and holds no allocation at
-        \\all; `array.add` or `array.reserve` acquires its backing storage.
+        \\all; `array.push` or `array.reserve` acquires its backing storage.
         \\Appending grows capacity from zero to eight and doubles it from there.
         \\The storage comes from `context.allocator`, so a
         \\`#push_allocator` region redirects it without any change at the call site.
@@ -647,7 +665,7 @@ render_section_51 :: () {
         \\    print("fresh: count=% capacity=%\n", d.count, d.capacity);
         \\    for i: 0..20 {
         \\        before := d.capacity;
-        \\        d.add(i);
+        \\        d.push(i);
         \\        if d.capacity != before
         \\            print("count %: capacity % -> %\n", d.count, before, d.capacity);
         \\    }
@@ -680,7 +698,7 @@ render_section_51 :: () {
         \\main :: () {
         \\    d: [..]s64;
         \\    print("fresh:      count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
-        \\    d.add(1, 2, 3);
+        \\    d.push(1, 2, 3);
         \\    print("after adds: count=% capacity=%\n", d.count, d.capacity);
         \\    d.free();
         \\    print("after free: count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
@@ -694,13 +712,13 @@ render_section_51 :: () {
 
     subheading(29, "The dynamic-array procedures");
     paragraph(30, #string,oneline
-        \\Dynamic arrays expose `add`, `append`, `reserve`, `reset`, `free`, and
+        \\Dynamic arrays expose `push`, `append`, `reserve`, `reset`, `free`, and
         \\`deinit` as inherent methods in the Prelude. Their mutable receivers borrow
         \\the descriptor automatically. `view` is also available on arrays and views;
         \\it returns a borrowed view without copying elements.
     );
     table_header(31, "Declaration   —   Effect   —   `#memory`");
-    table_row(32, "`a.add(value, ...)`, `a.append(value, ...)`   |   appends and grows if needed   |   `invalidates(#self), writes(#self), noescape(#self), owns(value, into: #self)`");
+    table_row(32, "`a.push(value, ...)`, `a.append(value, ...)`   |   appends and grows if needed   |   `invalidates(#self), writes(#self), noescape(#self), escapes(value, into: #self)`");
     table_row(58, "`a.reserve(capacity)`   |   reserves storage without changing count   |   `invalidates(#self), writes(#self), noescape(#self)`");
     table_row(33, "`a.reset()`   |   count to zero, allocation retained   |   `writes(#self), noescape(#self)`");
     table_row(34, "`a.free()`, `a.deinit()`   |   releases the backing allocation   |   `kills(#self), noescape(#self)`");
@@ -708,12 +726,12 @@ render_section_51 :: () {
     paragraph(36, #string,oneline
         \\The memory checker reads these contracts. Growing an array makes its
         \\backing storage owned and creates a release obligation. A view taken before
-        \\`add` or `reserve` can become stale when growth moves the allocation.
+        \\`push` or `reserve` can become stale when growth moves the allocation.
         \\Release the array with `free()` after its final use. Ownership and Release
         \\Obligations and Aliasing, Invalidation, and Storage Generations cover both.
     );
     paragraph(37, #string,oneline
-        \\`add` is variadic in its element type and appends several written-out
+        \\`push` is variadic in its element type and appends several written-out
         \\values in one call. A loop can append the elements of an existing array.
         \\Mutating operations require a writable dynamic array descriptor; a borrowed
         \\view does not own the allocation and cannot call `free()`.
@@ -727,7 +745,7 @@ render_section_51 :: () {
         \\`error: got [..]s64, expected []s64`; and `b: [5]s64 = v;` is
         \\`error: got []s64, expected [5]s64`. Every conversion is written, and each
         \\one is a slice or a call. The deliberate exception is a pointer made
-        \\directly from a fixed-array literal: `*.[...]` can satisfy an expected
+        \\directly from a fixed-array literal: `&.[...]` can satisfy an expected
         \\borrowed-slice type.
     );
     table_header(40, "From   —   To   —   Written");
@@ -735,9 +753,9 @@ render_section_51 :: () {
     table_row(42, "`[..]T`   |   `[]T`   |   `d.view()` or `d[..]`");
     table_row(43, "`[]T`   |   `[]T` over fewer elements   |   `v[lo..hi]`");
     table_row(44, "`[]T`   |   `[]const T`   |   implicit at an assignment or a call");
-    table_row(54, "`*[N]T` from `*.[...]`   |   `[]T`   |   implicit in an expected slice context; temporary borrow");
+    table_row(54, "`*[N]T` from `&.[...]`   |   `[]T`   |   implicit in an expected slice context; temporary borrow");
     table_row(45, "`[]T`   |   `[N]T`   |   no conversion; copy element by element");
-    table_row(46, "`[]T` or `[N]T`   |   `[..]T`   |   no conversion; `array.add` the elements");
+    table_row(46, "`[]T` or `[N]T`   |   `[..]T`   |   no conversion; `array.push` the elements");
     code_block(47, "glosso", #string
         \\#import "Io";
         \\
@@ -751,12 +769,12 @@ render_section_51 :: () {
         \\    a: [4]s64 = .[1, 2, 3, 4];
         \\    d: [..]s64;
         \\    defer d.free();
-        \\    for x: a d.add(x * 10);
+        \\    for x: a d.push(x * 10);
         \\    print("from a fixed array: %\n", total(a[..]));
         \\    print("from a dynamic array: %\n", total(d[..]));
         \\    print("through array_view:  %\n", total(d.view()));
         \\    print("a sub-range: %\n", total(a[1..3]));
-        \\    print("from temporary storage: %\n", total(*.[cast(s64)5, cast(s64)6, cast(s64)7]));
+        \\    print("from temporary storage: %\n", total(&.[cast(s64)5, cast(s64)6, cast(s64)7]));
         \\}
     );
     code_block(48, "text", #string
@@ -772,9 +790,9 @@ render_section_51 :: () {
         \\slice spelling.
     );
     note(55, #string,oneline
-        \\`*.[...]` materialises an anonymous fixed array whose lifetime is only
+        \\`&.[...]` materialises an anonymous fixed array whose lifetime is only
         \\the surrounding expression. That is long enough for an immediate call
-        \\such as `total(*.[cast(s64)5, cast(s64)6, cast(s64)7])`. Do not store or return the resulting slice,
+        \\such as `total(&.[cast(s64)5, cast(s64)6, cast(s64)7])`. Do not store or return the resulting slice,
         \\or otherwise let it escape; use a named fixed array when the borrow must
         \\live longer.
     );
@@ -974,7 +992,7 @@ render_section_52 :: () {
         \\    v := a[..];
         \\    d: [..]s64;
         \\    defer d.free();
-        \\    d.add(1, 2, 3, 4);
+        \\    d.push(1, 2, 3, 4);
         \\    s := "hello world";
         \\    print("view sliced:   count=% type=%\n", v[2..4].count, type_name((v[2..4]).type_of()));
         \\    print("dyn sliced:    count=% type=%\n", d[1..].count, type_name((d[1..]).type_of()));
@@ -989,7 +1007,7 @@ render_section_52 :: () {
     paragraph(34, #string,oneline
         \\`type_name` and diagnostics preserve `[]s64`; a slice whose element is
         \\the native integer instead prints `[]ssize`.
-        \\A slice of a dynamic array is a borrow, so a later `array.add`
+        \\A slice of a dynamic array is a borrow, so a later `array.push`
         \\invalidates it: see Aliasing, Invalidation, and Storage Generations.
     );
 
@@ -1095,10 +1113,10 @@ render_section_53 :: () {
         \\    defer aos.free();
         \\    defer soa.free();
         \\
-        \\    aos.add(Particle.{ 1, 10, 20 });
-        \\    soa.add(Particle.{ 1, 10, 20 });
-        \\    aos.add(Particle.{ 2, 30, 40 });
-        \\    soa.add(Particle.{ 2, 30, 40 });
+        \\    aos.push(Particle.{ 1, 10, 20 });
+        \\    soa.push(Particle.{ 1, 10, 20 });
+        \\    aos.push(Particle.{ 2, 30, 40 });
+        \\    soa.push(Particle.{ 2, 30, 40 });
         \\
         \\    print("aos: count=% [1].y=%\n", aos.count, aos[1].y);
         \\    print("soa: count=% x[1]=%\n", soa.count, soa.x[1]);
@@ -1144,7 +1162,7 @@ render_section_53 :: () {
     subheading(18, "Element syntax is unchanged");
     paragraph(19, #string,oneline
         \\Nothing at a use site distinguishes the two layouts. Elements are appended
-        \\with `array.add` and a whole element value, read back with `array[i]`, and
+        \\with `array.push` and a whole element value, read back with `array[i]`, and
         \\iterated with `for`, which yields reassembled elements and an optional
         \\index. A `#soa [..]T` is also an ordinary struct field type.
     );
@@ -1156,8 +1174,8 @@ render_section_53 :: () {
         \\main :: () {
         \\    w: World;
         \\    defer w.particles.free();
-        \\    w.particles.add(Particle.{ 1, 10, 20 });
-        \\    w.particles.add(Particle.{ 2, 30, 40 });
+        \\    w.particles.push(Particle.{ 1, 10, 20 });
+        \\    w.particles.push(Particle.{ 2, 30, 40 });
         \\
         \\    for e: w.particles print("elem % %\n", e.id, e.x);
         \\    for e, i: w.particles print("[%] %\n", i, e.y);
@@ -1187,8 +1205,8 @@ render_section_53 :: () {
         \\main :: () {
         \\    soa: #soa [..]Particle;
         \\    defer soa.free();
-        \\    soa.add(Particle.{ 1, 10, 20 });
-        \\    soa.add(Particle.{ 2, 30, 40 });
+        \\    soa.push(Particle.{ 1, 10, 20 });
+        \\    soa.push(Particle.{ 2, 30, 40 });
         \\
         \\    xs := soa.x;
         \\    print("field view: type=% count=% size=%\n",
@@ -1229,8 +1247,8 @@ render_section_53 :: () {
         \\main :: () {
         \\    bodies: #soa [..]Body;
         \\    defer bodies.free();
-        \\    bodies.add(Body.{ V2.{ 1.0, 2.0 }, 10.0 });
-        \\    bodies.add(Body.{ V2.{ 3.0, 4.0 }, 20.0 });
+        \\    bodies.push(Body.{ V2.{ 1.0, 2.0 }, 10.0 });
+        \\    bodies.push(Body.{ V2.{ 3.0, 4.0 }, 20.0 });
         \\
         \\    print("pos view: % / mass view: %\n",
         \\          type_name(bodies.pos.type_of()), type_name(bodies.mass.type_of()));
@@ -1274,8 +1292,8 @@ render_section_53 :: () {
         \\main :: () {
         \\    soa: #soa [..]Particle;
         \\    defer soa.free();
-        \\    soa.add(Particle.{ 1, 10, 20 });
-        \\    soa.add(Particle.{ 2, 30, 40 });
+        \\    soa.push(Particle.{ 1, 10, 20 });
+        \\    soa.push(Particle.{ 2, 30, 40 });
         \\
         \\    v := soa.view();
         \\    print("view type=% size=%\n", type_name(v.type_of()), size_of(v.type_of()));
@@ -1312,9 +1330,9 @@ render_section_53 :: () {
         \\main :: () {
         \\    soa: #soa [..]Particle;
         \\    defer soa.free();
-        \\    soa.add(Particle.{ 1, 10, 20 });
-        \\    soa.add(Particle.{ 2, 30, 40 });
-        \\    soa.add(Particle.{ 3, 50, 60 });
+        \\    soa.push(Particle.{ 1, 10, 20 });
+        \\    soa.push(Particle.{ 2, 30, 40 });
+        \\    soa.push(Particle.{ 3, 50, 60 });
         \\
         \\    bad := soa[..];
         \\    print("type=% count=%\n", type_name(bad.type_of()), bad.count);
@@ -1398,8 +1416,8 @@ render_section_54 :: () {
     table_row(16, "A struct field's default   |   `origin: [2]s64 = .[ 3, 4 ];`");
     table_row(17, "An element of an enclosing literal   |   `.[ .{ 1, 1 }, .{ 2, 2 } ]`");
     table_row(18, "A union variant payload   |   `o: ?Vec2 = .Some(.{ 5, 5 });`");
-    table_row(19, "An ifx arm with a typed target   |   `ifx flag then .{ 1, 0 } else .{ 0, 1 }`");
-    table_row(20, "A variadic argument of known element type   |   `d.add(.{ 1, 2 })`");
+    note(19, "An `ifx` arm may need its own type: qualify its literal as `Vec2.{ ... }` rather than relying on the surrounding target annotation.");
+    table_row(20, "A variadic argument of known element type   |   `d.push(.{ 1, 2 })`");
     code_block(21, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
@@ -1455,18 +1473,18 @@ render_section_54 :: () {
         \\main :: () {
         \\    d: [..]Vec2;
         \\    defer d.free();
-        \\    d.add(.{ 1, 2 }, .{ 3, 4 });
+        \\    d.push(.{ 1, 2 }, .{ 3, 4 });
         \\
         \\    s: #soa [..]Vec2;
         \\    defer s.free();
-        \\    s.add(.{ 7, 8 });
+        \\    s.push(.{ 7, 8 });
         \\
         \\    print("variadic x: % %\n", d[0].x, d[1].x);
         \\    print("soa: %\n", s.x[0]);
         \\    print("default parameter: % %\n", with_default(), with_default(.{ 42, 0 }));
         \\
         \\    flag := true;
-        \\    w: Vec2 = ifx flag then .{ 1, 0 } else .{ 0, 1 };
+        \\    w: Vec2 = ifx flag Vec2.{ 1, 0 } else Vec2.{ 0, 1 };
         \\    print("ifx arm: % %\n", w.x, w.y);
         \\}
     );
@@ -1555,8 +1573,8 @@ render_section_54 :: () {
         \\A view or a dynamic array cannot be initialized from a collection literal.
         \\`a: []s64 = .[ 1, 2, 3 ];` is `error: runtime array literals require a
         \\fixed array, Simd, or Matrix context`. Build a fixed array and take
-        \\`a[..]`, or grow a `[..]T` with `array.add`. For an immediate borrowed
-        \\view, `*.[1, 2, 3]` instead creates a pointer to temporary fixed-array
+        \\`a[..]`, or grow a `[..]T` with `array.push`. For an immediate borrowed
+        \\view, `&.[1, 2, 3]` instead creates a pointer to temporary fixed-array
         \\storage that can coerce to an expected `[]s64`; that storage lasts only
         \\for the surrounding expression.
     );
@@ -1669,13 +1687,13 @@ render_section_55 :: () {
         \\
         \\main :: () {
         \\    v := Vec2.{ 3, 4 };
-        \\    p := *v;
+        \\    p := &v;
         \\    print("read: %\n", p.*.x);
         \\    p.*.y = 40;
-        \\    bump(*v);
+        \\    bump(&v);
         \\    print("after: % %\n", v.x, v.y);
         \\
-        \\    pp := *p;
+        \\    pp := &p;
         \\    print("double: %\n", pp.*.*.x);
         \\}
     );
@@ -1685,8 +1703,8 @@ render_section_55 :: () {
         \\double: 4
     );
     paragraph(16, #string,oneline
-        \\The symmetric conversion does not happen either. The prefix `*` takes an
-        \\address and is written at the call site, as in `bump(*v)`. Passing the
+        \\The symmetric conversion does not happen either. The prefix `&` takes an
+        \\address and is written at the call site, as in `bump(&v)`. Passing the
         \\value where a pointer is declared is `error: arg type Vec2 != *Vec2 in
         \\call bump`, and passing the pointer where the value is declared is
         \\`error: arg type *Vec2 != Vec2 in call byval`. Pointer syntax is covered
@@ -1796,7 +1814,7 @@ render_section_55 :: () {
         \\    xs: [4]s64 = .[ 1, 2, 3, 4 ];
         \\    d: [..]s64;
         \\    defer d.free();
-        \\    d.add(5, 6);
+        \\    d.push(5, 6);
         \\
         \\    print("written out: %\n", label_sum("t", 1, 2, 3));
         \\    print("fixed array: %\n", label_sum("t", xs...));
@@ -1839,9 +1857,9 @@ render_section_55 :: () {
         \\`error: unexpected token '...'`.
     );
     note(44, #string,oneline
-        \\`array.add` does not accept an expanded argument. Its variadic parameter
+        \\`array.push` does not accept an expanded argument. Its variadic parameter
         \\is served by a `#magic` implementation that expansion does not reach, so
-        \\`d.add(xs...)` is `error: got [4]s64, expected s64`; append in a
+        \\`d.push(xs...)` is `error: got [4]s64, expected s64`; append in a
         \\loop, or route through an ordinary variadic. `print` does accept expansion
         \\but counts the pack as one argument when it checks placeholders, so
         \\`print("% %\n", ss...)` is `error: print: format has 2 '%' placeholder(s)
@@ -1860,7 +1878,7 @@ render_section_55 :: () {
         \\uses the first non-erased argument of `Reader.read(reader, buffer)` as its
         \\receiver. Fields and applicable inherent methods take precedence. If more
         \\than one class applies, qualify the class explicitly. Core standard-library
-        \\behavior uses methods, including `array.add(...)`, `text.substring(...)`, and
+        \\behavior uses methods, including `array.push(...)`, `text.substring(...)`, and
         \\`value.type_of()`. Domain operations with independent inputs use free
         \\functions, such as `alloc(size)`, `exists(path)`, and
         \\`simd_store(destination, value)`.

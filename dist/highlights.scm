@@ -81,6 +81,8 @@
 
 (comment) @comment
 (string_literal) @string
+(cstring_literal) @string
+(byte_array_literal) @string
 (multiline_string_line) @string
 (char_literal) @character
 (integer_literal) @number
@@ -110,6 +112,7 @@
 (binding_operator) @operator
 (constant_pattern_operator) @operator
 (try_operator) @operator
+(postfix_expression [".*" ".&"] @operator)
 
 ; Types
 (named_type [

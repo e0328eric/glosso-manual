@@ -28,7 +28,7 @@ render_section_116 :: () {
         \\}
     );
     table_header(3, "Field   —   What reads it");
-    table_row(5, "`allocator`   |   `alloc`, `free`, `array.add`, `format`, and every standard-library call that defaults its allocator parameter");
+    table_row(5, "`allocator`   |   `alloc`, `free`, `array.push`, `format`, and every standard-library call that defaults its allocator parameter");
     table_row(6, "`temp_allocator`   |   `tprint`, and everything else that returns arena-backed storage");
     table_row(7, "`logger`   |   structured logging; the vtable is zeroed in the default context");
     table_row(8, "`random_generator`   |   the random-number vtable; also zeroed in the default context");
@@ -290,7 +290,7 @@ render_section_117 :: () {
     paragraph(14, #string,oneline
         \\An allocator may implement a subset and return `.None` for the rest;
         \\that is what the supplied ones do. `Resize` is not optional in
-        \\practice, because a dynamic array grown by `array.add` and a
+        \\practice, because a dynamic array grown by `array.push` and a
         \\`String_Builder` grown by `String_Builder.write_string` both issue it, and an
         \\allocator that answers `.None` there hands the caller no memory to
         \\write into.
@@ -570,7 +570,7 @@ render_section_118 :: () {
         \\main :: () {
         \\    print("scalar reuse %\n", scalar() == scalar());
         \\    delta: s64 = 0;
-        \\    carrier(*delta);
+        \\    carrier(&delta);
         \\    print("carrier delta %\n", delta);
         \\}
     );
@@ -701,7 +701,7 @@ render_section_119 :: () {
     paragraph(4, #string,oneline
         \\The report gives one `leak:` entry per block still live at exit, with
         \\the byte count and the trace of the call that produced it. A dynamic
-        \\array is reported at its `array.add`, because that is the call that
+        \\array is reported at its `array.push`, because that is the call that
         \\asked the allocator for storage.
     );
     subheading(5, "Double free");
@@ -788,7 +788,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    (cast(*void) *slot).free();
+        \\    (cast(*void) &slot).free();
         \\    print("continued\n");
         \\}
     );
@@ -813,7 +813,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    fresh := (cast(*void) *slot).mem_resize(8, 32);
+        \\    fresh := (cast(*void) &slot).mem_resize(8, 32);
         \\    print("continued\n");
         \\}
     );
@@ -988,8 +988,8 @@ render_section_120 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
-        \\    values.add(2);
+        \\    values.push(1);
+        \\    values.push(2);
         \\    print("count=%\n", values.count);
         \\}
     );
@@ -1221,12 +1221,54 @@ render_section_120 :: () {
         \\Without a handler the failure propagates to a compatible result
         \\boundary. An infallible instance uses `Error :: #Never` and returns
         \\`#Never!void`; it needs neither a handler nor a fallible boundary.
-        \\`File` and `String_Builder` are managed types. A raw owned string or
+        \\`File` and `String_Builder` are managed types. A raw allocated string or
         \\dynamic array still needs `.free()`, commonly in `defer`.
         \\A borrow of a managed local may not escape its owning scope, even
         \\through an outer local, an aggregate field, or a pointer/view created
         \\before a later assignment. These lifetime errors remain errors with
         \\`--borrow-check off`; they belong to managed ownership checking.
+    );
+    paragraph(47, #string,oneline
+        \\Standard-library owners now include filesystem `Path`, `Owned_String`,
+        \\directory listings and mappings; sockets, TLS streams, HTTP responses,
+        \\URLs and resolver results; process environment results; HTML documents;
+        \\and bindgen options. These values move instead of copying their owned
+        \\storage, and their `Drop` instances release it at scope exit. Do not
+        \\add an old `free` or `destroy` call to a managed owner's normal cleanup.
+        \\A retained explicit operation such as `file.close()` can still finish a
+        \\resource early and report its error immediately. Automatic destruction
+        \\then observes the empty handle. Fallible owners still need a compatible
+        \\result boundary or an `#on_drop_error` handler.
+    );
+    subheading(48, "Controlling destruction with `ManuallyDrop`");
+    paragraph(49, #string,oneline
+        \\`#import "Memory"` provides `ManuallyDrop(T)`. Its `new(value)`
+        \\constructor transfers ownership into a wrapper that suppresses both
+        \\the value's `Drop` hook and destruction of its owned fields. The wrapper
+        \\has the same layout as `T`, adds no live flag, and does not make invalid
+        \\or uninitialized storage valid. It still moves when `T` is an owner.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Memory";
+        \\#import "String_Builder";
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    wrapped := ManuallyDrop(String_Builder).new(String_Builder.make_len_cap());
+        \\    wrapped.get_mut().write_string("restored owner");
+        \\    builder := wrapped.into_inner();
+        \\    print("%\n", builder.to_string());
+        \\    // builder is destroyed at scope exit; wrapped has been consumed.
+        \\}
+    );
+    paragraph(51, #string,oneline
+        \\`get()` and `get_mut()` borrow the contents. `into_inner()` consumes
+        \\the wrapper and restores ordinary ownership. `take()` extracts through
+        \\a mutable pointer, which also permits extracting an enclosing owner's
+        \\field. `drop()` performs the complete destructor, including owned
+        \\fields, and returns `Drop_Error(T)!void`. After `take()` or `drop()` the
+        \\slot must not be used again, even when destruction failed. An enclosing
+        \\destructor must track any slots it has already taken or destroyed.
     );
 }
 
@@ -1359,10 +1401,11 @@ render_section_121 :: () {
     table_row(32, "variable declaration   |   after the type or the initializer   |   `leak` only");
     table_row(33, "overlay   |   `#memory Name { ... }`, at top level or in a block   |   every clause the target's own declaration accepts");
     code_block(34, "glosso", #string
-        \\copy  := c_strdup(cast(*const s8) *text) #memory released_by(c_free);
-        \\same  := c_strdup(cast(*const s8) *text) #memory released_by(by: c_free);
+        \\text: cstring = c"hello";
+        \\copy  := c_strdup(text) #memory released_by(c_free);
+        \\same  := c_strdup(text) #memory released_by(by: c_free);
         \\table := alloc(64) #memory leak;
-        \\c_puts(cast(*const s8) *text) #memory(reads(s), noescape(s));
+        \\c_puts(text) #memory(reads(s), noescape(s));
     );
     paragraph(35, #string,oneline
         \\Putting a clause in the wrong position is a contract error whose message
@@ -1502,13 +1545,13 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    print("%\n", values.count);
         \\}
     );
     paragraph(3, #string,oneline
         \\That program warns. The declaration `values: [..]s64` carries no
-        \\contract of its own and creates nothing; the `array.add` call is what
+        \\contract of its own and creates nothing; the `array.push` call is what
         \\makes the array owned, because every such call attaches a release
         \\requirement naming `array.free`. A dynamic array that is declared and
         \\never grown owns no storage and is not reported.
@@ -1548,7 +1591,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    defer print("%\n", values[0]);
         \\    defer values.free();
         \\}
@@ -1562,7 +1605,7 @@ render_section_122 :: () {
         \\note: resource was released here
         \\  --> order.glo:7:11
         \\  |
-        \\7 |     defer array_free(*values);
+        \\7 |     defer values.free();
         \\  |           ^^^^^^^^^^
         \\note: resource originated here
         \\  --> order.glo:4:5
@@ -1631,7 +1674,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    a: Holder;
-        \\    a.values.add(1);
+        \\    a.values.push(1);
         \\    print("%\n", a.values.count);
         \\}
     );
@@ -1639,12 +1682,12 @@ render_section_122 :: () {
         \\warning: [memory.leak] resource must be released by 'array_free' before leaving scope
         \\  --> holder.glo:7:15
         \\  |
-        \\7 |     array_add(*a.values, 1);
+        \\7 |     a.values.push(1);
         \\  |               ^
         \\note: release obligation was created here
         \\  --> holder.glo:7:15
         \\  |
-        \\7 |     array_add(*a.values, 1);
+        \\7 |     a.values.push(1);
         \\  |               ^
     );
     paragraph(19, #string,oneline
@@ -1670,8 +1713,8 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    b := buffer_make();
-        \\    defer buffer_free(*b);
-        \\    b.values.add(7);
+        \\    defer buffer_free(&b);
+        \\    b.values.push(7);
         \\    print("% %\n", b.label, b.values.count);
         \\}
     );
@@ -1737,15 +1780,15 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    v := make();
-        \\    v.add(1);
-        \\    my_free(*v);
+        \\    v.push(1);
+        \\    my_free(&v);
         \\}
     );
     code_block(29, "text", #string
         \\warning: [memory.wrong_releaser] resource requires release by 'my_free', but this operation requires 'array_free'
         \\   --> mismatch.glo:12:5
         \\   |
-        \\12 |     array_add(*v, 1);
+        \\12 |     v.push(1);
         \\   |     ^^^^^^^^^
         \\note: resource originated here
         \\   --> mismatch.glo:11:10
@@ -1770,7 +1813,7 @@ render_section_122 :: () {
         \\
         \\main :: () {
         \\    c: Holder #memory leak;
-        \\    c.values.add(3);
+        \\    c.values.push(3);
         \\    print("%\n", c.values.count);
         \\}
     );
@@ -1822,8 +1865,8 @@ render_section_123 :: () {
     );
     code_block(2, "glosso", #string
         \\[..]$T ::: #public {
-        \\    add :: (*#self, value: ...T) #magic "array_add"
-        \\        #memory{invalidates(#self), writes(#self), noescape(#self), owns(value, into: #self)};
+        \\    push :: (*#self, value: ...T) #magic "array_push"
+        \\        #memory{invalidates(#self), writes(#self), noescape(#self), escapes(value, into: #self)};
         \\    free :: (*#self) #magic "array_free"
         \\        #memory{kills(#self), noescape(#self)};
         \\}
@@ -1834,19 +1877,21 @@ render_section_123 :: () {
     );
     paragraph(3, #string,oneline
         \\Those three prelude declarations are the whole model in miniature:
-        \\growing invalidates and takes ownership of what it stores, freeing
+        \\growing invalidates and retains the values it stores, freeing
         \\kills, taking a view borrows. A view taken
         \\before a growth and read after it is exactly the case the generation
         \\counter exists to catch.
+        \\Storing a string or pointer does not transfer an obligation to free
+        \\its backing storage; releasing the array releases its own buffer.
     );
     code_block(4, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    view := values.view();
-        \\    values.add(2);
+        \\    values.push(2);
         \\    print("%\n", view[0]);
         \\    values.free();
         \\}
@@ -1865,20 +1910,20 @@ render_section_123 :: () {
         \\note: storage was invalidated here
         \\  --> views.glo:7:5
         \\  |
-        \\7 |     array_add(*values, 2);
+        \\7 |     values.push(2);
         \\  |     ^^^^^^^^^
     );
 
     subheading(6, "Why the owner survives");
     paragraph(7, #string,oneline
-        \\Only `view` is reported. The second `array.add` and the `array.free`
+        \\Only `view` is reported. The second `array.push` and the `array.free`
         \\after it both go through `values`, and both are clean, even though the
         \\same call raised the generation. When a call invalidates a parameter the
         \\analyser bumps the generation and then refreshes the root expression
         \\that was passed as that argument.
     );
     paragraph(8, #string,oneline
-        \\The reason is that the owner is the thing being updated. `array.add`
+        \\The reason is that the owner is the thing being updated. `array.push`
         \\writes the new block's address back into the descriptor it was handed,
         \\so `values` is current by construction while every reference derived
         \\earlier from the old block is not. Refreshing exactly the argument root
@@ -1895,9 +1940,9 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    old := values.view();
-        \\    values.add(2);
+        \\    values.push(2);
         \\    fresh := values.view();
         \\    print("% %\n", fresh[0], fresh[1]);
         \\    values.free();
@@ -1905,9 +1950,9 @@ render_section_123 :: () {
     );
     note(11, #string,oneline
         \\The refresh follows the argument expression, not the type. A pointer
-        \\copied out of the owner before the call, such as `alias := *values`, is
+        \\copied out of the owner before the call, such as `alias := &values`, is
         \\a separate reference and does go stale, even though it has exactly the
-        \\type `array.add` expects. An alias of an owner is not an owner.
+        \\type `array.push` expects. An alias of an owner is not an owner.
     );
 
     subheading(12, "Releasing through a stale reference");
@@ -1921,9 +1966,9 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
-        \\    alias := *values;
-        \\    values.add(2);
+        \\    values.push(1);
+        \\    alias := &values;
+        \\    values.push(2);
         \\    alias.free();
         \\}
     );
@@ -1941,7 +1986,7 @@ render_section_123 :: () {
         \\note: storage was invalidated here
         \\  --> alias.glo:7:5
         \\  |
-        \\7 |     array_add(*values, 2);
+        \\7 |     values.push(2);
         \\  |     ^^^^^^^^^
         \\
         \\warning: [memory.stale_release] release through a stale reference
@@ -1952,7 +1997,7 @@ render_section_123 :: () {
         \\note: storage was invalidated here
         \\  --> alias.glo:7:5
         \\  |
-        \\7 |     array_add(*values, 2);
+        \\7 |     values.push(2);
         \\  |     ^^^^^^^^^
     );
 
@@ -1967,9 +2012,9 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    view := values.view();
-        \\    if values.count == 1 { values.add(2); }
+        \\    if values.count == 1 { values.push(2); }
         \\    print("%\n", view[0]);
         \\    values.free();
         \\}
@@ -1988,7 +2033,7 @@ render_section_123 :: () {
         \\note: storage was invalidated here
         \\  --> maybe.glo:7:28
         \\  |
-        \\7 |     if values.count == 1 { array_add(*values, 2); }
+        \\7 |     if values.count == 1 { values.push(2); }
         \\  |                            ^^^^^^^^^
     );
 
@@ -2006,7 +2051,7 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
+        \\    values.push(1);
         \\    view := values.view();
         \\    values.free();
         \\    print("%\n", view[0]);
@@ -2021,7 +2066,7 @@ render_section_123 :: () {
         \\note: resource was released here
         \\  --> freed.glo:7:5
         \\  |
-        \\7 |     array_free(*values);
+        \\7 |     values.free();
         \\  |     ^^^^^^^^^^
         \\note: resource originated here
         \\  --> freed.glo:4:5
@@ -2068,7 +2113,7 @@ render_section_123 :: () {
         \\
         \\main :: () {
         \\    x: s64 = 0;
-        \\    print("%\n", fill(*x, *x));
+        \\    print("%\n", fill(&x, &x));
         \\}
     );
     paragraph(35, #string,oneline
@@ -2443,7 +2488,7 @@ render_section_124 :: () {
         \\    buffer: [8]s8;
         \\    buffer[0] = 66;
         \\    buffer[1] = 0;
-        \\    c_puts(cast(*const s8) *buffer);
+        \\    c_puts(cast(*const s8)buffer.data);
         \\}
     );
     paragraph(46, #string,oneline
@@ -2562,7 +2607,7 @@ render_section_125 :: () {
     note(15, #string,oneline
         \\This unconstrained generic release wrapper has no spelling
         \\that satisfies both its own body check and its callers. The standard
-        \\library's `array.add`, `array.free`, and `array.view` avoid the
+        \\library's `array.push`, `array.free`, and `array.view` avoid the
         \\problem at this boundary with compiler-known operations and written contracts
         \\and no Glosso body.
     );
@@ -2715,7 +2760,7 @@ render_section_126 :: () {
     subheading(5, "The three modes on one leak");
     paragraph(6, #string,oneline
         \\A dynamic array that is grown and never freed is the shortest real
-        \\finding. The obligation comes from the `array.add` call, not from
+        \\finding. The obligation comes from the `array.push` call, not from
         \\the declaration: growing an array is what makes it owned.
     );
     code_block(7, "glosso", #string
@@ -2723,8 +2768,8 @@ render_section_126 :: () {
         \\
         \\main :: () {
         \\    values: [..]s64;
-        \\    values.add(1);
-        \\    values.add(2);
+        \\    values.push(1);
+        \\    values.push(2);
         \\    print("count=%\n", values.count);
         \\}
     );
@@ -3102,7 +3147,7 @@ render_section_127 :: () {
         \\
         \\main :: () {
         \\    value: s64 = 65;
-        \\    single: *s64 = *value;
+        \\    single: *s64 = &value;
         \\    many: [*]s64 = single;
         \\    bytes: *u8 = single;
         \\    print("% %\n", many[0], bytes.*);

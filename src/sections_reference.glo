@@ -149,18 +149,19 @@ render_section_142 :: () {
     );
     subheading(35, "Modules that are a directory");
     paragraph(36, #string,oneline
-        \\These fourteen directories carry a `module.glo` entry point.
+        \\These fifteen directories carry a `module.glo` entry point.
         \\An umbrella entry point uses `#export` to expose component modules;
         \\implementation fragments can be joined with `#load,embed`. The Lua
         \\entry point uses `#insert` to build its native runtime on demand.
     );
     table_header(37, "Module   —   Purpose");
     table_row(107, "`Archive`   |   ZIP central-directory reading and extraction with path and resource checks.");
+    table_row(110, "`Gui`   |   Native windows, input, 2D drawing, 3D scenes, and an immediate-mode UI on Windows x86_64 MSVC.");
     table_row(38, "`Image`   |   Owned RGBA8 images and PNG, JPEG, and WebP codecs written in Glosso.");
     table_row(39, "`Lua`   |   The Lua 5.5 C API, with a static runtime built from bundled sources.");
     table_row(40, "`Math/Bignum`   |   Arbitrary-precision `BigInt` and `BigFloat`.");
     table_row(41, "`Math/SpecialFunctions`   |   Airy, Bessel, gamma, hypergeometric, integrals, zeta and polylog.");
-    table_row(42, "`Memory`   |   Raw memory operations and generic slice algorithms.");
+    table_row(42, "`Memory`   |   Raw memory operations, generic slice algorithms, and `ManuallyDrop(T)`.");
     table_row(43, "`Meta`   |   Compile-time type introspection and folded intrinsics.");
     table_row(44, "`Os`   |   The target OS primitive boundary: threads, clocks, syscalls.");
     table_row(45, "`Prelude`   |   Loaded automatically for every program; see the chapter on the implicit prelude.");
@@ -238,7 +239,8 @@ render_section_142 :: () {
         \\when the target has no
         \\socket ABI or the family is `.Unspecified`. This is not a generic
         \\`.System_Error` with a zero native code. On success, the returned
-        \\socket owns its descriptor and must be closed with `Socket.close`.
+        \\socket owns its descriptor and its fallible `Drop` closes it at scope
+        \\exit. `Socket.close` remains available for an explicit early close.
     );
     paragraph(104, #string,oneline
         \\`Net/Tls` verifies the peer chain and hostname by default. The Linux
@@ -350,7 +352,8 @@ render_section_142 :: () {
         \\`permissions = File_Permissions.Default_File`, and
         \\`flags = Open_Flags.None`. Its path type must satisfy
         \\`AsView(P, Path_View)`. The returned `File` owns its handle, and
-        \\`file.close()` consumes that ownership even if closing reports an error.
+        \\its fallible `Drop` closes the handle automatically. `file.close()`
+        \\can finish it early and consumes the handle even if closing reports an error.
     );
     code_block(82, "glosso", #string
         \\#import "File_System/File";
@@ -389,7 +392,7 @@ render_section_142 :: () {
     );
     subheading(108, "Methods, constructors, and domain operations");
     paragraph(109, #string,oneline
-        \\Methods describe a value's own behavior: `values.add(item)`,
+        \\Methods describe a value's own behavior: `values.push(item)`,
         \\`text.substring(start, end)`, and `file.close()`. Constructors belong
         \\to the type they create, as in `File.open(path)`,
         \\`Image.image_read(path)`, and `f64.from_bits(bits)`. Domain operations
@@ -397,6 +400,25 @@ render_section_142 :: () {
         \\`json_serialize(value)`, and `add_build_file(path, workspace)`.
         \\Import the module that owns the operation; importing a domain module
         \\does not add all of its operations to every string or byte slice.
+    );
+    subheading(111, "Native windows and drawing");
+    paragraph(112, #string,oneline
+        \\`#import "Gui"` exports `Window`, `Input_Types`, `Input`, `Scene`,
+        \\and `UI`. The current backend requires a Windows x86_64 MSVC target
+        \\on a Windows host. It builds and caches its bundled native sources
+        \\with the compiler's embedded Clang and uses Win32 and Direct3D 11;
+        \\it has no raylib dependency. `create_window` creates a window,
+        \\`update_window_events` pumps input once per frame, and
+        \\`begin_render_frame` / `present_frame` bracket rendering. Querying
+        \\input does not pump the event queue.
+    );
+    paragraph(113, #string,oneline
+        \\`Gui/Scene` supplies meshes, cameras, materials, scene submission,
+        \\rectangles, and text labels. Window and mesh handles use explicit
+        \\`destroy_window` and `release_mesh` cleanup. The UI layer keeps its
+        \\state in a caller-owned `Ui_Context`; widgets need stable nonzero IDs,
+        \\and input routing uses the preceding frame's widget layout. Keep the
+        \\context across frames and submit each frame's complete event batch.
     );
 }
 
@@ -448,6 +470,8 @@ render_section_143 :: () {
         \\FLOAT     = decimal "." decimal [ exponent ] | decimal exponent ;
         \\exponent  = ( "e" | "E" ) [ "+" | "-" ] digit { digit } ;
         \\STRING    = quote { any - quote - "\" | string-escape } quote ;
+        \\CSTRING   = "c" STRING ;   (* no whitespace between prefix and quote *)
+        \\BYTES     = "b" STRING ;   (* decoded bytes, no trailing zero *)
         \\string-escape = "\" fixed-escape | "\x" hex hex
         \\              | unicode-escape ;
         \\unicode-escape = "\u{" hex [ hex [ hex [ hex [ hex [ hex ] ] ] ] ] "}" ;
@@ -817,7 +841,7 @@ render_section_143 :: () {
         \\            | "[" "*" "]" quals modified
         \\            | "[" "]" quals modified
         \\            | "[" ".." "]" modified
-        \\            | "[" ( INT | IDENT ) "]" modified
+        \\            | "[" ( INT | IDENT | "_" ) "]" modified
         \\            | ( "#aos" | "#soa" ) modified
         \\            | "$" IDENT
         \\            | DBACKTICK
@@ -844,6 +868,8 @@ render_section_143 :: () {
         \\inline `struct`, `union` or `enum` is legal only where a field name is
         \\already in hand, and elsewhere gives
         \\`error: inline aggregate types are only allowed in aggregate fields`.
+        \\`[_]T` infers a fixed array's length from its initializer, including
+        \\a `b"..."` literal; it does not denote a many-pointer.
     );
     note(35, #string,oneline
         \\Two shapes look like grammar but are not. `T.[ ... ]` does not exist:
@@ -869,6 +895,7 @@ render_section_143 :: () {
         \\            | "cast" "(" type ")" unary
         \\            | "acast" unary
         \\            | "*" { "*" } unary
+        \\            | "&" { "&" } unary
         \\            | prefixop unary
         \\            | ifx | patternexpr | ".."
         \\            | postfix ;
@@ -877,11 +904,11 @@ render_section_143 :: () {
         \\                      | "." "cast" "(" type ")" | "." "acast"
         \\                      | "(" [ args ] ")" | "[" expression "]"
         \\                      | ",," LABEL | ".{" fields "}"
-        \\                      | "#memory" effects | ".*" | suffixop } ;
+        \\                      | "#memory" effects | ".*" | ".&" | suffixop } ;
         \\args        = arg { "," arg } [ "," ] ;
         \\arg         = [ "." IDENT "=" ] expression [ "..." ] ;
         \\
-        \\primary     = INT | FLOAT | STRING | LABEL | "context"
+        \\primary     = INT | FLOAT | STRING | CSTRING | BYTES | LABEL | "context"
         \\            | "true" | "false" | "null" | IDENT | OPNAME
         \\            | BACKTICK | DBACKTICK | "$" IDENT
         \\            | "#undefined" | "#source_location" | "#self" | "#Self_Type"
@@ -900,7 +927,7 @@ render_section_143 :: () {
         \\field       = [ "." namelike "=" ] expression ;
         \\brackettype = "[" "*" "]" quals modified | "[" "]" quals modified
         \\            | "[" ".." "]" modified
-        \\            | "[" ( INT | IDENT ) "]" modified ;
+        \\            | "[" ( INT | IDENT | "_" ) "]" modified ;
         \\strmods     = { "," ( "oneline" | "escape" ) } ;
         \\codequote   = block | statement ;
         \\
@@ -920,6 +947,14 @@ render_section_143 :: () {
         \\unexpected-token error. Two operators that share a precedence level
         \\but disagree about associativity cannot be mixed without parentheses,
         \\and the parser says which two.
+    );
+    paragraph(200, #string,oneline
+        \\In value expressions, `&x` and `x.&` take the address of an
+        \\addressable place; `*p` and `p.*` dereference a typed pointer. The
+        \\prefix `*` still constructs a pointer when its operand is a type
+        \\value. `c"..."` has inferred type `cstring` and includes a trailing
+        \\zero in static storage. `b"..."` has inferred type `[N]u8`, where
+        \\`N` is its decoded byte count, with no implicit terminator.
     );
     paragraph(188, #string,oneline
         \\Bracket types can also appear as type values: `size_of([]u8)`,
@@ -1274,7 +1309,7 @@ render_section_144 :: () {
         \\tab, CR, and LF count as source whitespace.
     );
     table_header(23, "Message   —   Produced by");
-    table_row(24, "`reserved operator token '=' (operator '=' cannot be overloaded)`   |   Any of the fifteen reserved spellings written as an operator name or in operator position, including the `:::` instance separator. The message names the operator twice.");
+    table_row(24, "`reserved operator token '=' (operator '=' cannot be overloaded)`   |   A reserved spelling written as an operator name or in operator position, including `:::`, `.*`, and `.&`. The message names the operator twice.");
     table_row(25, "`operator token cannot end with '.'`   |   An operator run whose last character is `.` and which is not `..`, as in `2 *. 3`.");
     table_row(306, "`expected a directive name after '#'`   |   A bare `#` with no directive name.");
     table_row(307, "`operator name must not be empty`   |   An empty quoted operator name. Whitespace in a quoted name and an unterminated name have their own diagnostics.");
@@ -1343,11 +1378,14 @@ render_section_144 :: () {
     table_header(70, "Message   —   Produced by");
     table_row(71, "`struct member 'x' must end with ';'`   |   A missing member terminator. Unions and enums have the same message with their own noun.");
     table_row(72, "`enum variant integer values use '::', not '='`   |   `A = 1;` in an enum body.");
-    table_row(73, "`bracket type expects [], [*], [..], or [N]`   |   Any other bracket form in a type.");
+    table_row(73, "`bracket type expects [], [*], [..], [N], or [_]`   |   Any other bracket form in a type.");
     table_row(74, "`the built-in option type is written '?T'; its variants are '.Some(x)' and '.None'`   |   Writing `Option(T)`. The result form has the matching message for `Result(E, T)`.");
     table_row(75, "`the built-in Context type is written #Context`   |   Naming `Context` without the `#`.");
     table_row(76, "`no field 'z' in 'V'`   |   An unknown member, with `help: did you mean 'x'?` when a near name exists.");
     table_row(77, "`member of non-struct`   |   A member access whose left side is not a struct, including `p.field` on a `*T`: a single pointer does not auto-dereference, so write `p.*.field`.");
+    table_row(330, "`cannot take a pointer to a non-addressable expression`   |   `&42` or `42.&`: address-taking needs a storage location.");
+    table_row(331, "`operator '*' expects a typed pointer`   |   Prefix `*` applied to an ordinary non-pointer value; use `&value` to take its address.");
+    table_row(332, "`left side of assignment is not assignable`   |   Writing through `*p` or `p.*` when `p` points to const storage.");
     table_row(78, "`fixed array literal has 2 element(s), expected 3`   |   An array literal whose length disagrees with the annotation.");
     table_row(79, "`[]ssize has no field capacity`   |   Asking a view for a dynamic array's field.");
     table_row(80, "`field 'x' is already declared`   |   A repeated struct field, with a note at the first declaration. Duplicate union and enum variants have corresponding messages; `void` fields are supported.");
@@ -1739,7 +1777,7 @@ render_section_145 :: () {
         \\buffer_push :: (buffer: *Buffer, value: s64)
         \\    #memory{reads(buffer), writes(buffer), noescape(buffer)}
         \\{
-        \\    buffer.*.values.add(value);
+        \\    buffer.*.values.push(value);
         \\}
         \\
         \\buffer_sum :: (buffer: *Buffer) -> s64
@@ -1758,10 +1796,10 @@ render_section_145 :: () {
         \\
         \\main :: () {
         \\    buffer: Buffer;
-        \\    defer buffer_free(*buffer);
-        \\    buffer_push(*buffer, 3);
-        \\    buffer_push(*buffer, 4);
-        \\    print("%\n", buffer_sum(*buffer));
+        \\    defer buffer_free(&buffer);
+        \\    buffer_push(&buffer, 3);
+        \\    buffer_push(&buffer, 4);
+        \\    print("%\n", buffer_sum(&buffer));
         \\}
     );
     code_block(45, "text", #string

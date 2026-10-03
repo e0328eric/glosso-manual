@@ -55,6 +55,8 @@ assert.equal(compileAndRun("current_language"), "current language passed\n");
 assert.equal(compileAndRun("current_std_api"), "current std APIs passed\n");
 assert.equal(compileAndRun("string_views"), "string views passed\n");
 assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
+assert.equal(compileAndRun("pointers_literals"), "pointers and literals passed\n");
+assert.equal(compileAndRun("manual_drop"), "manual and automatic Drop passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -62,6 +64,8 @@ for (const [name, diagnostic] of [
   ["try_missing_boundary", "requires a Try-returning function or an enclosing #try block"],
   ["try_invalid_token", "with the boundary result in Break"],
   ["empty_parameter_order", "#empty parameters must appear before runtime parameters"],
+  ["removed_address_star", "operator '*' expects a typed pointer"],
+  ["manual_drop_reuse", "moved"],
 ]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: invalid source compiled successfully`);
@@ -110,4 +114,4 @@ for (const [name, diagnostic] of [
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
 }
 
-console.log("Language checks passed: string views and builder ownership, visibility, inherent methods, current std functions and factories, automatic Drop and cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

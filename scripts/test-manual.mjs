@@ -115,12 +115,24 @@ for (const source of [
   'main :: () { n := .(.(1, 2), 3); value := n.0.1; }',
   'main :: () { b := Box(f64).{ .value = 1.5 }; }',
   'Rune :: #char "\\u{1f642}";',
+  'main :: () { value: s64 = 7; p := &value; q := value.&; *p += 1; q.* += 1; pp := &p; answer := **pp; }',
 ]) {
   const current = parser.parse(source);
   assert(!current.rootNode.hasError, "Current syntax did not parse: " + source);
   current.delete();
 }
 const query = new Query(language, querySource);
+const prefixedLiterals = parser.parse(String.raw`main :: () {
+  terminated := c"hello\0tail";
+  bytes := b"é\xFF\u{41}";
+}`);
+assert(!prefixedLiterals.rootNode.hasError, "C-string and byte-array literals did not parse");
+assert.equal(prefixedLiterals.rootNode.descendantsOfType("cstring_literal").length, 1);
+assert.equal(prefixedLiterals.rootNode.descendantsOfType("byte_array_literal").length, 1);
+for (const literal of prefixedLiterals.rootNode.descendantsOfType(["cstring_literal", "byte_array_literal"]))
+  assert(query.captures(prefixedLiterals.rootNode).some(capture =>
+    capture.node.id === literal.id && capture.name === "string"));
+prefixedLiterals.delete();
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
 for (const directive of ["#public", "#private", "#on_drop_error"])
@@ -331,13 +343,13 @@ for (const width of [390, 1280]) {
   assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
   let text = render(width);
   assert(text.includes("Declarations") && text.includes("Methods"), "Reference section selectors are missing");
-  assert(textRuns.some(run => run.value === "[..]$T.add" && run.fontSize === 18));
+  assert(textRuns.some(run => run.value === "[..]$T.push" && run.fontSize === 18));
   text = clickText(width, "Declarations", run => run.fontSize === 14);
   assert.equal(instance.exports.glo_manual_get_reference_methods(), 0);
   assert(text.includes("no public declarations in this section"));
   text = clickText(width, "Methods", run => run.fontSize === 14);
   assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
-  assert(textRuns.some(run => run.value === "[..]$T.add" && run.fontSize === 18));
+  assert(textRuns.some(run => run.value === "[..]$T.push" && run.fontSize === 18));
   assert.equal(instance.exports.glo_manual_get_scroll_request(), 1, "Section switch should scroll to the top");
 
   // Paths use free functions, while handles expose receiver methods and factories.

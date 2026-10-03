@@ -100,8 +100,9 @@ their class declaration. Search opens the matching section and page.
 `node scripts/test-language.mjs` uses the installed `glosso` on PATH to check
 operators, Try boundary witnesses, propagation cleanup, array reservation,
 source locations, visibility, receiver methods, associated factories, domain
-free functions, managed destruction, string-view layouts and aliasing, and
-builder cloning and ownership transfer. Syntax checks cover Unicode character
+free functions, managed destruction and `ManuallyDrop`, string-view layouts and aliasing, and
+builder cloning and ownership transfer. Syntax checks cover prefix and suffix
+pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
 directives, invalid Try contracts, string capacity, and escaped builder views.
@@ -191,9 +192,19 @@ Primitive `string` and `string16` values are borrowed `{data, count}` views;
 substrings, trimmed text, and split pieces borrow the original storage. Keep
 that storage alive, clone text that must outlive it, and release explicitly
 allocated strings with the allocator that created them. `String_Builder`
-owns its buffer: `to_string()` borrows it, `clone()` copies it, and
-`into_string()` transfers it to the caller. Runtime concatenation uses builders
+owns its buffer and releases it automatically through `Drop`: `to_string()`
+borrows it, `clone()` copies it, and `into_string()` transfers it to the caller.
+`Path`, filesystem owners, and process owners also use automatic cleanup.
+Standard container structs and raw dynamic arrays still need explicit cleanup;
+dynamic arrays append values with `push()`.
+Runtime concatenation uses builders
 or `.cat()`; `+` is available for compile-time string constants.
+
+Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
+Pointer types still use `*T`. The literal `c"hello"` is a zero-terminated
+`cstring`; `b"hello"` is a fixed byte array. `ManuallyDrop(T)` suppresses automatic
+destruction until the value is extracted or explicitly destroyed. The generated
+reference includes the `Gui` modules and the `Memory/ManuallyDrop` API.
 
 Adding or removing a chapter therefore means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in

@@ -2806,10 +2806,10 @@ render_section_99 :: () {
         \\    print("steps=%\n", steps);
         \\
         \\    c: Node = .{ .value = 3, .next = .None };
-        \\    b: Node = .{ .value = 2, .next = .Some(*c) };
-        \\    a: Node = .{ .value = 1, .next = .Some(*b) };
+        \\    b: Node = .{ .value = 2, .next = .Some(&c) };
+        \\    a: Node = .{ .value = 1, .next = .Some(&b) };
         \\    total := 0;
-        \\    cursor: ?*Node = .Some(*a);
+        \\    cursor: ?*Node = .Some(&a);
         \\    while #pattern .Some(p) = cursor { total += p.*.value; cursor = p.*.next; }
         \\    print("total=%\n", total);
         \\}
@@ -3088,8 +3088,8 @@ render_section_100 :: () {
         \\
         \\    d: [..]ssize;
         \\    defer d.free();
-        \\    d.add(7);
-        \\    d.add(8);
+        \\    d.push(7);
+        \\    d.push(8);
         \\    for x, i: d print("dyn x=% at %\n", x, i);
         \\}
     );
@@ -3185,8 +3185,9 @@ render_section_100 :: () {
         \\The container expression must be addressable. Ranges compute values and
         \\have no elements to point into; tuples have no addressable homogeneous
         \\element; strings are read-only; and `Simd` lanes and matrix elements
-        \\have no pointer iteration instance. Compile-time values have no address,
-        \\so `for *` is unavailable inside `#comptime`. A pointer array walk is
+        \\have no pointer iteration instance. Mutable local array storage is
+        \\addressable inside `#comptime` too, so pointer iteration can update it.
+        \\A pointer array walk is
         \\deliberately not snapshotted: a dynamic array's count is reread each
         \\step, and growing it far enough to reallocate can leave the current
         \\element pointer dangling. Avoid structural mutation while such a loop
@@ -3281,9 +3282,9 @@ render_section_101 :: () {
         \\
         \\main :: () {
         \\    c: Node = .{ .value = 30, .next = .None };
-        \\    b: Node = .{ .value = 20, .next = .Some(*c) };
-        \\    a: Node = .{ .value = 10, .next = .Some(*b) };
-        \\    list: List = .{ .head = .Some(*a) };
+        \\    b: Node = .{ .value = 20, .next = .Some(&c) };
+        \\    a: Node = .{ .value = 10, .next = .Some(&b) };
+        \\    list: List = .{ .head = .Some(&a) };
         \\
         \\    for list print("default names: % at %\n", it, it_index);
         \\
@@ -3353,9 +3354,9 @@ render_section_101 :: () {
         \\main :: () {
         \\    r: Ring;
         \\    r.start = 6;
-        \\    ring_push(*r, 10);
-        \\    ring_push(*r, 20);
-        \\    ring_push(*r, 30);
+        \\    ring_push(&r, 10);
+        \\    ring_push(&r, 20);
+        \\    ring_push(&r, 30);
         \\
         \\    for r print("% at %\n", it, it_index);
         \\    for < v, i: r print("reverse % at %\n", v, i);
@@ -4145,7 +4146,7 @@ render_section_104 :: () {
         \\    code := saved.save();
         \\    if code == 0 {
         \\        print("captured, code=%\n", code);
-        \\        resume_saved(*saved);
+        \\        resume_saved(&saved);
         \\    }
         \\    print("restored, code=% inbox=%\n", code, saved.inbox);
         \\}
@@ -4200,23 +4201,23 @@ render_section_104 :: () {
         \\
         \\on_fresh_stack :: () -> #Never {
         \\'entry;
-        \\    state := *storage;
+        \\    state := &storage;
         \\    print("running on the fresh stack, inbox=%\n", state.*.fresh.inbox);
-        \\    goto(#undefined, .ctx = *state.*.caller, .value = "and back", .return_code = 9);
+        \\    goto(#undefined, .ctx = &state.*.caller, .value = "and back", .return_code = 9);
         \\}
         \\
         \\main :: () {
-        \\    state := *storage;
+        \\    state := &storage;
         \\    stack: [..]u8;
-        \\    for i: 0..64 * 1024 stack.add(cast(u8)0);
+        \\    for i: 0..64 * 1024 stack.push(cast(u8)0);
         \\    state.*.stack = stack;
         \\
-        \\    state.*.fresh.prepare(state.*.stack.view(), .local = *state.*.fresh_local);
+        \\    state.*.fresh.prepare(state.*.stack.view(), .local = &state.*.fresh_local);
         \\    state.*.caller.local = execution_local();
         \\
         \\    code := state.*.caller.save();
         \\    if code == 0 {
-        \\        goto(on_fresh_stack,,'entry, .ctx = *state.*.fresh, .value = "hello");
+        \\        goto(on_fresh_stack,,'entry, .ctx = &state.*.fresh, .value = "hello");
         \\    }
         \\    print("caller resumed: code=% inbox=%\n", code, state.*.caller.inbox);
         \\    state.*.stack.free();
@@ -4237,7 +4238,7 @@ render_section_104 :: () {
     paragraph(23, #string,oneline
         \\`Jump_Buffer` aliases `Execution_Context`. Capture with
         \\`buffer.save()`; the old free `setjmp` spelling is no longer supplied.
-        \\`buffer.longjmp(value)` calls `goto(#undefined, .ctx = *buffer,
+        \\`buffer.longjmp(value)` calls `goto(#undefined, .ctx = &buffer,
         \\.return_code = value)` with a zero value promoted to `1`.
     );
     code_block(24, "glosso", #string
@@ -4417,9 +4418,9 @@ render_section_104 :: () {
         \\    awaitable: Awaitable;
         \\    awaitable.init();
         \\
-        \\    created := Coroutine.coroutine_create(waiter, cast(*void)*awaitable, .scheduler = *scheduler);
+        \\    created := Coroutine.coroutine_create(waiter, cast(*void)&awaitable, .scheduler = &scheduler);
         \\    if #pattern .Some(co) = created {
-        \\        (*scheduler).scheduler_enqueue(co);
+        \\        (&scheduler).scheduler_enqueue(co);
         \\        scheduler.run();
         \\        print("waiting=%\n", co.*.status == .Waiting);
         \\        awaitable.complete(7);
