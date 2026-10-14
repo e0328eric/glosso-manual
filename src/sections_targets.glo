@@ -341,13 +341,7 @@ render_section_139 :: () {
         \\>>>               C:\Users\…\Temp\glosso-33852-bare.o:(glo_kernel_add)
     );
     note(8, #string,oneline
-        \\The rule that governs this is that runtime checks are emitted when the
-        \\optimization level is 1 or less. Use `-O2` or `-O3` for a linkable
-        \\bare-metal image today. The backend marks functions `no-builtins` on
-        \\targets without a C runtime so future working size pipelines cannot
-        \\turn loops into unresolved libc calls such as `strlen`, but the current
-        \\LLVM 23 `default<Os>` and `default<Oz>` requests abort first.
-        \\Overflow, Traps, and the `-O` Level covers the checks themselves.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     bullet(9, #string,oneline
         \\No host entry is emitted: the module defines `glo_main` and no `main`
@@ -389,7 +383,7 @@ render_section_139 :: () {
         \\error: lld-link: error: undefined symbol: wmain
     );
     code_block(16, "glosso", #string
-        \\efi_main :: (image: *void, system_table: *void) -> u64 #c_call {
+        \\efi_main :: (image: *mut void, system_table: *mut void) -> u64 #c_call {
         \\    #if OUT.abi != Target_ABI.Uefi
         \\        #compile_error "efi.glo builds only for the UEFI ABI";
         \\    return 0;
@@ -518,7 +512,6 @@ render_section_139 :: () {
         \\options.output_executable_name = "manual.wasm";
         \\options.set_target(wasm_target);
         \\options.set_optimization(.Optimized);
-        \\options.set_borrow_check(Compiler_Borrow_Check.Error);
         \\options.set_temp_allocator_size(1024 * 1024);
         \\options.add_linker_arg("--export=glo_manual_set_view");
         \\options.add_linker_arg("--export=glo_manual_select_section");
@@ -528,15 +521,7 @@ render_section_139 :: () {
         \\built := add_build_file("main.glo", workspace);
     );
     paragraph(39, #string,oneline
-        \\The manual uses `Optimized`, or `-O2`. `Optimized_Small`,
-        \\`Optimized_Very_Small`, and `Optimized_Tiny` become `-Os`, `-Oz`, and
-        \\`-Ozz`; although the backend attaches `optsize`/`minsize`, its LLVM 23
-        \\pass-pipeline spelling still aborts, so none can build the manual yet.
-        \\The explicit `--export=` arguments exist
-        \\because only `glo_main` is exported by default. `--allow-undefined`
-        \\admits the symbols the browser host supplies. And the manual's `main`
-        \\is a `#c_call` procedure taking the viewport size and pointer state,
-        \\which only this target permits.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     paragraph(40, #string,oneline
         \\The C dependency is built through the same target descriptor. The
@@ -569,7 +554,6 @@ render_section_140 :: () {
         \\help: did you mean 'tprint'?
     );
     table_header(3, "Line   —   Content");
-    table_row(4, "headline   |   the level, a colon, and the message; a memory diagnostic carries its rule in brackets ahead of the message, as in `[memory.leak]`");
     table_row(5, "location   |   ` --> ` then the file path, line and column");
     table_row(6, "blank gutter   |   a bare `|` aligned with the line-number column");
     table_row(7, "source   |   the line number, ` | `, and the source line verbatim");
@@ -587,18 +571,6 @@ render_section_140 :: () {
         \\Two note labels are produced: `help` for a suggested replacement, and
         \\`note` for everything else. A note may carry its own location frame,
         \\which is how a diagnostic points at a second place in the program.
-    );
-    code_block(12, "text", #string
-        \\warning: [memory.leak] resource must be released by 'array_free' before leaving scope
-        \\  --> …\diag2.glo:4:5
-        \\  |
-        \\4 |     values: [..]s64;
-        \\  |     ^^^^^^
-        \\note: release obligation was created here
-        \\  --> …\diag2.glo:4:5
-        \\  |
-        \\4 |     values: [..]s64;
-        \\  |     ^^^^^^
     );
     paragraph(13, #string,oneline
         \\A note with no span prints as a bare label and message, with no frame
@@ -637,33 +609,6 @@ render_section_140 :: () {
         \\  |            ^
         \\
         \\error: aborting due to 2 previous errors
-    );
-    paragraph(19, #string,oneline
-        \\One family of warnings is configurable. `--borrow-check` takes `off`,
-        \\`warning` or `error`, defaults to `warning`, and governs the temporal
-        \\memory analysis: leaks, double releases, stale references and escaping
-        \\pointers. `--borrow-check error` reprints exactly the same diagnostics
-        \\with `error:` in the headline and stops the build.
-        \\`--borrow-check-std` adds the findings inside standard-library bodies,
-        \\which are otherwise held back whatever the mode. The `--borrow-check`
-        \\Flag covers the analysis it controls.
-    );
-    note(20, #string,oneline
-        \\`--borrow-check error` does not promote everything that looks like a
-        \\warning. Checker lints, such as an unreachable pattern arm, are merged
-        \\into the output after the promotion decision and stay warnings at every
-        \\setting. `--borrow-check off` likewise silences the analysis but never
-        \\a malformed `#memory` contract, which is always a hard error.
-    );
-    code_block(21, "text", #string
-        \\$ glosso --borrow-check error --backend llvm-ir -o d6.ll diag6.glo
-        \\glosso: compile diag6.glo (target=x86_64-pc-windows-msvc)
-        \\warning: unreachable pattern - already covered by an earlier case
-        \\  --> …\diag6.glo:7:10
-        \\  |
-        \\7 |     case 1;   return "one again";
-        \\  |          ^
-        \\glosso: wrote d6.ll  (backend=llvm-ir, target=x86_64-pc-windows-msvc, -O1)
     );
     paragraph(22, #string,oneline
         \\Driver messages are a separate category and are not diagnostics. They
@@ -796,19 +741,16 @@ render_section_141 :: () {
         \\list that yields an absolute path.
     );
     table_header(3, "Source   —   Value");
-    table_row(4, "`--cache-dir <dir>`   |   the given directory, which must be absolute");
+    table_row(4, "`--cache-dir <dir>`   |   the given directory; relative paths resolve against the working directory");
     table_row(5, "`GLOSSO_CACHE_DIR`   |   the given directory, which must be absolute");
     table_row(6, "Windows default   |   the known LocalAppData folder, then `glosso/cache`");
     table_row(7, "macOS default   |   `$HOME/Library/Caches/glosso`");
     table_row(8, "other POSIX default   |   `$XDG_CACHE_HOME/glosso`, else `$HOME/.cache/glosso`");
     paragraph(9, #string,oneline
-        \\A relative path is rejected rather than resolved against the working
-        \\directory, and the two spellings fail differently because one is a
-        \\command-line error and the other is an environment error. `--cache-dir`
-        \\prints `glosso: --cache-dir: cache directory override must be an
-        \\absolute path` and exits 2; `GLOSSO_CACHE_DIR` prints `glosso: cache
-        \\directory unavailable: GLOSSO_CACHE_DIR must contain an absolute path`
-        \\and exits 1.
+        \\--cache-dir accepts relative paths and resolves them against the working
+        \\directory. GLOSSO_CACHE_DIR must contain an absolute path. The command-line
+        \\override takes precedence over the environment. Use --print-cache-dir to
+        \\inspect the resolved root.
     );
     code_block(10, "text", #string
         \\$ glosso --cache-dir "C:/temp/glosso-cache-probe" --print-cache-dir
@@ -865,12 +807,6 @@ render_section_141 :: () {
     bullet(23, #string,oneline
         \\The LLVM triple, and separately every field of `OUT`, because the
         \\triple collapses distinct targets.
-    );
-    bullet(24, #string,oneline
-        \\The backend name, the optimization level, the size mode, the sanitizer,
-        \\the borrow-check mode, the temporary-allocator size, whether
-        \\`GLOSSO_DEBUG_ALLOCATOR` selects the debug allocator, and the `--no-main`
-        \\flag.
     );
     bullet(25, #string,oneline
         \\Every `--linker-arg` in command-line order, every compile-time argument

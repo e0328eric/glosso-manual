@@ -89,7 +89,7 @@ const tree = parser.parse(`
 Counter ::: #public {
     make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
     read :: (#self) -> s64 { return #self.value; }
-    increment :: (*#self) { #self.*.value += 1; }
+    increment :: (*mut #self) { #self.*.value += 1; }
 }
 #public(unit) { shared :: () { value := Counter.make(); value.increment(); } }
 Cleanup ::: instance Drop {
@@ -102,10 +102,9 @@ cleanup :: () {
 }
 where_am_i :: () -> Source_Location { return #source_location; }
 inspect :: (path: $P, site: Source_Location = #source_location)
-    #memory{reads(path), noescape(path)} where AsView(P, Path_View) {}
+ where AsView(P, Path_View) {}
 open :: (path: $P, flags: Open_Flags = .None) -> Fs_Error!File
-    #memory{returns_fresh(returned.Ok),
-            released_by(place: returned.Ok, by: close), escapes(path)}
+
     where AsView(P, Path_View) {}
 `);
 assert(!tree.rootNode.hasError, "Current language syntax did not parse in Tree-sitter");
@@ -121,15 +120,23 @@ for (const source of [
   assert(!current.rootNode.hasError, "Current syntax did not parse: " + source);
   current.delete();
 }
+for (const source of [
+  'f :: () #memory returns_fresh {}',
+  'f :: (value: *const s64) {}',
+]) {
+  const removed = parser.parse(source);
+  assert(removed.rootNode.hasError, "Removed syntax still parses: " + source);
+  removed.delete();
+}
 const query = new Query(language, querySource);
 const prefixedLiterals = parser.parse(String.raw`main :: () {
   terminated := c"hello\0tail";
   bytes := b"é\xFF\u{41}";
 }`);
 assert(!prefixedLiterals.rootNode.hasError, "C-string and byte-array literals did not parse");
-assert.equal(prefixedLiterals.rootNode.descendantsOfType("cstring_literal").length, 1);
-assert.equal(prefixedLiterals.rootNode.descendantsOfType("byte_array_literal").length, 1);
-for (const literal of prefixedLiterals.rootNode.descendantsOfType(["cstring_literal", "byte_array_literal"]))
+assert.equal(prefixedLiterals.rootNode.descendantsOfType("c_string_literal").length, 1);
+assert.equal(prefixedLiterals.rootNode.descendantsOfType("byte_string_literal").length, 1);
+for (const literal of prefixedLiterals.rootNode.descendantsOfType(["c_string_literal", "byte_string_literal"]))
   assert(query.captures(prefixedLiterals.rootNode).some(capture =>
     capture.node.id === literal.id && capture.name === "string"));
 prefixedLiterals.delete();
@@ -150,9 +157,7 @@ for (const source of [
   assert(removed.rootNode.hasError, "Removed #noreturn still parses; use -> #Never");
   removed.delete();
 }
-for (const effect of ["returns_fresh", "released_by", "escapes"])
-  assert(query.captures(tree.rootNode).some(capture =>
-    capture.node.text === effect && capture.name === "attribute"), `Unhighlighted contract: ${effect}`);
+
 
 for (const [mode, parameters, level] of [
   ["left", "a: T, b: T", ", 18"],
@@ -360,8 +365,7 @@ for (const width of [390, 1280]) {
   text = clickText(width, "Methods", run => run.fontSize === 14);
   assert(textRuns.some(run => run.value === "File.open" && run.fontSize === 18));
   assert(!textRuns.some(run => run.value === "read_file" && run.fontSize === 18));
-  for (const effect of ["returns_fresh", "released_by", "returns_borrow", "noescape"])
-    assert(text.includes(effect), `Missing open contract ${effect}`);
+  assert(!text.includes("#MEMORY CONTRACTS"), "Removed contracts still appear in reference cards");
 
   // A typeclass's operations stay inside its declaration, not in Methods.
   instance.exports.glo_manual_select_module(moduleIndex("Prelude/Drop"));

@@ -4,821 +4,127 @@
 
 render_section_49 :: () {
     paragraph(0, #string,oneline
-        \\`*T` is the type of a pointer to exactly one `T`. It is a single machine
-        \\word, it carries no length, and it never holds zero. Everything that
-        \\needs a count of elements behind it is a different type: `[*]T` for an
-        \\unbounded run, `[]T` for a run whose length travels with it.
+        \\*T points to one non-null T and is read-only by default. *mut T permits writes through the pointer. Both are one machine word and carry no count. Use [*]T for an unbounded run of elements and []T for a counted view.
     );
-    paragraph(1, #string,oneline
-        \\Both operations have prefix and suffix spellings. `&value` and
-        \\`value.&` take an address; `*pointer` and `pointer.*` dereference it.
-        \\Both dereference spellings produce the same assignable storage.
-        \\`**pp` and `pp.*.*` follow two pointers. When the operand is a type,
-        \\prefix `*` still forms a pointer type: `*s64` and `**s64`.
-    );
-    code_block(2, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
+    code_block(1, "glosso", #string
         \\main :: () {
-        \\    n: s64 = 10;
-        \\    p := &n;                     // p is *s64
-        \\    print("read: %\n", *p);
-        \\    *p = 11;
-        \\    print("after the store: %\n", n);
-        \\    pp := p.&;                   // pp is **s64
-        \\    print("through two: %\n", pp.*.*);
-        \\    print("sizes: % %\n", size_of(*s64), size_of(**s64));
+        \\    value: s64 = 10;
+        \\    writable: *mut s64 = &value;
+        \\    writable.* = 20;
+        \\    readonly: *s64 = writable;
+        \\    copy := readonly.*;
         \\}
     );
-    code_block(3, "text", #string
-        \\read: 10
-        \\after the store: 11
-        \\through two: 11
-        \\sizes: 8 8
+    subheading(2, "Address-of and dereference");
+    paragraph(3, #string,oneline
+        \\&value and value.& take an address. *pointer and pointer.* dereference it. Address-of requires addressable storage, such as a local, field, or array element. Dereferencing a read-only pointer permits reads; only a writable pointer permits assignment. The old address-of use of prefix * has been removed.
     );
-
-    subheading(4, "Taking an address");
-    paragraph(5, #string,oneline
-        \\Prefix `&` and suffix `.&` apply only to an expression that has storage: a local, a
-        \\global, a struct field, an array element, or a dereference of another
-        \\pointer. A computed value has no address, and asking for one names the
-        \\node kind that failed: `&(1 + 2)` is
-        \\`error: cannot take a pointer to a non-addressable expression: 'Binary'`.
+    paragraph(4, #string,oneline
+        \\Member access does not implicitly dereference. Use p.*.field or (*p).field. Pointer receiver methods can use an existing compatible pointer or take the address of an addressable value; mutable receivers require writable storage.
     );
-    paragraph(6, #string,oneline
-        \\`void` is a real type with a single value and no storage, so it has no
-        \\address either. `&x` on a `void` local is
-        \\`error: pointer to the zero sized type is not allowed`, with
-        \\`note: 'void' holds no storage; '*void' spells the type-erased pointer instead`.
-    );
-    code_block(7, "glosso", #string
-        \\#import "Io";
-        \\
-        \\Vec :: struct { x: s64; y: s64; }
-        \\
-        \\shift :: (v: *Vec, dx: s64) { v.*.x = v.*.x + dx; }
-        \\
-        \\main :: () {
-        \\    v := Vec.{ 1, 2 };
-        \\    p := &v;
-        \\    print("fields: % %\n", p.*.x, p.*.y);
-        \\    shift(p, 10);
-        \\    print("after the call: %\n", v.x);
-        \\    px := &v.x;                  // a pointer to one field
-        \\    px.* = 100;
-        \\    a: [3]s64 = .[1, 2, 3];
-        \\    pe := &a[1];                 // a pointer to one element
-        \\    pe.* = 20;
-        \\    print("field: % element: %\n", v.x, a[1]);
-        \\}
-    );
-    code_block(8, "text", #string
-        \\fields: 1 2
-        \\after the call: 11
-        \\field: 100 element: 20
-    );
-
-    subheading(9, "Member access does not dereference");
+    subheading(5, "Qualifiers and nested pointers");
+    table_row(6, "`*T`   |   read-only pointee");
+    table_row(7, "`*mut T`   |   writable pointee");
+    table_row(8, "`*volatile T`   |   read-only volatile access");
+    table_row(9, "`*mut volatile T`   |   writable volatile access");
     paragraph(10, #string,oneline
-        \\There is no implicit dereference on `.`. Given `p: *Vec`, the expression
-        \\`p.x` is `error: member of non-struct`, because `p` is a pointer and a
-        \\pointer has no members. The field is reached by dereferencing first:
-        \\`p.*.x`, or `(*p).x` with the prefix spelling. Parentheses in the latter
-        \\form make the dereference happen before member access.
+        \\A writable pointer converts implicitly to a read-only pointer, preserving the pointee type. The reverse conversion is rejected. The const qualifier has been removed: omit it for read-only access and write mut for writable access.
     );
-    note(11, #string,oneline
-        \\A reader arriving from C or Go will write `p.x` and get
-        \\`error: member of non-struct`, which does not mention pointers at all.
-        \\The fix is always the same: insert `.*` before the field.
+    paragraph(11, #string,oneline
+        \\**T is a read-only pointer to a read-only pointer. Write *mut *mut T when both levels must be writable. In **mut T, mut applies to the innermost pointee; the outer pointer remains read-only.
     );
-
-    subheading(12, "`const` and `volatile` after the star");
+    subheading(12, "Nullability");
     paragraph(13, #string,oneline
-        \\A pointer type may carry qualifiers, and they are written after the star,
-        \\not before it. They describe the pointee, not the pointer variable: a
-        \\`*const s64` may be reassigned to point somewhere else, but the target
-        \\cannot be written through it.
+        \\*T excludes address zero. Use ?*T for an optional pointer: .None occupies the zero niche, so the optional has the same size as a pointer. Match the optional before dereferencing. cast(*T) of a known zero is rejected, and a runtime zero is checked at -O0 and -O1.
     );
-    table_header(14, "Written   —   Reads as   —   Store through `.*`");
-    table_row(15, "`*s64`   |   pointer to a mutable `s64`   |   allowed");
-    table_row(16, "`*const s64`   |   pointer to a read-only `s64`   |   rejected");
-    table_row(17, "`*volatile s64`   |   pointer whose accesses are not elided   |   allowed");
-    table_row(18, "`*const volatile s64`   |   both qualifiers, in that order   |   rejected");
-    paragraph(19, #string,oneline
-        \\Storing through a `const` pointer is
-        \\`error: left side of assignment is not assignable`. The conversion runs
-        \\one way only: `*T` is accepted where `*const T` is expected, both in an
-        \\assignment and at a call, while the reverse is
-        \\`error: got *const s64, expected *s64`.
+    paragraph(14, #string,oneline
+        \\An unassigned non-null pointer uses an invalid nonzero sentinel, not useful storage. Initialize it before dereferencing. Pointers do not own their pointee and do not keep its storage alive.
     );
-
-    subheading(20, "Runs of stars");
-    paragraph(21, #string,oneline
-        \\A run of stars in a type is split into that many pointer levels, so `**T`
-        \\is a pointer to a `*T`. A qualifier written after the run attaches to the
-        \\innermost level, the one nearest the pointee: `**const s64` is a pointer
-        \\to a `*const s64`, and the outer level stays mutable.
-    );
-    code_block(22, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\main :: () {
-        \\    n: s64 = 42;
-        \\    c: *const s64 = &n;          // the pointee is read-only
-        \\    b: **const s64 = &c;
-        \\    print("plain:  %\n", type_name((&n).type_of()));
-        \\    print("const:  %\n", type_name(c.type_of()));
-        \\    print("nested: %\n", type_name(b.type_of()));
-        \\    print("value:  %\n", b.*.*);
-        \\}
-    );
-    code_block(23, "text", #string
-        \\plain:  *s64
-        \\const:  *const s64
-        \\nested: **const s64
-        \\value:  42
-    );
-    paragraph(24, #string,oneline
-        \\`type_name` reports the canonical Glosso spelling of a pointer, which is
-        \\why the output above reads `**const s64`. Diagnostics use the same
-        \\vocabulary: assigning a `**s64` to a `**const s64` is
-        \\`error: got **s64, expected **const s64`. The C spelling survives only
-        \\for the unbounded shapes, where `type_name` of a `[*]s64` is `long *`
-        \\and of a `#fn_ptr` is its mangled name.
-    );
-
-    subheading(25, "A plain pointer excludes zero");
-    paragraph(26, #string,oneline
-        \\`*T` is a non-null type. The literal `null` does not reach it, and the
-        \\diagnostic names the replacement spelling rather than the rule.
-    );
-    code_block(27, "text", #string
-        \\error: 'null' is not a value of *s64
-        \\  --> e01_null.glo:2:15
-        \\  |
-        \\2 |     p: *s64 = null;
-        \\  |               ^^^^
-        \\note: a plain pointer excludes zero - write ?*s64 for a pointer that may be absent
-        \\note: its absent value is spelled '.None'
-    );
-    paragraph(28, #string,oneline
-        \\Absence is `?*T`, whose `.None` is address zero; that niche is what makes
-        \\`?*T` the same size as `*T`. The Option Type `?T` covers the type itself.
-        \\The consequence here is that an unassigned pointer cannot default
-        \\to zero without breaking the niche, so it defaults to the all-ones
-        \\sentinel instead: `16#FFFF_FFFF_FFFF_FFFF` at 64-bit pointer width. That
-        \\value is non-zero, so no optional built from a defaulted pointer reads as
-        \\absent, and it is never a mapped address on any supported target, so a
-        \\program that dereferences one faults at the use.
-    );
-    code_block(29, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    p: *s64;                     // never assigned
-        \\    op: ?*s64;
-        \\    print("default *s64: %\n", cast(u64) p);
-        \\    print("default ?*s64 is absent: %\n", op == null);
-        \\}
-    );
-    code_block(30, "text", #string
-        \\default *s64: 18446744073709551615
-        \\default ?*s64 is absent: 1
-    );
-    paragraph(31, #string,oneline
-        \\Because the type excludes zero, `cast(*T)` asserts rather than converts.
-        \\An address the checker can fold to zero is rejected outright, and the
-        \\notes point at the total spelling.
-    );
-    code_block(32, "text", #string
-        \\error: cast to *s64 of an address that is zero at compile time
-        \\  --> e06_castzero.glo:2:5
-        \\  |
-        \\2 |     p := cast(*s64) 0;
-        \\  |     ^
-        \\note: a plain pointer excludes zero - that is what gives ?T its niche, where .None IS address 0
-        \\note: cast to ?*s64 instead, which is total and yields .None here
-    );
-    paragraph(33, #string,oneline
-        \\A runtime zero is caught by a runtime check, which prints
-        \\`cast to *s64 of an address that is zero` and aborts. Hosted Windows
-        \\and Linux x86-64 use status 134; WASI uses 125.
-        \\`cast(?*T)` is the total form: it yields `.None` for zero and never traps.
-        \\The chapter `cast` and `acast` covers the conversion vocabulary; Runtime
-        \\Safety Checks and Panics covers the check family.
-    );
-    note(34, #string,oneline
-        \\The zero-address check belongs to the runtime-check family, which is
-        \\emitted only at `-O0` and `-O1`. At `-O2` and above the same
-        \\`cast(*T)` of a runtime zero produces a pointer holding zero and the
-        \\program continues into the dereference.
-    );
-
-    subheading(35, "Comparison");
-    paragraph(36, #string,oneline
-        \\Pointers compare with `==`, `!=`, and the ordering operators, and the
-        \\comparison is on the address. Both sides must have the same pointee type;
-        \\`*s64` against `*u8` is `error: no operator '==' for *s64, *u8`. Ordering
-        \\two pointers into unrelated objects is accepted by the compiler and
-        \\meaningless in the program.
-    );
-    code_block(37, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p := &a[0];
-        \\    q := &a[2];
-        \\    print("== %  != %\n", p == q, p != q);
-        \\    print("<  %  >  %\n", p < q, p > q);
-        \\    r := &a[0];
-        \\    print("same object: %\n", p == r);
-        \\}
-    );
-    code_block(38, "text", #string
-        \\== 0  != 1
-        \\<  1  >  0
-        \\same object: 1
-    );
-
-    subheading(39, "What a single pointer will not do");
-    paragraph(40, #string,oneline
-        \\`*T` points at one `T`. It has no arithmetic, no indexing, and no
-        \\conversion to the unbounded shape, because none of those operations can
-        \\be given a meaning without a length the type does not carry. Many-Pointers
-        \\and Null describes the type that does carry them.
-    );
-    table_header(41, "Written   —   Diagnostic");
-    table_row(42, "`p + 1`   |   `error: no operator '+' for *s64, ssize`");
-    table_row(43, "`p[1]`   |   `error: no operator '[]' for *s64, ssize`");
-    table_row(44, "`mp: [*]s64 = &a[0];`   |   `error: got *s64, expected [*]s64`");
-    table_row(45, "`p := &(1 + 2);`   |   `error: cannot take a pointer to a non-addressable expression: 'Binary'`");
-    paragraph(46, #string,oneline
-        \\A pointer has a `Show` instance, but it is deliberately uninformative:
-        \\`print("%\n", p)` prints `<pointer>`. Printing the address means casting
-        \\it, as `print("%\n", cast(u64) p)`.
+    subheading(15, "Single-element pointer operations");
+    paragraph(16, #string,oneline
+        \\A single pointer has dereference and address comparison, but no arithmetic or indexing. Many-pointers provide those operations. Use an explicit cast when crossing pointer shapes; pointer_punning relaxes shape checks without granting writable access to read-only storage.
     );
 }
 
 render_section_50 :: () {
     paragraph(0, #string,oneline
-        \\`[*]T` is the unbounded pointer: an address that points at a run of `T`
-        \\of unknown length. It is the shape C interop needs, and it is the only
-        \\pointer in the language that supports arithmetic and indexing. It is one
-        \\machine word, exactly like `*T`, and carries no count.
+        \\[*]T is a read-only many-pointer: one address with no element count. [*]mut T permits writes. These shapes support element indexing and arithmetic scaled by size_of(T). The caller must know that every accessed element exists; the compiler cannot bounds-check an unbounded pointer.
     );
-    paragraph(1, #string,oneline
-        \\The split between `*T` and `[*]T` is the whole point of having two
-        \\pointer types. A `*T` promises one element, so offsetting it is
-        \\meaningless; a `[*]T` promises nothing about how many elements follow, so
-        \\offsetting it is the caller's responsibility and the compiler never
-        \\checks it.
-    );
-    table_header(2, "Operation   —   `*T`   —   `[*]T`");
-    table_row(3, "`p.*`   |   yes   |   yes");
-    table_row(4, "`p[i]` and `p[i] = v`   |   no   |   yes, never bounds-checked");
-    table_row(5, "`p + n`, `p - n`   |   no   |   yes, scaled by `size_of(T)`");
-    table_row(6, "`p - q`   |   no   |   yes, the difference in elements");
-    table_row(7, "`==`, `!=`, `<`, `>`   |   yes   |   yes");
-    table_row(8, "`.count`   |   no   |   no");
-    table_row(9, "`p[lo..hi]`   |   no   |   no");
-    code_block(10, "glosso", #string
-        \\#import "Io";
-        \\
+    code_block(1, "glosso", #string
         \\main :: () {
-        \\    a: [5]s64 = .[1, 2, 3, 4, 5];
-        \\    mp: [*]s64 = a.data;
-        \\    print("mp[0]=% mp[3]=%\n", mp[0], mp[3]);
-        \\    q := mp + 2;
-        \\    print("q[0]=% q[-1]=%\n", q[0], q[-1]);
-        \\    print("difference in elements: %\n", q - mp);
-        \\    mp[1] = 99;
-        \\    print("wrote through: %\n", a[1]);
-        \\    print("ordered: % %\n", q > mp, q == mp);
+        \\    values: [3]s64 = .[10, 20, 30];
+        \\    writable: [*]mut s64 = values.data;
+        \\    writable[1] = 42;
+        \\    readonly: [*]s64 = writable;
+        \\    next := readonly + 1;
+        \\    distance := next - readonly;
         \\}
     );
-    code_block(11, "text", #string
-        \\mp[0]=1 mp[3]=4
-        \\q[0]=3 q[-1]=2
-        \\difference in elements: 2
-        \\wrote through: 99
-        \\ordered: 1 0
+    paragraph(2, #string,oneline
+        \\A fixed array, view, dynamic array, or string exposes its data pointer through .data. Read-only storage yields a read-only pointer. A many-pointer carries no .count and cannot itself be sliced; slice the original counted array or view.
     );
-    paragraph(12, #string,oneline
-        \\A negative index is legal and means what it means in C: `q[-1]` reads the
-        \\element before `q`. Addition is scaled by the element size, and
-        \\subtracting two many-pointers gives a count of elements, not of bytes.
+    subheading(3, "Non-null pointers and absence");
+    paragraph(4, #string,oneline
+        \\Single pointers, many-pointers, and function pointers all exclude zero. The literal null cannot initialize a bare [*]T or #fn_ptr. Use ?[*]T or an optional function-pointer type for absence; their .None variant occupies address zero without adding storage.
     );
-    note(13, #string,oneline
-        \\Indexing a `[*]T` is never bounds-checked, at any optimization level,
-        \\because the type carries no length to check against. This is the one
-        \\place in the language where an out-of-range index is silent. Fixed
-        \\arrays, views, and dynamic arrays are checked at `-O0` and `-O1`; see
-        \\Fixed Arrays, Views, and Dynamic Arrays.
-    );
-    paragraph(14, #string,oneline
-        \\Update assignment is not defined on the type: `mp += 1` is
-        \\`error: no operator '+=' for [*]s64, [*]s64`. The rebinding form
-        \\`mp = mp + 1` is the way to advance a many-pointer in place.
-    );
-
-    subheading(15, "Where a many-pointer comes from");
-    paragraph(16, #string,oneline
-        \\`.data` on a fixed array, a view, a dynamic array, or a `string` yields a
-        \\`[*]T`, and that is the ordinary source. `.data` is a bare `[*]T` rather
-        \\than `?[*]T` deliberately: an unallocated array carries the
-        \\invalid-pointer sentinel, and `count` is the field that says an array is
-        \\empty, so nothing has to unwrap the pointer to use it. Two container
-        \\shapes refuse the field: a structure-of-arrays value is
-        \\`error: #soa array has per-field data`, and a SIMD value is
-        \\`error: Simd has no stable .data pointer`.
-    );
-    code_block(17, "glosso", #string
-        \\#import "Io";
-        \\
-        \\Handler :: #fn_ptr(n: s64) -> s64;
-        \\
+    code_block(5, "glosso", #string
         \\main :: () {
-        \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    d: [..]s64;
-        \\    defer d.free();
-        \\    d.push(7, 8, 9);
-        \\    s := "hey";
-        \\    print("from [N]T: %\n", a.data[0]);
-        \\    print("from []T:  %\n", a[..].data[1]);
-        \\    print("from [..]T: %\n", d.data[2]);
-        \\    print("from string: %\n", s.data[0]);
-        \\    mp: [*]s64 = null;
-        \\    h: Handler = null;
-        \\    print("null reached both\n");
+        \\    maybe: ?[*]s64 = .None;
+        \\    values: [2]s64 = .[1, 2];
+        \\    maybe = values.data;
+        \\    if #pattern .Some(pointer) = maybe {
+        \\        first := pointer[0];
+        \\    }
         \\}
     );
-    code_block(18, "text", #string
-        \\from [N]T: 1
-        \\from []T:  2
-        \\from [..]T: 9
-        \\from string: 104
-        \\null reached both
+    paragraph(6, #string,oneline
+        \\Match an optional pointer before using its payload. A cast from a runtime integer to a bare pointer checks zero at -O0 and -O1; a known zero is rejected at compile time. An uninitialized non-null pointer is an invalid sentinel, not valid storage.
     );
-
-    subheading(19, "Recovering a length");
-    paragraph(20, #string,oneline
-        \\A many-pointer cannot be sliced: `mp[1..3]` is
-        \\`error: no operator '[]' for [*]s64, Range_ssize`, and `mp.count` is
-        \\`error: member of non-struct`. There is no operator that pairs a pointer
-        \\with a length to make a view, because the length would be unverifiable.
-        \\The construction exists as an intrinsic instead, and a program that has a
-        \\length from elsewhere declares it and takes responsibility in the
-        \\`#memory` contract.
+    subheading(7, "Converting pointer shapes");
+    paragraph(8, #string,oneline
+        \\Single pointers and many-pointers do not convert implicitly. Use cast([*]T) or cast(*T) when the backing storage justifies the new shape. Writable forms can be used through their matching read-only form; adding writable access implicitly is rejected.
     );
-    code_block(21, "glosso", #string
-        \\#import "Io";
-        \\
-        \\view_of :: (data: [*]s64, count: ssize) -> []s64 #magic "slice_from_pointer"
-        \\    #memory{returns_borrow(data), reads(data), noescape(data)};
-        \\
-        \\main :: () {
-        \\    a: [6]s64 = .[1, 2, 3, 4, 5, 6];
-        \\    v := view_of(a.data + 2, 3);
-        \\    print("count=% first=% last=%\n", v.count, v[0], v[2]);
-        \\}
-    );
-    code_block(22, "text", #string
-        \\count=3 first=3 last=5
-    );
-
-    subheading(23, "`null` still reaches `[*]T` and `#fn_ptr`");
-    paragraph(24, #string,oneline
-        \\Every pointer flavour in Glosso is nominally non-null, and `?[*]T` and
-        \\`?#fn_ptr` take the same zero niche that `?*T` takes. The rule was
-        \\enforced for `*T` and `?*T` and deliberately not carried through to the
-        \\other two: `null` still assigns to a `[*]T` and to a `#fn_ptr`. Those are
-        \\the unbounded C-interop pointers, outside the guarantee the rule makes,
-        \\and retiring the literal there is recorded as a separate decision that has
-        \\not been taken.
-    );
-    paragraph(25, #string,oneline
-        \\The practical shape of the exception: `mp: [*]s64 = null;` compiles, while
-        \\the same line at `*s64` is `error: 'null' is not a value of *s64`. A
-        \\program that wants absence checked should still write `?[*]T` and match on
-        \\it; a program interoperating with C may take the literal.
-    );
-    paragraph(26, #string,oneline
-        \\The optional forms cost nothing, because the niche applies to every
-        \\pointer-like payload. `?[*]T` and `?#fn_ptr` are one word, the same as the
-        \\bare types, and a fresh one reads as absent.
-    );
-    code_block(27, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\Handler :: #fn_ptr(n: s64) -> s64;
-        \\
-        \\main :: () {
-        \\    omp: ?[*]s64;
-        \\    ov:  ?[]s64;
-        \\    print("?*s64=%  ?[*]s64=%  ?Handler=%  ?[]s64=%\n",
-        \\        size_of(?*s64), size_of(omp.type_of()), size_of(?Handler), size_of(ov.type_of()));
-        \\    print("a fresh ?[*]s64 is absent: %\n", omp == null);
-        \\}
-    );
-    code_block(28, "text", #string
-        \\?*s64=8  ?[*]s64=8  ?Handler=8  ?[]s64=24
-        \\a fresh ?[*]s64 is absent: 1
-    );
-    note(29, #string,oneline
-        \\`null` in a *declaration* of an optional many-pointer is rejected even
-        \\though the comparison works: `op: ?[*]s64 = null;` is
-        \\`error: null is not a valid Option____s64`, because the declaration path
-        \\tests for a pointer-like type and an option is a union. Write
-        \\`op: ?[*]s64;` and let it default to absent, or assign `.None()`.
-    );
-
-    subheading(30, "Converting between pointer shapes");
-    paragraph(31, #string,oneline
-        \\`*T` and `[*]T` do not interconvert implicitly. The two make different
-        \\promises about how many elements follow, and silently exchanging them is
-        \\exactly how a one-element pointer becomes an unbounded one. The three
-        \\routes that do exist are a `cast`, the `pointer_punning` gate, and, in the
-        \\widening direction only, the option niche.
-    );
-    table_header(32, "From   —   To   —   Written");
-    table_row(33, "`*T`   |   `[*]T`   |   `cast([*]T) p`, or implicit under `#enable(pointer_punning)`");
-    table_row(34, "`[*]T`   |   `*T`   |   `cast(*T) mp`, or implicit under `#enable(pointer_punning)`");
-    table_row(35, "`[*]T`   |   `[*]U`   |   `cast([*]U) mp`, a reinterpretation");
-    table_row(36, "`*T`   |   `*const T`   |   implicit; the reverse is rejected");
-    table_row(37, "`[*]T`   |   `?[*]T`   |   implicit widening into the niche");
-    table_row(38, "`?[*]T`   |   `[*]T`   |   not a cast; bind the payload with a pattern");
-    code_block(39, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p: *s64 = &a[0];
-        \\    mp := cast([*]s64) p;
-        \\    print("as a many-pointer: % %\n", mp[0], mp[2]);
-        \\    back := cast(*s64) mp;
-        \\    print("back to one: %\n", back.*);
-        \\    bytes := cast([*]u8) mp;
-        \\    print("as bytes: %\n", bytes[0]);
-        \\    omp: ?[*]s64 = mp;
-        \\    print("widened: %\n", omp == null);
-        \\}
-    );
-    code_block(40, "text", #string
-        \\as a many-pointer: 1 3
-        \\back to one: 1
-        \\as bytes: 1
-        \\widened: 0
-    );
-    paragraph(41, #string,oneline
-        \\`#enable(pointer_punning)` removes the cast in a bracketed region of the
-        \\file. It is a section directive, not a statement, so it opens at top level
-        \\and closes with the matching `#disable`; Feature Gates: `#enable` and
-        \\`#disable` describes the mechanism and the full list.
-    );
-    code_block(42, "glosso", #string
-        \\#import "Io";
-        \\#enable(pointer_punning);
-        \\
-        \\main :: () {
-        \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    p: *s64 = &a[0];
-        \\    mp: [*]s64 = p;              // implicit under the gate
-        \\    back: *s64 = mp;
-        \\    print("% %\n", mp[3], back.*);
-        \\}
-        \\#disable(pointer_punning);
-    );
-    code_block(43, "text", #string
-        \\4 1
-    );
-    paragraph(44, #string,oneline
-        \\Narrowing an optional back to a bare pointer is not a cast in either
-        \\direction: `cast([*]s64) op` on a `?[*]s64` is
-        \\`error: cannot cast Option____s64 to [*]s64`. The niche would make the
-        \\conversion free and unchecked, which is the hole the non-null rule closes,
-        \\so the payload is reached by a pattern match instead. `cast([*]T)` of a
-        \\runtime zero is checked like `cast(*T)`: it prints
-        \\`cast to [*]s64 of an address that is zero` and takes the target's abort
-        \\path at `-O0` and `-O1`.
+    paragraph(9, #string,oneline
+        \\The pointer_punning feature gate relaxes pointee and pointer-shape checks but does not permit read-only storage to acquire writable access. Keep casts and gates adjacent to the code that needs them. Neither a pointer nor its optional form owns the pointee or extends its lifetime.
     );
 }
 
 render_section_51 :: () {
     paragraph(0, #string,oneline
-        \\Three types describe a run of elements, and they differ in where the
-        \\storage lives and what travels with the value. `[N]T` is the storage
-        \\itself, `N` elements laid out inline. `[]T` is a view: a count and a
-        \\pointer to storage owned by somebody else. `[..]T` is a dynamic array: a
-        \\count, a pointer, and a capacity, and it owns its allocation.
+        \\[N]T stores N elements inline. []T borrows a counted read-only run; []mut T permits writes. [..]T is a move-only owner of a growable allocation. [_]T infers the fixed length from the initializer, including b"..." byte-array literals.
     );
-    table_header(1, "Type   —   Layout   —   Size in bytes");
-    table_row(2, "`[N]T`   |   inline storage for `N` elements   |   `N * size_of(T)`");
-    table_row(3, "`[]T`   |   `{ count: ssize, data: [*]T }`   |   two native words (16 on x86-64)");
-    table_row(4, "`[..]T`   |   `{ count: ssize, data: [*]T, capacity: ssize }`   |   three native words (24 on x86-64)");
-    paragraph(5, #string,oneline
-        \\The descriptor fields are in that order and at those offsets. Reading the
-        \\three words of a `[..]s64` back as `usize` shows the count first, the data
-        \\pointer second, and the capacity third. `string` instead stores a data
-        \\pointer followed by a count: 16 bytes on a 64-bit target and 8 on a
-        \\32-bit target. It has no capacity or ownership; Built-in Strings covers
-        \\its lifetime and the one-pointer C-string representation.
+    table_row(1, "`[N]T`   |   inline storage, `N * size_of(T)` bytes");
+    table_row(2, "`[]T`, `[]mut T`   |   count followed by data, two native words");
+    table_row(3, "`[..]T`   |   count, data, capacity, three native words");
+    paragraph(4, #string,oneline
+        \\An unallocated dynamic array has zero count and capacity. Declare one without an initializer, then call push(), append(), or reserve(). reserve() requests total capacity and does not change count. push() appends one or more values and grows geometrically.
     );
-    code_block(6, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
+    code_block(5, "glosso", #string
         \\main :: () {
-        \\    a: [3]s64 = .[10, 20, 30];
-        \\    v := a[..];
-        \\    d: [..]s64;
-        \\    defer d.free();
-        \\    d.push(1, 2, 3, 4, 5);
-        \\    print("sizes: [3]s64=% []s64=% [..]s64=%\n",
-        \\        size_of(a.type_of()), size_of(v.type_of()), size_of(d.type_of()));
-        \\    words := cast([*]usize) cast(*usize) &d;
-        \\    print("descriptor words: % % %\n", words[0], words[1] == cast(usize) d.data, words[2]);
-        \\    print("fields: a.count=% v.count=% d.count=% d.capacity=%\n",
-        \\        a.count, v.count, d.count, d.capacity);
+        \\    values: [..]s64;
+        \\    values.reserve(8);
+        \\    values.push(1, 2, 3);
+        \\    view: []s64 = values.view();
+        \\    writable: []mut s64 = values.view();
+        \\    writable[0] = 10;
+        \\    // Scope exit destroys the array and frees its buffer.
         \\}
     );
-    code_block(7, "text", #string
-        \\sizes: [3]s64=24 []s64=16 [..]s64=24
-        \\descriptor words: 5 1 8
-        \\fields: a.count=3 v.count=3 d.count=5 d.capacity=8
+    paragraph(6, #string,oneline
+        \\A dynamic array owns its live elements. Passing it by value moves it; pointers and views borrow it. Iterate through managed elements with for *item: values. take() transfers storage and leaves an empty reusable source; replace(new_array) installs a moved array and returns the previous allocation.
+    );
+    paragraph(7, #string,oneline
+        \\free() and deinit() destroy live elements and release storage, leaving an empty array. They require infallible element destruction. reset() retains allocation and is available only when elements do not need destruction. release_storage() frees only storage and is for code that has already managed every element's lifetime.
     );
     paragraph(8, #string,oneline
-        \\Bracket types are also type-valued expressions. Write `size_of([3]s64)`,
-        \\`size_of([]s64)`, or `size_of([..]s64)` directly, or use
-        \\`size_of(a.type_of())` when the value already supplies its type.
+        \\Dynamic arrays allocate and release through context.allocator. Keep that allocator installed through destruction. Standard container constructors instead capture their supplied allocator.
     );
-
-    subheading(9, "The fields each shape exposes");
-    table_header(10, "Field   —   Available on   —   Meaning");
-    table_row(11, "`.count`   |   `[N]T`, `[]T`, `[..]T`, `string`   |   elements in use; on `[N]T` it is the constant `N`");
-    table_row(12, "`.data`   |   `[N]T`, `[]T`, `[..]T`, `string`   |   a `[*]T` at the first element");
-    table_row(13, "`.capacity`   |   `[..]T`   |   elements the allocation can hold");
-    paragraph(14, #string,oneline
-        \\`.capacity` on a view is `error: []s64 has no field capacity`: a view does
-        \\not own its storage, so it has nothing to report. On a fixed array
-        \\`.count` is a compile-time constant and usable wherever one is, including
-        \\in `#assert`. The length in `[N]T` must itself be an integer literal or a
-        \\plain identifier naming a constant. `[_]T` infers the length from its
-        \\array-literal initializer, including a `b"..."` literal for `u8`.
-        \\It requires an initializer and still produces a fixed array. Other forms give
-        \\`error: bracket type expects [], [*], [..], [N], or [_]`, and an expression in
-        \\the brackets fails earlier still, at the operator.
+    subheading(9, "Views and invalidation");
+    paragraph(10, #string,oneline
+        \\A view copies a pointer and count; it does not copy elements or update its count after mutation. Growth may relocate storage. Freeing, replacing, or destroying an array can leave existing views dangling. The compiler does not enforce these lifetimes.
     );
-    code_block(15, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\N :: 3;
-        \\M :: N + 2;
-        \\
-        \\main :: () {
-        \\    a: [M]s64;
-        \\    b: [N]s64 = .[1, 2, 3];
-        \\    print("a: count=% size=%\n", a.count, size_of(a.type_of()));
-        \\    print("b: count=% size=%\n", b.count, size_of(b.type_of()));
-        \\    #assert b.count == 3, "count is a compile-time constant";
-        \\    print("zero initialized: % % %\n", a[0], a[1], a[4]);
-        \\}
-    );
-    code_block(16, "text", #string
-        \\a: count=5 size=40
-        \\b: count=3 size=24
-        \\zero initialized: 0 0 0
-    );
-    code_block(59, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\main :: () {
-        \\    values: [_]s64 = .[10, 20, 30];
-        \\    bytes: [_]u8 = b"hi";
-        \\    bytes[0] = 72;
-        \\    print("% count=%\n", type_name(values.type_of()), values.count);
-        \\    print("% bytes=% %\n", type_name(bytes.type_of()), bytes[0], bytes[1]);
-        \\}
-    );
-    code_block(60, "text", #string
-        \\[3]s64 count=3
-        \\[2]u8 bytes=72 105
-    );
-
-    subheading(17, "Value and reference semantics");
-    paragraph(18, #string,oneline
-        \\A fixed array is a value. Assigning one copies every element, and passing
-        \\one to a parameter of type `[N]T` copies it too, so a store inside the
-        \\callee is invisible outside. A view is a two-word descriptor: copying the
-        \\descriptor copies the count and the pointer, and both copies then address
-        \\the same elements, so a store through either is visible through the other.
-    );
-    code_block(19, "glosso", #string
-        \\#import "Io";
-        \\
-        \\bump_array :: (a: [3]s64) { a[0] = 99; }
-        \\bump_view  :: (v: []s64)  { v[0] = 99; }
-        \\
-        \\main :: () {
-        \\    a: [3]s64 = .[1, 2, 3];
-        \\    b := a;
-        \\    b[0] = 50;
-        \\    print("copy: a[0]=% b[0]=%\n", a[0], b[0]);
-        \\    bump_array(a);
-        \\    print("after a [3]s64 call: a[0]=%\n", a[0]);
-        \\    v := a[..];
-        \\    bump_view(v);
-        \\    print("after a []s64 call: a[0]=%\n", a[0]);
-        \\}
-    );
-    code_block(20, "text", #string
-        \\copy: a[0]=1 b[0]=50
-        \\after a [3]s64 call: a[0]=1
-        \\after a []s64 call: a[0]=99
-    );
-    note(21, #string,oneline
-        \\A large `[N]T` parameter is copied on every call, and the copy is silent.
-        \\Passing `a[..]` instead hands over sixteen bytes and keeps the write
-        \\visible; passing `*[N]T` keeps the exact length in the type.
-    );
-
-    subheading(22, "Growth and the allocator");
-    paragraph(23, #string,oneline
-        \\A fresh `[..]T` is `count = 0`, `capacity = 0`, and holds no allocation at
-        \\all; `array.push` or `array.reserve` acquires its backing storage.
-        \\Appending grows capacity from zero to eight and doubles it from there.
-        \\The storage comes from `context.allocator`, so a
-        \\`#push_allocator` region redirects it without any change at the call site.
-        \\Allocators and The Implicit Context cover that machinery.
-    );
-    code_block(24, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    d: [..]s64;
-        \\    defer d.free();
-        \\    print("fresh: count=% capacity=%\n", d.count, d.capacity);
-        \\    for i: 0..20 {
-        \\        before := d.capacity;
-        \\        d.push(i);
-        \\        if d.capacity != before
-        \\            print("count %: capacity % -> %\n", d.count, before, d.capacity);
-        \\    }
-        \\    d.reset();
-        \\    print("after array_reset: count=% capacity=%\n", d.count, d.capacity);
-        \\}
-    );
-    code_block(25, "text", #string
-        \\fresh: count=0 capacity=0
-        \\count 1: capacity 0 -> 8
-        \\count 9: capacity 8 -> 16
-        \\count 17: capacity 16 -> 32
-        \\after array_reset: count=0 capacity=32
-    );
-    paragraph(26, #string,oneline
-        \\`d.reserve(capacity)` ensures room for at least that many elements
-        \\without changing the count or existing values. A request within the
-        \\current capacity does nothing; a larger request allocates that capacity.
-        \\The extra storage is uninitialized. Negative capacities and byte-size
-        \\overflow are rejected before allocation. Reservation also works at compile
-        \\time and on structure-of-arrays dynamic arrays.
-        \\`array.reset` sets the count to zero and keeps the allocation, which is
-        \\what makes a reused buffer cheap. `array.free` goes further and restores
-        \\the descriptor a fresh array has, sentinel data pointer included, so a
-        \\freed array is indistinguishable from one that was never grown.
-    );
-    code_block(27, "glosso", #string
-        \\#import "Io";
-        \\
-        \\main :: () {
-        \\    d: [..]s64;
-        \\    print("fresh:      count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
-        \\    d.push(1, 2, 3);
-        \\    print("after adds: count=% capacity=%\n", d.count, d.capacity);
-        \\    d.free();
-        \\    print("after free: count=% capacity=% data=%\n", d.count, d.capacity, cast(u64) d.data);
-        \\}
-    );
-    code_block(28, "text", #string
-        \\fresh:      count=0 capacity=0 data=18446744073709551615
-        \\after adds: count=3 capacity=8
-        \\after free: count=0 capacity=0 data=18446744073709551615
-    );
-
-    subheading(29, "The dynamic-array procedures");
-    paragraph(30, #string,oneline
-        \\Dynamic arrays expose `push`, `append`, `reserve`, `reset`, `free`, and
-        \\`deinit` as inherent methods in the Prelude. Their mutable receivers borrow
-        \\the descriptor automatically. `view` is also available on arrays and views;
-        \\it returns a borrowed view without copying elements.
-    );
-    table_header(31, "Declaration   —   Effect   —   `#memory`");
-    table_row(32, "`a.push(value, ...)`, `a.append(value, ...)`   |   appends and grows if needed   |   `invalidates(#self), writes(#self), noescape(#self), escapes(value, into: #self)`");
-    table_row(58, "`a.reserve(capacity)`   |   reserves storage without changing count   |   `invalidates(#self), writes(#self), noescape(#self)`");
-    table_row(33, "`a.reset()`   |   count to zero, allocation retained   |   `writes(#self), noescape(#self)`");
-    table_row(34, "`a.free()`, `a.deinit()`   |   releases the backing allocation   |   `kills(#self), noescape(#self)`");
-    table_row(35, "`a.view()`   |   a view over the current elements   |   `returns_borrow(#self), reads(#self), noescape(#self)`");
-    paragraph(36, #string,oneline
-        \\The memory checker reads these contracts. Growing an array makes its
-        \\backing storage owned and creates a release obligation. A view taken before
-        \\`push` or `reserve` can become stale when growth moves the allocation.
-        \\Release the array with `free()` after its final use. Ownership and Release
-        \\Obligations and Aliasing, Invalidation, and Storage Generations cover both.
-    );
-    paragraph(37, #string,oneline
-        \\`push` is variadic in its element type and appends several written-out
-        \\values in one call. A loop can append the elements of an existing array.
-        \\Mutating operations require a writable dynamic array descriptor; a borrowed
-        \\view does not own the allocation and cannot call `free()`.
-    );
-
-    subheading(38, "Converting between the three");
-    paragraph(39, #string,oneline
-        \\Stored fixed arrays, dynamic arrays, and views do not implicitly convert
-        \\into one another. `v: []s64 = a;` on a fixed array is
-        \\`error: got [5]s64, expected []s64`; the same line from a dynamic array is
-        \\`error: got [..]s64, expected []s64`; and `b: [5]s64 = v;` is
-        \\`error: got []s64, expected [5]s64`. Every conversion is written, and each
-        \\one is a slice or a call. The deliberate exception is a pointer made
-        \\directly from a fixed-array literal: `&.[...]` can satisfy an expected
-        \\borrowed-slice type.
-    );
-    table_header(40, "From   —   To   —   Written");
-    table_row(41, "`[N]T`   |   `[]T`   |   `a[..]`, or any other slice of `a`");
-    table_row(42, "`[..]T`   |   `[]T`   |   `d.view()` or `d[..]`");
-    table_row(43, "`[]T`   |   `[]T` over fewer elements   |   `v[lo..hi]`");
-    table_row(44, "`[]T`   |   `[]const T`   |   implicit at an assignment or a call");
-    table_row(54, "`*[N]T` from `&.[...]`   |   `[]T`   |   implicit in an expected slice context; temporary borrow");
-    table_row(45, "`[]T`   |   `[N]T`   |   no conversion; copy element by element");
-    table_row(46, "`[]T` or `[N]T`   |   `[..]T`   |   no conversion; `array.push` the elements");
-    code_block(47, "glosso", #string
-        \\#import "Io";
-        \\
-        \\total :: (v: []s64) -> s64 {
-        \\    sum: s64 = 0;
-        \\    for x: v sum = sum + x;
-        \\    return sum;
-        \\}
-        \\
-        \\main :: () {
-        \\    a: [4]s64 = .[1, 2, 3, 4];
-        \\    d: [..]s64;
-        \\    defer d.free();
-        \\    for x: a d.push(x * 10);
-        \\    print("from a fixed array: %\n", total(a[..]));
-        \\    print("from a dynamic array: %\n", total(d[..]));
-        \\    print("through array_view:  %\n", total(d.view()));
-        \\    print("a sub-range: %\n", total(a[1..3]));
-        \\    print("from temporary storage: %\n", total(&.[cast(s64)5, cast(s64)6, cast(s64)7]));
-        \\}
-    );
-    code_block(48, "text", #string
-        \\from a fixed array: 10
-        \\from a dynamic array: 100
-        \\through array_view:  100
-        \\a sub-range: 5
-        \\from temporary storage: 18
-    );
-    paragraph(49, #string,oneline
-        \\Taking a view never copies elements: `a[1..3]` on a `[4]s64` produces a
-        \\two-word descriptor pointing into `a`. Ranges and Slicing gives every
-        \\slice spelling.
-    );
-    note(55, #string,oneline
-        \\`&.[...]` materialises an anonymous fixed array whose lifetime is only
-        \\the surrounding expression. That is long enough for an immediate call
-        \\such as `total(&.[cast(s64)5, cast(s64)6, cast(s64)7])`. Do not store or return the resulting slice,
-        \\or otherwise let it escape; use a named fixed array when the borrow must
-        \\live longer.
-    );
-
-    subheading(50, "Bounds and printing");
-    paragraph(51, #string,oneline
-        \\Indexing a fixed array, a view, or a dynamic array is bounds-checked at
-        \\runtime at `-O0` and `-O1`, including when the index is a compile-time
-        \\constant that is out of range. The failure prints a source position when available and
-        \\`runtime check failed: array.bounds` before aborting. At `-O2` and above the check is not emitted and the
-        \\index reads whatever is at that offset. Runtime Safety Checks and Panics
-        \\covers the whole family.
-    );
-    note(52, #string,oneline
-        \\Slicing is guarded on the same terms. A range whose start is negative,
-        \\whose end runs past the container's count, or whose end precedes its
-        \\start aborts before the descriptor is built; at `-O2` and above the
-        \\check is not emitted and the descriptor is built from the bounds as
-        \\written. Ranges and Slicing gives the rule.
-    );
-    paragraph(53, #string,oneline
-        \\None of the three has a `Show` instance. A default `%` reports a
-        \\missing `Formatter` instance for `[3]s64` or `[]s64`. Print by
-        \\iterating, deriving `Show` on a wrapper struct, or supplying a
-        \\custom selector; the chapter `Show`,
-        \\`FromString`, and `print` Formatting covers the alternatives.
+    paragraph(11, #string,oneline
+        \\Writable views convert to read-only views. Read-only views cannot be used as writable ones. Indexing fixed arrays, slices, dynamic arrays, and counted strings is checked at -O0 and -O1; [*]T carries no count and is never bounds-checked.
     );
 }
 
@@ -949,7 +255,7 @@ render_section_52 :: () {
     code_block(28, "glosso", #string
         \\#import "Io";
         \\
-        \\dump :: (label: string, v: []s64) {
+        \\dump :: (label: string, v: []mut s64) {
         \\    print("% count=%", label, v.count);
         \\    for x: v print(" %", x);
         \\    print("\n");
@@ -1279,13 +585,13 @@ render_section_53 :: () {
         \\
         \\Particle :: struct { id: u8; x: s64; y: s64; }
         \\
-        \\total_x :: (v: #soa []Particle) -> s64 {
+        \\total_x :: (v: #soa []mut Particle) -> s64 {
         \\    total: s64 = 0;
         \\    for i: 0..v.count total += v.x[i];
         \\    return total;
         \\}
         \\
-        \\scale_y :: (v: #soa []Particle, k: s64) {
+        \\scale_y :: (v: #soa []mut Particle, k: s64) {
         \\    for i: 0..v.count v.y[i] *= k;
         \\}
         \\
@@ -1315,39 +621,12 @@ render_section_53 :: () {
         \\showing.
     );
     note(36, #string,oneline
-        \\A range slice of a `#soa` array is not an SoA view. `soa[..]` and
-        \\`soa[1..3]` produce a plain `[]T` over the first field's run, silently
-        \\reinterpreting that run as whole elements, and nothing rejects it. Build
-        \\SoA views with `array.view`; slicing itself is covered in the chapter on
-        \\ranges and slicing.
+        \\A structure-of-arrays descriptor cannot be sliced as an ordinary array
+        \\of structs. Use array.view() for its #soa view, or slice one field's
+        \\column, such as array.x[lo..hi]. Ordinary array slicing is rejected
+        \\because each element field lives in its own buffer.
     );
-    code_block(37, "glosso", #string
-        \\#import "Io";
-        \\#import "Meta";
-        \\
-        \\Particle :: struct { id: u8; x: s64; y: s64; }
-        \\
-        \\main :: () {
-        \\    soa: #soa [..]Particle;
-        \\    defer soa.free();
-        \\    soa.push(Particle.{ 1, 10, 20 });
-        \\    soa.push(Particle.{ 2, 30, 40 });
-        \\    soa.push(Particle.{ 3, 50, 60 });
-        \\
-        \\    bad := soa[..];
-        \\    print("type=% count=%\n", type_name(bad.type_of()), bad.count);
-        \\    print("bad[0]: id=% x=% y=%\n", bad[0].id, bad[0].x, bad[0].y);
-        \\}
-    );
-    code_block(38, "text", #string
-        \\type=[]Particle count=3
-        \\bad[0]: id=50 x=10 y=30
-    );
-    paragraph(39, #string,oneline
-        \\Those three numbers are the first three elements of the `x` run read back
-        \\as one `Particle`, because `x` sorts first in the laid-out field list.
-        \\Field reordering is described in the chapter on struct memory layout.
-    );
+
 }
 
 render_section_54 :: () {
@@ -1370,7 +649,7 @@ render_section_54 :: () {
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
-        \\Vec2 :: struct { x: s64 = 0; y: s64 = 0; }
+        \\Vec2 :: struct #derive(Show) { x: s64 = 0; y: s64 = 0; }
         \\
         \\main :: () {
         \\    a := Vec2.{ 10, 20 };        // qualified: the type is written
@@ -1683,7 +962,7 @@ render_section_55 :: () {
         \\
         \\Vec2 :: struct { x: s64; y: s64; }
         \\
-        \\bump :: (p: *Vec2) { p.*.x += 1; }
+        \\bump :: (p: *mut Vec2) { p.*.x += 1; }
         \\
         \\main :: () {
         \\    v := Vec2.{ 3, 4 };
@@ -1719,16 +998,16 @@ render_section_55 :: () {
     subheading(18, "Inherent methods and associated functions");
     paragraph(19, #string,oneline
         \\Attach methods to an owned type with `Vec2 ::: { ... }`. The first
-        \\parameter `#self` receives a value, `*#self` a mutable pointer, and
-        \\`*const #self` a read-only pointer. `#Self_Type` names the complete owner
+        \\parameter `#self` receives a value, `*mut #self` a mutable pointer, and
+        \\`*#self` a read-only pointer. `#Self_Type` names the complete owner
         \\type. A function without a receiver is an associated function, called
         \\through the type. The block below makes its members public explicitly.
     );
     paragraph(20, #string,oneline
         \\`v.length2()` inserts the receiver; `Vec2.length2(v)` spells it explicitly.
         \\A pointer receiver can use an existing pointer or borrow an addressable
-        \\value automatically. Mutable receivers cannot borrow a temporary or discard
-        \\`const`. Field access inside a pointer receiver still writes `#self.*.x`.
+        \\value automatically. Mutable receivers cannot borrow a temporary or accept
+        \\a read-only pointer. Field access inside a pointer receiver still writes `#self.*.x`.
         \\A parameter default cannot refer to `#self`: defaults are evaluated at
         \\the call site, where the receiver binding is not in scope.
     );
@@ -1738,7 +1017,7 @@ render_section_55 :: () {
         \\Vec2 ::: #public {
         \\    make :: (x: s64, y: s64) -> #Self_Type { return .{ x, y }; }
         \\    length2 :: (#self) -> s64 { return #self.x * #self.x + #self.y * #self.y; }
-        \\    shift :: (*#self, amount: s64) { #self.*.x += amount; }
+        \\    shift :: (*mut #self, amount: s64) { #self.*.x += amount; }
         \\}
         \\main :: () {
         \\    v := Vec2.make(3, 4);
@@ -1819,7 +1098,7 @@ render_section_55 :: () {
         \\    print("written out: %\n", label_sum("t", 1, 2, 3));
         \\    print("fixed array: %\n", label_sum("t", xs...));
         \\    print("view:        %\n", label_sum("t", xs[..]...));
-        \\    print("dynamic:     %\n", label_sum("t", d...));
+        \\    print("dynamic:     %\n", label_sum("t", d.view()...));
         \\    print("empty pack:  %\n", label_sum("t"));
         \\}
     );

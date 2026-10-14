@@ -725,7 +725,7 @@ render_section_58 :: () {
         \\
         \\main :: () {
         \\    fixed: [3]ssize = .[1, 2, 3];
-        \\    view: []ssize = fixed[..];
+        \\    view: []mut ssize = fixed[..];
         \\    print("fixed=% view=%\n", sum(fixed...), sum(view...));
         \\    dyn: [..]ssize;
         \\    dyn.push(10);
@@ -772,168 +772,24 @@ render_section_58 :: () {
 
 render_section_59 :: () {
     paragraph(0, #string,oneline
-        \\`noalias` is a keyword, not a directive, and it qualifies a parameter. It
-        \\states that for the duration of the call the storage reached through that
-        \\pointer is not reached through any other pointer the procedure can see. It
-        \\is written before the parameter name, alongside `using`, and before any
-        \\parameter directive.
+        \\noalias is a pointer parameter modifier and a promise made by the caller. During the call, access through that pointer must obey the non-aliasing contract. It is independent of pointer mutability and ownership.
     );
     code_block(1, "glosso", #string
-        \\copy2 :: (noalias dst: *ssize, noalias src: *const ssize) { dst.* = src.*; }
+        \\copy_one :: (noalias destination: *mut s64, source: *s64) {
+        \\    destination.* = source.*;
+        \\}
         \\
-        \\add_all :: (noalias out: [*]s64, noalias a: [*]s64, n: s64) {
-        \\    for i: 0..n out[i] = a[i] * 2;
+        \\main :: () {
+        \\    source: s64 = 42;
+        \\    destination: s64;
+        \\    copy_one(&destination, &source);
         \\}
     );
     paragraph(2, #string,oneline
-        \\The promise exists to be handed to the backend. Each qualified parameter
-        \\becomes an LLVM `noalias` attribute, on the definition and again on every
-        \\call, which is what lets the optimizer keep a loaded value in a register
-        \\across a store through the other pointer, and vectorize loops like
-        \\`add_all` that would otherwise have to assume overlap.
+        \\A receiver can also carry noalias, as in noalias *mut #self. A writable destination and a read-only source still need distinct storage when the noalias contract requires it. The compiler does not perform borrow analysis to establish this caller promise.
     );
-    code_block(3, "text", #string
-        \\define void @glo_copy2(ptr noalias %0, ptr noalias %1) {
-        \\...
-        \\  call void @glo_copy2(ptr noalias %r5.load, ptr noalias %r7.load)
-    );
-
-    subheading(4, "Pointer types only");
-    paragraph(5, #string,oneline
-        \\`noalias` is refused on anything that is not pointer-like, because there is
-        \\nothing to make a promise about. The check runs on the resolved parameter
-        \\type, and the diagnostic reads `noalias parameter 'v' must have a pointer
-        \\type, got ssize`, with the resolved type in the last position.
-    );
-    table_header(6, "Parameter type   —   `noalias`   —   Reported type");
-    table_row(7, "`*T`, `*const T`   |   accepted   |   n/a");
-    table_row(8, "`[*]T`   |   accepted   |   n/a");
-    table_row(9, "a `#fn_ptr` type   |   accepted   |   n/a");
-    table_row(10, "`?*T`   |   refused   |   `Option__ssize`");
-    table_row(11, "`[]T`   |   refused   |   `[]ssize`");
-    table_row(12, "`string`   |   refused   |   `string`");
-    table_row(13, "any scalar or struct   |   refused   |   `ssize`, `Point`, ...");
-    note(14, #string,oneline
-        \\`?*T` is refused even though it holds a pointer at runtime. An optional
-        \\pointer is a niche union, and the checker sees the union type, which is why
-        \\the message reports `Option__ssize`. A procedure that wants both the null
-        \\niche and the aliasing promise has to unwrap the option and pass the bare
-        \\`*T` on.
-    );
-
-    subheading(15, "Where else it is refused");
-    paragraph(16, #string,oneline
-        \\Two parameter directives exclude it outright. `#comptime` and `#empty`
-        \\parameters carry no runtime pointer, so there is nothing for the attribute
-        \\to attach to. Outside a parameter list the keyword has no meaning at all.
-    );
-    table_header(17, "Written   —   Diagnostic");
-    table_row(18, "`(noalias noalias p: *ssize)`   |   `duplicate noalias parameter modifier`");
-    table_row(19, "`(noalias #comptime p: *ssize)`   |   `noalias cannot qualify a #comptime parameter`");
-    table_row(20, "`(noalias #empty: $T)`   |   `noalias cannot qualify a #empty parameter`");
-    table_row(21, "`(#comptime noalias p: *ssize)`   |   `unexpected token 'noalias'`");
-    table_row(22, "`(pair: (noalias *ssize, *ssize))`   |   `noalias is only valid on function parameters`");
-    paragraph(23, #string,oneline
-        \\The last row is the tuple type. A parenthesized list followed by `->` is a
-        \\function type, where `noalias` is meaningful; the same list without the
-        \\arrow is a tuple type, where it is not. Inside a function type the
-        \\parameters may be unnamed, and the diagnostic then numbers them:
-        \\`f :: (g: (noalias ssize) -> ssize)` is `error: noalias function parameter 1
-        \\must have a pointer type, got ssize`.
-    );
-
-    subheading(24, "Generic parameters");
-    paragraph(25, #string,oneline
-        \\When the parameter's type is a polymorph the check cannot run at the
-        \\declaration, so it is deferred to each instantiation. The same declaration
-        \\is therefore accepted or rejected depending on what it is called with.
-    );
-    code_block(26, "glosso", #string
-        \\#import "Io";
-        \\
-        \\touch :: (noalias p: $T) -> ssize { return 1; }
-        \\
-        \\main :: () { print("%\n", touch(3)); }
-    );
-    code_block(27, "text", #string
-        \\error: noalias parameter 'p' instantiated with non-pointer type ssize
-    );
-    paragraph(28, #string,oneline
-        \\`touch(&a)` for an `a: ssize` compiles and runs. The error is reported at the
-        \\declaration rather than at the offending call, so a generic procedure used
-        \\from several places names none of them.
-    );
-
-    subheading(29, "Part of a function pointer's type");
-    paragraph(30, #string,oneline
-        \\`noalias` is recorded in a function-pointer type and compared when one is
-        \\assigned. It is not a subtyping relation in either direction: a procedure
-        \\without the promise does not satisfy a type that has it, and a procedure
-        \\with the promise does not satisfy a type that lacks it. The second
-        \\direction matters because the attribute is applied at the call site as well
-        \\as at the definition, so a caller that dropped the promise from the type
-        \\would still emit it.
-    );
-    code_block(31, "glosso", #string
-        \\Copy :: #fn_ptr(noalias dst: *ssize, noalias src: *const ssize);
-        \\
-        \\do_copy :: (dst: *ssize, src: *const ssize) { dst.* = src.*; }
-        \\
-        \\main :: () { c: Copy = do_copy; }
-    );
-    code_block(32, "text", #string
-        \\error: cannot implicitly convert fnptr to fnptr because their noalias parameter contracts differ
-    );
-    paragraph(33, #string,oneline
-        \\Adding `noalias` to `do_copy` makes it compile. Lambdas carry the qualifier
-        \\too, and are checked the same way: `|noalias p: *ssize| -> ssize { return p.*; }`
-        \\assigned where a plain `(p: *ssize) -> ssize` is expected gives
-        \\`error: lambda parameter 'p' is noalias, but the expected function parameter
-        \\is not`.
-    );
-
-    subheading(34, "What is proved and what is assumed");
-    paragraph(35, #string,oneline
-        \\The attribute itself proves nothing: `noalias` is a promise to the
-        \\optimizer, and no analysis establishes that the storage really is
-        \\disjoint. The memory analysis does check the two shapes it can see. A
-        \\call that hands the same storage to two `noalias` parameters, or hands
-        \\one a pointer that another live reference still names, is
-        \\`warning: [memory.X1] noalias argument overlaps another live reference`,
-        \\framed on the call. A body that lets a `noalias` parameter be retained
-        \\by something it calls is `warning: [memory.X3] noalias parameter 'v' is
-        \\retained by this call`, with `note: a noalias parameter may not escape;
-        \\take a plain '*T' instead, or do not retain it`. Both follow
-        \\`--borrow-check`, so `--borrow-check error` makes them fatal and
-        \\`--borrow-check off` silences them.
-    );
-    code_block(36, "glosso", #string
-        \\#import "Io";
-        \\
-        \\copy2 :: (noalias dst: *ssize, noalias src: *const ssize) { dst.* = src.*; }
-        \\
-        \\main :: () {
-        \\    a: ssize = 1;
-        \\    b: ssize = 2;
-        \\    copy2(&a, &b);
-        \\    print("a=%\n", a);
-        \\    copy2(&a, &a);
-        \\    print("aliased a=%\n", a);
-        \\}
-    );
-    code_block(37, "text", #string
-        \\a=2
-        \\aliased a=2
-    );
-    note(38, #string,oneline
-        \\The aliased call above still produces the expected value at this
-        \\optimization level, which is why the diagnostic matters: a false
-        \\`noalias` is not reliably a visible wrong answer. It changes what the
-        \\optimizer is allowed to assume, so the same source can behave
-        \\differently at a different `-O` level or after an unrelated edit, and
-        \\`[memory.X1]` only catches an overlap it can see inside one procedure.
-        \\Add it only where the non-overlap is a documented condition of the
-        \\procedure.
+    note(3, #string,oneline
+        \\Keep noalias only where callers can satisfy it. Backend optimization may rely on the declaration; runtime bounds and null checks do not check aliasing.
     );
 }
 
@@ -1507,8 +1363,8 @@ render_section_62 :: () {
         \\
         \\idf   :: (x: $T) -> T { return x; }
         \\wider :: (a: $T, b: T) -> T { if a > b return a; return b; }
-        \\first :: (xs: []$T) -> T { return xs[0]; }
-        \\deref :: (p: *$T) -> T { return p.*; }
+        \\first :: (xs: []mut $T) -> T { return xs[0]; }
+        \\deref :: (p: *mut $T) -> T { return p.*; }
         \\unbox :: (b: Box($T)) -> T { return b.value; }
         \\tag   :: (a: $A, b: $B) -> s64 { return size_of(A) * 100 + size_of(B); }
         \\
@@ -1561,7 +1417,7 @@ render_section_62 :: () {
         \\
         \\takes_opt  :: (o: ?$T) -> T { if #pattern .Some(v) = o return v; d: T; return d; }
         \\takes_res  :: (r: $E!$T) -> T { if #pattern .Ok(v) = r return v; d: T; return d; }
-        \\takes_many :: (p: [*]$T) -> T { return p[0]; }
+        \\takes_many :: (p: [*]mut $T) -> T { return p[0]; }
         \\takes_fn   :: (f: ($T) -> $R, x: T) -> R { return f(x); }
         \\
         \\dbl :: (x: s64) -> s64 { return x * 2; }
@@ -1597,7 +1453,7 @@ render_section_62 :: () {
         \\rejected for the same reason `(a: $T, b: $T)` is.
     );
     code_block(21, "glosso", #string
-        \\zip_len :: (a: []$T, b: []T) -> ssize {
+        \\zip_len :: (a: []mut $T, b: []mut T) -> ssize {
         \\    if a.count < b.count return a.count;
         \\    return b.count;
         \\}
@@ -1898,8 +1754,7 @@ render_section_63 :: () {
         \\default against a skolem, class methods resolve abstractly with no
         \\dictionary, and `#meaningful` probes are not run at all, because a
         \\structural probe asks a question about a concrete type by
-        \\construction. What it finds it reports as a warning on the same
-        \\channel as the memory diagnostics, never as an error, so a program the
+        \\construction. What it finds it reports as a warning as a warning, never as an error, so a program the
         \\pre-check complains about still compiles and runs.
     );
     paragraph(31, #string,oneline
@@ -2348,7 +2203,7 @@ render_section_65 :: () {
         \\#import "Io";
         \\#import "String_Builder";
         \\
-        \\find_if :: (values: []$T, predicate: (T) -> bool) -> ssize {
+        \\find_if :: (values: []mut $T, predicate: (T) -> bool) -> ssize {
         \\    for values { if predicate(it) return it_index; }
         \\    return -1;
         \\}
@@ -2409,7 +2264,7 @@ render_section_65 :: () {
         \\
         \\main :: () {
         \\    // Globals and constants are visible; enclosing locals are not.
-        \\    scaled := |x: s64| -> s64 { return x * SCALE + offset; };
+        \\    scaled := |x: s64| -> s64 { return x *mut SCALE + offset; };
         \\    print("scaled=%\n", scaled(4));
         \\
         \\    // Named results in a lambda return type.
@@ -2418,7 +2273,7 @@ render_section_65 :: () {
         \\    print("lo=% hi=%\n", a, b);
         \\
         \\    // noalias parameters.
-        \\    load := |noalias p: *s64| -> s64 { return p.*; };
+        \\    load := |noalias p: *mut s64| -> s64 { return p.*; };
         \\    n: s64 = 8;
         \\    print("load=%\n", load(&n));
         \\
@@ -2486,8 +2341,8 @@ render_section_66 :: () {
         \\Sink    :: #fn_ptr(v: s64);
         \\Nullary :: #fn_ptr() -> s64;
         \\Cb      :: #fn_ptr(v: s64) -> s64 #c_call;
-        \\Copy    :: #fn_ptr(noalias dst: *s64, noalias src: *const s64);
-        \\Varargs :: #fn_ptr(fmt: *const s8, ...) -> s32 #c_call;
+        \\Copy    :: #fn_ptr(noalias dst: *mut s64, noalias src: *s64);
+        \\Varargs :: #fn_ptr(fmt: *s8, ...) -> s32 #c_call;
     );
     paragraph(2, #string,oneline
         \\Parameter names are mandatory here, even though they contribute
@@ -2498,21 +2353,9 @@ render_section_66 :: () {
         \\default to `void`.
     );
     subheading(3, "The suffixes");
-    paragraph(4, #string,oneline
-        \\Three directives may follow the return type, in any order.
-        \\`#c_call` is part of the type: a function must carry `#c_call` to be
-        \\assignable to a `#c_call` pointer, and must not carry it to be
-        \\assignable to a plain one. `#no_context` is accepted in the same
-        \\position but is discarded by the parser and never enters the type, so
-        \\it neither constrains an assignment nor changes a call. `#memory`
-        \\attaches a contract that the memory analysis applies to every call
-        \\made through the pointer; it is not part of the type's identity, so a
-        \\procedure with no contract of its own still assigns to it.
-    );
     table_header(5, "Suffix   —   On a `#fn_ptr` type   —   On a function declaration");
     table_row(6, "`#c_call`   |   part of the type's identity   |   C calling convention, no implicit context");
     table_row(7, "`#no_context`   |   accepted and ignored   |   suppresses the implicit context parameter");
-    table_row(8, "`#memory`   |   applied to every indirect call; not part of the identity   |   the procedure's own contract");
     paragraph(9, #string,oneline
         \\A convention mismatch in either direction is
         \\`error: got fnptr, expected fnptr`. The message repeats itself because
@@ -2552,8 +2395,7 @@ render_section_66 :: () {
         \\`#fn_ptr(a: s64) -> s64` assigns to `#fn_ptr(different: s64) -> s64`.
     );
     bullet(13, #string,oneline
-        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const
-        \\s64);` rejects a procedure without both markers with
+        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *mut s64, noalias src: *s64);` rejects a procedure without both markers with
         \\`error: cannot implicitly convert fnptr to fnptr because their noalias
         \\parameter contracts differ`. `noalias` Pointer Parameters covers the
         \\marker itself.
@@ -2590,11 +2432,11 @@ render_section_66 :: () {
         \\call0 :: (f: () -> s64) -> s64 { return f(); }
         \\call1 :: (f: (s64) -> s64, v: s64) -> s64 { return f(v); }
         \\call2 :: (f: (x: s64, y: s64) -> s64, v: s64) -> s64 { return f(v, v); }
-        \\callN :: (f: (noalias p: *s64) -> s64, p: *s64) -> s64 { return f(p); }
+        \\callN :: (f: (noalias p: *mut s64) -> s64, p: *mut s64) -> s64 { return f(p); }
         \\
         \\five :: () -> s64 { return 5; }
         \\add  :: (a: s64, b: s64) -> s64 { return a + b; }
-        \\load :: (noalias p: *s64) -> s64 { return p.*; }
+        \\load :: (noalias p: *mut s64) -> s64 { return p.*; }
         \\
         \\main :: () {
         \\    k: s64 = 12;
@@ -2673,15 +2515,6 @@ render_section_66 :: () {
 }
 
 render_section_67 :: () {
-    paragraph(0, #string,oneline
-        \\A directive is `#` followed by a run of letters, digits and
-        \\underscores. The lexer produces one token for any such spelling
-        \\without knowing which names exist, and every directive is then
-        \\dispatched by name at the point in the grammar where it appeared.
-        \\Position is therefore part of a directive's meaning: `#comptime`,
-        \\`#memory`, `#inline` and `#derive` all do different things depending
-        \\on what they are attached to.
-    );
     paragraph(1, #string,oneline
         \\There is no unknown-directive diagnostic. A name the parser does not
         \\accept in that position simply fails to parse, and the error names the
@@ -2704,11 +2537,9 @@ render_section_67 :: () {
     table_row(7, "`#import`   |   `#import[,only(…)] \"M\";`, or `,hide(…)`   |   loads a standard-library module, optionally under an alias");
     table_row(8, "`#load`   |   `#load \"path\";`   |   loads an isolated relative module; `#load,embed` shares this unit; `#export` reexports a relative dependency");
     table_row(9, "`#library`   |   `N :: #library \"file\";` with `,system`, `,dyn` or `,static`   |   declares a foreign library handle for `#foreign`");
-    table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call] [#no_context] [#memory …];`   |   declares a function-pointer type");
     table_row(11, "`#thread_local`   |   `#thread_local <global var decl>`   |   gives the variable thread-local storage");
     table_row(12, "`#comptime`   |   `#comptime { … }` / `X :: #comptime e;`   |   runs during compilation");
     table_row(13, "`#insert`   |   `#insert <string expr>;`   |   splices generated declarations into the file");
-    table_row(14, "`#memory`   |   `#memory <fn> { effects }`   |   attaches a contract to a function declared elsewhere");
     note(15, #string,oneline
         \\Module-level `#if` selects declaration blocks at compile time, with
         \\optional `else #if` and `else` branches. Inactive branches contribute no
@@ -2744,7 +2575,6 @@ render_section_67 :: () {
     table_row(30, "`#must`   |   none   |   discarding the result is an error");
     table_row(31, "`#inline`   |   none, or `,always` / `,never`   |   inlining hint, or a forced decision");
     table_row(32, "`#modify`   |   an expression or a block   |   rewrites the type parameters before instantiation");
-    table_row(33, "`#memory`   |   one effect, `(effect, …)`, or `{ effect, … }`   |   memory and ownership contract");
     paragraph(34, #string,oneline
         \\`#inline,sometimes` is `error: #inline expects always or never after
         \\','`, and `#expand,stmt` is `error: #expand expects expression after
@@ -2871,8 +2701,6 @@ render_section_67 :: () {
         \\cover them.
     );
     table_header(64, "Position   —   Directives");
-    table_row(65, "statement   |   `#memory` overlay, `#memory trusted(\"why\") { … }`, `#bytes`, `#asm`, `#inline while`, `#inline for`, `#try defer`, `#push_context`, `#push_allocator`, `#comptime`, `#if`, `#assert`, `#compile_error`, `#insert`");
-    table_row(66, "expression   |   `#comptime`, `#try`, `#pattern`, `#meaningful`, `#undefined`, `#source_location`, `#simd`, `#string`, `#inline for`, `#inline while`, `#code`, and a postfix `#memory{…}` contract");
     table_row(67, "type   |   `#Context`, `#Never`, `#Self_Type`, `#aos [..]T`, `#soa [..]T`");
     table_row(68, "switch and case   |   `#partial` on the switch, `#falling` on a case");
     paragraph(69, #string,oneline
@@ -2892,7 +2720,7 @@ render_section_67 :: () {
         \\the complete contextual-typing and escape rules.
     );
     table_row(72, "`#public`, `#public(unit)`, `#private`   |   declaration prefix or group; also an inherent block header after `:::`   |   declaration audience");
-    table_row(73, "`#self`, `*#self`, `*const #self`   |   first parameter of an inherent method   |   receiver value or pointer");
+    table_row(73, "`#self`, `*#self`, `*#self`   |   first parameter of an inherent method   |   receiver value or pointer");
     table_row(74, "`#Self_Type`   |   type in an inherent block or instance   |   the complete matched owner type");
     table_row(75, "`#on_drop_error(value, error) { ... }`   |   after an owning local declaration   |   handles failure from automatic cleanup");
 }

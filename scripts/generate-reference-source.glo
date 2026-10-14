@@ -9,15 +9,9 @@ Reference_Parameter :: struct {
     constraints: [..]string;
 }
 
-Reference_Memory_Contract :: struct {
-    effect: string;
-    arguments: [..]string;
-}
-
 Reference_Function :: struct {
     parameters: [..]Reference_Parameter;
     return_type: string;
-    memory_contracts: [..]Reference_Memory_Contract;
     where_clauses: [..]string;
 }
 
@@ -100,122 +94,178 @@ Reference_Header :: struct {
 
 // Explicit transport serializers keep extraction independent of compile-time
 // formatting used by the standard Serialize derive.
-Reference_Parameter ::: instance Serialize {
-    serialize :: (value: Reference_Parameter) -> Serialization_Value {
+// Serialization borrows records; their dynamic fields remain owned by the scanner.
+reference_serialize_strings :: (values: []string) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for value: values out.push(serialize(value));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_parameters :: (values: []mut Reference_Parameter) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_fields :: (values: []mut Reference_Type_Field) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_variants :: (values: []mut Reference_Type_Variant) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_members :: (values: []mut Reference_Member) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_symbols :: (values: []mut Reference_Symbol) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_set_function :: (out: *mut Reference_Function, value: Reference_Function) {
+    out.*.return_type = value.return_type;
+    _ := out.*.parameters.replace(value.parameters.take());
+    _ := out.*.where_clauses.replace(value.where_clauses.take());
+}
+
+reference_set_type_info :: (out: *mut Reference_Type_Info, value: Reference_Type_Info) {
+    out.*.kind = value.kind;
+    _ := out.*.fields.replace(value.fields.take());
+    _ := out.*.variants.replace(value.variants.take());
+}
+
+reference_clone_function :: (value: *Reference_Function) -> Reference_Function {
+    out: Reference_Function;
+    out.return_type = value.*.return_type;
+    for clause: value.*.where_clauses out.where_clauses.push(clause);
+    for parameter_index: 0..value.*.parameters.count {
+        parameter := &value.*.parameters[parameter_index];
+        copy: Reference_Parameter = .{
+            .name = parameter.*.name, .value_type = parameter.*.value_type,
+            .default_value = parameter.*.default_value,
+        };
+        for modifier: parameter.*.modifiers copy.modifiers.push(modifier);
+        for constraint: parameter.*.constraints copy.constraints.push(constraint);
+        out.parameters.push(copy);
+    }
+    return out;
+}
+
+*mut Reference_Parameter ::: instance Serialize {
+    serialize :: (value: *mut Reference_Parameter) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "value_type", .value = serialize(value.value_type) });
-        fields.push(.{ .name = "default_value", .value = serialize(value.default_value) });
-        fields.push(.{ .name = "modifiers", .value = serialize(value.modifiers) });
-        fields.push(.{ .name = "constraints", .value = serialize(value.constraints) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "value_type", .value = serialize(value.*.value_type) });
+        fields.push(.{ .name = "default_value", .value = serialize(value.*.default_value) });
+        fields.push(.{ .name = "modifiers", .value = reference_serialize_strings(value.*.modifiers.view()) });
+        fields.push(.{ .name = "constraints", .value = reference_serialize_strings(value.*.constraints.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Parameter", fields);
     }
 }
 
-Reference_Memory_Contract ::: instance Serialize {
-    serialize :: (value: Reference_Memory_Contract) -> Serialization_Value {
+*mut Reference_Function ::: instance Serialize {
+    serialize :: (value: *mut Reference_Function) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "effect", .value = serialize(value.effect) });
-        fields.push(.{ .name = "arguments", .value = serialize(value.arguments) });
-        return Serialization_Value.serialization_structure_value("Reference_Memory_Contract", fields);
-    }
-}
-
-Reference_Function ::: instance Serialize {
-    serialize :: (value: Reference_Function) -> Serialization_Value {
-        fields: [..]Serialization_Field;
-        fields.push(.{ .name = "parameters", .value = serialize(value.parameters) });
-        fields.push(.{ .name = "return_type", .value = serialize(value.return_type) });
-        fields.push(.{ .name = "memory_contracts", .value = serialize(value.memory_contracts) });
-        fields.push(.{ .name = "where_clauses", .value = serialize(value.where_clauses) });
+        fields.push(.{ .name = "parameters", .value = reference_serialize_parameters(value.*.parameters.view()) });
+        fields.push(.{ .name = "return_type", .value = serialize(value.*.return_type) });
+        fields.push(.{ .name = "where_clauses", .value = reference_serialize_strings(value.*.where_clauses.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Function", fields);
     }
 }
 
-Reference_Type_Field ::: instance Serialize {
-    serialize :: (value: Reference_Type_Field) -> Serialization_Value {
+*mut Reference_Type_Field ::: instance Serialize {
+    serialize :: (value: *mut Reference_Type_Field) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "value_type", .value = serialize(value.value_type) });
-        fields.push(.{ .name = "default_value", .value = serialize(value.default_value) });
-        fields.push(.{ .name = "modifiers", .value = serialize(value.modifiers) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "value_type", .value = serialize(value.*.value_type) });
+        fields.push(.{ .name = "default_value", .value = serialize(value.*.default_value) });
+        fields.push(.{ .name = "modifiers", .value = reference_serialize_strings(value.*.modifiers.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Type_Field", fields);
     }
 }
 
-Reference_Type_Variant ::: instance Serialize {
-    serialize :: (value: Reference_Type_Variant) -> Serialization_Value {
+*mut Reference_Type_Variant ::: instance Serialize {
+    serialize :: (value: *mut Reference_Type_Variant) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "variant_type", .value = serialize(value.variant_type) });
-        fields.push(.{ .name = "value", .value = serialize(value.value) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "variant_type", .value = serialize(value.*.variant_type) });
+        fields.push(.{ .name = "value", .value = serialize(value.*.value) });
         return Serialization_Value.serialization_structure_value("Reference_Type_Variant", fields);
     }
 }
 
-Reference_Type_Info ::: instance Serialize {
-    serialize :: (value: Reference_Type_Info) -> Serialization_Value {
+*mut Reference_Type_Info ::: instance Serialize {
+    serialize :: (value: *mut Reference_Type_Info) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "kind", .value = serialize(value.kind) });
-        fields.push(.{ .name = "fields", .value = serialize(value.fields) });
-        fields.push(.{ .name = "variants", .value = serialize(value.variants) });
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "fields", .value = reference_serialize_fields(value.*.fields.view()) });
+        fields.push(.{ .name = "variants", .value = reference_serialize_variants(value.*.variants.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Type_Info", fields);
     }
 }
 
-Reference_Member ::: instance Serialize {
-    serialize :: (value: Reference_Member) -> Serialization_Value {
+*mut Reference_Member ::: instance Serialize {
+    serialize :: (value: *mut Reference_Member) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "kind", .value = serialize(value.kind) });
-        fields.push(.{ .name = "signature", .value = serialize(value.signature) });
-        fields.push(.{ .name = "display_signature", .value = serialize(value.display_signature) });
-        fields.push(.{ .name = "summary", .value = serialize(value.summary) });
-        fields.push(.{ .name = "source_path", .value = serialize(value.source_path) });
-        fields.push(.{ .name = "source_line", .value = serialize(value.source_line) });
-        fields.push(.{ .name = "has_default", .value = serialize(value.has_default) });
-        fields.push(.{ .name = "function_info", .value = serialize(value.function_info) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "signature", .value = serialize(value.*.signature) });
+        fields.push(.{ .name = "display_signature", .value = serialize(value.*.display_signature) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "source_line", .value = serialize(value.*.source_line) });
+        fields.push(.{ .name = "has_default", .value = serialize(value.*.has_default) });
+        fields.push(.{ .name = "function_info", .value = serialize(&value.*.function_info) });
         return Serialization_Value.serialization_structure_value("Reference_Member", fields);
     }
 }
 
-Reference_Class_Info ::: instance Serialize {
-    serialize :: (value: Reference_Class_Info) -> Serialization_Value {
+*mut Reference_Class_Info ::: instance Serialize {
+    serialize :: (value: *mut Reference_Class_Info) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "minimal", .value = serialize(value.minimal) });
-        fields.push(.{ .name = "minimal_explicit", .value = serialize(value.minimal_explicit) });
-        fields.push(.{ .name = "members", .value = serialize(value.members) });
+        fields.push(.{ .name = "minimal", .value = serialize(value.*.minimal) });
+        fields.push(.{ .name = "minimal_explicit", .value = serialize(value.*.minimal_explicit) });
+        fields.push(.{ .name = "members", .value = reference_serialize_members(value.*.members.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Class_Info", fields);
     }
 }
 
-Reference_Symbol ::: instance Serialize {
-    serialize :: (value: Reference_Symbol) -> Serialization_Value {
+*mut Reference_Symbol ::: instance Serialize {
+    serialize :: (value: *mut Reference_Symbol) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "kind", .value = serialize(value.kind) });
-        fields.push(.{ .name = "signature", .value = serialize(value.signature) });
-        fields.push(.{ .name = "display_signature", .value = serialize(value.display_signature) });
-        fields.push(.{ .name = "searchable_signature", .value = serialize(value.searchable_signature) });
-        fields.push(.{ .name = "summary", .value = serialize(value.summary) });
-        fields.push(.{ .name = "source_path", .value = serialize(value.source_path) });
-        fields.push(.{ .name = "source_line", .value = serialize(value.source_line) });
-        fields.push(.{ .name = "owner_typeclass", .value = serialize(value.owner_typeclass) });
-        fields.push(.{ .name = "has_default", .value = serialize(value.has_default) });
-        fields.push(.{ .name = "function_info", .value = serialize(value.function_info) });
-        fields.push(.{ .name = "type_info", .value = serialize(value.type_info) });
-        fields.push(.{ .name = "class_info", .value = serialize(value.class_info) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "signature", .value = serialize(value.*.signature) });
+        fields.push(.{ .name = "display_signature", .value = serialize(value.*.display_signature) });
+        fields.push(.{ .name = "searchable_signature", .value = serialize(value.*.searchable_signature) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "source_line", .value = serialize(value.*.source_line) });
+        fields.push(.{ .name = "owner_typeclass", .value = serialize(value.*.owner_typeclass) });
+        fields.push(.{ .name = "has_default", .value = serialize(value.*.has_default) });
+        fields.push(.{ .name = "function_info", .value = serialize(&value.*.function_info) });
+        fields.push(.{ .name = "type_info", .value = serialize(&value.*.type_info) });
+        fields.push(.{ .name = "class_info", .value = serialize(&value.*.class_info) });
         return Serialization_Value.serialization_structure_value("Reference_Symbol", fields);
     }
 }
 
-Reference_Module ::: instance Serialize {
-    serialize :: (value: Reference_Module) -> Serialization_Value {
+*mut Reference_Module ::: instance Serialize {
+    serialize :: (value: *mut Reference_Module) -> Serialization_Value {
         fields: [..]Serialization_Field;
-        fields.push(.{ .name = "name", .value = serialize(value.name) });
-        fields.push(.{ .name = "summary", .value = serialize(value.summary) });
-        fields.push(.{ .name = "source_path", .value = serialize(value.source_path) });
-        fields.push(.{ .name = "symbols", .value = serialize(value.symbols) });
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "symbols", .value = reference_serialize_symbols(value.*.symbols.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Module", fields);
     }
 }
@@ -323,7 +373,7 @@ reference_compare_paths :: (left: string, right: string) -> Ordering {
 
 reference_collect_paths :: (
     directory_path: string,
-    paths: *[..]string,
+    paths: *mut [..]string,
 ) -> Fs_Error!ssize {
     entries := os_fs_directory_entries(directory_path);
     for child: entries {
@@ -488,7 +538,7 @@ reference_module_summary :: (source: string) -> string {
     return reference_normalize_space(out.into_string());
 }
 
-reference_header_needs_space :: (out: *String_Builder, byte: u8) -> bool {
+reference_header_needs_space :: (out: *mut String_Builder, byte: u8) -> bool {
     if out.*.buf.count == 0 return false;
     previous := out.*.buf[out.*.buf.count - 1];
     if previous == cast(u8)(#char "(") || previous == cast(u8)(#char "[") return false;
@@ -496,16 +546,15 @@ reference_header_needs_space :: (out: *String_Builder, byte: u8) -> bool {
     return true;
 }
 
-reference_header_ends_with :: (out: *String_Builder, suffix: string) -> bool {
+reference_header_ends_with :: (out: *mut String_Builder, suffix: string) -> bool {
     if suffix.count > out.*.buf.count return false;
     start := out.*.buf.count - suffix.count;
     for i: 0..suffix.count if out.*.buf[start + i] != suffix[i] return false;
     return true;
 }
 
-reference_header_starts_braced_directive :: (out: *String_Builder) -> bool {
-    return reference_header_ends_with(out, "#memory") ||
-        reference_header_ends_with(out, "#modify");
+reference_header_starts_braced_directive :: (out: *mut String_Builder) -> bool {
+    return reference_header_ends_with(out, "#modify");
 }
 
 reference_header :: (source: string, start: ssize) -> Reference_Header {
@@ -661,7 +710,7 @@ reference_is_function_header :: (value: string, terminator: u8) -> bool {
     parameters := value[1..close].trim();
     return terminator == cast(u8)(#char "{") || parameters.count == 0 ||
         reference_top_level_index(parameters, cast(u8)(#char ":")) >= 0 ||
-        parameters == "#self" || parameters == "*#self" || parameters == "*const #self";
+        parameters == "#self" || parameters == "*#self" || parameters == "*mut #self";
 }
 
 reference_matching_brace :: (value: string, open: ssize) -> ssize {
@@ -795,7 +844,7 @@ reference_public_members :: (body: string, default_public: bool = true) -> strin
     return out.into_temporary_string();
 }
 
-reference_parse_struct_fields :: (body: string, info: *Reference_Type_Info) {
+reference_parse_struct_fields :: (body: string, info: *mut Reference_Type_Info) {
     parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         value := reference_normalize_space(part);
@@ -842,7 +891,7 @@ reference_parse_struct_fields :: (body: string, info: *Reference_Type_Info) {
     }
 }
 
-reference_parse_union_variants :: (body: string, info: *Reference_Type_Info) {
+reference_parse_union_variants :: (body: string, info: *mut Reference_Type_Info) {
     parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         value := reference_normalize_space(part);
@@ -859,7 +908,7 @@ reference_parse_union_variants :: (body: string, info: *Reference_Type_Info) {
     }
 }
 
-reference_parse_enum_variants :: (body: string, info: *Reference_Type_Info) {
+reference_parse_enum_variants :: (body: string, info: *mut Reference_Type_Info) {
     parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         variant := reference_normalize_space(part);
@@ -1132,10 +1181,10 @@ reference_contains_identifier :: (value: string, identifier: string) -> bool {
 }
 
 reference_parameter_introduces_constraint_type :: (
-    parameter: Reference_Parameter,
+    parameter: *Reference_Parameter,
     constraint: string,
 ) -> bool {
-    value_type := parameter.value_type;
+    value_type := parameter.*.value_type;
     i: ssize = 0;
     while i + 1 < value_type.count {
         if value_type[i] == cast(u8)(#char "$") && reference_is_identifier_start(value_type[i + 1]) {
@@ -1147,23 +1196,23 @@ reference_parameter_introduces_constraint_type :: (
         } else i += 1;
     }
     return value_type == "type" &&
-        reference_contains_identifier(constraint, parameter.name);
+        reference_contains_identifier(constraint, parameter.*.name);
 }
 
 reference_attach_parameter_constraint :: (
-    function: *Reference_Function,
+    function: *mut Reference_Function,
     constraint: string,
 ) {
     for i: 0..function.*.parameters.count {
         if reference_parameter_introduces_constraint_type(
-            function.*.parameters[i], constraint,
+            &function.*.parameters[i], constraint,
         ) function.*.parameters[i].constraints.push(reference_copy_string(constraint),);
     }
 }
 
 reference_parse_where_clauses :: (
     tail: string,
-    function: *Reference_Function,
+    function: *mut Reference_Function,
 ) {
     marker := reference_find_top_level_word(tail, "where");
     while marker >= 0 {
@@ -1206,130 +1255,18 @@ reference_return_type :: (tail: string) -> string {
     return reference_copy_string(value);
 }
 
-reference_memory_contract :: (raw: string) -> Reference_Memory_Contract {
-    contract: Reference_Memory_Contract;
-    value := raw.trim();
-    if value.count == 0 return contract;
-    open := reference_index_of_byte(value, cast(u8)(#char "("));
-    if open < 0 || !value.ends_with(")") {
-        contract.effect = reference_copy_string(value);
-        return contract;
-    }
-    contract.effect = reference_copy_string(value[0..open].trim());
-    arguments := reference_split_top_level(value[open + 1..value.count - 1]);
-    for argument: arguments
-        contract.arguments.push(reference_copy_string(argument.trim()));
-    return contract;
-}
-
-reference_parse_memory_contracts :: (
-    tail: string,
-    function: *Reference_Function,
-) {
-    offset: ssize = 0;
-    while offset < tail.count {
-        marker := reference_find_top_level_word(tail, "#memory", offset);
-        if marker < 0 break;
-        cursor := marker + 7;
-        while cursor < tail.count && reference_is_space(tail[cursor]) cursor += 1;
-        raw := "";
-        if cursor < tail.count && tail[cursor] == cast(u8)(#char "(") {
-            close := reference_matching_paren(tail, cursor);
-            if close < 0 break;
-            raw = tail[cursor + 1..close];
-            offset = close + 1;
-        } else if cursor < tail.count && tail[cursor] == cast(u8)(#char "{") {
-            close := reference_matching_brace(tail, cursor);
-            if close < 0 break;
-            raw = tail[cursor + 1..close];
-            offset = close + 1;
-        } else {
-            end := cursor;
-            while end < tail.count && reference_is_identifier_continue(tail[end]) end += 1;
-            if end == cursor break;
-            argument_open := end;
-            while argument_open < tail.count && reference_is_space(tail[argument_open])
-                argument_open += 1;
-            if argument_open < tail.count && tail[argument_open] == cast(u8)(#char "(") {
-                close := reference_matching_paren(tail, argument_open);
-                if close < 0 break;
-                raw = tail[cursor..close + 1];
-                offset = close + 1;
-            } else {
-                raw = tail[cursor..end];
-                offset = end;
-            }
-        }
-        parts := reference_split_top_level(raw);
-        for part: parts {
-            contract := reference_memory_contract(part);
-            if contract.effect.count > 0
-                function.*.memory_contracts.push(contract);
-        }
-    }
-}
-
-reference_memory_directive_end :: (value: string, marker: ssize) -> ssize {
-    cursor := marker + 7;
-    while cursor < value.count && reference_is_space(value[cursor]) cursor += 1;
-    if cursor < value.count && value[cursor] == cast(u8)(#char "(") {
-        close := reference_matching_paren(value, cursor);
-        if close >= 0 return close + 1;
-        return marker;
-    }
-    if cursor < value.count && value[cursor] == cast(u8)(#char "{") {
-        close := reference_matching_brace(value, cursor);
-        if close >= 0 return close + 1;
-        return marker;
-    }
-    end := cursor;
-    while end < value.count && reference_is_identifier_continue(value[end]) end += 1;
-    if end == cursor return marker;
-    argument_open := end;
-    while argument_open < value.count && reference_is_space(value[argument_open])
-        argument_open += 1;
-    if argument_open < value.count && value[argument_open] == cast(u8)(#char "(") {
-        close := reference_matching_paren(value, argument_open);
-        if close >= 0 return close + 1;
-        return marker;
-    }
-    return end;
-}
-
 reference_display_decorations :: (value: string) -> string {
-    out := String_Builder.make_len_cap(0, value.count);
-    cursor: ssize = 0;
-    while cursor < value.count {
-        memory := reference_find_top_level_word(value, "#memory", cursor);
-        modify := reference_find_top_level_word(value, "#modify", cursor);
-        marker := memory;
-        is_memory := true;
-        if marker < 0 || (modify >= 0 && modify < marker) {
-            marker = modify;
-            is_memory = false;
-        }
-        if marker < 0 {
-            out.write_string(value[cursor..value.count]);
-            break;
-        }
-        out.write_string(value[cursor..marker]);
-        if is_memory {
-            end := reference_memory_directive_end(value, marker);
-            if end <= marker {
-                cursor = marker + 7;
-            } else cursor = end;
-            continue;
-        }
-        out.write_string("#modify");
-        after := marker + 7;
-        while after < value.count && reference_is_space(value[after]) after += 1;
-        if after < value.count && value[after] == cast(u8)(#char "{") {
-            close := reference_matching_brace(value, after);
-            if close < 0 break;
-            cursor = close + 1;
-        } else cursor = marker + 7;
+    // Keep directives such as #operator, but elide the modifier's code body.
+    marker := reference_find_top_level_word(value, "#modify");
+    if marker < 0 return reference_normalize_space(value);
+    after := marker + 7;
+    while after < value.count && reference_is_space(value[after]) after += 1;
+    if after < value.count && value[after] == cast(u8)(#char "{") {
+        close := reference_matching_brace(value, after);
+        if close >= 0 return reference_normalize_space(
+            value[0..after].cat(value[close + 1..value.count]));
     }
-    return reference_normalize_space(out.into_string());
+    return reference_normalize_space(value);
 }
 
 reference_function_info :: (right: string) -> Reference_Function {
@@ -1343,7 +1280,6 @@ reference_function_info :: (right: string) -> Reference_Function {
     parts.free();
     tail := right[close + 1..right.count];
     function.return_type = reference_return_type(tail);
-    reference_parse_memory_contracts(tail, &function);
     reference_parse_where_clauses(tail, &function);
     return function;
 }
@@ -1351,7 +1287,7 @@ reference_function_info :: (right: string) -> Reference_Function {
 reference_display_signature :: (
     name: string,
     right: string,
-    function: Reference_Function,
+    function: *mut Reference_Function,
 ) -> string {
     open := reference_index_of_byte(right, cast(u8)(#char "("));
     if open < 0 return "";
@@ -1373,11 +1309,11 @@ reference_display_signature :: (
     decoration_start: ssize = 0;
     if arrow >= 0 {
         out.write_string(" -> ");
-        out.write_string(function.return_type);
+        out.write_string(function.*.return_type);
         return_start := arrow + 2;
         while return_start < tail.count && reference_is_space(tail[return_start])
             return_start += 1;
-        decoration_start = return_start + function.return_type.count;
+        decoration_start = return_start + function.*.return_type.count;
     }
     decoration_end := tail.count;
     where_marker := reference_find_top_level_word(tail, "where");
@@ -1394,66 +1330,67 @@ reference_display_signature :: (
     return out.into_string();
 }
 
-reference_searchable_signature :: (function: Reference_Function) -> string {
+reference_searchable_signature :: (function: *mut Reference_Function) -> string {
     out := String_Builder.make_len_cap(0, 64);
     out.write_byte(cast(u8)(#char "("));
     wrote := false;
-    for parameter: function.parameters {
+    for parameter_index: 0..function.*.parameters.count {
+        parameter := &function.*.parameters[parameter_index];
         skip := false;
         variadic := false;
-        for modifier: parameter.modifiers {
+        for modifier: parameter.*.modifiers {
             if modifier == "comptime" || modifier == "empty type witness" skip = true;
             if modifier == "variadic" variadic = true;
         }
         if skip continue;
         if wrote out.write_string(", ");
         if variadic out.write_string("...");
-        value_type := parameter.value_type;
+        value_type := parameter.*.value_type;
         if value_type.count == 0 value_type = "any";
         out.write_string(value_type);
         wrote = true;
     }
     out.write_string(") -> ");
-    out.write_string(function.return_type);
+    out.write_string(function.*.return_type);
     return out.into_string();
 }
 
-reference_find_module :: (modules: *[..]Reference_Module, name: string) -> ssize {
+reference_find_module :: (modules: *mut [..]Reference_Module, name: string) -> ssize {
     for i: 0..modules.*.count if modules.*[i].name == name return i;
     return -1;
 }
 
-reference_find_typeclass :: (module: *Reference_Module, name: string) -> ssize {
+reference_find_typeclass :: (module: *mut Reference_Module, name: string) -> ssize {
     for i: 0..module.*.symbols.count {
-        symbol := module.*.symbols[i];
-        if symbol.kind == "typeclass" && symbol.name == name return i;
+        symbol := &module.*.symbols[i];
+        if symbol.*.kind == "typeclass" && symbol.*.name == name return i;
     }
     return -1;
 }
 
 reference_add_typeclass_member :: (
-    module: *Reference_Module,
+    module: *mut Reference_Module,
     owner: string,
-    symbol: Reference_Symbol,
+    symbol: *Reference_Symbol,
 ) {
     index := reference_find_typeclass(module, owner);
     if index < 0 return;
     member: Reference_Member = .{
-        .name = reference_copy_string(symbol.name),
+        .name = reference_copy_string(symbol.*.name),
         .kind = "method",
-        .signature = reference_copy_string(symbol.signature),
-        .display_signature = reference_copy_string(symbol.display_signature),
-        .summary = reference_copy_string(symbol.summary),
-        .source_path = reference_copy_string(symbol.source_path),
-        .source_line = symbol.source_line,
-        .has_default = symbol.has_default,
-        .function_info = symbol.function_info,
+        .signature = reference_copy_string(symbol.*.signature),
+        .display_signature = reference_copy_string(symbol.*.display_signature),
+        .summary = reference_copy_string(symbol.*.summary),
+        .source_path = reference_copy_string(symbol.*.source_path),
+        .source_line = symbol.*.source_line,
+        .has_default = symbol.*.has_default,
+        .function_info = reference_clone_function(&symbol.*.function_info),
     };
     module.*.symbols[index].class_info.members.push(member);
 }
 
 reference_add_associated_member :: (
-    module: *Reference_Module,
+    module: *mut Reference_Module,
     owner: string,
     name: string,
     annotation: string,
@@ -1478,24 +1415,25 @@ reference_add_associated_member :: (
     module.*.symbols[index].class_info.members.push(member);
 }
 
-reference_finalize_typeclasses :: (module: *Reference_Module) {
+reference_finalize_typeclasses :: (module: *mut Reference_Module) {
     for i: 0..module.*.symbols.count {
-        symbol := module.*.symbols[i];
-        if symbol.kind != "typeclass" || symbol.class_info.minimal_explicit continue;
+        symbol := &module.*.symbols[i];
+        if symbol.*.kind != "typeclass" || symbol.*.class_info.minimal_explicit continue;
         out := String_Builder.make_len_cap(0, 64);
         wrote := false;
-        for member: symbol.class_info.members {
-            if member.kind != "method" || member.has_default continue;
+        for member_index: 0..symbol.*.class_info.members.count {
+        member := &symbol.*.class_info.members[member_index];
+            if member.*.kind != "method" || member.*.has_default continue;
             if wrote out.write_string(", ");
-            if member.signature.starts_with("'") {
+            if member.*.signature.starts_with("'") {
                 out.write_byte(cast(u8)(#char "'"));
-                out.write_string(member.name);
+                out.write_string(member.*.name);
                 out.write_byte(cast(u8)(#char "'"));
-            } else out.write_string(member.name);
+            } else out.write_string(member.*.name);
             wrote = true;
         }
-        symbol.class_info.minimal = out.into_string();
-        module.*.symbols[i] = symbol;
+        symbol.*.class_info.minimal = out.into_string();
+
     }
 }
 
@@ -1530,8 +1468,8 @@ reference_alias_target :: (signature: string) -> string {
 // while `Process_Id :: s64` is a type alias.  They have no syntactic body of
 // their own, so resolve their category and callable details after every module
 // has been scanned.  This keeps aliases beside what they denote in the
-// reference and carries the target's parameter, constraint, and memory rows.
-reference_resolve_aliases :: (modules: *[..]Reference_Module) {
+// reference and carries the target's parameter, constraint rows.
+reference_resolve_aliases :: (modules: *mut [..]Reference_Module) {
     changed := true;
     passes: ssize = 0;
     while changed && passes < 16 {
@@ -1540,23 +1478,25 @@ reference_resolve_aliases :: (modules: *[..]Reference_Module) {
         for module_index: 0..modules.*.count {
             module := &modules.*[module_index];
             for symbol_index: 0..module.*.symbols.count {
-                symbol := module.*.symbols[symbol_index];
-                if symbol.kind != "constant" continue;
-                target_name := reference_alias_target(symbol.signature);
+                symbol := &module.*.symbols[symbol_index];
+                if symbol.*.kind != "constant" continue;
+                target_name := reference_alias_target(symbol.*.signature);
                 if target_name.count == 0 continue;
                 if reference_builtin_type_alias(target_name) {
-                    symbol.kind = "type";
-                    module.*.symbols[symbol_index] = symbol;
+                    symbol.*.kind = "type";
+
                     changed = true;
                     continue;
                 }
                 found := false;
-                target: Reference_Symbol;
+                target: *Reference_Symbol;
                 ambiguous := false;
-                for candidate_module: modules.* {
-                    for candidate: candidate_module.symbols {
-                        if candidate.name != target_name ||
-                           candidate.kind == "constant" continue;
+                for candidate_module_index: 0..modules.*.count {
+        candidate_module := &modules.*[candidate_module_index];
+                    for candidate_index: 0..candidate_module.*.symbols.count {
+        candidate := &candidate_module.*.symbols[candidate_index];
+                        if candidate.*.name != target_name ||
+                           candidate.*.kind == "constant" continue;
                         if found {
                             ambiguous = true;
                         } else {
@@ -1566,16 +1506,16 @@ reference_resolve_aliases :: (modules: *[..]Reference_Module) {
                     }
                 }
                 if !found || ambiguous continue;
-                if target.kind == "function" || target.kind == "method" {
-                    symbol.kind = "function";
-                    symbol.function_info = target.function_info;
-                    symbol.searchable_signature = reference_copy_string(
-                        target.searchable_signature,
+                if target.*.kind == "function" || target.*.kind == "method" {
+                    symbol.*.kind = "function";
+                    reference_set_function(&symbol.*.function_info, reference_clone_function(&target.*.function_info));
+                    symbol.*.searchable_signature = reference_copy_string(
+                        target.*.searchable_signature,
                     );
-                } else if target.kind == "type" || target.kind == "typeclass" {
-                    symbol.kind = "type";
+                } else if target.*.kind == "type" || target.*.kind == "typeclass" {
+                    symbol.*.kind = "type";
                 } else continue;
-                module.*.symbols[symbol_index] = symbol;
+
                 changed = true;
             }
         }
@@ -1585,9 +1525,9 @@ reference_resolve_aliases :: (modules: *[..]Reference_Module) {
 reference_parse_file :: (
     std_directory: string,
     path: string,
-    modules: *[..]Reference_Module,
-    all_instances: *[..]Reference_Instance,
-    symbol_count: *ssize,
+    modules: *mut [..]Reference_Module,
+    all_instances: *mut [..]Reference_Instance,
+    symbol_count: *mut ssize,
 ) -> bool {
     // Filesystem byte counts are fixed-width metadata; convert only after the
     // value has been checked, because `read_file` indexes host memory.
@@ -1604,7 +1544,7 @@ reference_parse_file :: (
         return false;
     }
     source: string;
-    if read_file(path, cast(ssize)(size + 1)) == {
+    if read_file_up_to(path, cast(ssize)(size + 1)) == {
         case .Err(reason);
             print("could not read %: ", path);
             report_error(reason);
@@ -1795,15 +1735,15 @@ reference_parse_file :: (
                             if owner_typeclass.count > 0 || owner_inherent.count > 0 symbol.kind = "method";
                             else symbol.kind = "function";
                             if owner_inherent.count > 0 right = reference_resolve_self_type(right, owner_inherent);
-                            symbol.function_info = reference_function_info(right);
+                            reference_set_function(&symbol.function_info, reference_function_info(right));
                             if owner_inherent.count > 0 {
                                 for parameter_index: 0..symbol.function_info.parameters.count {
                                     parameter := &symbol.function_info.parameters[parameter_index];
                                     receiver := parameter.*.name;
-                                    if receiver == "#self" || receiver == "*#self" || receiver == "*const #self" {
+                                    if receiver == "#self" || receiver == "*#self" || receiver == "*mut #self" {
                                         parameter.*.name = "#self";
                                         receiver_type := String_Builder.make_len_cap(0, owner_inherent.count + 8);
-                                        if receiver.starts_with("*const") receiver_type.write_string("*const ");
+                                        if receiver.starts_with("*mut") receiver_type.write_string("*mut ");
                                         else if receiver.starts_with("*") receiver_type.write_string("*");
                                         receiver_type.write_string(owner_inherent);
                                         parameter.*.value_type = receiver_type.into_string();
@@ -1813,9 +1753,9 @@ reference_parse_file :: (
                                 reference_parse_where_clauses(scope_constraints[depth], &symbol.function_info);
                             }
                             symbol.display_signature = reference_display_signature(
-                                display_name, right, symbol.function_info,
+                                display_name, right, &symbol.function_info,
                             );
-                            symbol.searchable_signature = reference_searchable_signature(symbol.function_info);
+                            symbol.searchable_signature = reference_searchable_signature(&symbol.function_info);
                         } else if right.starts_with("typeclass") {
                             symbol.kind = "typeclass";
                             minimal_marker := reference_index_of(right, "#minimal(");
@@ -1830,27 +1770,28 @@ reference_parse_file :: (
                         } else if right.starts_with("struct") || right.starts_with("union") ||
                                   right.starts_with("enum") || right.starts_with("#fn_ptr") {
                             symbol.kind = "type";
-                            symbol.type_info = reference_type_info(
-                                right, source, declaration_start, header.terminator_index);
+                            reference_set_type_info(&symbol.type_info, reference_type_info(
+                                right, source, declaration_start, header.terminator_index));
                             if right.starts_with("#fn_ptr") {
-                                symbol.function_info = reference_function_info(right);
+                                reference_set_function(&symbol.function_info, reference_function_info(right));
                                 symbol.display_signature = reference_display_signature(
-                                    display_name, right, symbol.function_info,
+                                    display_name, right, &symbol.function_info,
                                 );
                                 symbol.searchable_signature = reference_searchable_signature(
-                                    symbol.function_info,
+                                    &symbol.function_info,
                                 );
                             }
                         } else symbol.kind = "constant";
                         module.*.symbols.push(symbol);
+                        inserted := &module.*.symbols[module.*.symbols.count - 1];
                         symbol_count.* += 1;
-                        if symbol.kind == "typeclass" {
-                            child_class = symbol.name;
+                        if inserted.*.kind == "typeclass" {
+                            child_class = inserted.*.name;
                             child_declarations = true;
                             child_public = true;
                         }
-                        else if symbol.kind == "method" && owner_typeclass.count > 0
-                            reference_add_typeclass_member(module, owner_typeclass, symbol);
+                        else if inserted.*.kind == "method" && owner_typeclass.count > 0
+                            reference_add_typeclass_member(module, owner_typeclass, inserted);
                     }
                 }
             }
@@ -1880,15 +1821,15 @@ reference_parse_file :: (
 }
 
 reference_write_source :: (
-    modules: []Reference_Module,
-    instances: []Reference_Instance,
+    modules: []mut Reference_Module,
+    instances: []mut Reference_Instance,
     output_path: string,
 ) -> bool {
     out := String_Builder.make_len_cap(0, 4 * 1024 * 1024);
     out.write_string("{\"modules\":[");
     for i: 0..modules.count {
         if i > 0 out.write_byte(cast(u8)(#char ","));
-        if json_serialize(modules[i]) == {
+        if json_serialize(&modules[i]) == {
         case .Ok(encoded_module); out.write_string(encoded_module);
         case .Err;
             print("could not serialize reference module %\n", modules[i].name);

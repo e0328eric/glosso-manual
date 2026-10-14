@@ -33,7 +33,8 @@ private Glosso repository or compile the project in GitHub Actions.
   Wasm entry point.
 - `scripts/generate-reference-source.glo` extracts public declarations and their
   documentation comments directly from a supplied Glosso standard-library
-  directory into an ignored JSON file.
+  directory into an ignored JSON file. Whole-file reads use `read_file_up_to` so short
+  reads cannot truncate declarations.
 - `scripts/generate-reference.glo` converts that intermediate data into the
   compact Glosso and browser reference files, and rebuilds the language-manual
   half of the search index by reading the chapter sources: titles from
@@ -64,7 +65,7 @@ procedure:
 
 Before compilation, `build` synchronizes the highlight query embedded in the
 browser host. This keeps it compatible with the staged grammar when language
-directives change (for example, `#operator` replaces the removed `#precedence`).
+directives and pointer syntax change.
 
 `first.glo` marks its outer build-driver compilation as output-free and starts
 the `main.glo` compilation with an explicit wasm target. This gives both the C
@@ -89,7 +90,7 @@ Binding generation explicitly disables textual fallback so Clay uses Clang's
 complete C layouts.
 
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
-compact signatures, parameter constraints and defaults, `#memory` contracts,
+compact signatures, parameter constraints and defaults, pointer mutability,
 flag enums, lazy parameters, function-pointer declarations, private-name
 filtering, `#Self_Type` factory results, `#Never` returns, and boundary-aware
 `try(Target)` operators.
@@ -105,13 +106,17 @@ builder cloning and ownership transfer. Syntax checks cover prefix and suffix
 pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
-directives, invalid Try contracts, string capacity, and escaped builder views.
+directives, invalid Try contracts, string capacity, removed memory contracts, and removed pointer qualifiers. It also
+checks that escaping builder views compile, since pointer lifetimes are the
+programmer's responsibility; that dangling-view fixture is never executed.
 Pass a compiler path as its optional first argument to test another build.
-All output and caches stay under `build/`.
+All output and caches stay under `build/`. The collection checks exercise
+automatic element destruction, nested dynamic arrays, and `take()` / `replace()`
+ownership transfers.
 
 `node scripts/test-manual.mjs` checks staged assets and exercises the actual
 Wasm renderer for every chapter and reference module at narrow and wide widths,
-including the search bridge, current operator and memory syntax, and rejection
+including the search bridge, current operator and ownership syntax, and rejection
 of the removed `#precedence` directive. Its synthetic font metrics check layout
 validity and the browser/Clay ABI; they do not replace a visual browser check.
 
@@ -120,7 +125,7 @@ validity and the browser/Clay ABI; they do not replace a visual browser check.
 `tree-sitter/highlights.scm`. `gen-reference <std-directory>` reads public
 standard-library declarations and their documentation comments from the supplied
 directory, then updates `src/generated/std_reference.glo` and
-`reference-index.js`. Its temporary `build/reference-source.json` input is
+`reference-index.js`, then assembles its streamed parts at runtime. Its temporary `build/reference-source.json` input is
 ignored and is never checked in.
 
 ## Document the standard library
@@ -195,13 +200,21 @@ allocated strings with the allocator that created them. `String_Builder`
 owns its buffer and releases it automatically through `Drop`: `to_string()`
 borrows it, `clone()` copies it, and `into_string()` transfers it to the caller.
 `Path`, filesystem owners, and process owners also use automatic cleanup.
-Standard container structs and raw dynamic arrays still need explicit cleanup;
-dynamic arrays append values with `push()`.
+Standard containers and dynamic arrays also clean up automatically, including
+their live elements. Use `take()` and `replace()` to transfer dynamic-array
+storage and leave the original descriptor reusable. Dynamic arrays allocate and
+release through `context.allocator`; keep that allocator installed until cleanup.
+Containers capture their constructor's allocator. Dynamic arrays append values
+with `push()` or `append()`.
 Runtime concatenation uses builders
 or `.cat()`; `+` is available for compile-time string constants.
 
 Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
-Pointer types still use `*T`. The literal `c"hello"` is a zero-terminated
+Pointer types use read-only `*T` and writable `*mut T`; many-pointers and views
+use `[*]T` / `[*]mut T` and `[]T` / `[]mut T`. The `const` qualifier,
+`#memory` contracts, and borrow-check options have been removed. Ownership
+checking rejects reuse after a move; it does not enforce pointer/view lifetimes.
+The literal `c"hello"` is a zero-terminated
 `cstring`; `b"hello"` is a fixed byte array. `ManuallyDrop(T)` suppresses automatic
 destruction until the value is extracted or explicitly destroyed. The generated
 reference includes the `Gui` modules and the `Memory/ManuallyDrop` API.
@@ -239,9 +252,10 @@ glosso first.glo -- build
 ### Linux or macOS
 
 ```sh
+export PATH="$HOME/.local/glosso/bin:$PATH"
 export GLOSSO_STD="$(cd ../glosso/std && pwd)"
-glosso first.glo -- gen-reference ../glosso/std
-glosso first.glo -- build
+glosso --cache-dir build/cache first.glo -- gen-reference ../glosso/std
+glosso --cache-dir build/cache first.glo -- build
 ```
 
 After a successful build, serve `dist/` over HTTP:

@@ -3,11 +3,12 @@
 The query files and Wasm parser are used by the manual's browser highlighter.
 The parser uses the sibling `../tree-sitter-glosso` grammar, including visibility
 on inherent block headers, receiver syntax, `#Never`, and `#on_drop_error`.
-`current-language.patch` adds `c"..."` and `b"..."` literals, suffix address-of
-(`value.&`), repeated prefix `&`, custom `!!` suffix parsing, negative enum values,
-and bracket types in expression positions, which the current compiler accepts
-but the upstream grammar does not yet recognize. Rebuild in a local copy so the
-sibling repository stays unchanged.
+The current grammar includes read-only and writable pointer/view types,
+`c"..."` and `b"..."` literals, suffix address-of (`value.&`), repeated prefix
+`&`, negative enum values and bracket type expressions.
+It rejects removed `#memory` contracts and the `const` qualifier. The small `current-language.patch` adds custom `!!` suffix
+operators, which the compiler accepts and the upstream grammar still misses. Rebuild in a local copy so the sibling
+repository stays unchanged.
 
 From the manual repository root, rebuild on Windows with the installed
 Tree-sitter CLI and LLVM toolchain:
@@ -38,8 +39,7 @@ Copy-Item -LiteralPath "$grammarStage/tree-sitter-glosso.wasm" -Destination tree
 
 `--js-runtime native` uses the CLI's embedded JavaScript runtime. LLVM's shared
 Wasm output includes the dynamic-linking metadata required by web-tree-sitter.
-When updating the grammar, check whether the compatibility patch is still needed
-and copy its matching highlight and locals queries from
+When updating the grammar, copy its matching highlight and locals queries from
 `../tree-sitter-glosso/queries/` into `tree-sitter/` as well.
 
 Rebuild the manual afterward to embed the highlight query and copy all syntax

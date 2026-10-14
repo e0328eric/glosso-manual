@@ -5,8 +5,14 @@
   (block)
   (for_statement)
   (pattern_arm)
+  (pattern_quote_expression)
+  (code_expression)
   (on_drop_error_statement)
 ] @local.scope
+
+; Lifetime binders use a separate namespace from value parameters.
+((lifetimes_directive) @local.scope
+  (#set! local.scope-inherits false))
 
 ; Parameters
 (receiver_parameter

@@ -34,11 +34,11 @@ assert.equal(symbols.get("Box.get").display_signature, "Box.get :: (#self) -> ss
 assert.equal(symbols.get("Box.make").display_signature, 'Box.make :: (value: ssize, label: string = "#Self_Type") -> Box');
 assert.equal(symbols.get("Box.make").function_info.return_type, "Box");
 assert.equal(symbols.get("Box.copy_from").function_info.return_type, "Fs_Error!Box");
-assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*const Box");
-assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*Box, *const Box) -> Fs_Error!Box");
-assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*#self, value: ssize)");
+assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*Box");
+assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*mut Box, *Box) -> Fs_Error!Box");
+assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*mut #self, value: ssize)");
 assert.deepEqual(symbols.get("Box.set").function_info.parameters[0], {
-  name: "#self", value_type: "*Box", default_value: "", modifiers: ["receiver"], constraints: [],
+  name: "#self", value_type: "*mut Box", default_value: "", modifiers: ["receiver"], constraints: [],
 });
 assert.deepEqual(symbols.get("Box").type_info.fields.map(field => field.name), ["value", "exposed"]);
 assert.equal(symbols.get("$T.inspect").kind, "method");
@@ -67,11 +67,7 @@ assert.deepEqual(open.function_info.parameters[0].constraints, ["AsView(P, Path_
 assert.deepEqual(open.function_info.parameters.slice(1).map(parameter => parameter.default_value), [
   "File_Access.Read", "Open_Disposition.Open_Existing", "File_Permissions.Default_File", ".None",
 ]);
-assert.deepEqual(open.function_info.memory_contracts, [
-  { effect: "returns_fresh", arguments: ["returned.Ok"] },
-  { effect: "released_by", arguments: ["place: returned.Ok", "by: close"] },
-  { effect: "escapes", arguments: ["path"] },
-]);
+
 
 const flags = symbols.get("Open_Flags").type_info;
 assert.equal(flags.kind, "enum_flags");
@@ -90,15 +86,11 @@ assert.equal(lazy[2].default_value, "42");
 assert.equal(lazy[3].value_type, "[]string");
 assert.equal(lazy[3].default_value, ".[]");
 
-for (const [name, effects] of [
-  ["legacy", ["returns_borrow", "noescape"]],
-  ["bare", ["returns_borrow"]],
-  ["Callback", ["reads", "noescape"]],
-]) {
+for (const name of ["legacy", "bare", "Callback"]) {
   const symbol = symbols.get(name);
-  assert.deepEqual(symbol.function_info.memory_contracts.map(contract => contract.effect), effects);
   assert.deepEqual(symbol.function_info.parameters[0].constraints, ["AsView(P, Path_View)"]);
   assert.doesNotMatch(symbol.display_signature, /#memory|\bwhere\b/);
+  assert(!("memory_contracts" in symbol.function_info));
 }
 assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
 assert.equal(symbols.get("Callback").display_signature, "Callback :: #fn_ptr(path: $P) -> string");
@@ -125,11 +117,7 @@ assert.deepEqual(diagnostic.function_info.parameters.map(parameter => [parameter
   ["line", "", "#source_location.line"],
   ["fallback", "Source_Location", ".{ .filename = \"generated.glo\", .line = 1, .column = 1 }"],
 ]);
-assert.deepEqual(diagnostic.function_info.memory_contracts, [
-  { effect: "returns_fresh", arguments: [] },
-  { effect: "reads", arguments: ["message", "location"] },
-  { effect: "noescape", arguments: ["message", "location"] },
-]);
+
 assert.doesNotMatch(diagnostic.display_signature, /#memory|\bwhere\b/);
 assert.equal(instances.length, 1);
 assert.equal(instances[0].class_name, "Show");
@@ -159,4 +147,4 @@ assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.n
   "Output", "Residual", "from_output", "from_residual", "branch", "?",
 ]);
 
-console.log("Reference extraction checks passed: visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, memory forms, typed flags, function pointers, source locations, and try(Target) operators.");
+console.log("Reference extraction checks passed: visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, read-only and writable pointers, typed flags, function pointers, source locations, and try(Target) operators.");

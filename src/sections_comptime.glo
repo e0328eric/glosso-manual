@@ -248,7 +248,7 @@ render_section_105 :: () {
         \\allocated_value :: () -> s64 {
         \\    p := alloc(8);
         \\    if #pattern .Some(raw) = p {
-        \\        cell := cast(*s64)raw;
+        \\        cell := cast(*mut s64)raw;
         \\        cell.* = 42;
         \\        value := cell.*;
         \\        p.free();
@@ -2157,9 +2157,9 @@ render_section_113 :: () {
         \\
         \\NUMBER :: #pattern Token.Number(n);
         \\NAME   :: #pattern Token.Name(text);
-        \\ARMS : []Pattern : .[NUMBER, NAME];
+        \\ARMS : []mut Pattern : .[NUMBER, NAME];
         \\
-        \\witness_list :: (T: type, Ps: []Pattern, i: ssize) -> string {
+        \\witness_list :: (T: type, Ps: []mut Pattern, i: ssize) -> string {
         \\    if i >= pattern_missing_count(T, Ps) return "";
         \\    tail := witness_list(T, Ps, i + 1);
         \\    if tail == "" return pattern_missing(T, Ps, i);
@@ -2196,7 +2196,7 @@ render_section_113 :: () {
         \\NUMBER :: #pattern Token.Number(n);
         \\NAME   :: #pattern Token.Name(text);
         \\EOF    :: #pattern Token.Eof;
-        \\ARMS : []Pattern : .[NUMBER, NAME, EOF];
+        \\ARMS : []mut Pattern : .[NUMBER, NAME, EOF];
         \\
         \\classify :: (t: Token) -> string {
         \\    #assert #comptime pattern_missing_count(Token, ARMS) == 0, "classify is not total";
@@ -2310,7 +2310,6 @@ render_section_114 :: () {
     table_row(16, "`linker_args`   |   empty   |   One `--linker-arg` per entry.");
     table_row(17, "`compile_time_command_line`   |   empty   |   Entries after `--`, preserving spaces and empty strings as individual arguments.");
     table_row(18, "`memory_sanitizer`, `thread_sanitizer`   |   `false`   |   `--memory-sanitizer` and `--thread-sanitizer`.");
-    table_row(19, "`borrow_check`   |   `.Warning`   |   `--borrow-check` with `off`, `warning`, or `error`.");
     table_row(69, "`color`   |   `.Auto`   |   `--color always` or `--color never`, resolved against the parent's stderr.");
     table_row(70, "`temp_allocator_size`   |   4 MiB   |   `--temp-allocator-size <bytes>` when positive.");
     table_row(71, "`no_main`   |   `false`   |   `--no-main`.");
@@ -2325,7 +2324,7 @@ render_section_114 :: () {
         \\The fields are written through mutators that take a pointer to the
         \\record: `Build_Options.set_backend`, `Build_Options.set_target`,
         \\`Build_Options.set_optimization`, `Build_Options.set_memory_sanitizer`,
-        \\`Build_Options.set_thread_sanitizer`, `Build_Options.set_borrow_check`,
+        \\`Build_Options.set_thread_sanitizer`,
         \\`Build_Options.set_color`, `Build_Options.set_temp_allocator_size`,
         \\`Build_Options.set_no_main`, `Build_Options.add_compiler_arg`,
         \\`Build_Options.add_linker_arg`, `Build_Options.add_linker_args` and
@@ -2360,18 +2359,12 @@ render_section_114 :: () {
     table_row(27, "`Very_Debug`   |   1   |   `-O1`; runtime checks stay enabled");
     table_row(28, "`Optimized`   |   2   |   `-O2`");
     table_row(29, "`Very_Optimized`   |   3   |   `-O3`");
-    table_row(30, "`Optimized_Small`   |   4   |   `-Os`; currently rejected by LLVM 23's `default<Os>` pipeline");
-    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`; currently rejected by LLVM 23's `default<Oz>` pipeline");
+    table_row(30, "`Optimized_Small`   |   4   |   `-Os`; LLVM size optimization and dead-section removal");
+    table_row(31, "`Optimized_Very_Small`   |   5   |   `-Oz`; aggressive size optimization");
     table_row(32, "`Optimized_Tiny`   |   6   |   `-Ozz`; reaches the same rejected `default<Oz>` pipeline before stripping");
     table_row(33, "`Default`   |   7   |   none; child defaults to working `-O1`");
     note(68, #string,oneline
-        \\Glosso maps the three size modes to LLVM `optsize` or `minsize`
-        \\attributes and selects `default<Os>` or `default<Oz>`, but LLVM 23 still
-        \\aborts on those pipeline-level optimization names. Use `Optimized` or
-        \\`Very_Optimized` for a linked workspace build. C archive compilation is
-        \\narrower by design: `Native_Compile_Output.compile_c_archive` accepts only `Debug` through
-        \\`Very_Optimized`; the size modes and `.Default` return a
-        \\`Compiler_Error` before invoking the C compiler.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     subheading(34, "Named and implicit workspaces");
     paragraph(35, #string,oneline
@@ -2509,21 +2502,6 @@ render_section_114 :: () {
         \\produce a valid Glosso string literal.
     );
     subheading(45, "Other compiler services");
-    paragraph(46, #string,oneline
-        \\`executable_path()` returns the absolute path of the compiler running the
-        \\script; its contract is `returns_fresh, released_by(string.free)`, so a
-        \\script that keeps the result and does not free it draws `warning:
-        \\[memory.leak] resource must be released by 'string_free' before leaving
-        \\scope`. `find_header(name, root)`, `find_library(name)` and
-        \\`find_resource(name)` search the target directories, the usual environment
-        \\variables and the project root, and return an empty string when nothing
-        \\matches; `find_resource("std")` resolves the standard library directory.
-        \\`run_command(text)` runs a shell command and returns its captured output as
-        \\`Compiler_Error!string`. `add_current_linker_arg(arg)` appends a raw flag
-        \\to the link of the current compilation, which a bad flag proves loudly:
-        \\`error: lld-link: error: could not open '/no-such-linker-flag': no such file
-        \\or directory`.
-    );
     note(74, #string,oneline
         \\`macro_unit(path, argument)` is the native-code route for a reusable source
         \\generator. It builds `path` as a program through a nested compiler, benefits
@@ -2552,7 +2530,6 @@ render_section_114 :: () {
         \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "hello.exe";
         \\    options.set_optimization(.Optimized);
-        \\    options.set_borrow_check(Compiler_Borrow_Check.Error);
         \\    options.set_color(.Always);
         \\    options.set_build_options(workspace);
         \\    if #pattern .Err(failure) = add_build_file("hello.glo", workspace) {
@@ -2627,14 +2604,6 @@ render_section_115 :: () {
         \\Compiler. What matters here is the compile-time half: the arguments are
         \\how a build script written in Glosso is parameterized, and they are
         \\part of the identity of the artifact the build produces.
-    );
-    paragraph(1, #string,oneline
-        \\`get_cmdline_args :: () -> []const string #magic "get_cmdline_args"
-        \\#memory{returns_static};` is the whole surface. During top-level
-        \\`#comptime` it returns exactly the words after `--`, with no program
-        \\name in front and none of the compiler's own options, so index `0` is
-        \\the first argument the caller wrote. An empty vector means the
-        \\separator was absent or carried nothing.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -2775,7 +2744,6 @@ render_section_115 :: () {
     table_row(16, "Sources   |   The canonicalized path of the input file and the resolved standard-library directory.");
     table_row(17, "Target   |   The LLVM triple, and separately every key and value of `--target`, because the triple collapses distinct maps such as `uefi` and `msvc`.");
     table_row(18, "Code generation   |   Backend name, optimization level, size mode, and sanitizer selection.");
-    table_row(19, "Checking   |   The `--borrow-check` mode and whether the standard library is in use.");
     table_row(20, "Runtime   |   The temporary allocator size and `--no-main`.");
     table_row(21, "Linking   |   Every `--linker-arg`, in order.");
     table_row(22, "Compile time   |   Every argument after `--`, in order.");
@@ -2870,22 +2838,11 @@ render_section_115 :: () {
     );
     subheading(38, "`--cache-dir` and `--print-cache-dir`");
     paragraph(39, #string,oneline
-        \\`--print-cache-dir` prints the resolved cache root and exits without
-        \\reading any source. `--cache-dir <dir>` overrides that root for the
-        \\run, and the path must be absolute: a relative one is
-        \\`glosso: --cache-dir: cache directory override must be an absolute
-        \\path` with exit code 2. The override moves the whole root, so the
-        \\generated-source cache described in The Build Cache and Generated
-        \\Sources moves with it; that is what makes a build reproducible inside a
-        \\project directory.
-    );
-    code_block(40, "text", #string
-        \\$ glosso --print-cache-dir
-        \\C:\Users\almag\AppData\Local\glosso\cache
-        \\$ glosso --cache-dir C:\work\manual\build\cache --print-cache-dir
-        \\C:\work\manual\build\cache
-        \\$ glosso --cache-dir relative/dir --print-cache-dir
-        \\glosso: --cache-dir: cache directory override must be an absolute path
+        \\--print-cache-dir prints the resolved root and exits without reading
+        \\source. --cache-dir overrides that root; a relative path is resolved
+        \\against the working directory. The override moves generated sources,
+        \\native C archives, and final-artifact entries together. For example,
+        \\glosso --cache-dir build/cache --print-cache-dir selects a project cache.
     );
     paragraph(41, #string,oneline
         \\With no override the root is chosen from the host convention, and the

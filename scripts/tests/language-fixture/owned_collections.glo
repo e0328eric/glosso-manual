@@ -1,0 +1,55 @@
+#import "Io";
+#import "Memory";
+#import "Container/Deque";
+#import "Container/Error";
+
+released: ssize;
+Resource :: struct { id: ssize; }
+Resource ::: instance Drop {
+    Error :: #Never;
+    drop :: (value: *mut #Self_Type) -> #Never!void {
+        released += 1;
+        return .Ok;
+    }
+}
+
+main :: () -> Container_Error!void {
+    {
+        values: [..]Resource;
+        values.push(Resource.{ 1 }, Resource.{ 2 });
+        previous := values.take();
+        #assert values.count == 0 && released == 0;
+        values.push(Resource.{ 3 });
+        replaced := values.replace(previous);
+        #assert values.count == 2 && replaced.count == 1;
+    }
+    #assert released == 3;
+    {
+        nested: [..][..]Resource;
+        row: [..]Resource;
+        row.push(Resource.{ 4 });
+        nested.push(row);
+    }
+    #assert released == 4;
+    {
+        deque := Deque(Resource).new();
+        _ := deque.push_back(Resource.{ 5 })?;
+        removed := deque.pop_front();
+        #assert removed.is_some() && released == 4;
+        _ := deque.push_back(Resource.{ 6 })?;
+    }
+    #assert released == 6;
+    {
+        owner := Resource.{ 7 };
+        previous := value_replace(&owner, Resource.{ 8 });
+        #assert previous.id == 7 && owner.id == 8;
+        values: [..]Resource;
+        values.push(Resource.{ 9 });
+        extracted := array_pop_last(&values);
+        #assert values.count == 0 && extracted.id == 9;
+        #assert released == 6;
+    }
+    #assert released == 9;
+    print("owned collections passed\n");
+    return .Ok;
+}
