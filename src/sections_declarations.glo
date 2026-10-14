@@ -53,7 +53,7 @@ render_section_16 :: () {
     table_row(12, "`x := v`   |   Mutable global.   |   Mutable local.");
     table_row(13, "`x : T = v`   |   Mutable global.   |   Mutable local.");
     table_row(14, "`x : T;`   |   Zero-filled global.   |   Zero-filled local.");
-    table_row(47, "`x :: definition`   |   Named definition.   |   Named definition; supported nested kinds are hoisted.");
+    table_row(47, "`x :: definition`   |   Named definition.   |   Named definition in the enclosing lexical scope.");
     table_row(48, "`x := definition`, `x ::= definition`, `x : D : definition`, or `x : D :: definition`   |   Named definition; its declaration type is inferred, or checked against `D`.   |   Not the named-definition grammar; `:=` and `::=` take the ordinary local-binding path.");
     paragraph(15, #string,oneline
         \\Both `:` and `::` are accepted after a type annotation, so `MAX: ssize :
@@ -355,11 +355,10 @@ render_section_17 :: () {
         \\`Macro((ssize) -> void)`.
     );
     paragraph(27, #string,oneline
-        \\File scope also collects declarations that were not written there. A
-        \\`name :: (…)`, `struct`, `union`, `enum`, or `distinct` declaration
-        \\written inside a procedure body is hoisted out to file scope and is
-        \\visible to every other top-level declaration. Blocks, Scope, and
-        \\Shadowing covers that rule and what it does to name lookup.
+        \\Procedures and types may also be declared inside a procedure body.
+        \\Their names belong to the containing lexical block; other top-level
+        \\declarations cannot reach them. Separate blocks may use the same local
+        \\name. Function Declarations covers local procedures and their capture rules.
     );
 
     subheading(28, "Globals and their initialisers");
@@ -738,15 +737,12 @@ render_section_19 :: () {
     table_row(11, "A switch or pattern arm body   |   A fresh scope per arm, holding that arm's captures.");
     table_row(12, "A `#push_context` or `#push_allocator` body   |   A fresh scope.");
     table_row(13, "A lambda body   |   A fresh scope that cannot reach enclosing locals.");
-    subheading(14, "Nested declarations do not nest");
+    subheading(14, "Local declarations and lexical scope");
     paragraph(15, #string,oneline
-        \\A `::` declaration written inside a procedure body is not necessarily
-        \\local. `name :: (...)`, `name :: struct`, `name :: enum`,
-        \\`name :: union` and `name :: distinct` are lifted out of the body by
-        \\the parser and become file-level declarations; only constants and
-        \\variables such as `name :: 3` and `name := 3` stay local. The
-        \\declaration forms themselves are covered in Top-Level Declarations and
-        \\Thread-Local Storage.
+        \\A named function or type declared inside a body belongs to its containing
+        \\lexical block. Other procedures cannot reach that local name. Type aliases
+        \\can also be used in local annotations. Constants and variables follow the
+        \\ordinary block scope rules.
     );
     code_block(16, "glosso", #string
         \\#import "Io";
@@ -758,6 +754,7 @@ render_section_19 :: () {
         \\}
         \\
         \\report :: () {
+        \\    Sample :: struct { v: ssize; tag: bool; }
         \\    t: Sample = .{ .v = 9 };
         \\    print("report %\n", t.v);
         \\}
@@ -769,16 +766,15 @@ render_section_19 :: () {
         \\report 9
     );
     paragraph(18, #string,oneline
-        \\`Sample` is declared inside `collect` and used from `report`, which
-        \\never mentions it. The cost of that convenience is a shared file
-        \\namespace: two procedures that each declare a `step :: () -> ssize`
-        \\collide with `error: function 'step' is already declared`.
+        \\collect and report each declare their own Sample type. Their names are
+        \\independent and their fields may differ. A function declared in one block
+        \\cannot be called from a separate top-level procedure; pass a callback
+        \\explicitly when that behavior is needed.
     );
     note(19, #string,oneline
-        \\Hoisting happens in the parser, before any `#if` is evaluated. A
-        \\procedure declared inside `#if false { ... }` still exists and is
-        \\still callable; the static branch removes the statements around the
-        \\declaration, not the declaration.
+        \\A local function or type inside a braced #if branch stays in that lexical
+        \\block. At module scope, #if selects complete declaration blocks; only the
+        \\active branch contributes declarations and dependencies.
     );
     subheading(20, "Captures and pattern bindings");
     paragraph(21, #string,oneline
@@ -886,10 +882,10 @@ render_section_19 :: () {
     paragraph(35, #string,oneline
         \\Shadowing is refused within one file's top-level namespace. A second
         \\declaration there is an error, including declarations brought into
-        \\the same unit by `#load,embed` or hoisted from a procedure body.
-        \\Ordinary `#load` preserves the loaded module's identity. Qualified
-        \\loads let a caller distinguish equally named declarations in separate
-        \\modules without merging their types or global storage.
+        \\the same unit by #load,embed. Local functions and types stay in their
+        \\lexical blocks, so their names do not collide across procedure bodies.
+        \\Ordinary #load preserves the loaded module's identity. Qualified loads
+        \\distinguish equally named declarations in separate modules.
     );
     table_header(36, "Duplicate at file scope   —   Diagnostic");
     table_row(37, "`K :: 1;` then `K :: 2;`   |   `error: constant 'K' is already declared`");

@@ -160,12 +160,10 @@ render_section_105 :: () {
         \\build_text = <hello builder>
     );
     note(27, #string,oneline
-        \\A top-level `#comptime` declaration follows the machine path and also
-        \\supports the ordinary builder operations. The older `source_new`,
-        \\`append`, and `finish_source` intrinsics still have a string-view
-        \\compatibility issue in the installed compiler. Prefer `make_len_cap`,
-        \\`write_string`, and `into_string`, or the allocating `string.cat` and
-        \\`string.repeat` helpers.
+        \\Compile-time source generation also supports String_Builder.source_new(),
+        \\append(), and finish_source(). The last call consumes the builder and
+        \\returns its text. Ordinary make_len_cap(), write_string(), and into_string()
+        \\also work, as do the allocating string.cat() and string.repeat() helpers.
     );
 
     subheading(28, "Globals, memory, and foreign calls");
@@ -303,9 +301,9 @@ render_section_106 :: () {
         \\    local := #comptime 6 * 7;
         \\    print("Inline_Expr=% Table_Size=% local=%\n", Inline_Expr, Table_Size, local);
         \\    print("Table_Size: % (% bytes)\n",
-        \\          type_name(Table_Size.type_of()), size_of(Table_Size.type_of()));
+        \\          type_name(type_of(Table_Size)), size_of(type_of(Table_Size)));
         \\    print("Byte_Limit: % (% bytes)\n",
-        \\          type_name(Byte_Limit.type_of()), size_of(Byte_Limit.type_of()));
+        \\          type_name(type_of(Byte_Limit)), size_of(type_of(Byte_Limit)));
         \\    print("Squares = % % % %\n", Squares[0], Squares[1], Squares[2], Squares[3]);
         \\}
     );
@@ -510,7 +508,7 @@ render_section_107 :: () {
     table_row(9, "`X := e;` and `X : T = e;`   |   Not attempted.   |   No.");
     paragraph(10, #string,oneline
         \\The typed forms differ from the untyped ones only in the type they give
-        \\the name, and that difference is visible through `value.type_of`. An untyped
+        \\the name, and that difference is visible through `type_of(value)`. An untyped
         \\integer constant keeps the literal type `comptime_int`, which has not
         \\yet been given a width; a typed one has the width it was written with.
         \\Compile-Time Numbers and Literal Defaulting explains what
@@ -527,8 +525,8 @@ render_section_107 :: () {
         \\    D : s64 := 40;
         \\    print("A=% B=% C=% D=%\n", A, B, C, D);
         \\    print("types: % % % %\n",
-        \\          type_name(A.type_of()), type_name(B.type_of()),
-        \\          type_name(C.type_of()), type_name(D.type_of()));
+        \\          type_name(type_of(A)), type_name(type_of(B)),
+        \\          type_name(type_of(C)), type_name(type_of(D)));
         \\    #if A + B + C + D == 100 print("all four are compile-time values\n");
         \\}
     );
@@ -1541,7 +1539,7 @@ render_section_111 :: () {
         \\main :: () {
         \\    small: u8 = 200;
         \\    widened := widen_small(small);
-        \\    print("% %\n", widened, type_name(widened.type_of()));
+        \\    print("% %\n", widened, type_name(type_of(widened)));
         \\}
     );
     code_block(28, "text", #string
@@ -1655,7 +1653,7 @@ render_section_112 :: () {
     table_row(30, "`matrix_row_count(M)` / `matrix_column_count(M)` / `matrix_element_count(M)`   |   the shape of a `Matrix(T, R, C)`");
     table_row(31, "`matrix_element_type(M)` / `matrix_transpose_type(M)` / `matrix_product_type(A, B)`   |   matrix types computed from matrix types");
     paragraph(32, #string,oneline
-        \\`value.type_of`, `type_name` and `size_of` belong to the same family and are
+        \\`type_of(value)`, `type_name` and `size_of` belong to the same family and are
         \\described in Types as Values; the `pattern_binder_*` and `pattern_missing*`
         \\intrinsics belong to Pattern Reflection; the `derive_type_*` intrinsics
         \\belong to Writing a Derive Macro. `simd_*` comes with `#import "Simd";`
@@ -1685,10 +1683,11 @@ render_section_112 :: () {
         \\
         \\Vec3 :: struct { x: f32 = 0.0; y: f32 = 0.0; z: f32 = 0.0; }
         \\
-        \\fields_desc :: (T: type, i: ssize) -> string {
-        \\    if i >= field_count(T) return "";
-        \\    one := (" ").cat((field_name(T, i)).cat((": ").cat(type_name(field_type(T, i)))));
-        \\    return one.cat(fields_desc(T, i + 1));
+        \\fields_desc :: (#comptime T: type, #comptime i: ssize) -> string {
+        \\    #if i >= field_count(T) { return ""; } else {
+        \\        one := (" ").cat((field_name(T, i)).cat((": ").cat(type_name(field_type(T, i)))));
+        \\        return one.cat(fields_desc(T, i + 1));
+        \\    }
         \\}
         \\
         \\VEC3_FIELDS :: #comptime fields_desc(Vec3, 0);
@@ -1712,9 +1711,9 @@ render_section_112 :: () {
     );
     paragraph(38, #string,oneline
         \\The recursive helper is the idiom the standard library uses. It carries
-        \\the index as an ordinary parameter, and a parameter of a
-        \\const-evaluated call is a constant in the callee, so the intrinsic folds
-        \\at every depth. It also composes: the helper returns text, which is what
+        \\the type and index as #comptime parameters. A #if branch stops recursion
+        \\before checking an out-of-range field index, so each live intrinsic call
+        \\folds at its specialization. It also composes: the helper returns text, which is what
         \\`#insert` wants. `#inline while` works because the counter is declared
         \\`i ::= 0`, a compile-time binding; declaring it `i := 0` is `#inline
         \\while condition must be compile-time evaluable`.
@@ -1790,7 +1789,7 @@ render_section_112 :: () {
     subheading(47, "Generating code from a type");
     paragraph(48, #string,oneline
         \\Reflection pays off when its answers become source. The helper below
-        \\emits one `print` per field and the generic procedure splices the
+        \\uses a compile-time index to emit one print per field and splices the
         \\result, so a single definition prints any struct without a `Show`
         \\instance and without a runtime type table.
     );
@@ -1802,16 +1801,14 @@ render_section_112 :: () {
         \\Vec3 :: struct { x: f32 = 0.0; y: f32 = 0.0; z: f32 = 0.0; }
         \\Span :: struct { lo: s64 = 0; hi: s64 = 0; }
         \\
-        \\field_print_source :: (T: type, i: ssize) -> string {
-        \\    if i >= field_count(T) return "";
-        \\    name := field_name(T, i);
-        \\    line := ("    print(\"  ").cat(name.cat((" = %\\n\", value.").cat(name.cat(");\n"))));
-        \\    return line.cat(field_print_source(T, i + 1));
-        \\}
-        \\
         \\describe :: (value: $T) {
         \\    print("% {\n", type_name(T));
-        \\    #insert field_print_source(T, 0);
+        \\    i ::= 0;
+        \\    #inline while i < field_count(T) {
+        \\        name :: field_name(T, i);
+        \\        #insert ("print(\"  ").cat(name.cat((" = %\\n\", `value.").cat(name.cat(");"))));
+        \\        i += 1;
+        \\    }
         \\    print("}\n");
         \\}
         \\
@@ -1833,11 +1830,11 @@ render_section_112 :: () {
     );
     paragraph(51, #string,oneline
         \\`describe` is instantiated once per argument type and each instantiation
-        \\splices its own generated statements, which `--show-generated` reports
-        \\as two materialised sources. `T` is a compile-time type parameter, so
+        \\splices its own generated statements, which --show-generated reports.
+        \\The inline while index is a compile-time binding. T is a type parameter, so
         \\the reflection calls fold inside the generic body; `value` is an
-        \\ordinary parameter and the generated text names it directly, because a
-        \\statement-position `#insert` splices into the scope it stands in.
+        \\ordinary parameter. The generated source spells `value with a backtick
+        \\to resolve that name in the insertion site rather than the generator.
     );
     note(52, #string,oneline
         \\Generating source is the general answer to a per-field or per-variant
@@ -2460,12 +2457,11 @@ render_section_114 :: () {
         \\
         \\adder_bindings :: () -> string {
         \\    sources: [..]string;
-        \\    defer sources.free();
         \\    sources.push("adder.c");
         \\
         \\    arguments: [1]string = .["-fno-builtin"];
         \\
-        \\    if Native_Compile_Output.compile_c_archive("adder", sources, .compiler_args = arguments[..]) == {
+        \\    if Native_Compile_Output.compile_c_archive("adder", sources[..], .compiler_args = arguments[..]) == {
         \\    case .Ok(archive);
         \\        print("[c] archive at %\n", archive.artifact);
         \\        slashes := archive.artifact.replace("\\", "\\\\");
@@ -2678,7 +2674,6 @@ render_section_115 :: () {
         \\    options := workspace.get_build_options();
         \\    options.output_executable_name = "child.exe";
         \\    options.compile_time_command_line.push("release");
-        \\    defer options.compile_time_command_line.free();
         \\    options.set_build_options(workspace);
         \\
         \\    if add_build_file("child.glo", workspace) == {

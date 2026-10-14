@@ -188,8 +188,8 @@ render_section_142 :: () {
         \\    defer photo.destroy();
         \\    thumbnail := photo.resize(320, 240)?;
         \\    defer thumbnail.destroy();
-        \\    _ := image_write("thumbnail.png", thumbnail)?;
-        \\    _ := image_write("thumbnail.jpg", thumbnail, .quality = 90)?;
+        \\    _ := image_write("thumbnail.png", &thumbnail)?;
+        \\    _ := image_write("thumbnail.jpg", &thumbnail, .quality = 90)?;
         \\    return .Ok;
         \\}
     );
@@ -395,7 +395,7 @@ render_section_142 :: () {
         \\`text.substring(start, end)`, and `file.close()`. Constructors belong
         \\to the type they create, as in `File.open(path)`,
         \\`Image.image_read(path)`, and `f64.from_bits(bits)`. Domain operations
-        \\use free functions with named inputs, such as `image_write(path, image)`,
+        \\use free functions with named inputs, such as `image_write(path, &image)`,
         \\`json_serialize(value)`, and `add_build_file(path, workspace)`.
         \\Import the module that owns the operation; importing a domain module
         \\does not add all of its operations to every string or byte slice.
@@ -567,7 +567,7 @@ render_section_143 :: () {
     subheading(21, "Aggregates");
     code_block(22, "ebnf", #string
         \\struct      = "struct" { structdir } "{" { structmember } "}" ;
-        \\structdir   = "#c_call" | "#packed" | "#magic" STRING
+        \\structdir   = "#c_call" | "#packed" | "#align" "(" INT ")" | "#magic" STRING
         \\            | derive | "#modify" ( block | expression ) ;
         \\structmember= [ "using" ] [ "#as" [ "using" ] ] IDENT ":" fieldtype
         \\              [ "=" expression ] ";"
@@ -793,23 +793,16 @@ render_section_143 :: () {
     );
     subheading(41, "Statements");
     paragraph(43, #string,oneline
-        \\A nested procedure definition, `struct`, `enum`, `union` or `distinct` is
-        \\parsed as a declaration and hoisted to file scope, leaving nothing
-        \\behind in the body; a nested `name :: expression` is an ordinary local
-        \\constant and is not hoisted. A nested `distinct` and a bodyless nested
-        \\`#foreign` or `#magic` procedure currently accept an optional `;`;
-        \\braced nested definitions do not. The required terminator on a local
-        \\declaration, assignment, expression statement, value-bearing `return`,
-        \\or legacy `#asm` is waived immediately before `}` inside a
-        \\`#code` quote, including before a nested block's closing brace. In an
-        \\expression-position `#inline while` or `#inline for`, an ordinary
-        \\expression statement in the generated body may use
-        \\`,` instead. These are contextual parser rules omitted from the EBNF.
-        \\`#falling` must be the last statement of
-        \\its arm, and anything written after it is
-        \\`error: '#falling' must be the last statement of a case`. An `ifx`
-        \\conditional has no one-armed form, because it must produce a value on
-        \\every path.
+        \\A procedure, struct, enum, union, distinct type, typeclass, or function-pointer
+        \\alias declared inside a body has lexical scope. A name :: expression binding
+        \\is a local constant. Ordinary local procedures do not capture runtime locals.
+        \\A nested distinct and a bodyless nested #foreign or #magic procedure accept
+        \\an optional semicolon; braced definitions do not. The terminator on a local
+        \\declaration, assignment, expression statement, value-bearing return, or legacy
+        \\#asm is waived immediately before } inside a #code quote. Expression-position
+        \\#inline loops may use a comma after an expression in the generated body.
+        \\#falling must be the last statement of its arm. An ifx conditional must
+        \\produce a value on every path.
     );
     code_block(44, "glosso", #string
         \\#import "Io";
@@ -906,12 +899,12 @@ render_section_143 :: () {
     table_row(84, "`#source_location`   |   primary expression, with no arguments; a `Source_Location` value for the directive's lexical `#` token, including in a constant, default, or quote");
     table_row(63, "`#char`   |   a character literal recognised by the lexer; ASCII defaults to `u8`, non-ASCII to `rune`");
     table_row(64, "`#derive`, `#minimal`   |   `#derive` on `struct`, `union`, `typeclass` and `distinct`; `#minimal` on `typeclass` only");
-    table_row(65, "`#empty`, `#as`, `#from`, `#raw`, `#packed`   |   aggregate declarations; `#empty` also in a parameter list");
+    table_row(65, "`#empty`, `#as`, `#from`, `#raw`, `#packed`, `#align(N)`   |   aggregate declarations; `#empty` also in a parameter list");
     table_row(66, "`#c_call`, `#modify`, `#magic`   |   both aggregate and procedure declarations");
-    table_row(67, "`#operator`, `#expand`, `#foreign`, `#no_context`, `#returns_twice`, `#dump`, `#must`, `#lazy`   |   procedure declarations; `#lazy` on a parameter. A diverging return type is `-> #Never`.");
+    table_row(67, "`#operator`, `#expand`, `#foreign`, `#fresh_result`, `#unchecked_transfer`, `#no_context`, `#returns_twice`, `#dump`, `#must`, `#lazy`   |   procedure declarations; `#lazy` on a parameter. A diverging return type is `-> #Never`.");
     table_row(68, "`#Context`, `#Never`, `#Self_Type`, `#aos`, `#soa`   |   type position; `#Self_Type` belongs to inherent blocks and instances");
     table_row(85, "`#public`, `#public(unit)`, `#private`   |   one named declaration or a transparent group; also the visibility default after an inherent block's `:::`");
-    table_row(86, "`#self`, `*#self`, `*#self`   |   first parameter of an inherent method; `#self` names the receiver in its body");
+    table_row(86, "`#self`, `*#self`, `*mut #self`   |   first parameter of an inherent method; `#self` names the receiver in its body");
     table_row(87, "`#on_drop_error(owner, error) { ... }`   |   a local cleanup error handler registered immediately after its owning declaration");
     subheading(69, "Decisions the grammar defers to lookahead");
     paragraph(70, #string,oneline
@@ -933,8 +926,8 @@ render_section_143 :: () {
         \\switch instead of comparing against a struct literal.
     );
     bullet(74, #string,oneline
-        \\Inside a body, `name ::` followed by a procedure signature,
-        \\`struct`, `enum`, `union` or `distinct` is a hoisted declaration.
+        \\Inside a body, name :: followed by a procedure signature, struct, enum,
+        \\union, distinct, typeclass, or #fn_ptr introduces a local declaration.
         \\A parenthesized value initializer remains a local constant.
     );
     bullet(75, #string,oneline

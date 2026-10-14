@@ -58,6 +58,8 @@ assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
 assert.equal(compileAndRun("pointers_literals"), "pointers and literals passed\n");
 assert.equal(compileAndRun("manual_drop"), "manual and automatic Drop passed\n");
 assert.equal(compileAndRun("owned_collections"), "owned collections passed\n");
+assert.equal(compileAndRun("current_reflection"), "current reflection passed\n");
+assert.equal(compileAndRun("current_comptime"), "current comptime passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -67,6 +69,10 @@ for (const [name, diagnostic] of [
   ["empty_parameter_order", "#empty parameters must appear before runtime parameters"],
   ["removed_address_star", "operator '*' expects a typed pointer"],
   ["manual_drop_reuse", "moved"],
+  ["invalid_alignment", "#align expects a positive power of two"],
+  ["invalid_const_overflow", "constant arithmetic overflow"],
+  ["invalid_float_literal", "out of range for f16"],
+  ["non_exhaustive_switch", "non-exhaustive switch"],
 ]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: invalid source compiled successfully`);
@@ -101,7 +107,8 @@ assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
 for (const name of ["removed_noreturn", "removed_private_section", "private_declaration",
-  "removed_memory", "removed_const", "removed_memory_strict"]) {
+  "removed_memory", "removed_const", "removed_memory_strict",
+  "removed_type_of_method", "local_function_escape"]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: obsolete syntax or private access compiled successfully`);
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, /error:/, `${name}: missing diagnostic`);
@@ -118,4 +125,4 @@ for (const [name, diagnostic] of [
 // Borrow lifetimes are not checked. Compile the escaping-view example, but do not run it.
 assert.equal(compile("string_view_escape", "object").status, 0);
 
-console.log("Language checks passed: pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

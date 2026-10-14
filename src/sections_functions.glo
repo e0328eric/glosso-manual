@@ -227,41 +227,46 @@ render_section_56 :: () {
 
     subheading(34, "Nested procedures");
     paragraph(35, #string,oneline
-        \\A `name :: (...)` declaration inside a body is parsed as a declaration and
-        \\then hoisted to file scope, leaving nothing behind at the point where it
-        \\was written. Struct, enum, union, and `distinct` declarations inside a body
-        \\are hoisted the same way. Nesting is therefore a matter of where the reader
-        \\finds the declaration, not of what can see it.
+        \\A procedure declared inside a body is visible within its containing
+        \\lexical block, including to sibling local procedures. It can be called
+        \\before its declaration. Structs, enums, unions, distinct types, typeclasses,
+        \\and function-pointer aliases declared in a body also stay local.
+        \\Their names do not escape into other top-level procedures.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
         \\
-        \\main :: () {
+        \\first :: () -> ssize {
         \\    nested :: (x: ssize) -> ssize { return x * 2; }
-        \\    print("nested=%\n", nested(21));
+        \\    return nested(21);
         \\}
         \\
-        \\elsewhere :: () -> ssize { return nested(3); }
+        \\second :: () -> ssize {
+        \\    nested :: (x: ssize) -> ssize { return x + 1; }
+        \\    return nested(2);
+        \\}
+        \\
+        \\main :: () { print("nested=% other=%\n", first(), second()); }
     );
     code_block(37, "text", #string
-        \\nested=42
+        \\nested=42 other=3
     );
     bullet(38, #string,oneline
-        \\`elsewhere` compiles: after hoisting, `nested` is an ordinary top-level
-        \\procedure.
+        \\A top-level procedure cannot call either local nested function.
+        \\Pass a function pointer explicitly when a helper must escape its scope.
     );
     bullet(39, #string,oneline
-        \\A nested procedure cannot read the enclosing locals. Referring to one is
-        \\`error: unbound 'base'`, because the body was moved out of that scope.
+        \\An ordinary local procedure cannot capture enclosing runtime locals.
+        \\Pass them as parameters. A macro expands into its caller and follows
+        \\the macro hygiene rules described in Macros with #expand.
     );
     bullet(40, #string,oneline
-        \\Two nested procedures with the same name collide even when they sit in
-        \\different bodies: `error: function 'helper' is already declared`. Hoisting
-        \\puts them both in the same namespace.
+        \\Local functions with the same name in different blocks are independent.
+        \\Duplicate function declarations within one block are rejected.
     );
     bullet(41, #string,oneline
-        \\`name :: <expr>;` inside a body is not hoisted. Only the procedure and
-        \\aggregate forms are.
+        \\A name :: expression binding remains a local constant. Type aliases
+        \\such as Byte :: u8 may be used in annotations within that same scope.
     );
 }
 
@@ -714,8 +719,10 @@ render_section_58 :: () {
     subheading(31, "Call-site expansion");
     paragraph(32, #string,oneline
         \\An existing array can be passed as the whole pack by suffixing the argument
-        \\with `...`. The source may be a fixed array, a view, or a dynamic array;
-        \\what the checker requires is an array type whose element matches the pack.
+        \\with `...`. Use a fixed array or a view whose element type matches the pack.
+        \\A dynamic array owns its storage and cannot move into a variadic pack;
+        \\expand its borrowed view instead, as in sum(dyn[..]...). Managed elements
+        \\cannot be passed by value through a pack, which does not destroy them.
     );
     code_block(33, "glosso", #string
         \\#import "Io";
@@ -730,8 +737,7 @@ render_section_58 :: () {
         \\    dyn: [..]ssize;
         \\    dyn.push(10);
         \\    dyn.push(20);
-        \\    print("dyn=%\n", sum(dyn...));
-        \\    dyn.free();
+        \\    print("dyn=%\n", sum(dyn[..]...));
         \\    print("forward=%\n", sum_plus(100, 1, 2, 3));
         \\}
     );
@@ -1163,17 +1169,20 @@ render_section_61 :: () {
     );
     code_block(7, "glosso", #string
         \\#import "Io";
+        \\#import "String_Builder";
         \\
         \\banner :: (#comptime width: ssize = 4, ch: string) -> string {
-        \\    out := "";
-        \\    #inline for i: 0..width out = out + ch;
-        \\    return out;
+        \\    return ch.repeat(width);
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", banner(.ch = "-"));
-        \\    print("%\n", banner(6, "="));
-        \\    print("%\n", banner(.width = 2, .ch = "*"));
+        \\    a := banner(.ch = "-");
+        \\    defer a.free();
+        \\    b := banner(6, "=");
+        \\    defer b.free();
+        \\    c := banner(.width = 2, .ch = "*");
+        \\    defer c.free();
+        \\    print("%\n%\n%\n", a, b, c);
         \\}
     );
     code_block(8, "text", #string
@@ -1601,21 +1610,22 @@ render_section_63 :: () {
     code_block(1, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
+        \\#import "String_Builder";
         \\
         \\scaled :: (x: $T, k: T) -> T #inline where Is_Numeric(T) where !Is_Bool(T) {
         \\    return x * k;
         \\}
         \\
         \\rep :: (#comptime n: ssize, s: string) -> string where n > 0 {
-        \\    out := s;
-        \\    #inline for i: 1..n out = out + s;
-        \\    return out;
+        \\    return s.repeat(n);
         \\}
         \\
         \\main :: () {
         \\    print("scaled=%\n", scaled(6, 7));
         \\    print("scaled=%\n", scaled(1.5, 2.0));
-        \\    print("rep=%\n", rep(3, "ab"));
+        \\    repeated := rep(3, "ab");
+        \\    defer repeated.free();
+        \\    print("rep=%\n", repeated);
         \\}
     );
     code_block(2, "text", #string
@@ -2264,7 +2274,7 @@ render_section_65 :: () {
         \\
         \\main :: () {
         \\    // Globals and constants are visible; enclosing locals are not.
-        \\    scaled := |x: s64| -> s64 { return x *mut SCALE + offset; };
+        \\    scaled := |x: s64| -> s64 { return x * SCALE + offset; };
         \\    print("scaled=%\n", scaled(4));
         \\
         \\    // Named results in a lambda return type.
@@ -2575,6 +2585,8 @@ render_section_67 :: () {
     table_row(30, "`#must`   |   none   |   discarding the result is an error");
     table_row(31, "`#inline`   |   none, or `,always` / `,never`   |   inlining hint, or a forced decision");
     table_row(32, "`#modify`   |   an expression or a block   |   rewrites the type parameters before instantiation");
+    table_row(76, "`#fresh_result`   |   none; #foreign only   |   declares a result independent of argument storage; the foreign API must satisfy that promise");
+    table_row(77, "`#unchecked_transfer`   |   none   |   accepted on raw storage helpers; it adds no lifetime protection and does not make moved values reusable");
     paragraph(34, #string,oneline
         \\`#inline,sometimes` is `error: #inline expects always or never after
         \\','`, and `#expand,stmt` is `error: #expand expects expression after
@@ -2655,7 +2667,7 @@ render_section_67 :: () {
         \\`enum` and `enum_flags` accept none at all.
     );
     table_header(50, "Target   —   Accepted   —   Notes");
-    table_row(51, "`struct`   |   `#c_call` `#packed` `#modify` `#derive(…)` `#magic \"…\"`   |   `#c_call` and `#packed` both lock declaration order");
+    table_row(51, "`struct`   |   `#c_call` `#packed` `#align(N)` `#modify` `#derive(…)` `#magic \"…\"`   |   `#c_call` and `#packed` both lock declaration order");
     table_row(52, "`union`   |   `#raw` `#derive(…)` `#magic \"…\"`   |   `#raw` makes it a reinterpreting union with no tag");
     table_row(53, "`enum`, `enum_flags`   |   none   |   `Color :: enum #derive(Show)` is `error: unexpected token 'derive'`");
     table_row(54, "`typeclass`   |   `#derive(…)` `#minimal(…)`   |   `#derive` here names the class's own derive macro");

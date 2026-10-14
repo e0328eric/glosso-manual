@@ -102,7 +102,11 @@ their class declaration. Search opens the matching section and page.
 operators, Try boundary witnesses, propagation cleanup, array reservation,
 source locations, visibility, receiver methods, associated factories, domain
 free functions, managed destruction and `ManuallyDrop`, string-view layouts and aliasing, and
-builder cloning and ownership transfer. Syntax checks cover prefix and suffix
+builder cloning and ownership transfer. They also verify free, unevaluated
+`type_of(value)` queries, lexical scope for local functions and types, local
+type aliases, `#align(N)` record layouts, compile-time source builders,
+recursive reflection, and rejection of non-exhaustive switches and overflowing
+integer or float constants. Syntax checks cover prefix and suffix
 pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
@@ -110,7 +114,9 @@ directives, invalid Try contracts, string capacity, removed memory contracts, an
 checks that escaping builder views compile, since pointer lifetimes are the
 programmer's responsibility; that dangling-view fixture is never executed.
 Pass a compiler path as its optional first argument to test another build.
-All output and caches stay under `build/`. The collection checks exercise
+For the local installation, run
+`node scripts/test-language.mjs "$HOME/.local/glosso/bin/glosso"` with
+`GLOSSO_STD` pointing to `../glosso/std`. All output and caches stay under `build/`. The collection checks exercise
 automatic element destruction, nested dynamic arrays, and `take()` / `replace()`
 ownership transfers.
 
@@ -206,6 +212,10 @@ storage and leave the original descriptor reusable. Dynamic arrays allocate and
 release through `context.allocator`; keep that allocator installed until cleanup.
 Containers capture their constructor's allocator. Dynamic arrays append values
 with `push()` or `append()`.
+`type_of(value)` is a free function from `Meta`; its argument is typechecked
+but never evaluated or moved. Local functions and type declarations belong to
+their containing lexical block. Structs accept `#align(N)` with a literal
+power-of-two alignment, including alongside `#packed`.
 Runtime concatenation uses builders
 or `.cat()`; `+` is available for compile-time string constants.
 

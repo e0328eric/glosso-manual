@@ -86,6 +86,11 @@ parser.setLanguage(language);
 const tree = parser.parse(`
 #load,embed "fragment.glo";
 #public Counter :: struct { value: s64; #private cached: s64; }
+Aligned :: struct #align(32) { value: s32; }
+Packed :: struct #packed #align(2) { value: s32; }
+libc :: #library "c";
+copy_c :: (value: [*]u8) -> ?[*]mut u8 #foreign libc "strdup" #fresh_result;
+raw_transfer :: (slot: *mut $T) -> T #unchecked_transfer { return __value_move(slot); }
 Counter ::: #public {
     make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
     read :: (#self) -> s64 { return #self.value; }
@@ -94,7 +99,7 @@ Counter ::: #public {
 #public(unit) { shared :: () { value := Counter.make(); value.increment(); } }
 Cleanup ::: instance Drop {
     Error :: #Never;
-    drop :: (value: *#Self_Type) -> #Never!void { return .Ok; }
+    drop :: (value: *mut #Self_Type) -> #Never!void { return .Ok; }
 }
 cleanup :: () {
     resource: Fallible;
@@ -282,6 +287,14 @@ function moduleIndex(name) {
   return index;
 }
 
+const metaModule = moduleIndex("Meta/Utilities");
+const typeQuery = referenceIndex.symbols.find(symbol => symbol[4] === metaModule && symbol[0] === "type_of");
+assert(typeQuery, "Missing free type_of function in the reference");
+assert.equal(typeQuery[5], "function");
+assert.equal(typeQuery[1], 'type_of :: (val: $T) -> type #magic "type_of"');
+assert(!referenceIndex.symbols.some(symbol => symbol[0].endsWith(".type_of")),
+  "Removed type_of receiver method remains in the reference");
+
 function symbolIndex(module, name) {
   const index = referenceIndex.symbols.findIndex(symbol => symbol[4] === module && symbol[0] === name);
   assert(index >= 0, `Missing reference symbol ${name}`);
@@ -324,6 +337,10 @@ for (const width of [390, 1280]) {
     assert.equal(instance.exports.glo_manual_get_section(), index);
     const text = render(width);
     assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
+    assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
+    if (index === 29) assert(text.includes("never evaluated"), "Type-query semantics are stale");
+    if (index === 38) assert(text.includes("#align(N)"), "Alignment chapter is stale");
+    if (index === 56) assert(text.includes("lexical block"), "Local-declaration scope is stale");
     if (index === 20) assert(text.includes("#public(unit)"), "Visibility chapter is stale");
     if (index === 55) assert(text.includes("#self"), "Receiver-method chapter is stale");
   }

@@ -148,7 +148,7 @@ render_section_87 :: () {
         \\label is recognised before an expression for the same reason.
     );
     table_header(25, "Form   —   What it is");
-    table_row(27, "`name :: (...)`, `name :: struct`, `name :: enum`, `name :: union`, `name :: distinct`   |   A nested declaration, hoisted to file scope.");
+    table_row(27, "`name :: (...)`, `name :: struct`, `name :: enum`, `name :: union`, `name :: distinct`   |   A declaration local to its containing lexical block.");
     table_row(28, "`{ ... }`   |   A bare block, which introduces a scope.");
     table_row(29, "`'name;`   |   A label.");
     table_row(30, "`return;`, `return e;`, `return a, b;`   |   Leaves the procedure.");
@@ -507,7 +507,7 @@ render_section_89 :: () {
         \\
         \\main :: () {
         \\    lv := Level.Warn;
-        \\    if lv == { case Level.Info; print("qualified Info\n"); case Level.Warn; print("qualified Warn\n"); }
+        \\    if #partial lv == { case Level.Info; print("qualified Info\n"); case Level.Warn; print("qualified Warn\n"); }
         \\    if lv == { case .Info; print("dotted Info\n"); case .Warn, .Error; print("dotted Warn or Error\n"); }
         \\
         \\    t: Token = .Code(42);
@@ -540,17 +540,17 @@ render_section_89 :: () {
     );
     subheading(28, "Nothing matched");
     paragraph(29, #string,oneline
-        \\When no arm matches and there is no `else;`, control falls out of the
-        \\switch and continues after it. There is no trap, because a statement
-        \\switch is not obliged to produce anything. The expression form is
-        \\obliged to, and behaves differently; see `ifx` Expressions.
+        \\A #partial statement switch can leave values unhandled. If no arm matches
+        \\and there is no else, execution continues after that switch. Without
+        \\#partial, the compiler requires exhaustive coverage or an else arm.
+        \\An ifx expression must always produce a value.
     );
     code_block(30, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
         \\    n := 7;
-        \\    if n == { case 1; print("one\n"); case 2; print("two\n"); }
+        \\    if #partial n == { case 1; print("one\n"); case 2; print("two\n"); }
         \\    print("fell out of the ssize switch\n");
         \\}
     );
@@ -558,12 +558,11 @@ render_section_89 :: () {
         \\fell out of the ssize switch
     );
     paragraph(32, #string,oneline
-        \\Integer, float, string, character, `bool` and enum subjects are not
-        \\coverage-checked in this form, and duplicate labels are not diagnosed:
-        \\the first matching arm wins and the rest are dead. A tagged-union
-        \\subject is the exception. Its switch must name every variant, or carry
-        \\`else;`, or be marked `#partial`; otherwise it is
-        \\`error: switch is exhaustive by default; add else or #partial`.
+        \\Scalar and enum statement switches are coverage-checked by default.
+        \\A gap reports non-exhaustive switch with a missing-case witness.
+        \\Cover every value, add else, or use #partial for intentional fall-through.
+        \\Tagged-union switches likewise require all variants, else, or #partial.
+        \\Covered arms can receive an unreachable-pattern warning.
     );
     paragraph(33, #string,oneline
         \\`#partial` waives that requirement and is written immediately after
@@ -725,7 +724,7 @@ render_section_90 :: () {
         \\    a := ifx b 1 else 2.5;
         \\    c := ifx b n else 7;
         \\    d := ifx b cast(f32)1.0 else 2.0;
-        \\    print("% % %\n", type_name(a.type_of()), type_name(c.type_of()), type_name(d.type_of()));
+        \\    print("% % %\n", type_name(type_of(a)), type_name(type_of(c)), type_name(type_of(d)));
         \\    print("% % %\n", a, c, d);
         \\}
     );
@@ -1616,17 +1615,12 @@ render_section_94 :: () {
         \\value, so it may contain `_` where any value would do.
     );
     paragraph(2, #string,oneline
-        \\The analysis governs `#pattern` switches and the switch forms of `ifx`.
-        \\`ifx` reuses the same witnesses under its own wording,
-        \\`error: cannot decide a value for this ifx` followed by
-        \\`note: missing case: Color.Blue` and
-        \\`note: cover every case, or add an 'else' arm`; its chapter has the rest.
-        \\A tagged-union statement switch is checked more crudely, by counting the
-        \\tags an arm names, and reports
-        \\`error: switch is exhaustive by default; add else or #partial`. A plain
-        \\statement switch over an integer, string, float, boolean or enum subject
-        \\is not coverage-checked at all; the chapter on switching on a value
-        \\covers that.
+        \\The coverage analysis governs #pattern switches, scalar and enum statement
+        \\switches, and the switch forms of ifx. An incomplete statement switch reports
+        \\non-exhaustive switch and lists missing cases; add else or #partial when
+        \\coverage is intentionally incomplete. An ifx reports cannot decide a value
+        \\for this ifx and requires an else arm or complete coverage. Tagged-union
+        \\statement switches also check that every variant is handled.
     );
     subheading(3, "Enumerable and opaque domains");
     paragraph(4, #string,oneline
@@ -2626,32 +2620,33 @@ render_section_98 :: () {
 
     subheading(25, "The limits");
     paragraph(26, #string,oneline
-        \\`#if` is a statement. At file scope it is not a declaration and the
-        \\parser says so: `error: bad decl name 'if'`. Nothing in `std/` uses a
-        \\top-level `#if`; target gates are written inside a procedure body.
+        \\At module scope, #if selects declarations, imports, and libraries.
+        \\Only the active branch contributes them to the module. Operator syntax
+        \\and loads that supply operators must remain unconditional because the
+        \\operator prescan runs before semantic branch selection.
     );
     paragraph(27, #string,oneline
-        \\`#if` cannot conditionally declare. A nested procedure, struct, enum,
-        \\union or `distinct` declaration is hoisted to file scope by the parser,
-        \\before any condition is evaluated, so it escapes the branch it was
-        \\written in and exists whether or not that branch was selected.
+        \\Inside a procedure, local functions and types belong to their lexical
+        \\block. A function declared inside a braced #if branch does not become
+        \\a top-level function. Use module-level conditional declarations when
+        \\a selected function should be callable elsewhere in the module.
     );
     code_block(28, "glosso", #string
         \\#import "Io";
         \\
-        \\main :: () {
-        \\    #if false {
-        \\        dead :: () { print("declared inside a dead branch\n"); }
-        \\    }
-        \\    dead();
+        \\#if true {
+        \\    selected :: () -> ssize { return 1; }
+        \\} else {
+        \\    selected :: () -> ssize { return 2; }
         \\}
+        \\
+        \\main :: () { print("selected=%\n", selected()); }
     );
-    code_block(29, "text", "declared inside a dead branch");
+    code_block(29, "text", "selected=1");
     note(30, #string,oneline
-        \\`#if false` removes statements, not declarations. To compile a
-        \\procedure out of a build, guard its body, or select between two whole
-        \\files with the load and import machinery described in Source Files,
-        \\Imports, and Loads.
+        \\Module-level #if can select between complete implementations with the
+        \\same name. Inactive branches introduce no declarations or dependencies.
+        \\Source Files, Imports, and Loads covers conditional module loading.
     );
     paragraph(31, #string,oneline
         \\A braced `#if` branch does not open a scope of its own. The selected
@@ -3107,7 +3102,7 @@ render_section_100 :: () {
         \\main :: () {
         \\    text := "A가";
         \\    for r, i: text
-        \\        print("%:%:%\n", i, type_name(r.type_of()), cast(u32)r);
+        \\        print("%:%:%\n", i, type_name(type_of(r)), cast(u32)r);
         \\    for < r, i: text print("reverse %:%\n", i, cast(u32)r);
         \\}
     );
@@ -3524,7 +3519,7 @@ render_section_102 :: () {
         \\    #inline for row describe(it);
         \\
         \\    #inline for row {
-        \\        #if it.type_of() == string print("  a string\n");
+        \\        #if type_of(it) == string print("  a string\n");
         \\        else                      print("  not a string\n");
         \\    }
         \\}
@@ -3636,7 +3631,7 @@ render_section_102 :: () {
     note(32, #string,oneline
         \\The restriction is on the loop variable's value, not its type. A generic
         \\call binds `$T` from the argument's type and works per element, and `#if
-        \\it.type_of() == string` selects a branch per copy. Only intrinsics and
+        \\type_of(it) == string` selects a branch per copy. Only intrinsics and
         \\declarations that need the value itself are affected.
     );
     subheading(33, "break, scope, and defer");
@@ -4155,7 +4150,7 @@ render_section_104 :: () {
         \\    fresh: Execution_Context;
         \\    fresh_local: Execution_Local;
         \\    caller: Execution_Context;
-        \\    stack: [..]u8;
+        \\    stack: [65536]u8;
         \\}
         \\
         \\#thread_local storage: State = .{};
@@ -4169,11 +4164,8 @@ render_section_104 :: () {
         \\
         \\main :: () {
         \\    state := &storage;
-        \\    stack: [..]u8;
-        \\    for i: 0..64 * 1024 stack.push(cast(u8)0);
-        \\    state.*.stack = stack;
         \\
-        \\    state.*.fresh.prepare(state.*.stack.view(), .local = &state.*.fresh_local);
+        \\    state.*.fresh.prepare(state.*.stack[..], .local = &state.*.fresh_local);
         \\    state.*.caller.local = execution_local();
         \\
         \\    code := state.*.caller.save();
@@ -4181,7 +4173,6 @@ render_section_104 :: () {
         \\        goto(on_fresh_stack,,'entry, .ctx = &state.*.fresh, .value = "hello");
         \\    }
         \\    print("caller resumed: code=% inbox=%\n", code, state.*.caller.inbox);
-        \\    state.*.stack.free();
         \\}
     );
     code_block(20, "text", #string

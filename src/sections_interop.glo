@@ -635,7 +635,7 @@ render_section_133 :: () {
     code_block(201, "glosso", #string
         \\#import "Io";
         \\
-        \\c_puts :: (s: *s8) -> s32 #foreign "c" "puts"
+        \\c_puts :: (s: *s8) -> s32 #foreign "c" "puts";
         \\
         \\main :: () {
         \\    text := c"hello";
@@ -1336,11 +1336,13 @@ render_section_136 :: () {
         \\
         \\// A user declaration may bind any registered intrinsic name.
         \\byte_width :: (T: type) -> ssize #magic "size_of";
-        \\concat     :: (a: string, b: string) -> string #magic "str_concat"
+        \\concat     :: (a: string, b: string) -> string #magic "str_concat";
         \\
         \\main :: () {
         \\    print("byte_width(s32) = %\n", byte_width(s32));
-        \\    print("concat = %\n", concat("glo", "sso"));
+        \\    text := concat("glo", "sso");
+        \\    defer text.free();
+        \\    print("concat = %\n", text);
         \\}
     );
     code_block(3, "text", #string
@@ -1379,7 +1381,7 @@ render_section_136 :: () {
         \\program that build emits.
     );
     table_header(13, "Family   —   Class   —   Note");
-    table_row(14, "type and pattern reflection   |   compile-time only   |   `value.type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
+    table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of(value)`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
     table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `string.repeat`, `substring`, `byte_string`, the `show_*` formatters");
     table_row(16, "files, filesystem, processes   |   VM and compile time   |   so a build script can read the host; the handle-relative sandbox primitives stay native only");
     table_row(17, "compiler and bindgen services   |   VM and compile time, native forbidden   |   `compiler_add_build_file`, `compiler_add_build_string`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
@@ -1495,11 +1497,11 @@ render_section_136 :: () {
         \\error: #magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering [opcode Magic] while lowering 'main' at IR instruction 2
     );
     note(47, #string,oneline
-        \\The older `String_Builder.source_new`, `append`, and `finish_source`
-        \\intrinsics currently fail with the new string representation. Use the
-        \\ordinary `make_len_cap`, `write_string`, and `into_string` operations
-        \\for compile-time text instead. Those operations work in both the
-        \\constant evaluator and top-level `#comptime` execution.
+        \\String_Builder.source_new(), append(), and finish_source() support
+        \\compile-time source generation; finish_source() consumes the builder.
+        \\The ordinary make_len_cap(), write_string(), and into_string() operations
+        \\also work in compile-time code. Use a transferred allocation or clone
+        \\when the resulting text must outlive the builder.
     );
     subheading(48, "`#magic` on an aggregate");
     paragraph(49, #string,oneline
@@ -1679,7 +1681,7 @@ render_section_137 :: () {
         \\#import "Io";
         \\#import "Lua";
         \\
-        \\glosso_triple :: (state: ?[*mut ]lua_State) -> s32 #c_call {
+        \\glosso_triple :: (state: ?[*]mut lua_State) -> s32 #c_call {
         \\    n := lua_tointeger(state, 1);
         \\    lua_pushinteger(state, n * 3);
         \\    return 1;
@@ -1693,7 +1695,9 @@ render_section_137 :: () {
         \\    }
         \\    luaL_openlibs(state);
         \\
-        \\    lua_register(state, "triple", glosso_triple);
+        \\    callback: lua_CFunction = glosso_triple;
+        \\    optional_callback: ?lua_CFunction = .Some(callback);
+        \\    lua_register(state, "triple", optional_callback);
         \\
         \\    if luaL_dostring(state, "answer = triple(14)") != LUA_OK {
         \\        print("lua error\n");

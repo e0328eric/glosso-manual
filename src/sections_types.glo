@@ -142,7 +142,7 @@ render_section_22 :: () {
     bullet(13, #string,oneline
         \\Size equals alignment for the listed integers and floats on this
         \\target. That is not a language-wide identity: on `x86-linux-musl`,
-        \\`f64` is size 8 / alignment 4 and `f80` is 16 / 4; wide integers
+        \\`f64` is size 8 / alignment 4; on Linux x86, `f80` is 12 / 4; wide integers
         \\on 32-bit Arm, MIPS, and PowerPC have alignment 8 rather than 16.
     );
     bullet(14, #string,oneline
@@ -183,7 +183,7 @@ render_section_22 :: () {
         \\    print("ssize == s64      %\n", ssize == s64);
         \\    print("usize == u64     %\n", usize == u64);
         \\    print("s64 == int64_t    %\n", s64 == int64_t);
-        \\    print("ASCII literal == u8 %\n", (#char "A").type_of() == u8);
+        \\    print("ASCII literal == u8 %\n", type_of(#char "A") == u8);
         \\    print("rune == u32       %\n", rune == u32);
         \\}
     );
@@ -297,8 +297,8 @@ render_section_22 :: () {
         \\`any` is the boxing target: the coercion rule accepts every type
         \\into it, which is how variadic arguments are collected. A
         \\compile-time number takes its default type on the way in. `type`
-        \\values may be stored in a runtime local and shown, but a
-        \\compile-time intrinsic will not accept one; `Types as Values`
+        \\values should be bound as compile-time constants for reflection
+        \\and formatting; a mutable local is not a compile-time constant; `Types as Values`
         \\covers that boundary. `Code`, `Pattern`, `Namespace`, `Library`,
         \\`Typeclass(...)` and `Macro(...)` exist only during compilation.
         \\`type_kind` reports `0` for the four ordinary type expressions in that
@@ -689,7 +689,8 @@ render_section_24 :: () {
     );
     note(16, #string,oneline
         \\The two carriers are not the same bit image. On an x86 target the
-        \\sixteen bytes hold an x87 extended value; elsewhere they hold an
+        \\storage holds an x87 extended value; its byte size follows the target
+        \\ABI. Elsewhere f80 uses an
         \\IEEE binary128. An `f80` written to a file by one build is not
         \\readable as an `f80` by the other. `f80` is for reaching x87
         \\precision, not for portable storage.
@@ -700,22 +701,23 @@ render_section_24 :: () {
         \\format's full 64-bit significand instead of being rounded to the legacy
         \\53-bit control setting.
     );
-    subheading(17, "There is no float fitting check");
+    subheading(17, "Float literals and runtime overflow");
     paragraph(18, #string,oneline
-        \\An integer literal that leaves its target's range is a compile
-        \\error, quoting the range: `error: 300 does not fit u8, whose range
-        \\is 0..=255`. There is no counterpart for floats. A float literal
-        \\is rounded to the nearest representable value of the target type
-        \\and nothing is reported, so a magnitude above the maximum becomes
-        \\an infinity and a magnitude below the smallest subnormal becomes
-        \\zero.
+        \\A finite float literal must fit the target type. For example,
+        \\over: f16 = 100000.0 reports float literal '100000.0' is out of range
+        \\for f16. A nonzero literal that rounds to zero is also rejected.
+        \\Runtime narrowing and arithmetic can still produce infinity;
+        \\very small values may round to zero. The example below narrows an
+        \\ordinary f32 variable at runtime rather than an out-of-range literal.
     );
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
-        \\    over:  f16 = 100000.0;
-        \\    under: f16 = 0.00000001;
+        \\    source: f32 = 100000.0;
+        \\    over := cast(f16)source;
+        \\    tiny: f32 = 0.00000001;
+        \\    under := cast(f16)tiny;
         \\    limit: f16 = 65504.0;
         \\    print("over <= f16 max : %\n", over <= limit);
         \\    print("over == over    : %\n", over == over);
@@ -748,7 +750,8 @@ render_section_24 :: () {
         \\#import "Io";
         \\
         \\main :: () {
-        \\    over: f16 = 100000.0;
+        \\    source: f32 = 100000.0;
+        \\    over := cast(f16)source;
         \\    print("f16 100000.0 prints as %\n", cast(f64) over);
         \\}
     );
@@ -1379,8 +1382,8 @@ render_section_27 :: () {
         \\
         \\W16 : string16 : "hi";
         \\B8 : string : "hi";
-        \\Bytes :: B8.data.type_of();
-        \\Units :: W16.data.type_of();
+        \\Bytes :: type_of(B8.data);
+        \\Units :: type_of(W16.data);
         \\
         \\first_byte :: (p: [*]u8) -> u8 { return p[0]; }
         \\first_char :: (p: [*]s8) -> s8 { return p[0]; }
@@ -1719,10 +1722,9 @@ render_section_28 :: () {
         \\fixed `[Cols]T`, not a `Simd`.
     );
     note(41, #string,oneline
-        \\A `Matrix` alias must be declared at file scope to be usable as a type
-        \\annotation. Declaring `M :: Matrix(s64, 2, 3);` inside a procedure and
-        \\then writing `m: M = .[1, 2, 3, 4, 5, 6];` gives `got [6]comptime_int,
-        \\expected type`.
+        \\A type alias may be declared inside a procedure. For example,
+        \\`M :: Matrix(s64, 2, 3);` followed by
+        \\`m: M = .[1, 2, 3, 4, 5, 6];` uses that alias within its lexical scope.
     );
 }
 
@@ -1754,7 +1756,7 @@ render_section_29 :: () {
         \\    print("% is % bytes, kind %\n",
         \\        type_name(Vec2), size_of(Vec2), cast(s64) type_kind(Vec2));
         \\    x: u16 = 3;
-        \\    X :: x.type_of();
+        \\    X :: type_of(x);
         \\    print("type_of(x) is %\n", type_name(X));
         \\    info :: type_info(f80);
         \\    print("f80: name % size % alignment % tag %\n",
@@ -1768,7 +1770,7 @@ render_section_29 :: () {
         \\f80: name f80 size 16 alignment 16 tag 2
     );
     paragraph(4, #string,oneline
-        \\`value.type_of()` is the static type of an expression, `type_name(T)` its
+        \\`type_of(value)` is the static type of an expression, `type_name(T)` its
         \\printed spelling, `size_of(T)` its size in bytes under natural C layout,
         \\`type_kind(T)` its `Type_Info_Tag`, and `type_info(T)` a record holding
         \\all of that at once. There is no `align_of`: writing one is `unknown
@@ -1931,7 +1933,7 @@ render_section_29 :: () {
         \\#import "Meta";
         \\
         \\width :: (Q: type) -> string {
-        \\    if Q == {
+        \\    if #partial Q == {
         \\        case s8, u8;   return "one byte";
         \\        case s16, u16; return "two bytes";
         \\        case s32, u32; return "four bytes";
@@ -1944,25 +1946,41 @@ render_section_29 :: () {
         \\    print("% / % / % / %\n", width(u8), width(s32), width(u64), width(f64));
         \\    print("ssize == s64 %  s64 == int64_t %  usize == u64 %\n",
         \\        ssize == s64, s64 == int64_t, usize == u64);
-        \\    t := s32;
-        \\    print("a type in a runtime local shows as %\n", t);
+        \\    t :: s32;
+        \\    print("a type constant shows as %\n", t);
         \\}
     );
     code_block(38, "text", #string
         \\one byte / four bytes / eight bytes / something else
         \\ssize == s64 0  s64 == int64_t 1  usize == u64 0
-        \\a type in a runtime local shows as s32
+        \\a type constant shows as s32
     );
     paragraph(39, #string,oneline
-        \\A type value may be stored in a runtime local and shown, as the last
-        \\line above does, but it cannot then be fed back to a compile-time
-        \\intrinsic: `type_kind(t)` on such a local is `unknown const t`. For the
-        \\same reason `value.type_of` has to fold before lowering; using its result
-        \\where a runtime value is expected gives `#magic 'type_of' must not reach
-        \\native LLVM lowering: type introspection query must be folded before
-        \\native lowering`. Binding it to a constant first, as `X :: x.type_of();`,
-        \\is the spelling that always works.
+        \\Type queries fold during checking. Bind a query to a constant, such as
+        \\`X :: type_of(x);`, when its answer is needed by another intrinsic.
+        \\A mutable local holding a type value is not a compile-time constant:
+        \\`type_kind(t)` on such a local reports `unknown const t`.
     );
+    subheading(48, "Unevaluated type queries");
+    paragraph(49, #string,oneline
+        \\`type_of(value)` is a free function imported from Meta. Its argument is
+        \\typechecked but never evaluated, so a call inside it has no side effects
+        \\and a managed argument does not move. It reports the expression's static
+        \\type: an any value reports any, rather than its boxed payload type.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\calls: ssize;
+        \\next :: () -> s64 { calls += 1; return 7; }
+        \\main :: () {
+        \\    T :: type_of(next());
+        \\    print("type=% calls=%\n", type_name(T), calls);
+        \\}
+    );
+    code_block(51, "text", "type=s64 calls=0");
+
 }
 
 render_section_30 :: () {
@@ -2007,12 +2025,12 @@ render_section_30 :: () {
         \\    a := 5;
         \\    b := 5.0;
         \\    c := 1 + 2;
-        \\    A :: a.type_of(); B :: b.type_of(); C :: c.type_of();
+        \\    A :: type_of(a); B :: type_of(b); C :: type_of(c);
         \\    print("5 -> % / 5.0 -> % / 1 + 2 -> % (%)\n",
         \\        type_name(A), type_name(B), type_name(C), c);
         \\    f: f64 = 5;
         \\    z: c128 = 3;
-        \\    Z :: z.type_of();
+        \\    Z :: type_of(z);
         \\    print("f64 from an integer literal % ; c128 from one is %\n",
         \\        f, type_name(Z));
         \\}
@@ -2979,14 +2997,13 @@ render_section_35 :: () {
         \\A many-pointer index carries no length, so it cannot be bounds
         \\checked at any level.
     );
-    subheading(30, "Compile-time arithmetic does not trap");
+    subheading(30, "Compile-time integer arithmetic is checked");
     paragraph(31, #string,oneline
-        \\For overflowing `+`, `-`, `*`, and unary `-`, the constant evaluator
-        \\and compile-time VM wrap. They implement those operations directly
-        \\rather than through the backend, and the overflow branch lives only in
-        \\the backend. Identical code can therefore produce a value at compile
-        \\time and an abort at run time. Invalid division is refused separately;
-        \\it is not turned into a wrapped value.
+        \\Ordinary constant integer arithmetic must fit its target type. Overflow
+        \\in a compile-time expression is rejected with the operands, result, and
+        \\allowed range. Use explicit wrapping operators such as +% when wrapping
+        \\is intended. Runtime optimization levels do not permit overflowing
+        \\constant expressions. Invalid constant division is also rejected.
     );
     code_block(32, "glosso", #string
         \\#import "Io";
@@ -3001,16 +3018,12 @@ render_section_35 :: () {
         \\}
     );
     code_block(33, "text", #string
-        \\compile time: 44
-        \\runtime check failed: arithmetic.overflow
-        \\glosso: program exited with status exit code: 134
+        \\error: constant arithmetic overflow: 200 + 100 = 300 does not fit u8, whose range is 0..=255
     );
     note(34, #string,oneline
-        \\The report category identifies this as arithmetic overflow; array bounds
-        \\instead prints `array.bounds` and its source site. Rebuilding at `-O2`
-        \\still distinguishes a checked operation from a hardware trap: if it runs to
-        \\completion with a wrapped or garbage value, the failure was a checked
-        \\operation rather than a hardware trap.
+        \\At runtime, -O0 and -O1 check ordinary integer arithmetic and counted
+        \\array access. Optimized builds may omit those runtime checks. Explicit
+        \\wrapping and saturating operators retain their specified behavior.
     );
 }
 
@@ -3128,7 +3141,7 @@ render_section_36 :: () {
         \\
         \\Pow :: typeclass (L: type, R: type) {
         \\    Output :: type;
-        \\    '*mut *' :: (a: L, b: R) -> Output #operator(right, 19);
+        \\    '**' :: (a: L, b: R) -> Output #operator(right, 19);
         \\}
         \\Chain :: typeclass (L: type, R: type) {
         \\    Output :: type;
@@ -3137,7 +3150,7 @@ render_section_36 :: () {
         \\
         \\(s64, s64) ::: instance Pow {
         \\    Output :: s64;
-        \\    '*mut *' :: (a: s64, b: s64) -> s64 {
+        \\    '**' :: (a: s64, b: s64) -> s64 {
         \\        r: s64 = 1;
         \\        i: s64 = 0;
         \\        while i < b { r = r * a; i = i + 1; }
@@ -3150,9 +3163,9 @@ render_section_36 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("2 *mut * 3 *mut * 2 = %\n", 2 *mut * 3 *mut * 2);
+        \\    print("2 ** 3 ** 2 = %\n", 2 ** 3 ** 2);
         \\    print("1 ~> 2 ~> 3 = %\n", 1 ~> 2 ~> 3);
-        \\    print("2 *mut * 3 * 2  = %\n", 2 *mut * 3 * 2);
+        \\    print("2 ** 3 * 2  = %\n", 2 ** 3 * 2);
         \\}
     );
     code_block(31, "text", #string

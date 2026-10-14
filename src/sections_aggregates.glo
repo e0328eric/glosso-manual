@@ -110,8 +110,8 @@ render_section_37 :: () {
         \\    q: Pair(f64) = .{ 1.5, 2.5 };
         \\    print("% % %\n", p.first, p.second, p.label);
         \\    print("% %\n", q.first, q.second);
-        \\    print("%\n", type_name(p.type_of()));
-        \\    print("%\n", type_name(q.type_of()));
+        \\    print("%\n", type_name(type_of(p)));
+        \\    print("%\n", type_name(type_of(q)));
         \\}
     );
     code_block(13, "text", #string
@@ -334,7 +334,7 @@ render_section_38 :: () {
         \\`24` bytes the declared order would have needed.
     );
     paragraph(9, #string,oneline
-        \\The record's alignment is the largest field alignment, and its size is the
+        \\Without #align, the record's alignment is the largest field alignment, and its size is the
         \\end of the last field rounded up to that alignment. A struct with no fields
         \\has size `0`.
     );
@@ -355,11 +355,14 @@ render_section_38 :: () {
     table_row(15, "`type_info(T).alignment`   |   The record alignment in bytes.");
     table_row(16, "`align_of(T)`   |   `error: unknown function align_of`");
     table_row(17, "`offset_of(T, \"b\")`   |   `error: unknown function offset_of`");
-    table_row(18, "`struct #align(16) { ... }`   |   `error: unexpected token 'align'`");
+    table_row(18, "`struct #align(16) { ... }`   |   Raises record alignment to at least 16 bytes.");
     paragraph(19, #string,oneline
-        \\A declaration therefore cannot raise a record's alignment: it is always the
-        \\maximum of the field alignments, or `1`. The two directives below are the
-        \\whole layout vocabulary, and neither of them adds alignment.
+        \\#align(N) requests an explicit record alignment. N must be a literal
+        \\positive power of two no greater than 268435456. Ordinary structs keep
+        \\at least their natural field alignment. The record size rounds up to
+        \\its alignment, including when it has no fields. #packed removes internal
+        \\field padding; with #align(N), its record alignment is N and its size
+        \\still rounds up to N. Match any corresponding C declaration exactly.
     );
     subheading(20, "`#c_call`: declaration order and the C ABI");
     paragraph(21, #string,oneline
@@ -375,10 +378,10 @@ render_section_38 :: () {
         \\the check recurses into nested aggregates. The rest of the boundary is
         \\covered in the chapter on C data across the boundary.
     );
-    subheading(23, "`#packed`: no padding");
+    subheading(23, "`#packed`: no field padding");
     paragraph(24, #string,oneline
         \\`struct #packed { ... }` also suppresses the sort, and additionally removes
-        \\all padding: the size is the plain sum of the field sizes and the record
+        \\internal padding: without #align, the size is the sum of the field sizes and the record
         \\alignment is `1`. Writing both directives is accepted, and `#packed` wins,
         \\because it is the stronger constraint.
     );
@@ -495,9 +498,10 @@ render_section_38 :: () {
         \\
         \\Plain :: struct { a: u8; b: u64; c: u8; }
         \\
-        \\names :: (T: type, i: ssize) -> string {
-        \\    if i >= field_count(T) return "";
-        \\    return ((field_name(T, i)).cat(" ")).cat(names(T, i + 1));
+        \\names :: (#comptime T: type, #comptime i: ssize) -> string {
+        \\    #if i >= field_count(T) { return ""; } else {
+        \\        return ((field_name(T, i)).cat(" ")).cat(names(T, i + 1));
+        \\    }
         \\}
         \\
         \\PLAIN_FIELDS :: #comptime names(Plain, 0);
@@ -507,6 +511,24 @@ render_section_38 :: () {
     code_block(36, "text", #string
         \\a b c
     );
+    subheading(37, "Explicit record alignment");
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Aligned :: struct #align(32) { value: s32; }
+        \\Packed :: struct #packed #align(2) { tag: u8; value: s32; }
+        \\
+        \\main :: () {
+        \\    print("Aligned size=% alignment=%\n", size_of(Aligned), type_info(Aligned).alignment);
+        \\    print("Packed size=% alignment=%\n", size_of(Packed), type_info(Packed).alignment);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\Aligned size=32 alignment=32
+        \\Packed size=6 alignment=2
+    );
+
 }
 
 render_section_39 :: () {
@@ -625,9 +647,9 @@ render_section_39 :: () {
         \\    p: Phantom(f64) = .{ .raw = 5 };
         \\    q: Phantom(s8)  = .{ .raw = 6 };
         \\    m: Marker;
-        \\    print("phantom size=% fields=% raw=% name=%\n", size_of(p.type_of()),
-        \\          field_count(p.type_of()), p.raw, type_name(p.type_of()));
-        \\    print("other instance name=%\n", type_name(q.type_of()));
+        \\    print("phantom size=% fields=% raw=% name=%\n", size_of(type_of(p)),
+        \\          field_count(type_of(p)), p.raw, type_name(type_of(p)));
+        \\    print("other instance name=%\n", type_name(type_of(q)));
         \\    print("marker size=% fields=% first=% v=%\n", size_of(Marker),
         \\          field_count(Marker), field_name(Marker, 0), m.v);
         \\}
@@ -782,10 +804,10 @@ render_section_40 :: () {
         \\    o.perm  = .Write;
         \\    o.tag.L = 5;
         \\    print("values: % % % %\n", o.inner.a, o.inner.b, o.kind, o.perm);
-        \\    print("inner name: %\n", type_name(o.inner.type_of()));
-        \\    print("kind name:  %\n", type_name(o.kind.type_of()));
-        \\    print("perm name:  %\n", type_name(o.perm.type_of()));
-        \\    print("tag name:   %\n", type_name(o.tag.type_of()));
+        \\    print("inner name: %\n", type_name(type_of(o.inner)));
+        \\    print("kind name:  %\n", type_name(type_of(o.kind)));
+        \\    print("perm name:  %\n", type_name(type_of(o.perm)));
+        \\    print("tag name:   %\n", type_name(type_of(o.tag)));
         \\    if o.tag == {
         \\        case .L(v); print("tag L %\n", v);
         \\        case .R(b); print("tag R %\n", b);
@@ -815,7 +837,7 @@ render_section_40 :: () {
         \\The dotted spelling is annotation syntax only. In expression position the
         \\dot is member access, so `size_of(Outer.inner)` is
         \\`error: member of non-struct`. Where a type value is needed, take it from a
-        \\binding with `value.type_of`.
+        \\binding with `type_of(value)`.
     );
     subheading(10, "Nesting and composition");
     paragraph(11, #string,oneline
@@ -846,13 +868,13 @@ render_section_40 :: () {
         \\main :: () {
         \\    o: Outer;
         \\    o.inner.deep.n = 3;
-        \\    print("deep=% name=%\n", o.inner.deep.n, type_name(o.inner.deep.type_of()));
-        \\    print("items elem name=%\n", type_name(o.items.type_of()));
-        \\    print("slot name=%\n", type_name(o.slot.type_of()));
+        \\    print("deep=% name=%\n", o.inner.deep.n, type_name(type_of(o.inner.deep)));
+        \\    print("items elem name=%\n", type_name(type_of(o.items)));
+        \\    print("slot name=%\n", type_name(type_of(o.slot)));
         \\    m := Msg.Header(.{ .id = 1, .len = 2 });
         \\    if m == {
         \\        case .Header(h); print("header % %  name=%\n", h.id, h.len,
-        \\                               type_name(h.type_of()));
+        \\                               type_name(type_of(h)));
         \\        case .Eof;       print("eof\n");
         \\    }
         \\}
@@ -901,9 +923,9 @@ render_section_40 :: () {
         \\    o.shown.n = 4;
         \\    o.small = .B;
         \\    o.bits.f = 1.0;
-        \\    print("head=% body=% small=% bits=%\n", size_of(o.head.type_of()),
-        \\          size_of(o.body.type_of()), size_of(o.small.type_of()),
-        \\          size_of(o.bits.type_of()));
+        \\    print("head=% body=% small=% bits=%\n", size_of(type_of(o.head)),
+        \\          size_of(type_of(o.body)), size_of(type_of(o.small)),
+        \\          size_of(type_of(o.bits)));
         \\    print("shown.n=%\n", o.shown.n);
         \\    print("raw read: %\n", o.bits.i);
         \\    print("Outer=%\n", size_of(Outer));
@@ -1032,7 +1054,7 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    t: (u8, s64, u8);
-        \\    print("struct % tuple %\n", size_of(Record), size_of(t.type_of()));
+        \\    print("struct % tuple %\n", size_of(Record), size_of(type_of(t)));
         \\}
     );
     code_block(22, "text", #string
@@ -1057,7 +1079,7 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    e := .();
-        \\    print("% %\n", type_name(e.type_of()), size_of(e.type_of()));
+        \\    print("% %\n", type_name(type_of(e)), size_of(type_of(e)));
         \\}
     );
     code_block(27, "text", #string
@@ -1552,7 +1574,7 @@ render_section_43 :: () {
         \\    t: Tree(s64) = .Leaf(4);
         \\    n := 0;
         \\    if t == { case .Leaf(v); n = v; case .Pair(p); n = -1; }
-        \\    print("% %\n", type_name(t.type_of()), n);
+        \\    print("% %\n", type_name(type_of(t)), n);
         \\}
     );
     code_block(30, "text", #string
@@ -2326,10 +2348,10 @@ render_section_47 :: () {
         \\    b: ??s64;
         \\    c: ?*mut s64;
         \\    d: ?E1!s64;
-        \\    print("?s64   = %\n", type_name(a.type_of()));
-        \\    print("??s64  = %\n", type_name(b.type_of()));
-        \\    print("?*mut s64  = %\n", type_name(c.type_of()));
-        \\    print("?E1!s64 = %\n", type_name(d.type_of()));
+        \\    print("?s64   = %\n", type_name(type_of(a)));
+        \\    print("??s64  = %\n", type_name(type_of(b)));
+        \\    print("?*mut s64  = %\n", type_name(type_of(c)));
+        \\    print("?E1!s64 = %\n", type_name(type_of(d)));
         \\    print("size_of(?s64) = %\n", size_of(?s64));
         \\}
     );
@@ -2603,11 +2625,11 @@ render_section_48 :: () {
         \\    s: E1![]mut u8;
         \\    t: []mut u8!E1;
         \\
-        \\    print("E1!?*mut User  = %\n", type_name(p.type_of()));
-        \\    print("?E1!User   = %\n", type_name(q.type_of()));
-        \\    print("E1!E2!User = %\n", type_name(r.type_of()));
-        \\    print("E1![]mut u8    = %\n", type_name(s.type_of()));
-        \\    print("[]mut u8!E1    = %\n", type_name(t.type_of()));
+        \\    print("E1!?*mut User  = %\n", type_name(type_of(p)));
+        \\    print("?E1!User   = %\n", type_name(type_of(q)));
+        \\    print("E1!E2!User = %\n", type_name(type_of(r)));
+        \\    print("E1![]mut u8    = %\n", type_name(type_of(s)));
+        \\    print("[]mut u8!E1    = %\n", type_name(type_of(t)));
         \\}
     );
     code_block(9, "text", #string
@@ -2798,8 +2820,8 @@ render_section_48 :: () {
         \\main :: () {
         \\    a: *mut s64!Nil;
         \\    b: []mut u8!Nil;
-        \\    print("% %\n", size_of(a.type_of()), size_of(b.type_of()));
-        \\    print("% %\n", type_name(a.type_of()), type_name(b.type_of()));
+        \\    print("% %\n", size_of(type_of(a)), size_of(type_of(b)));
+        \\    print("% %\n", type_name(type_of(a)), type_name(type_of(b)));
         \\}
     );
     code_block(36, "text", #string
