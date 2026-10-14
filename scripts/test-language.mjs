@@ -16,23 +16,23 @@ const outputDirectory = join(root, "build", "language-tests");
 const cacheDirectory = join(outputDirectory, "cache");
 mkdirSync(cacheDirectory, { recursive: true });
 
-function run(executable, args) {
+function run(executable, args, environment = process.env) {
   const result = spawnSync(executable, args, {
-    cwd: root, encoding: "utf8", timeout: 120_000,
+    cwd: root, env: environment, encoding: "utf8", timeout: 120_000,
   });
   assert.ifError(result.error);
   assert.equal(result.signal, null, `${executable} terminated: ${result.stderr}`);
   return result;
 }
 
-function compile(name, backend = "llvm") {
+function compile(name, backend = "llvm", environment = process.env) {
   const output = join(outputDirectory,
     `${name}${backend === "llvm" ? executableSuffix : ".o"}`);
   const result = run(compiler, [
     "--color", "never", "--cache-dir", cacheDirectory,
     "--backend", backend, "-O0", "-o", output,
     join(fixtures, `${name}.glo`),
-  ]);
+  ], environment);
   return { ...result, output };
 }
 
@@ -60,6 +60,7 @@ assert.equal(compileAndRun("manual_drop"), "manual and automatic Drop passed\n")
 assert.equal(compileAndRun("owned_collections"), "owned collections passed\n");
 assert.equal(compileAndRun("current_reflection"), "current reflection passed\n");
 assert.equal(compileAndRun("current_comptime"), "current comptime passed\n");
+assert.equal(compileAndRun("current_strings"), "current strings passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -73,11 +74,22 @@ for (const [name, diagnostic] of [
   ["invalid_const_overflow", "constant arithmetic overflow"],
   ["invalid_float_literal", "out of range for f16"],
   ["non_exhaustive_switch", "non-exhaustive switch"],
+  ["removed_string_cat", "string has no field cat"],
+  ["removed_string_repeat", "string has no field repeat"],
+  ["removed_string_into_temporary", "string has no field into_temporary"],
+  ["runtime_string_add", "string concatenation with '+' requires constant strings"],
 ]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: invalid source compiled successfully`);
   const diagnostics = `${rejected.stdout}\n${rejected.stderr}`;
   assert.ok(diagnostics.includes(diagnostic), `${name}: missing ${diagnostic}:\n${diagnostics}`);
+}
+
+// Bound both evaluation engines so a broken compile-time loop cannot hang a build.
+for (const name of ["comptime_step_limit", "constant_step_limit"]) {
+  const rejected = compile(name, "object", { ...process.env, GLOSSO_COMPTIME_STEP_LIMIT: "64" });
+  assert.notEqual(rejected.status, 0, `${name}: execution limit did not stop the loop`);
+  assert.match(`${rejected.stdout}\n${rejected.stderr}`, /step limit|GLOSSO_COMPTIME_STEP_LIMIT/i);
 }
 
 const locationSource = readFileSync(join(fixtures, "source_locations.glo"), "utf8");
@@ -125,4 +137,4 @@ for (const [name, diagnostic] of [
 // Borrow lifetimes are not checked. Compile the escaping-view example, but do not run it.
 assert.equal(compile("string_view_escape", "object").status, 0);
 
-console.log("Language checks passed: unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: Strings umbrella, allocator-matched string cleanup, builder repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

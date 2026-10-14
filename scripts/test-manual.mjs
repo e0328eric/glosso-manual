@@ -295,6 +295,14 @@ assert.equal(typeQuery[1], 'type_of :: (val: $T) -> type #magic "type_of"');
 assert(!referenceIndex.symbols.some(symbol => symbol[0].endsWith(".type_of")),
   "Removed type_of receiver method remains in the reference");
 
+moduleIndex("Strings");
+const stringMemory = moduleIndex("Strings/Memory");
+const stringFree = referenceIndex.symbols.find(symbol => symbol[4] === stringMemory && symbol[0] === "string.free");
+assert(stringFree, "Missing owned-string cleanup from Strings/Memory");
+assert.equal(stringFree[5], "method");
+assert(!referenceIndex.symbols.some(symbol => ["string.cat", "string.repeat", "string.into_temporary"].includes(symbol[0])),
+  "Removed allocating-string methods remain in the reference");
+
 function symbolIndex(module, name) {
   const index = referenceIndex.symbols.findIndex(symbol => symbol[4] === module && symbol[0] === name);
   assert(index >= 0, `Missing reference symbol ${name}`);
@@ -338,6 +346,10 @@ for (const width of [390, 1280]) {
     const text = render(width);
     assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
     assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
+    assert(!text.includes('#magic "str_concat"'), `Removed string intrinsic in chapter ${index}`);
+    if (index === 27) assert(text.includes("Strings/Memory"), "Owned-string cleanup imports are stale");
+    if (index === 105) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is stale");
+    if (index === 142) assert(text.includes("These six directories"), "Namespace-only directory list is stale");
     if (index === 29) assert(text.includes("never evaluated"), "Type-query semantics are stale");
     if (index === 38) assert(text.includes("#align(N)"), "Alignment chapter is stale");
     if (index === 56) assert(text.includes("lexical block"), "Local-declaration scope is stale");
@@ -403,6 +415,13 @@ for (const width of [390, 1280]) {
   browseSection(width, math, false, declarations);
   browseSection(width, math, true, methods);
   assert(!textRuns.some(run => run.value === "sin" && run.fontSize === 18));
+
+  // Owned UTF-8 cleanup is in its own module and search opens its method card.
+  browseSection(width, stringMemory, true, ["string.free"]);
+  text = openSymbolSearch(width, stringMemory, "string.free");
+  assert.equal(instance.exports.glo_manual_get_module(), stringMemory);
+  assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
+  assert(textRuns.some(run => run.value === "string.free" && run.anchor));
 
   // Browse a real multi-page Methods section and confirm search can navigate
   // directly to a late method, while a typeclass operation targets its owner.

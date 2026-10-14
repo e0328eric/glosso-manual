@@ -122,12 +122,11 @@ render_section_105 :: () {
         \\gives the same message for the same reason.
     );
     paragraph(22, #string,oneline
-        \\The evaluator also polices its own running time, because a
-        \\non-terminating fold would hang the compiler with no diagnostic at all.
-        \\An interpreted `while` that has not finished after a million iterations
-        \\is `error: compile-time while exceeded 1000000 iterations`. The machine
-        \\carries no such budget; a five-million-iteration loop inside a
-        \\top-level `#comptime` block simply runs to completion.
+        \\Both compile-time engines bound execution so an infinite loop cannot
+        \\hang a build. The default budget is 2^28 interpreter steps or VM
+        \\instructions for one evaluation entry. `GLOSSO_COMPTIME_STEP_LIMIT`
+        \\overrides it; `0` removes the limit. Exhausting it stops compilation
+        \\with a diagnostic. The budget counts execution steps, not loop iterations.
     );
 
     subheading(23, "Managed builders at compile time");
@@ -163,7 +162,8 @@ render_section_105 :: () {
         \\Compile-time source generation also supports String_Builder.source_new(),
         \\append(), and finish_source(). The last call consumes the builder and
         \\returns its text. Ordinary make_len_cap(), write_string(), and into_string()
-        \\also work, as do the allocating string.cat() and string.repeat() helpers.
+        \\also work. Use `tprint` or `format` for formatted source and diagnostics;
+        \\import `Format` to name them directly.
     );
 
     subheading(28, "Globals, memory, and foreign calls");
@@ -198,6 +198,7 @@ render_section_105 :: () {
         \\is gone and only its answer is left in the instruction stream.
     );
     code_block(38, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "Meta";
         \\#import "String_Builder";
@@ -205,7 +206,7 @@ render_section_105 :: () {
         \\Vec3 :: struct { x: f32; y: f32; z: f32; }
         \\
         \\describe :: (T: type) -> string {
-        \\    return (type_name(T)).cat((".").cat(field_name(T, 0)));
+        \\    return tprint("%.%", type_name(T), field_name(T, 0));
         \\}
         \\
         \\DESC :: #comptime describe(Vec3);
@@ -471,7 +472,7 @@ render_section_106 :: () {
     table_row(37, "Reading a mutable global   |   Supported in the compile-time program; it does not observe later runtime writes.");
     table_row(38, "Reading a runtime local or parameter   |   `error: unknown const x`");
     table_row(39, "`goto`, a label, `#asm`, and other unsupported statements   |   `error: statement is not available at compile time`");
-    table_row(40, "A loop that does not terminate quickly   |   `error: compile-time while exceeded 1000000 iterations`");
+    table_row(40, "An evaluation that exceeds its execution budget   |   `GLOSSO_COMPTIME_STEP_LIMIT` stops it; the default is 2^28 steps, and 0 disables the bound");
     paragraph(41, #string,oneline
         \\`#comptime` is one half of the metaprogramming surface: it computes
         \\values. The other half turns values back into program text, and is
@@ -875,7 +876,7 @@ render_section_108 :: () {
     paragraph(31, #string,oneline
         \\The message is optional, follows a comma, and must be a compile-time
         \\`string`. It need not be a literal: any expression the evaluator folds
-        \\to a string is accepted, so `string.cat` can compose one from the values
+        \\to a string is accepted, so `tprint` can compose one from the values
         \\that made the check fail. A value of the wrong type is
         \\`error: #assert message must be a compile-time string`, and a runtime
         \\local used as the message is `error: unknown const reason`, pointing at
@@ -891,12 +892,13 @@ render_section_108 :: () {
         \\than a fixed string is the point: the failing case can name itself.
     );
     code_block(34, "glosso", #string
+        \\#import "Format";
         \\#import "String_Builder";
         \\
         \\NAME :: "widget";
         \\
         \\main :: () {
-        \\    #compile_error ("unsupported backend: ").cat(NAME);
+        \\    #compile_error tprint("unsupported backend: %", NAME);
         \\}
     );
     paragraph(35, #string,oneline
@@ -915,11 +917,10 @@ render_section_108 :: () {
     code_block(38, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
-        \\#import "String_Builder";
         \\
         \\byte_width :: (x: $T) -> ssize {
         \\    #if !Is_Integer(T) {
-        \\        #compile_error ("byte_width needs an integer, got ").cat(type_name(T));
+        \\        #compile_error "byte_width needs an integer, got " + type_name(T);
         \\    }
         \\    return size_of(T);
         \\}
@@ -1256,17 +1257,20 @@ render_section_110 :: () {
         \\procedure, aggregate, macro, and instance declarations.
     );
     code_block(19, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "String_Builder";
         \\
         \\struct_source :: (name: string, fields: ssize) -> string {
-        \\    source := name.cat(" :: struct {\n");
+        \\    source := String_Builder.source_new();
+        \\    source.append(name, " :: struct {\n");
         \\    i := 0;
         \\    while i < fields {
-        \\        source = source.cat("    f").cat(show(i)).cat(": s32 = 0;\n");
+        \\        source.append("    f", tprint("%", i), ": s32 = 0;\n");
         \\        i += 1;
         \\    }
-        \\    return source.cat("}\n");
+        \\    source.append("}\n");
+        \\    return source.finish_source();
         \\}
         \\
         \\#insert struct_source("Generated", 2);
@@ -1677,6 +1681,7 @@ render_section_112 :: () {
         \\counter that is itself a compile-time binding.
     );
     code_block(36, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "Meta";
         \\#import "String_Builder";
@@ -1685,8 +1690,8 @@ render_section_112 :: () {
         \\
         \\fields_desc :: (#comptime T: type, #comptime i: ssize) -> string {
         \\    #if i >= field_count(T) { return ""; } else {
-        \\        one := (" ").cat((field_name(T, i)).cat((": ").cat(type_name(field_type(T, i)))));
-        \\        return one.cat(fields_desc(T, i + 1));
+        \\        one := tprint(" %: %", field_name(T, i), type_name(field_type(T, i)));
+        \\        return tprint("%%", one, fields_desc(T, i + 1));
         \\    }
         \\}
         \\
@@ -1794,6 +1799,7 @@ render_section_112 :: () {
         \\instance and without a runtime type table.
     );
     code_block(49, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "Meta";
         \\#import "String_Builder";
@@ -1806,7 +1812,7 @@ render_section_112 :: () {
         \\    i ::= 0;
         \\    #inline while i < field_count(T) {
         \\        name :: field_name(T, i);
-        \\        #insert ("print(\"  ").cat(name.cat((" = %\\n\", `value.").cat(name.cat(");"))));
+        \\        #insert tprint("print(\"  % = \\%\\n\", `value.%);", name, name);
         \\        i += 1;
         \\    }
         \\    print("}\n");
@@ -2146,6 +2152,7 @@ render_section_113 :: () {
         \\Reflection.
     );
     code_block(40, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "Meta";
         \\#import "String_Builder";
@@ -2160,13 +2167,13 @@ render_section_113 :: () {
         \\    if i >= pattern_missing_count(T, Ps) return "";
         \\    tail := witness_list(T, Ps, i + 1);
         \\    if tail == "" return pattern_missing(T, Ps, i);
-        \\    return (pattern_missing(T, Ps, i)).cat((", ").cat(tail));
+        \\    return tprint("%, %", pattern_missing(T, Ps, i), tail);
         \\}
         \\
         \\REPORT :: #comptime witness_list(Token, ARMS, 0);
         \\
         \\main :: () {
-        \\    #if REPORT != "" { #compile_error ("switch is not total; uncovered: ").cat(REPORT); }
+        \\    #if REPORT != "" { #compile_error tprint("switch is not total; uncovered: %", REPORT); }
         \\    print("ok\n");
         \\}
     );
@@ -2174,7 +2181,7 @@ render_section_113 :: () {
         \\error: switch is not total; uncovered: Token.Eof
         \\   --> …\total.glo:21:24
         \\   |
-        \\21 |     #if REPORT != "" { #compile_error str_cat("switch is not total; uncovered: ", REPORT); }
+        \\21 |     #if REPORT != "" { #compile_error tprint("switch is not total; uncovered: %", REPORT); }
         \\   |                        ^^^^^^^^^^^^^^
     );
     paragraph(42, #string,oneline
@@ -2439,17 +2446,20 @@ render_section_114 :: () {
         \\`Native_Compile_Output`, whose `artifact` field is the path of the
         \\static library it produced and whose `output` field is the tool's log.
         \\The archive is written into the native cache, keyed by the archive
-        \\name, the active target and the parameters, so an unchanged archive is
-        \\built once. Pass `include_paths`, `preprocessor_definitions`, and
-        \\`compiler_args` as named `[]string` parameters, which default to `.[]`.
-        \\Their slices and strings are borrowed for the call. `sources` remains a
-        \\dynamic `[..]string` array. `position_independent` defaults to `false`,
+        \\name, target, parameters, and verified source/header dependencies.
+        \\If dependency inputs cannot be verified, the archive uses a fresh
+        \\`uncached-...` directory and is rebuilt. Pass `include_paths`, `preprocessor_definitions`, and
+        \\`compiler_args` as named `[]mut string` parameters, which default to `.[]`.
+        \\Their slices and strings are borrowed for the call. `sources` is also
+        \\`[]mut string`; pass a fixed or dynamic array's `[..]` view.
+        \\`position_independent` defaults to `false`,
         \\and `optimization_level` defaults to `.Optimized`; only `.Debug`,
         \\`.Very_Debug`, `.Optimized`, and `.Very_Optimized` are accepted.
         \\The input option record and its specialized mutators are no longer
         \\public APIs.
     );
     code_block(42, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
         \\#import "Compiler";
         \\#import "Strings/Utf8";
@@ -2468,7 +2478,7 @@ render_section_114 :: () {
         \\        defer slashes.free();
         \\        escaped := slashes.replace("\"", "\\\"");
         \\        defer escaped.free();
-        \\        return (("adder :: #library,static \"").cat(escaped)).cat("\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";");
+        \\        return tprint("adder :: #library,static \"%\";\nc_add :: (a: s32, b: s32) -> s32 #foreign adder \"c_add\";", escaped);
         \\    case .Err(failure);
         \\        return "#comptime { #compile_error \"the adder archive did not build\"; }";
         \\    }
@@ -2480,7 +2490,7 @@ render_section_114 :: () {
     );
     code_block(43, "text", #string
         \\glosso: compile archive.glo (target=x86_64-pc-windows-msvc)
-        \\[c] archive at C:\Users\…\glosso\cache\native\v7\adder\x86_64-windows-msvc\…\adder.lib
+        \\[c] archive at C:\Users\…\glosso\cache\native\v9\adder\x86_64-windows-msvc\…\adder.lib
         \\glosso: link archive.exe (target=x86_64-pc-windows-msvc, -O1)
         \\glosso: done archive.exe  (backend=llvm, target=x86_64-pc-windows-msvc, -O1)
         \\c_add(3, 4) = 7
@@ -2736,21 +2746,22 @@ render_section_115 :: () {
         \\different for them.
     );
     table_header(15, "Group   —   What goes into the identity");
-    table_row(16, "Sources   |   The canonicalized path of the input file and the resolved standard-library directory.");
+    table_row(16, "Sources   |   The canonical input and compiler paths, the working directory, and the resolved standard-library directory.");
     table_row(17, "Target   |   The LLVM triple, and separately every key and value of `--target`, because the triple collapses distinct maps such as `uefi` and `msvc`.");
-    table_row(18, "Code generation   |   Backend name, optimization level, size mode, and sanitizer selection.");
-    table_row(20, "Runtime   |   The temporary allocator size and `--no-main`.");
+    table_row(18, "Code generation   |   Backend name, optimization level, size mode, sanitizer selection, and diagnostic color.");
+    table_row(20, "Runtime   |   The temporary allocator size, `GLOSSO_DEBUG_ALLOCATOR` selection, `--no-main`, and `--use-std`.");
     table_row(21, "Linking   |   Every `--linker-arg`, in order.");
     table_row(22, "Compile time   |   Every argument after `--`, in order.");
-    table_row(23, "Modules   |   Every `--module-path` directory, in order.");
+    table_row(23, "Modules   |   Every `--module-path` directory, in order, and explicit `--unit-source` mappings.");
     paragraph(24, #string,oneline
         \\The output path is deliberately absent. Building the same source with
         \\`-o other.exe` restores the cached artifact and copies it to the new
         \\name: `glosso: restored other.exe from the native artifact cache`. The
-        \\key is 32 hexadecimal characters, and the two files that make up an
-        \\entry are `<key>.artifact` and `<key>.manifest` under
-        \\`<cache>/native/artifacts/v1`. Both are written to temporary names and
-        \\renamed into place, so a concurrent build never observes half an entry.
+        \\key is 32 hexadecimal characters. An entry holds `<key>.artifact`,
+        \\`<key>.manifest`, `<key>.stdout`, and `<key>.stderr` under
+        \\`<cache>/native/artifacts/v1`. A hit replays the stored checker output
+        \\and diagnostics. Missing output sidecars turn the entry into a miss;
+        \\new entries use temporary files and publish their manifest last.
     );
     subheading(25, "The manifest");
     paragraph(26, #string,oneline

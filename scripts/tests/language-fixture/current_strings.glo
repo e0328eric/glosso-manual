@@ -1,0 +1,61 @@
+#import "Io";
+#import "Context";
+#import "Format";
+#import "Strings";
+#import "String_Builder";
+
+allocations: ssize;
+releases: ssize;
+
+tracking_allocator :: (
+    data: ?*mut void, mode: Allocator_Mode, size: ssize, alignment: ssize,
+    old_memory: ?*mut void, old_size: ssize,
+) -> ?*mut void {
+    if mode == .Free && old_memory.is_some() releases += 1;
+    heap_data: ?*mut void = .None;
+    result := heap_allocator_proc(heap_data, mode, size, alignment, old_memory, old_size);
+    if (mode == .Alloc || mode == .Alloc_Non_Zeroed ||
+        mode == .Resize || mode == .Resize_Non_Zeroed) &&
+        old_memory.is_none() && result.is_some() allocations += 1;
+    return result;
+}
+
+JOINED :: "glo" + "sso";
+
+repeat_text :: (text: string, count: ssize, allocator: Allocator) -> string {
+    builder := String_Builder.make_len_cap(.allocator = allocator);
+    for 0..count builder.write_string(text);
+    return builder.into_string();
+}
+
+main :: () {
+    allocator := Allocator.{ .procedure = tracking_allocator };
+    #assert JOINED == "glosso";
+    owned := JOINED.clone(allocator);
+    #assert owned == JOINED && owned.data != JOINED.data;
+    terminated := owned.cstring_from_string(allocator);
+    #assert terminated.to_string() == JOINED;
+    wide := owned.utf16_from_string(allocator);
+    #assert wide.count == 6;
+    wide_copy := wide.clone(allocator);
+    #assert wide_copy.data != wide.data;
+    repeated := repeat_text("ab", 3, allocator);
+    #assert repeated == "ababab";
+    formatted := format("% %", owned, 42, .allocator = allocator);
+    #assert formatted == "glosso 42";
+    formatted.free(allocator);
+    repeated.free(allocator);
+    wide_copy.free(allocator);
+    wide.free(allocator);
+    terminated.free(allocator);
+    owned.free(allocator);
+    #assert allocations > 0 && allocations == releases;
+
+    temporary := tprint("%%", "glo", "sso");
+    #assert temporary == JOINED;
+    arena_builder := String_Builder.make_len_cap(.allocator = context.temp_allocator);
+    arena_builder.write_string("arena text");
+    arena_text := arena_builder.into_temporary_string();
+    #assert arena_text == "arena text";
+    print("current strings passed\n");
+}

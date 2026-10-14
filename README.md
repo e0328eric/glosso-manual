@@ -105,7 +105,10 @@ free functions, managed destruction and `ManuallyDrop`, string-view layouts and 
 builder cloning and ownership transfer. They also verify free, unevaluated
 `type_of(value)` queries, lexical scope for local functions and types, local
 type aliases, `#align(N)` record layouts, compile-time source builders,
-recursive reflection, and rejection of non-exhaustive switches and overflowing
+recursive reflection, the `Strings` umbrella and allocator-matched cleanup,
+builder repetition and compile-time string concatenation, configurable execution
+limits for both compile-time engines, and rejection of removed string helpers,
+runtime string concatenation, non-exhaustive switches and overflowing
 integer or float constants. Syntax checks cover prefix and suffix
 pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
@@ -216,8 +219,14 @@ with `push()` or `append()`.
 but never evaluated or moved. Local functions and type declarations belong to
 their containing lexical block. Structs accept `#align(N)` with a literal
 power-of-two alignment, including alongside `#packed`.
-Runtime concatenation uses builders
-or `.cat()`; `+` is available for compile-time string constants.
+Runtime concatenation and repetition use builders or formatting; `+` is
+available for compile-time string constants. The `string.cat()`,
+`string.repeat()`, and `string.into_temporary()` helpers have been removed.
+Import `Strings/Memory` for owned UTF-8 buffer cleanup with `string.free()`,
+or import the `Strings` umbrella for `Memory`, `Utf8`, and `Utf16`. A temporary
+string needs no transfer marker and expires when its arena is reclaimed.
+Both compile-time engines use a default execution budget of 2^28 steps;
+`GLOSSO_COMPTIME_STEP_LIMIT=0` removes that limit.
 
 Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
 Pointer types use read-only `*T` and writable `*mut T`; many-pointers and views
