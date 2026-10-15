@@ -56,6 +56,21 @@ const textAt = (address, length) => {
 // Execute the real browser initialization, so this catches drift in its ABI
 // offsets too. The test context supplies only its documented runtime inputs.
 const app = read("app.js").toString("utf8");
+const signatureHost = { referenceIndex };
+runInNewContext(app.slice(app.indexOf("function splitTopLevel("),
+  app.indexOf("function searchDocumentation(")) +
+  "; this.findSignatures = signatureResults; this.typeKey = value => serializeType(parseType(value));",
+  signatureHost);
+assert.equal(signatureHost.typeKey("**const s64"), signatureHost.typeKey("* *const s64"));
+assert.notEqual(signatureHost.typeKey("*const *s64"), signatureHost.typeKey("**const s64"));
+for (const shape of ["*", "[*]", "[]"])
+  assert.notEqual(signatureHost.typeKey(`${shape}const s64`), signatureHost.typeKey(`${shape}s64`));
+const signatureNames = query => signatureHost.findSignatures(query)
+  .map(result => referenceIndex.symbols[result.index][0]);
+assert(signatureNames("(*const String_Builder) -> string").includes("String_Builder.to_string"));
+assert(!signatureNames("(*String_Builder) -> string").includes("String_Builder.to_string"));
+assert(signatureNames("(*String_Builder) -> []u8").includes("String_Builder.to_bytes"));
+assert(!signatureNames("(*String_Builder) -> []const u8").includes("String_Builder.to_bytes"));
 // A click may press and release between animation frames. Navigation still
 // needs both states, even if the browser coalesces the scheduled render.
 const pointerRelease = app.match(/window\.addEventListener\("pointerup", event => \{([\s\S]*?)\r?\n\}\);/);
@@ -89,28 +104,30 @@ const tree = parser.parse(`
 Aligned :: struct #align(32) { value: s32; }
 Packed :: struct #packed #align(2) { value: s32; }
 libc :: #library "c";
-copy_c :: (value: [*]u8) -> ?[*]mut u8 #foreign libc "strdup" #fresh_result;
-raw_transfer :: (slot: *mut $T) -> T #unchecked_transfer { return __value_move(slot); }
+copy_c :: (value: [*]const u8) -> ?[*]u8 #foreign libc "strdup" #fresh_result;
+raw_transfer :: (slot: *$T) -> T #unchecked_transfer { return __value_move(slot); }
 Counter ::: #public {
     make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
     read :: (#self) -> s64 { return #self.value; }
-    increment :: (*mut #self) { #self.*.value += 1; }
+    increment :: (*#self) { #self.*.value += 1; }
 }
 #public(unit) { shared :: () { value := Counter.make(); value.increment(); } }
 Cleanup ::: instance Drop {
     Error :: #Never;
-    drop :: (value: *mut #Self_Type) -> #Never!void { return .Ok; }
+    drop :: (value: *#Self_Type) -> #Never!void { return .Ok; }
 }
 cleanup :: () {
     resource: Fallible;
     #on_drop_error(resource, error) { report_error(error); }
 }
 #memory { reads(source), noescape(source), returns_borrow(source) }
-view :: (source: []u8) -> []u8 { return source; }
+view :: (source: []const u8) -> []const u8 { return source; }
 #public #memory { returns_borrow(input), noescape(input) }
-View :: #fn_ptr(input: []u8) -> []u8;
+View :: #fn_ptr(input: []const u8) -> []const u8;
 #memory view { reads(arg(0)), returns_borrow(arg(0)) };
-trusted :: (pointer: *mut u8) {
+#memory { returns_fresh, released_by(place: returned, by: (?*void).mem_free, instance: allocator) }
+allocate :: (allocator: Allocator) -> ?*void #foreign "c" "allocate";
+trusted :: (pointer: *u8) {
     #memory trusted("foreign API") { use(pointer); }
     use(pointer) #memory { reads(pointer), noescape(pointer) };
 }
@@ -124,18 +141,19 @@ open :: (path: $P, flags: Open_Flags = .None) -> Fs_Error!File
 assert(!tree.rootNode.hasError, "Current language syntax did not parse in Tree-sitter");
 for (const source of [
   'Signed :: enum s8 { Negative :: -1; Zero; }',
-  'types :: () { Slice :: []s64; Fixed :: [2]s64; Many :: [*]u8; Dynamic :: [..]u8; }',
+  'types :: () { Slice :: []const s64; Fixed :: [2]s64; Many :: [*]const u8; Dynamic :: [..]u8; }',
   'main :: () { n := .(.(1, 2), 3); value := n.0.1; }',
   'main :: () { b := Box(f64).{ .value = 1.5 }; }',
   'Rune :: #char "\\u{1f642}";',
   'main :: () { value: s64 = 7; p := &value; q := value.&; *p += 1; q.* += 1; pp := &p; answer := **pp; }',
+  'f :: (writable: *s64, readonly: *const s64, nested: **const s64, bytes: []const u8) {}',
 ]) {
   const current = parser.parse(source);
   assert(!current.rootNode.hasError, "Current syntax did not parse: " + source);
   current.delete();
 }
 for (const source of [
-  'f :: (value: *const s64) {}',
+  'f :: (value: *mut s64) {}',
 ]) {
   const removed = parser.parse(source);
   assert(removed.rootNode.hasError, "Removed syntax still parses: " + source);
@@ -367,6 +385,8 @@ for (const width of [390, 1280]) {
     assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
     assert(!text.includes('#magic "str_concat"'), `Removed string intrinsic in chapter ${index}`);
     if (index === 123) assert(text.includes("--borrow-check=error") && text.includes("returns_borrow") && text.includes("Byte_Reader"), "Memory contracts chapter is stale");
+    if (index === 117) assert(text.includes("new(T)") && text.includes("delete(pointer)"), "Typed object allocation is missing");
+    if (index === 49) assert(text.includes("*const T") && text.includes("omit the qualifier for writable access"), "Pointer qualifiers are stale");
     if (index === 127) assert(text.includes("strict module cannot overlay") && text.includes("unknown(reason:"), "Strict memory rules are missing");
     if (index === 27) assert(text.includes("Strings/Memory"), "Owned-string cleanup imports are stale");
     if (index === 105) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is stale");
@@ -453,6 +473,15 @@ for (const width of [390, 1280]) {
   text = openSymbolSearch(width, moduleIndex("String_Builder"), "String_Builder.to_string");
   assert(textRuns.some(run => run.value === "returns_borrow"));
   assert(textRuns.some(run => run.value === "#self"));
+  text = openSymbolSearch(width, moduleIndex("String_Builder"), "String_Builder.clone");
+  assert(textRuns.some(run => run.value === "released_by"));
+  assert(textRuns.some(run => run.value === "string.free"));
+  assert(text.includes("*const String_Builder"));
+  text = openSymbolSearch(width, moduleIndex("Context"), "mem_alloc");
+  assert(textRuns.some(run => run.value === "(?*void).mem_free"));
+  text = openSymbolSearch(width, moduleIndex("Memory/Object"), "new");
+  assert(textRuns.some(run => run.value === "returns_fresh"));
+  assert(textRuns.some(run => run.value === "delete"));
   text = openSymbolSearch(width, moduleIndex("Context"), "Allocator_Proc");
   assert(textRuns.some(run => run.value === "maybe_kills"));
   assert(textRuns.some(run => run.value === "unknown"));

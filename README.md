@@ -127,6 +127,8 @@ filtering, leading memory-contract attachment and documentation,
 The reference restores a separate `#MEMORY CONTRACTS` table for functions,
 receiver methods, named function-pointer types, and nested typeclass operations.
 Effects and their arguments come from leading or historical trailing contracts.
+Typed releasers such as `(?*void).mem_free` retain their complete owner syntax,
+and read-only receiver parameters retain `*const` in the displayed tables.
 Written empty contracts are distinguished from declarations without a contract;
 these are source contracts, while compiler inference is available through the
 compiler report flags. Named result places and allocator/releaser labels are
@@ -142,7 +144,7 @@ free functions, managed destruction and `ManuallyDrop`, string-view layouts and 
 builder cloning and ownership transfer. They also verify free, unevaluated
 `type_of(value)` queries, lexical scope for local functions and types, local
 type aliases, `#align(N)` record layouts, compile-time source builders,
-recursive reflection, the `Strings` umbrella and allocator-matched cleanup,
+recursive reflection and source-spelled type names, the `Strings` umbrella and allocator-matched cleanup,
 builder repetition and compile-time string concatenation, configurable execution
 limits for both compile-time engines, and rejection of removed string helpers,
 runtime string concatenation, non-exhaustive switches and overflowing
@@ -150,7 +152,7 @@ integer or float constants. Syntax checks cover prefix and suffix
 pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
-directives, invalid Try contracts, string capacity, and removed pointer qualifiers.
+directives, invalid Try contracts, string capacity, and the removed `mut` qualifier.
 Memory checks cover leading contracts, strict exported boundaries, double release,
 body-contract violations, indirect calls, separate tuple-result release identities,
 report flags, and warning/error/off analysis modes. Strict boundary requirements
@@ -161,7 +163,7 @@ Pass a compiler path as its optional first argument to test another build.
 For the local installation, run
 `node scripts/test-language.mjs "$HOME/.local/glosso/bin/glosso"` with
 `GLOSSO_STD` pointing to `../glosso/std`. All output and caches stay under `build/`. The collection checks exercise
-automatic element destruction, nested dynamic arrays, and `take()` / `replace()`
+automatic element destruction, allocator-captured object deletion, nested dynamic arrays, and `take()` / `replace()`
 ownership transfers.
 
 `node scripts/test-manual.mjs` checks staged assets and exercises the actual
@@ -274,8 +276,9 @@ Both compile-time engines use a default execution budget of 2^28 steps;
 `GLOSSO_COMPTIME_STEP_LIMIT=0` removes that limit.
 
 Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
-Pointer types use read-only `*T` and writable `*mut T`; many-pointers and views
-use `[*]T` / `[*]mut T` and `[]T` / `[]mut T`. The `const` qualifier has been removed. Leading
+Pointer types use writable `*T` and read-only `*const T`; many-pointers and views
+use `[*]T` / `[*]const T` and `[]T` / `[]const T`. The former `mut` qualifier
+has been removed; bare pointers and views are writable. Leading
 `#memory { ... }` contracts describe access, escapes, invalidation, allocation,
 release, and returned origins. Body contracts are checked; bodyless declarations
 supply external contracts. Private functions can use inference. Temporal memory
@@ -291,7 +294,9 @@ remain responsible for managed-value transfers and automatic destruction.
 The literal `c"hello"` is a zero-terminated
 `cstring`; `b"hello"` is a fixed byte array. `ManuallyDrop(T)` suppresses automatic
 destruction until the value is extracted or explicitly destroyed. The generated
-reference includes the `Gui` modules and the `Memory/ManuallyDrop` API.
+reference includes the `Gui` modules and the `Memory/ManuallyDrop` and `Memory/Object` APIs. `new(T)` allocates and
+initializes one object; `delete(pointer)` destroys it and frees storage through
+its captured allocator, including when destruction fails.
 
 Adding or removing a chapter therefore means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in

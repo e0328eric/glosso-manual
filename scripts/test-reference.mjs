@@ -23,7 +23,7 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 25, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.size, 27, "default-private declarations, unit declarations, and private groups must be excluded");
 assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
 assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
 for (const name of ["Box.make", "Box.get", "Box.set"]) {
@@ -34,11 +34,12 @@ assert.equal(symbols.get("Box.get").display_signature, "#memory { reads(#self), 
 assert.equal(symbols.get("Box.make").display_signature, 'Box.make :: (value: ssize, label: string = "#Self_Type") -> Box');
 assert.equal(symbols.get("Box.make").function_info.return_type, "Box");
 assert.equal(symbols.get("Box.copy_from").function_info.return_type, "Fs_Error!Box");
-assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*Box");
-assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*mut Box, *Box) -> Fs_Error!Box");
-assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*mut #self, value: ssize)");
+assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*const Box");
+assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*Box, *const Box) -> Fs_Error!Box");
+assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*#self, value: ssize)");
+assert.equal(symbols.get("Box.peek").function_info.parameters[0].value_type, "*const Box");
 assert.deepEqual(symbols.get("Box.set").function_info.parameters[0], {
-  name: "#self", value_type: "*mut Box", default_value: "", modifiers: ["receiver"], constraints: [],
+  name: "#self", value_type: "*Box", default_value: "", modifiers: ["receiver"], constraints: [],
 });
 assert.deepEqual(symbols.get("Box").type_info.fields.map(field => field.name), ["value", "exposed"]);
 assert.equal(symbols.get("$T.inspect").kind, "method");
@@ -54,7 +55,7 @@ assert.equal(symbols.get("BYTE_TEXT").signature, 'BYTE_TEXT :: b"\\xFF; // }"');
 assert.deepEqual(symbols.get("literal_defaults").function_info.parameters.map(parameter => parameter.default_value), [
   'c"// { ; }"', 'b"\\xFF;"',
 ]);
-assert.equal(symbols.get("literal_defaults").function_info.return_type, "*u8");
+assert.equal(symbols.get("literal_defaults").function_info.return_type, "*const u8");
 
 const open = symbols.get("open");
 assert.equal(open.display_signature,
@@ -83,7 +84,7 @@ assert.deepEqual(lazy.slice(0, 2).map(parameter => parameter.modifiers), [
 assert.equal(lazy[2].name, "size");
 assert.equal(lazy[2].value_type, "");
 assert.equal(lazy[2].default_value, "42");
-assert.equal(lazy[3].value_type, "[]string");
+assert.equal(lazy[3].value_type, "[]const string");
 assert.equal(lazy[3].default_value, ".[]");
 
 for (const name of ["legacy", "bare", "Callback"]) {
@@ -121,6 +122,10 @@ assert.deepEqual(effects("acquire_pair"), [
 assert.deepEqual(effects("old_parentheses"), [
   { effect: "reads", arguments: ["value"] },
   { effect: "noescape", arguments: ["value"] },
+]);
+assert.deepEqual(effects("typed_acquire"), [
+  { effect: "returns_fresh", arguments: [] },
+  { effect: "released_by", arguments: ["place: returned", "by: (?*void).mem_free", "instance: allocator"] },
 ]);
 assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
 assert.equal(symbols.get("Callback").display_signature, "#memory { returns_borrow(path), noescape(path) }\nCallback :: #fn_ptr(path: $P) -> string");

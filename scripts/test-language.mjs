@@ -58,6 +58,7 @@ assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
 assert.equal(compileAndRun("pointers_literals"), "pointers and literals passed\n");
 assert.equal(compileAndRun("manual_drop"), "manual and automatic Drop passed\n");
 assert.equal(compileAndRun("owned_collections"), "owned collections passed\n");
+assert.equal(compileAndRun("owned_objects"), "owned objects passed\n");
 assert.equal(compileAndRun("current_reflection"), "current reflection passed\n");
 assert.equal(compileAndRun("current_comptime"), "current comptime passed\n");
 assert.equal(compileAndRun("current_strings"), "current strings passed\n");
@@ -77,6 +78,8 @@ for (const [name, diagnostic] of [
   ["removed_string_cat", "string has no field cat"],
   ["removed_string_repeat", "string has no field repeat"],
   ["runtime_string_add", "string concatenation with '+' requires constant strings"],
+  ["readonly_write", "not assignable"],
+  ["readonly_view_write", "not assignable"],
 ]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: invalid source compiled successfully`);
@@ -118,7 +121,7 @@ assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
 for (const name of ["removed_noreturn", "removed_private_section", "private_declaration",
-  "removed_const",
+  "removed_mut",
   "removed_type_of_method", "local_function_escape"]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: obsolete syntax or private access compiled successfully`);

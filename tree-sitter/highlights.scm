@@ -14,6 +14,7 @@
   "using"
   "noalias"
   "mut"
+  "const"
   "raw"
   "raw_mut"
   "volatile"
@@ -50,6 +51,7 @@
   "#foreign"
   "#c_call"
   "#packed"
+  "#align"
   "#no_context"
   "#dump"
   "#must"
@@ -322,6 +324,7 @@
 ; Memory contracts use effect names and labels only within the directive.
 (memory_effect (identifier) @attribute)
 (memory_release_argument name: (identifier) @attribute)
+(memory_typed_releaser method: (identifier) @function)
 (memory_unknown_argument name: (identifier) @attribute)
 (memory_trusted_statement "trusted" @attribute)
 (memory_place . (identifier) @variable.parameter)

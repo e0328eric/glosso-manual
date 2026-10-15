@@ -23,7 +23,7 @@ render_section_116 :: () {
         \\    temp_allocator:   Allocator;
         \\    logger:           Logger;
         \\    random_generator: Random_Generator;
-        \\    user_ptr:         ?*mut void;
+        \\    user_ptr:         ?*void;
         \\    user_index:       ssize;
         \\}
     );
@@ -244,15 +244,15 @@ render_section_117 :: () {
     );
     code_block(1, "glosso", #string
         \\Allocator_Proc :: #fn_ptr(
-        \\    data: ?*mut void,
+        \\    data: ?*void,
         \\    mode: Allocator_Mode,
         \\    size: ssize,
         \\    alignment: ssize,
-        \\    old_memory: ?*mut void,
+        \\    old_memory: ?*void,
         \\    old_size: ssize
-        \\) -> ?*mut void
+        \\) -> ?*void
         \\
-        \\Allocator :: struct { procedure: ?Allocator_Proc; data: ?*mut void; }
+        \\Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }
     );
     paragraph(2, #string,oneline
         \\Four of the slots are optional, and each for a reason. A stateless
@@ -351,7 +351,7 @@ render_section_117 :: () {
         \\main :: () {
         \\    p := mem_alloc(8, heap_allocator());
         \\    if #pattern .Some(raw) = p {
-        \\        cell := cast(*mut s64) raw;
+        \\        cell := cast(*s64) raw;
         \\        cell.* = 42;
         \\        print("cell %\n", cell.*);
         \\    }
@@ -385,13 +385,13 @@ render_section_117 :: () {
         \\requests: ssize = 0;
         \\
         \\tracking_proc :: (
-        \\    data: ?*mut void,
+        \\    data: ?*void,
         \\    mode: Allocator_Mode,
         \\    size: ssize,
         \\    alignment: ssize,
-        \\    old_memory: ?*mut void,
+        \\    old_memory: ?*void,
         \\    old_size: ssize
-        \\) -> ?*mut void  {
+        \\) -> ?*void  {
         \\    heap := heap_allocator();
         \\    if mode == {
         \\        case .Alloc, .Alloc_Non_Zeroed;
@@ -435,6 +435,35 @@ render_section_117 :: () {
         \\caller that wants a different allocator for one call passes it; a
         \\caller that wants it for a region uses `#push_allocator`.
     );
+
+    subheading(51, "Allocating typed objects");
+    paragraph(52, #string,oneline
+        \\Import Memory or Memory/Object for new(T) and delete(pointer).
+        \\new(T) allocates one properly aligned T and applies its ordinary defaults
+        \\only after allocation succeeds. It returns ?*T; .None means allocation
+        \\failed. The caller must delete a successful allocation.
+    );
+    code_block(53, "glosso", #string
+        \\#import "Memory/Object";
+        \\#import "String_Builder";
+        \\
+        \\Record :: struct { text: String_Builder; }
+        \\main :: () {
+        \\    if #pattern .Some(record) = new(Record) {
+        \\        defer _ := delete(record);
+        \\        record.*.text.write_string("owned object");
+        \\    }
+        \\}
+    );
+    paragraph(54, #string,oneline
+        \\delete(pointer) runs complete typed destruction, including owned fields,
+        \\then frees the storage through the allocator captured by new. It returns
+        \\Drop_Error(T)!void, and an absent pointer succeeds without doing anything.
+        \\Storage is released even when destruction fails; the pointer and all
+        \\derived views are invalid afterward. Keep the captured allocator's state
+        \\alive until deletion. Raw alloc/free do not initialize or destroy T.
+    );
+
 }
 
 render_section_118 :: () {
@@ -498,7 +527,7 @@ render_section_118 :: () {
         \\a many-pointer, an array or a tuple.
     );
     bullet(10, #string,oneline
-        \\Any parameter is a typed pointer, `*T` or `[*]T`.
+        \\Any parameter is a typed pointer, `*const T` or `[*]const T`.
     );
     paragraph(11, #string,oneline
         \\A loop body in a procedure that satisfies neither reuses the same
@@ -526,7 +555,7 @@ render_section_118 :: () {
     paragraph(14, #string,oneline
         \\The contrast is visible in one program. `scalar` returns an `s64`, so
         \\its mark is restored and two consecutive calls hand back the same
-        \\address. `carrier` takes a `*s64`, so no mark is taken and its two
+        \\address. `carrier` takes a `*const s64`, so no mark is taken and its two
         \\temporaries sit sixteen bytes apart.
     );
     code_block(15, "glosso", #string
@@ -537,7 +566,7 @@ render_section_118 :: () {
         \\    return cast(s64) tprint("aaaa").data;
         \\}
         \\
-        \\carrier :: (sink: *mut s64) {
+        \\carrier :: (sink: *s64) {
         \\    first := cast(s64) tprint("aaaa").data;
         \\    second := cast(s64) tprint("bbbb").data;
         \\    sink.* = second - first;
@@ -692,7 +721,7 @@ render_section_119 :: () {
         \\main :: () {
         \\    p := alloc(64);
         \\    if #pattern .Some(raw) = p {
-        \\        bytes := cast([*]mut u8) raw;
+        \\        bytes := cast([*]u8) raw;
         \\        bytes[0] = 7;
         \\        p.free();
         \\        print("value=%\n", bytes[0]);
@@ -711,7 +740,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    (cast(*mut void) &slot).free();
+        \\    (cast(*void) &slot).free();
         \\    print("continued\n");
         \\}
     );
@@ -728,7 +757,7 @@ render_section_119 :: () {
         \\
         \\main :: () {
         \\    slot: s64 = 1;
-        \\    fresh := (cast(*mut void) &slot).mem_resize(8, 32);
+        \\    fresh := (cast(*void) &slot).mem_resize(8, 32);
         \\    print("continued\n");
         \\}
     );
@@ -746,7 +775,7 @@ render_section_119 :: () {
         \\main :: () {
         \\    p := alloc(16);
         \\    if #pattern .Some(raw) = p {
-        \\        bytes := cast([*]mut u8) raw;
+        \\        bytes := cast([*]u8) raw;
         \\        bytes[16] = 1;
         \\    }
         \\    p.free();
@@ -835,7 +864,7 @@ render_section_120 :: () {
         \\Resource :: struct { id: ssize; }
         \\Resource ::: instance Drop {
         \\    Error :: #Never;
-        \\    drop :: (value: *mut #Self_Type) -> #Never!void {
+        \\    drop :: (value: *#Self_Type) -> #Never!void {
         \\        // Release the resource represented by value.*.id here.
         \\        return .Ok;
         \\    }
@@ -875,7 +904,7 @@ render_section_121 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\Use a read-only *T or writable *mut T parameter to operate on an existing owner while leaving ownership with the caller. Receiver methods may automatically take the address of an addressable value. Read-only pointers cannot be passed to writable receiver methods.
+        \\Use a read-only *const T or writable *T parameter to operate on an existing owner while leaving ownership with the caller. Receiver methods may automatically take the address of an addressable value. Read-only pointers cannot be passed to writable receiver methods.
     );
     paragraph(3, #string,oneline
         \\A struct, tuple, option, result, or fixed array containing a managed value also needs destruction. Moving the whole aggregate transfers its managed contents. Moving an individual managed field or indexed element directly is rejected; use a typed transfer operation or move the whole owner.
@@ -939,13 +968,13 @@ render_section_122 :: () {
 
 render_section_123 :: () {
     paragraph(0, #string,oneline
-        \\A *T pointer, []T slice, or primitive string borrows storage without keeping its owner alive. Temporal memory analysis follows the storage origin and diagnoses uses after release, invalidation, or scope exit. This analysis is enabled as warnings by default and can be made an error with --borrow-check=error. It does not insert lifetime tokens or extend storage lifetime.
+        \\A *const T pointer, []const T slice, or primitive string borrows storage without keeping its owner alive. Temporal memory analysis follows the storage origin and diagnoses uses after release, invalidation, or scope exit. This analysis is enabled as warnings by default and can be made an error with --borrow-check=error. It does not insert lifetime tokens or extend storage lifetime.
     );
     subheading(1, "Read-only and writable access");
-    table_row(2, "`*T`, `[*]T`, `[]T`   |   read-only access");
-    table_row(3, "`*mut T`, `[*]mut T`, `[]mut T`   |   writable access");
+    table_row(2, "`*const T`, `[*]const T`, `[]const T`   |   read-only access");
+    table_row(3, "`*T`, `[*]T`, `[]T`   |   writable access");
     paragraph(4, #string,oneline
-        \\Writable pointers and slices can be used through read-only forms. The reverse implicit conversion is rejected. volatile marks accesses that must be emitted; *volatile T remains read-only and *mut volatile T permits stores.
+        \\Writable pointers and slices can be used through read-only forms. The reverse implicit conversion is rejected. volatile marks accesses that must be emitted; *const volatile T remains read-only and *volatile T permits stores.
     );
     subheading(5, "Invalidation");
     paragraph(6, #string,oneline
@@ -982,7 +1011,7 @@ render_section_123 :: () {
         \\    noescape(source),
         \\    returns_borrow(source),
         \\}
-        \\view :: (source: []u8) -> []u8 {
+        \\view :: (source: []const u8) -> []const u8 {
         \\    return source;
         \\}
         \\
@@ -1006,7 +1035,7 @@ render_section_123 :: () {
     table_row(22, "released_by(by: release, instance: allocator)   |   The release operation and optional allocator identity for an acquired result.");
     table_row(23, "unknown(arg: p, reason: \"external API\")   |   An explicit hole for one argument; result: returned selects a result place.");
     paragraph(24, #string,oneline
-        \\Contracts can select fields and tuple components, including returned.Ok, returned.0, and named results. For independent outputs, write separate returns_fresh(returned.0) and returns_fresh(returned.1) effects and give each its own releaser. Inferred maybe_kills and other maybe_ effects describe effects that are possible rather than guaranteed on every path.
+        \\Contracts can select fields and tuple components, including returned.Ok, returned.0, and named results. Releasers may be free functions, associated methods such as string.free or Array.free, or a parenthesized owner type followed by its method, such as (?*void).mem_free. For independent outputs, write separate returns_fresh(returned.0) and returns_fresh(returned.1) effects and give each its own releaser. Inferred maybe_kills and other maybe_ effects describe effects that are possible rather than guaranteed on every path.
     );
     subheading(25, #string
         \\Analysis modes and reports
@@ -1039,7 +1068,7 @@ render_section_123 :: () {
         \\#import "Context";
         \\
         \\#memory { kills(pointer), reads(allocator), noescape(pointer, allocator) }
-        \\release_byte :: (pointer: *mut u8, allocator: Allocator)
+        \\release_byte :: (pointer: *u8, allocator: Allocator)
         \\    #foreign "c" "release_byte";
         \\
         \\#memory {
@@ -1049,7 +1078,7 @@ render_section_123 :: () {
         \\    released_by(place: returned.0, by: release_byte, instance: allocator),
         \\    released_by(place: returned.1, by: release_byte, instance: allocator),
         \\}
-        \\acquire_pair :: (allocator: Allocator) -> (*mut u8, *mut u8)
+        \\acquire_pair :: (allocator: Allocator) -> (*u8, *u8)
         \\    #foreign "c" "acquire_pair";
     );
     paragraph(41, #string,oneline
@@ -1061,10 +1090,10 @@ render_section_123 :: () {
     );
     code_block(44, "glosso", #string
         \\#memory { reads(value), noescape(value) }
-        \\Byte_Reader :: #fn_ptr(value: *u8) -> u8;
+        \\Byte_Reader :: #fn_ptr(value: *const u8) -> u8;
         \\
         \\#memory { reads(value), noescape(value) }
-        \\read_byte :: (value: *u8) -> u8 { return value.*; }
+        \\read_byte :: (value: *const u8) -> u8 { return value.*; }
         \\
         \\main :: () {
         \\    reader: Byte_Reader = read_byte;
@@ -1087,10 +1116,10 @@ render_section_124 :: () {
     code_block(2, "glosso", #string
         \\#import "Context";
         \\
-        \\Buffer :: struct { memory: ?*mut void; }
+        \\Buffer :: struct { memory: ?*void; }
         \\Buffer ::: instance Drop {
         \\    Error :: #Never;
-        \\    drop :: (buffer: *mut #Self_Type) -> #Never!void {
+        \\    drop :: (buffer: *#Self_Type) -> #Never!void {
         \\        buffer.*.memory.free();
         \\        return .Ok;
         \\    }
@@ -1108,10 +1137,10 @@ render_section_124 :: () {
     );
     code_block(5, "glosso", #string
         \\#memory { kills(pointer), noescape(pointer) }
-        \\release :: (pointer: *mut u8) #foreign "c" "release";
+        \\release :: (pointer: *u8) #foreign "c" "release";
         \\
         \\#memory { returns_fresh, released_by(by: release) }
-        \\acquire :: () -> *mut u8 #foreign "c" "acquire";
+        \\acquire :: () -> *u8 #foreign "c" "acquire";
     );
     paragraph(6, #string,oneline
         \\This schematic foreign API gives acquire() a release obligation that release(pointer) discharges. The actual foreign implementation must satisfy those contracts. Wrapping such a handle in a Drop owner makes cleanup automatic; a contract alone does not generate a release call.
@@ -1135,7 +1164,7 @@ render_section_125 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\get() returns *T and get_mut() returns *mut T without transferring ownership. into_inner() consumes the whole wrapper and restores automatic destruction. take() extracts through a mutable pointer, including from an enclosing owner's field. drop() runs the full destructor in place and returns Drop_Error(T)!void.
+        \\get() returns *const T and get_mut() returns *T without transferring ownership. into_inner() consumes the whole wrapper and restores automatic destruction. take() extracts through a mutable pointer, including from an enclosing owner's field. drop() runs the full destructor in place and returns Drop_Error(T)!void.
     );
     paragraph(3, #string,oneline
         \\After take() or drop(), the slot must not be used again, including when destruction reports an error. An enclosing Drop hook must account for consumed slots with its own lifecycle state. Use into_inner() when the whole wrapper can be moved.
@@ -1158,7 +1187,7 @@ render_section_126 :: () {
         \\Resource :: struct { id: ssize; }
         \\Resource ::: instance Drop {
         \\    Error :: Cleanup_Error;
-        \\    drop :: (resource: *mut #Self_Type) -> Cleanup_Error!void {
+        \\    drop :: (resource: *#Self_Type) -> Cleanup_Error!void {
         \\        return .Err(.Failed);
         \\    }
         \\}
@@ -1184,7 +1213,7 @@ render_section_126 :: () {
 render_section_127 :: () {
     table_header(1, "Gate   —   What `#enable` permits");
     table_row(2, "`lossy_numerics`   |   Implicit integer-to-integer conversions that lose information: narrowing, and sign reinterpretation.");
-    table_row(3, "`pointer_punning`   |   Pointee-unchecked pointer conversions, and `*T` interchangeable with `[*]T`.");
+    table_row(3, "`pointer_punning`   |   Pointee-unchecked pointer conversions, and `*const T` interchangeable with `[*]const T`.");
     table_row(4, "`memory_strict`   |   Require written memory contracts at exported and external boundaries.");
     table_row(5, "`allow_union_unwrap`   |   Direct tagged-union payload access outside a pattern match.");
     table_row(6, "`#public`, `#public(unit)`, `#private`   |   Declaration visibility prefixes; these are not feature gates.");
@@ -1339,8 +1368,8 @@ render_section_127 :: () {
     paragraph(32, #string,oneline
         \\`pointer_punning` relaxes the pointee check and the distinction
         \\between a single pointer and a many-pointer. The two assignments below
-        \\are rejected without it: `error: got *s64, expected [*]s64` and
-        \\`error: got *s64, expected *u8`. With it, both are accepted and the
+        \\are rejected without it: `error: got *const s64, expected [*]const s64` and
+        \\`error: got *const s64, expected *const u8`. With it, both are accepted and the
         \\program prints `65 65`.
     );
     code_block(33, "glosso", #string
@@ -1350,9 +1379,9 @@ render_section_127 :: () {
         \\
         \\main :: () {
         \\    value: s64 = 65;
-        \\    single: *mut s64 = &value;
-        \\    many: [*]mut s64 = single;
-        \\    bytes: *mut u8 = single;
+        \\    single: *s64 = &value;
+        \\    many: [*]s64 = single;
+        \\    bytes: *u8 = single;
         \\    print("% %\n", many[0], bytes.*);
         \\}
     );
@@ -1360,8 +1389,8 @@ render_section_127 :: () {
         \\What it does not relax is read-only access. The gate is tested inside the
         \\branch that has already established the qualifier direction is
         \\legal, so adding writable access remains an error under the gate:
-        \\`writable: *mut s64 = readonly;` with `readonly: *s64` reports
-        \\`error: got *s64, expected *mut s64`.
+        \\`writable: *s64 = readonly;` with `readonly: *const s64` reports
+        \\`error: got *const s64, expected *s64`.
     );
     subheading(35, "The gate that tightens");
     paragraph(36, #string,oneline
@@ -1370,7 +1399,7 @@ render_section_127 :: () {
     code_block(37, "glosso", #string
         \\#enable(memory_strict);
         \\
-        \\#public view :: (source: []u8) -> []u8 { return source; }
+        \\#public view :: (source: []const u8) -> []const u8 { return source; }
         \\main :: () {}
     );
     code_block(38, "text", #string

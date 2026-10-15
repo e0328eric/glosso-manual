@@ -7,11 +7,13 @@ The current grammar includes read-only and writable pointer/view types,
 `c"..."` and `b"..."` literals, suffix address-of (`value.&`), repeated prefix
 `&`, negative enum values and bracket type expressions.
 It supports leading `#memory` contracts, trailing contracts, overlays, trusted
-blocks, and labelled effect operands, and rejects the removed `const` qualifier.
-The `current-language.patch` adds custom `!!` suffix operators,
-`#align(N)` struct modifiers, alongside the `#fresh_result` / `#unchecked_transfer`
-function modifiers already present in the sibling grammar. Rebuild in a local copy so the sibling
-repository stays unchanged.
+blocks, labelled effect operands, typed releasers such as
+`released_by((?*void).mem_free)`, and `const` for read-only access.
+Bare pointers and views are writable; the compiler rejects the old `mut` qualifier.
+The sibling grammar includes `#align(N)` struct modifiers.
+The `current-language.patch` adds custom `!!` suffix operators alongside the
+`#fresh_result` / `#unchecked_transfer` modifiers already in the sibling grammar.
+Rebuild in a local copy so the sibling repository stays unchanged.
 
 From the manual repository root, rebuild on Windows with the installed
 Tree-sitter CLI and LLVM toolchain:
@@ -24,7 +26,7 @@ $clang = Join-Path $env:USERPROFILE .local/llvm-project/x86_64-windows-msvc/bin/
 New-Item -ItemType Directory -Force -Path $grammarStage | Out-Null
 Copy-Item -LiteralPath (Join-Path $grammarSource grammar.js) -Destination $grammarStage -Force
 Copy-Item -LiteralPath (Join-Path $grammarSource tree-sitter.json) -Destination $grammarStage -Force
-git apply --directory=build/tree-sitter-current tree-sitter/current-language.patch
+git apply --unidiff-zero --directory=build/tree-sitter-current tree-sitter/current-language.patch
 Push-Location $grammarStage
 try { & $treeSitterCli generate --js-runtime native } finally { Pop-Location }
 

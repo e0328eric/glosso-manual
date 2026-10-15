@@ -519,8 +519,8 @@ render_section_58 :: () {
     table_header(1, "Spelling   —   Elements   —   The body sees");
     table_row(2, "`xs: ...`   |   any types, mixed   |   `[]any`");
     table_row(40, "`xs: ...any`   |   any types, mixed   |   a heterogeneous tuple; constant indices retain concrete types");
-    table_row(3, "`xs: ...ssize`   |   all `ssize`   |   `[]ssize`");
-    table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]T`");
+    table_row(3, "`xs: ...ssize`   |   all `ssize`   |   `[]const ssize`");
+    table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]const T`");
     table_row(5, "`xs: ...Show`   |   any type implementing `Show`   |   a pack whose elements keep their own types");
     table_row(6, "`xs: ...(Show && PartialEq)`   |   any type implementing both   |   the same, with both constraints");
     paragraph(7, #string,oneline
@@ -565,15 +565,14 @@ render_section_58 :: () {
     paragraph(12, #string,oneline
         \\For the untyped, homogeneous, and generic forms the parameter really is an
         \\array view and can be bound as one: `view: []any = xs;` inside `describe`,
-        \\`view: []ssize = xs;` inside a `...ssize` procedure, and `view: []T = xs;`
+        \\`view: []const ssize = xs;` inside a `...ssize` procedure, and `view: []const T = xs;`
         \\inside a `...$T` procedure all compile.
     );
     note(13, #string,oneline
-        \\An untyped pack boxes each argument into `any`, and a bare integer literal
-        \\has no type to box. `count_all(1, 2)` against `count_all :: (xs: ...)`
-        \\reaches the backend undecided and fails late with `error: comptime_int
-        \\reached code generation without a decided type [opcode BoxAny] while
-        \\lowering 'main'`. Give the argument a type, or use a typed pack.
+        \\An untyped pack boxes each argument into `any`. Bare numeric literals
+        \\receive their default runtime types before boxing: `count_all(1, 2)`
+        \\against `count_all :: (xs: ...) -> ssize { return xs.count; }` returns 2.
+        \\Use a typed pack when every element must have one particular type.
     );
     paragraph(41, #string,oneline
         \\Explicit `...any` is different from bare `...`: it preserves the
@@ -732,7 +731,7 @@ render_section_58 :: () {
         \\
         \\main :: () {
         \\    fixed: [3]ssize = .[1, 2, 3];
-        \\    view: []mut ssize = fixed[..];
+        \\    view: []ssize = fixed[..];
         \\    print("fixed=% view=%\n", sum(fixed...), sum(view...));
         \\    dyn: [..]ssize;
         \\    dyn.push(10);
@@ -765,7 +764,7 @@ render_section_58 :: () {
     bullet(38, #string,oneline
         \\Expanding something that is not an array reports error: expanded variadic
         \\argument to `sum` must be an array. Expanding the wrong element type
-        \\reports error: expanded variadic arg type `[2]string` != `[]ssize` in call
+        \\reports error: expanded variadic arg type `[2]string` != `[]const ssize` in call
         \\`sum`.
     );
     note(39, #string,oneline
@@ -781,7 +780,7 @@ render_section_59 :: () {
         \\noalias is a pointer parameter modifier and a promise made by the caller. During the call, access through that pointer must obey the non-aliasing contract. It is independent of pointer mutability and ownership.
     );
     code_block(1, "glosso", #string
-        \\copy_one :: (noalias destination: *mut s64, source: *s64) {
+        \\copy_one :: (noalias destination: *s64, source: *const s64) {
         \\    destination.* = source.*;
         \\}
         \\
@@ -792,7 +791,7 @@ render_section_59 :: () {
         \\}
     );
     paragraph(2, #string,oneline
-        \\A receiver can also carry noalias, as in noalias *mut #self. A writable destination and a read-only source still need distinct storage when the noalias contract requires it. Memory analysis checks overlapping arguments and conflicting live borrows; findings are warnings by default and errors under --borrow-check=error.
+        \\A receiver can also carry noalias, as in noalias *#self. A writable destination and a read-only source still need distinct storage when the noalias contract requires it. Memory analysis checks overlapping arguments and conflicting live borrows; findings are warnings by default and errors under --borrow-check=error.
     );
     note(3, #string,oneline
         \\Keep noalias only where callers can satisfy it. Backend optimization may rely on the declaration; runtime bounds and null checks do not check aliasing.
@@ -1375,8 +1374,8 @@ render_section_62 :: () {
         \\
         \\idf   :: (x: $T) -> T { return x; }
         \\wider :: (a: $T, b: T) -> T { if a > b return a; return b; }
-        \\first :: (xs: []mut $T) -> T { return xs[0]; }
-        \\deref :: (p: *mut $T) -> T { return p.*; }
+        \\first :: (xs: []$T) -> T { return xs[0]; }
+        \\deref :: (p: *$T) -> T { return p.*; }
         \\unbox :: (b: Box($T)) -> T { return b.value; }
         \\tag   :: (a: $A, b: $B) -> s64 { return size_of(A) * 100 + size_of(B); }
         \\
@@ -1411,15 +1410,15 @@ render_section_62 :: () {
         \\The capture does not have to be the whole annotation. It may sit at
         \\any depth inside it, and the compiler matches the annotation's shape
         \\against the argument's type to solve for it. That is what makes
-        \\`(xs: []$T)` mean "a view of anything" rather than "a view of a type
+        \\`(xs: []const $T)` mean "a view of anything" rather than "a view of a type
         \\literally named T".
     );
     table_header(6, "Annotation   —   Binds T to");
     table_row(7, "`x: $T`   |   The argument's own type");
-    table_row(8, "`xs: []$T`   |   The element type of a view");
+    table_row(8, "`xs: []const $T`   |   The element type of a view");
     table_row(9, "`xs: [..]$T`   |   The element type of a dynamic array");
-    table_row(10, "`p: *$T`   |   The pointee type");
-    table_row(11, "`p: [*]$T`   |   The pointee type of a many-pointer");
+    table_row(10, "`p: *const $T`   |   The pointee type");
+    table_row(11, "`p: [*]const $T`   |   The pointee type of a many-pointer");
     table_row(12, "`o: ?$T`   |   The payload of an option");
     table_row(13, "`r: $E!$T`   |   Two parameters: the error type and the payload");
     table_row(14, "`b: Box($T)`   |   The argument of a generic aggregate");
@@ -1429,7 +1428,7 @@ render_section_62 :: () {
         \\
         \\takes_opt  :: (o: ?$T) -> T { if #pattern .Some(v) = o return v; d: T; return d; }
         \\takes_res  :: (r: $E!$T) -> T { if #pattern .Ok(v) = r return v; d: T; return d; }
-        \\takes_many :: (p: [*]mut $T) -> T { return p[0]; }
+        \\takes_many :: (p: [*]$T) -> T { return p[0]; }
         \\takes_fn   :: (f: ($T) -> $R, x: T) -> R { return f(x); }
         \\
         \\dbl :: (x: s64) -> s64 { return x * 2; }
@@ -1461,11 +1460,11 @@ render_section_62 :: () {
         \\A `$` prefix declares the parameter. Every later mention of the same
         \\name, in the same signature, is written plain. Repeating the `$` is
         \\`error: polymorph $T is already bound; use plain T after the first
-        \\$T`, and the rule applies at any depth: `(a: []$T, b: []$T)` is
+        \\$T`, and the rule applies at any depth: `(a: []const $T, b: []const $T)` is
         \\rejected for the same reason `(a: $T, b: $T)` is.
     );
     code_block(21, "glosso", #string
-        \\zip_len :: (a: []mut $T, b: []mut T) -> ssize {
+        \\zip_len :: (a: []$T, b: []T) -> ssize {
         \\    if a.count < b.count return a.count;
         \\    return b.count;
         \\}
@@ -2162,7 +2161,7 @@ render_section_65 :: () {
     table_row(9, "`|a, b| a * b`   |   two, types from context   |   one expression");
     table_row(10, "`|| 0`   |   none   |   one expression");
     table_row(11, "`||->ssize { … }`   |   none   |   block, return type written");
-    table_row(12, "`|noalias p: *ssize| -> ssize { … }`   |   one, `noalias`   |   block");
+    table_row(12, "`|noalias p: *const ssize| -> ssize { … }`   |   one, `noalias`   |   block");
     paragraph(13, #string,oneline
         \\An explicit return type requires a block. Without one the body is a
         \\single expression that is wrapped in an implicit `return`, and there is
@@ -2221,7 +2220,7 @@ render_section_65 :: () {
         \\#import "String_Builder";
         \\#import "Strings/Memory";
         \\
-        \\find_if :: (values: []mut $T, predicate: (T) -> bool) -> ssize {
+        \\find_if :: (values: []$T, predicate: (T) -> bool) -> ssize {
         \\    for values { if predicate(it) return it_index; }
         \\    return -1;
         \\}
@@ -2291,7 +2290,7 @@ render_section_65 :: () {
         \\    print("lo=% hi=%\n", a, b);
         \\
         \\    // noalias parameters.
-        \\    load := |noalias p: *mut s64| -> s64 { return p.*; };
+        \\    load := |noalias p: *s64| -> s64 { return p.*; };
         \\    n: s64 = 8;
         \\    print("load=%\n", load(&n));
         \\
@@ -2359,8 +2358,8 @@ render_section_66 :: () {
         \\Sink    :: #fn_ptr(v: s64);
         \\Nullary :: #fn_ptr() -> s64;
         \\Cb      :: #fn_ptr(v: s64) -> s64 #c_call;
-        \\Copy    :: #fn_ptr(noalias dst: *mut s64, noalias src: *s64);
-        \\Varargs :: #fn_ptr(fmt: *s8, ...) -> s32 #c_call;
+        \\Copy    :: #fn_ptr(noalias dst: *s64, noalias src: *const s64);
+        \\Varargs :: #fn_ptr(fmt: *const s8, ...) -> s32 #c_call;
     );
     paragraph(2, #string,oneline
         \\Parameter names are mandatory here, even though they contribute
@@ -2413,7 +2412,7 @@ render_section_66 :: () {
         \\`#fn_ptr(a: s64) -> s64` assigns to `#fn_ptr(different: s64) -> s64`.
     );
     bullet(13, #string,oneline
-        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *mut s64, noalias src: *s64);` rejects a procedure without both markers with
+        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const s64);` rejects a procedure without both markers with
         \\`error: cannot implicitly convert fnptr to fnptr because their noalias
         \\parameter contracts differ`. `noalias` Pointer Parameters covers the
         \\marker itself.
@@ -2450,11 +2449,11 @@ render_section_66 :: () {
         \\call0 :: (f: () -> s64) -> s64 { return f(); }
         \\call1 :: (f: (s64) -> s64, v: s64) -> s64 { return f(v); }
         \\call2 :: (f: (x: s64, y: s64) -> s64, v: s64) -> s64 { return f(v, v); }
-        \\callN :: (f: (noalias p: *mut s64) -> s64, p: *mut s64) -> s64 { return f(p); }
+        \\callN :: (f: (noalias p: *s64) -> s64, p: *s64) -> s64 { return f(p); }
         \\
         \\five :: () -> s64 { return 5; }
         \\add  :: (a: s64, b: s64) -> s64 { return a + b; }
-        \\load :: (noalias p: *mut s64) -> s64 { return p.*; }
+        \\load :: (noalias p: *s64) -> s64 { return p.*; }
         \\
         \\main :: () {
         \\    k: s64 = 12;
@@ -2474,8 +2473,8 @@ render_section_66 :: () {
     );
     subheading(23, "Null and function pointers");
     paragraph(24, #string,oneline
-        \\A `#fn_ptr` type excludes the zero address, in the same way `*T` and
-        \\`[*]T` do, because the optional form takes the null representation as
+        \\A `#fn_ptr` type excludes the zero address, in the same way `*const T` and
+        \\`[*]const T` do, because the optional form takes the null representation as
         \\its niche. `?Op` is therefore the same size as `Op` on a 64-bit target
         \\and costs nothing to carry. An absent callback is `.None`, and reading
         \\it back goes through a pattern match like any other option payload.
@@ -2510,7 +2509,7 @@ render_section_66 :: () {
     );
     paragraph(27, #string,oneline
         \\This is the shape the standard library uses for every vtable slot.
-        \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }`
+        \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*const void; }`
         \\relies on `.None` being address zero, so a zero-initialized
         \\`Allocator` is the "none installed" value without any extra tag.
     );
@@ -2741,7 +2740,7 @@ render_section_67 :: () {
         \\the complete contextual-typing and escape rules.
     );
     table_row(72, "`#public`, `#public(unit)`, `#private`   |   declaration prefix or group; also an inherent block header after `:::`   |   declaration audience");
-    table_row(73, "`#self`, `*#self`, `*#self`   |   first parameter of an inherent method   |   receiver value or pointer");
+    table_row(73, "`#self`, `*const #self`, `*const #self`   |   first parameter of an inherent method   |   receiver value or pointer");
     table_row(74, "`#Self_Type`   |   type in an inherent block or instance   |   the complete matched owner type");
     table_row(75, "`#on_drop_error(value, error) { ... }`   |   after an owning local declaration   |   handles failure from automatic cleanup");
 }
