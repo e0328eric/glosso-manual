@@ -105,6 +105,15 @@ cleanup :: () {
     resource: Fallible;
     #on_drop_error(resource, error) { report_error(error); }
 }
+#memory { reads(source), noescape(source), returns_borrow(source) }
+view :: (source: []u8) -> []u8 { return source; }
+#public #memory { returns_borrow(input), noescape(input) }
+View :: #fn_ptr(input: []u8) -> []u8;
+#memory view { reads(arg(0)), returns_borrow(arg(0)) };
+trusted :: (pointer: *mut u8) {
+    #memory trusted("foreign API") { use(pointer); }
+    use(pointer) #memory { reads(pointer), noescape(pointer) };
+}
 where_am_i :: () -> Source_Location { return #source_location; }
 inspect :: (path: $P, site: Source_Location = #source_location)
  where AsView(P, Path_View) {}
@@ -126,7 +135,6 @@ for (const source of [
   current.delete();
 }
 for (const source of [
-  'f :: () #memory returns_fresh {}',
   'f :: (value: *const s64) {}',
 ]) {
   const removed = parser.parse(source);
@@ -147,9 +155,13 @@ for (const literal of prefixedLiterals.rootNode.descendantsOfType(["c_string_lit
 prefixedLiterals.delete();
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
-for (const directive of ["#public", "#private", "#on_drop_error"])
+for (const directive of ["#public", "#private", "#on_drop_error", "#memory"])
   assert(query.captures(tree.rootNode).some(capture =>
     capture.node.text === directive && capture.name === "attribute"));
+assert(query.captures(tree.rootNode).some(capture =>
+  capture.node.text === "returns_borrow" && capture.name === "attribute"));
+assert(query.captures(tree.rootNode).some(capture =>
+  capture.node.text === "trusted" && capture.name === "attribute"));
 assert(query.captures(tree.rootNode).some(capture =>
   capture.node.text === "#Self_Type" && capture.name === "type.builtin"));
 assert(query.captures(tree.rootNode).some(capture =>
@@ -291,7 +303,7 @@ const metaModule = moduleIndex("Meta/Utilities");
 const typeQuery = referenceIndex.symbols.find(symbol => symbol[4] === metaModule && symbol[0] === "type_of");
 assert(typeQuery, "Missing free type_of function in the reference");
 assert.equal(typeQuery[5], "function");
-assert.equal(typeQuery[1], 'type_of :: (val: $T) -> type #magic "type_of"');
+assert.equal(typeQuery[1], '#memory { noescape(val) }\ntype_of :: (val: $T) -> type #magic "type_of"');
 assert(!referenceIndex.symbols.some(symbol => symbol[0].endsWith(".type_of")),
   "Removed type_of receiver method remains in the reference");
 
@@ -300,7 +312,14 @@ const stringMemory = moduleIndex("Strings/Memory");
 const stringFree = referenceIndex.symbols.find(symbol => symbol[4] === stringMemory && symbol[0] === "string.free");
 assert(stringFree, "Missing owned-string cleanup from Strings/Memory");
 assert.equal(stringFree[5], "method");
-assert(!referenceIndex.symbols.some(symbol => ["string.cat", "string.repeat", "string.into_temporary"].includes(symbol[0])),
+assert(referenceIndex.symbols.some(symbol => symbol[4] === stringMemory && symbol[0] === "string.into_temporary"),
+  "Missing arena ownership transfer from Strings/Memory");
+for (const name of ["Workspace.create", "String_Builder.new", "Compiler_Borrow_Check"])
+  assert(referenceIndex.symbols.some(symbol => symbol[0] === name), `Missing current API ${name}`);
+for (const name of ["Workspace.create_workspace", "String_Builder.source_new"])
+  assert(!referenceIndex.symbols.some(symbol => symbol[0] === name), `Obsolete API ${name}`);
+
+assert(!referenceIndex.symbols.some(symbol => ["string.cat", "string.repeat"].includes(symbol[0])),
   "Removed allocating-string methods remain in the reference");
 
 function symbolIndex(module, name) {
@@ -347,6 +366,7 @@ for (const width of [390, 1280]) {
     assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
     assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
     assert(!text.includes('#magic "str_concat"'), `Removed string intrinsic in chapter ${index}`);
+    if (index === 123) assert(text.includes("--borrow-check=error") && text.includes("returns_borrow"), "Memory contracts chapter is stale");
     if (index === 27) assert(text.includes("Strings/Memory"), "Owned-string cleanup imports are stale");
     if (index === 105) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is stale");
     if (index === 142) assert(text.includes("These six directories"), "Namespace-only directory list is stale");
@@ -394,7 +414,7 @@ for (const width of [390, 1280]) {
   text = clickText(width, "Methods", run => run.fontSize === 14);
   assert(textRuns.some(run => run.value === "File.open" && run.fontSize === 18));
   assert(!textRuns.some(run => run.value === "read_file" && run.fontSize === 18));
-  assert(!text.includes("#MEMORY CONTRACTS"), "Removed contracts still appear in reference cards");
+  assert(text.includes("#memory"), "Leading memory contracts are missing from reference signatures");
 
   // A typeclass's operations stay inside its declaration, not in Methods.
   instance.exports.glo_manual_select_module(moduleIndex("Prelude/Drop"));

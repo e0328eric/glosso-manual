@@ -599,7 +599,7 @@ render_section_118 :: () {
     table_row(27, "`tprint`   |   the formatted string, in the arena");
     table_row(28, "`File.read_line`   |   the `text` field of its `Read_Line`, in the arena");
     table_row(29, "`string.c_string`   |   a NUL-terminated copy of the string, in the arena");
-    table_row(30, "`format`   |   the formatted string, when passed `.allocator = context.temp_allocator`; no additional transfer is needed");
+    table_row(30, "`format(..., .allocator = context.temp_allocator).into_temporary()`   |   the formatted arena string, with its per-value release obligation transferred to the arena");
     table_row(31, "`String_Builder.into_temporary_string`   |   the builder's arena-backed bytes as a string");
     table_row(32, "`String_Builder.make_len_cap(.allocator = context.temp_allocator)`   |   an arena-backed builder; `into_temporary_string()` consumes it and returns its text");
     paragraph(33, #string,oneline
@@ -884,7 +884,7 @@ render_section_121 :: () {
         \\Iterate with for *item: values to visit managed elements through pointers. An ordinary for item: values copies each element and cannot copy a managed owner. Ending a pointer's scope does not destroy its pointee.
     );
     note(5, #string,oneline
-        \\Ownership checking does not impose borrow lifetimes. A pointer or slice does not prevent its owner from moving or being destroyed; keep the backing storage valid yourself.
+        \\Move checking tracks managed values separately from temporal memory analysis. Borrow diagnostics track views through calls, invalidation, escapes, and automatic destruction. They are warnings by default; use --borrow-check=error to reject findings. Keep backing storage valid even when analysis is disabled or cannot prove an origin.
     );
     subheading(6, "Transfers through existing storage");
     paragraph(7, #string,oneline
@@ -939,7 +939,7 @@ render_section_122 :: () {
 
 render_section_123 :: () {
     paragraph(0, #string,oneline
-        \\A *T pointer, []T slice, or primitive string borrows storage. It has no owner reference or lifetime token. The compiler does not keep that owner alive, prevent its movement, or reject escaping views. Every access must happen while the original storage remains valid.
+        \\A *T pointer, []T slice, or primitive string borrows storage without keeping its owner alive. Temporal memory analysis follows the storage origin and diagnoses uses after release, invalidation, or scope exit. This analysis is enabled as warnings by default and can be made an error with --borrow-check=error. It does not insert lifetime tokens or extend storage lifetime.
     );
     subheading(1, "Read-only and writable access");
     table_row(2, "`*T`, `[*]T`, `[]T`   |   read-only access");
@@ -957,20 +957,85 @@ render_section_123 :: () {
         \\and into_bytes() transfer the allocation; retain the allocator needed to
         \\free the transferred raw result. Import Strings/Memory for string.free().
         \\For arena-backed text, construct the builder with context.temp_allocator
-        \\and consume it with into_temporary_string(); no string.into_temporary()
-        \\marker is needed or supported. The view expires when that arena is reclaimed.
+        \\and consume it with into_temporary_string(). Alternatively, an owned string
+        \\allocated from that arena can use string.into_temporary() to hand its
+        \\release obligation to the arena. Never use this on heap storage. The view
+        \\expires when the arena is reset or restored.
     );
     paragraph(8, #string,oneline
-        \\Returning a builder's to_string() view after that local builder is destroyed creates a dangling view, even if it compiles. Return a cloned string or transferred allocation instead. Literal storage lasts for the program's lifetime and must not be freed.
+        \\Returning a builder's to_string() view after that local builder is destroyed creates a dangling view. The current analyzer does not diagnose every builder-backed escape, even in error mode. Return a cloned string or transferred allocation instead. Literal storage lasts for the program's lifetime and must not be freed.
     );
     note(9, #string,oneline
-        \\noalias is a separate caller promise about pointer access during a call. Ownership checking and runtime bounds checks do not verify that promise.
+        \\noalias marks unique access during a call. Memory analysis checks conflicting aliases and inferred borrow extents; it is independent of pointer mutability. Runtime bounds checks do not verify aliasing.
+    );
+    subheading(10, #string
+        \\Leading memory contracts
+    );
+    paragraph(11, #string,oneline
+        \\Write #memory { ... } immediately before a function declaration. The block belongs to that declaration, and its operands resolve in the following signature: parameters, named results, and #self are available; body locals are not. It can precede foreign and #magic declarations, typeclass and instance methods, and named #fn_ptr types. Visibility prefixes may appear before or after the contract.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#memory {
+        \\    reads(source),
+        \\    noescape(source),
+        \\    returns_borrow(source),
+        \\}
+        \\view :: (source: []u8) -> []u8 {
+        \\    return source;
+        \\}
+        \\
+        \\main :: () {
+        \\    bytes: [3]u8 = b"abc";
+        \\    text := view(bytes[..]);
+        \\    print("%\n", text.count);
+        \\}
+    );
+    paragraph(13, #string,oneline
+        \\A contract on a function with a body is checked against its implementation. A bodyless declaration supplies an external contract. Private functions can omit a contract and use inference. An explicitly written #memory {} asserts an empty contract; unknown(...) records uncertainty instead of silently claiming no effects. Ordinary function directives, such as #inline and #foreign, keep their position after the signature.
+    );
+    table_header(14, "Effect   —   Meaning");
+    table_row(15, "reads(p), writes(p)   |   Access through the named place; several places can share one effect: reads(a, b).");
+    table_row(16, "noescape(p), escapes(p)   |   Whether a reference may be retained; escapes(p, into: q) names its destination, including global.");
+    table_row(17, "invalidates(p), kills(p)   |   Invalidate derived views, or release the resource itself.");
+    table_row(18, "owns(p), owns(p, into: owner)   |   Transfer an ownership obligation to the callee or into a named resource.");
+    table_row(19, "gives(p, released_by: release)   |   Transfer a fresh resource out through a parameter slot.");
+    table_row(20, "returns_borrow(p), returns_unique_borrow(p)   |   A result derived from p, with shared or unique access.");
+    table_row(21, "returns_fresh, returns_static   |   A newly acquired resource, or storage that needs no release.");
+    table_row(22, "released_by(by: release, instance: allocator)   |   The release operation and optional allocator identity for an acquired result.");
+    table_row(23, "unknown(arg: p, reason: \"external API\")   |   An explicit hole for one argument; result: returned selects a result place.");
+    paragraph(24, #string,oneline
+        \\Contracts can select fields and tuple components, including returned.Ok, returned.0, and named results. For independent outputs, write separate returns_fresh(returned.0) and returns_fresh(returned.1) effects and give each its own releaser. Inferred maybe_kills and other maybe_ effects describe effects that are possible rather than guaranteed on every path.
+    );
+    subheading(25, #string
+        \\Analysis modes and reports
+    );
+    table_header(26, "Option   —   Behavior");
+    table_row(27, "--borrow-check=warning   |   Default: report temporal memory findings and continue compilation.");
+    table_row(28, "--borrow-check=error   |   Treat temporal memory findings as compilation errors.");
+    table_row(29, "--borrow-check=off   |   Disable body memory analysis; move and type checking still apply.");
+    table_row(30, "--borrow-check-std   |   Include standard-library bodies in memory diagnostics.");
+    table_row(31, "--memory-signatures   |   Print inferred contracts for functions with bodies.");
+    table_row(32, "--memory-axioms   |   Print normalized external contracts for bodyless declarations.");
+    table_row(33, "--memory-report   |   Print the per-module contract inventory, including deferred generic bodies.");
+    paragraph(34, #string,oneline
+        \\#enable(memory_strict); requires written contracts at exported and external memory boundaries. Generic bodies whose ownership transfers depend on their payload type are checked at concrete calls. The inventory identifies deferred templates. Warning mode, unknown contracts, raw pointer arithmetic, and trusted assertions limit what a successful compilation establishes.
+    );
+    subheading(35, #string
+        \\Other contract sites
+    );
+    paragraph(36, #string,oneline
+        \\A postfix call assertion, call(value) #memory { reads(value), noescape(value) };, supplies trusted effects at that call. A named overlay, #memory target { ... };, describes a named declaration; overload ambiguity is diagnosed. #memory trusted("reason") { ... } suspends selected alias and lifetime checks while still computing effects. These forms have different scopes from a leading declaration contract.
+    );
+    note(37, #string,oneline
+        \\Historical contracts after the signature remain accepted, including #memory(...). Prefer leading braced contracts in new code. Contracts describe memory behavior; Drop still determines automatic destruction and move semantics.
     );
 }
 
 render_section_124 :: () {
     paragraph(0, #string,oneline
-        \\Foreign function signatures describe the ABI and pointer mutability. They do not describe allocation, retention, or release. Read the foreign API's ownership rules and match every raw acquisition with the corresponding release function.
+        \\Foreign function signatures describe ABI and pointer mutability. Add leading #memory contracts to describe allocation, retention, and release; the compiler treats bodyless contracts as external facts. Match every raw acquisition with the specified releaser and allocator identity. Bindgen emits contracts from the C signature and explicit unknown holes where that signature cannot establish behavior.
     );
     paragraph(1, #string,oneline
         \\For an owned foreign handle, define a local wrapper with a Drop instance. Release that handle in the hook and move the wrapper when transferring ownership. Pass pointers to helpers that should leave ownership with the caller.
@@ -996,6 +1061,16 @@ render_section_124 :: () {
     );
     paragraph(4, #string,oneline
         \\Use defer for a raw resource without a Drop instance. Use #try defer only when cleanup returns a Try carrier and its failure should propagate through the surrounding boundary. Do not schedule a second destructive release for a resource already managed by Drop.
+    );
+    code_block(5, "glosso", #string
+        \\#memory { kills(pointer), noescape(pointer) }
+        \\release :: (pointer: *mut u8) #foreign "c" "release";
+        \\
+        \\#memory { returns_fresh, released_by(by: release) }
+        \\acquire :: () -> *mut u8 #foreign "c" "acquire";
+    );
+    paragraph(6, #string,oneline
+        \\This schematic foreign API gives acquire() a release obligation that release(pointer) discharges. The actual foreign implementation must satisfy those contracts. Wrapping such a handle in a Drop owner makes cleanup automatic; a contract alone does not generate a release call.
     );
 }
 
@@ -1066,6 +1141,7 @@ render_section_127 :: () {
     table_header(1, "Gate   —   What `#enable` permits");
     table_row(2, "`lossy_numerics`   |   Implicit integer-to-integer conversions that lose information: narrowing, and sign reinterpretation.");
     table_row(3, "`pointer_punning`   |   Pointee-unchecked pointer conversions, and `*T` interchangeable with `[*]T`.");
+    table_row(4, "`memory_strict`   |   Require written memory contracts at exported and external boundaries.");
     table_row(5, "`allow_union_unwrap`   |   Direct tagged-union payload access outside a pattern match.");
     table_row(6, "`#public`, `#public(unit)`, `#private`   |   Declaration visibility prefixes; these are not feature gates.");
     paragraph(7, #string,oneline

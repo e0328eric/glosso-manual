@@ -50,9 +50,6 @@
   "#foreign"
   "#c_call"
   "#packed"
-  "#align"
-  "#fresh_result"
-  "#unchecked_transfer"
   "#no_context"
   "#dump"
   "#must"
@@ -78,6 +75,9 @@
   "#disable"
   "#derive"
   "#lifetimes"
+  "#memory"
+  "#fresh_result"
+  "#unchecked_transfer"
   "#assert"
   "#public"
   "#private"
@@ -193,6 +193,7 @@
     (code_splice_identifier)
   ] @type.definition)
   [
+    (function_pointer_type_declaration)
     (struct_declaration)
     (enum_declaration)
     (union_declaration)
@@ -317,3 +318,22 @@
 (visibility_modifier "unit" @attribute)
 (operator_try_modifier "try" @attribute)
 (operator_try_modifier target: (identifier) @type)
+
+; Memory contracts use effect names and labels only within the directive.
+(memory_effect (identifier) @attribute)
+(memory_release_argument name: (identifier) @attribute)
+(memory_unknown_argument name: (identifier) @attribute)
+(memory_trusted_statement "trusted" @attribute)
+(memory_place . (identifier) @variable.parameter)
+(memory_place field: (identifier) @property)
+((memory_place . (identifier) @variable.builtin)
+  (#eq? @variable.builtin "returned"))
+(memory_qualified_name field: (identifier) @property)
+((memory_qualified_name . (identifier) @variable.builtin)
+  (#eq? @variable.builtin "returned"))
+(memory_overlay target: (memory_qualified_name (identifier) @function .))
+(memory_release_argument (memory_qualified_name (identifier) @function .))
+((memory_effect
+  kind: (identifier) @_memory_effect
+  (memory_qualified_name (identifier) @function .))
+  (#any-of? @_memory_effect "released_by" "gives" "maybe_gives"))

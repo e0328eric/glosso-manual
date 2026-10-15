@@ -25,12 +25,12 @@ function run(executable, args, environment = process.env) {
   return result;
 }
 
-function compile(name, backend = "llvm", environment = process.env) {
+function compile(name, backend = "llvm", environment = process.env, options = []) {
   const output = join(outputDirectory,
     `${name}${backend === "llvm" ? executableSuffix : ".o"}`);
   const result = run(compiler, [
     "--color", "never", "--cache-dir", cacheDirectory,
-    "--backend", backend, "-O0", "-o", output,
+    "--backend", backend, "-O0", "-o", output, ...options,
     join(fixtures, `${name}.glo`),
   ], environment);
   return { ...result, output };
@@ -76,7 +76,6 @@ for (const [name, diagnostic] of [
   ["non_exhaustive_switch", "non-exhaustive switch"],
   ["removed_string_cat", "string has no field cat"],
   ["removed_string_repeat", "string has no field repeat"],
-  ["removed_string_into_temporary", "string has no field into_temporary"],
   ["runtime_string_add", "string concatenation with '+' requires constant strings"],
 ]) {
   const rejected = compile(name, "object");
@@ -119,7 +118,7 @@ assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
 for (const name of ["removed_noreturn", "removed_private_section", "private_declaration",
-  "removed_memory", "removed_const", "removed_memory_strict",
+  "removed_const",
   "removed_type_of_method", "local_function_escape"]) {
   const rejected = compile(name, "object");
   assert.notEqual(rejected.status, 0, `${name}: obsolete syntax or private access compiled successfully`);
@@ -134,7 +133,33 @@ for (const [name, diagnostic] of [
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
 }
 
-// Borrow lifetimes are not checked. Compile the escaping-view example, but do not run it.
-assert.equal(compile("string_view_escape", "object").status, 0);
+// Warning mode may emit code for a dangling view. Never execute this fixture.
+const escaping = compile("pointer_view_escape", "object");
+assert.equal(escaping.status, 0);
+assert.match(`${escaping.stdout}\n${escaping.stderr}`, /warning:.*dangling_return/);
+const strictEscape = compile("pointer_view_escape", "object", process.env, ["--borrow-check=error"]);
+assert.notEqual(strictEscape.status, 0);
+assert.match(`${strictEscape.stdout}\n${strictEscape.stderr}`, /dangling_return/);
+assert.equal(compile("pointer_view_escape", "object", process.env, ["--borrow-check=off"]).status, 0);
 
-console.log("Language checks passed: Strings umbrella, allocator-matched string cleanup, builder repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+// The current analyzer misses this builder-backed escape, even in error mode.
+// Preserve the limitation as a compile-only fixture; its pointer is dangling.
+assert.equal(compile("string_view_escape", "object", process.env, ["--borrow-check=error"]).status, 0);
+
+assert.equal(compileAndRun("current_memory"), "memory contracts passed\n");
+const strictMemory = compile("current_memory", "object", process.env, [
+  "--borrow-check=error", "--memory-signatures", "--memory-axioms", "--memory-report",
+]);
+assert.equal(strictMemory.status, 0, `${strictMemory.stdout}\n${strictMemory.stderr}`);
+assert.match(`${strictMemory.stdout}\n${strictMemory.stderr}`, /#memory/);
+for (const [name, diagnostic] of [
+  ["memory_double_release", /double.release/],
+  ["memory_invalid_contract", /undeclared writes effect/],
+  ["memory_strict_boundary", /contract/],
+]) {
+  const checked = compile(name, "object", process.env, ["--borrow-check=error"]);
+  assert.notEqual(checked.status, 0, `${name}: memory violation compiled successfully`);
+  assert.match(`${checked.stdout}\n${checked.stderr}`, diagnostic);
+}
+
+console.log("Language checks passed: leading memory contracts, strict boundaries, release obligations, borrow analysis modes and reports, temporary string transfers, Strings umbrella, allocator-matched string cleanup, builder repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

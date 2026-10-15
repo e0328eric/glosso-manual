@@ -6,9 +6,11 @@ on inherent block headers, receiver syntax, `#Never`, and `#on_drop_error`.
 The current grammar includes read-only and writable pointer/view types,
 `c"..."` and `b"..."` literals, suffix address-of (`value.&`), repeated prefix
 `&`, negative enum values and bracket type expressions.
-It rejects removed `#memory` contracts and the `const` qualifier. The `current-language.patch` adds custom `!!` suffix operators,
-`#align(N)` struct modifiers, and `#fresh_result` / `#unchecked_transfer`
-function modifiers that the current compiler accepts. Rebuild in a local copy so the sibling
+It supports leading `#memory` contracts, trailing contracts, overlays, trusted
+blocks, and labelled effect operands, and rejects the removed `const` qualifier.
+The `current-language.patch` adds custom `!!` suffix operators,
+`#align(N)` struct modifiers, alongside the `#fresh_result` / `#unchecked_transfer`
+function modifiers already present in the sibling grammar. Rebuild in a local copy so the sibling
 repository stays unchanged.
 
 From the manual repository root, rebuild on Windows with the installed

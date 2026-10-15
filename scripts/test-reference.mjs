@@ -23,14 +23,14 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 21, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.size, 23, "default-private declarations, unit declarations, and private groups must be excluded");
 assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
 assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
 for (const name of ["Box.make", "Box.get", "Box.set"]) {
   assert.equal(symbols.get(name).kind, "method");
   assert.equal(symbols.get(name).owner_typeclass, "");
 }
-assert.equal(symbols.get("Box.get").display_signature, "Box.get :: (#self) -> ssize");
+assert.equal(symbols.get("Box.get").display_signature, "#memory { reads(#self), noescape(#self) }\nBox.get :: (#self) -> ssize");
 assert.equal(symbols.get("Box.make").display_signature, 'Box.make :: (value: ssize, label: string = "#Self_Type") -> Box');
 assert.equal(symbols.get("Box.make").function_info.return_type, "Box");
 assert.equal(symbols.get("Box.copy_from").function_info.return_type, "Fs_Error!Box");
@@ -89,11 +89,22 @@ assert.equal(lazy[3].default_value, ".[]");
 for (const name of ["legacy", "bare", "Callback"]) {
   const symbol = symbols.get(name);
   assert.deepEqual(symbol.function_info.parameters[0].constraints, ["AsView(P, Path_View)"]);
-  assert.doesNotMatch(symbol.display_signature, /#memory|\bwhere\b/);
-  assert(!("memory_contracts" in symbol.function_info));
+  assert.doesNotMatch(symbol.display_signature, /\bwhere\b/);
+  assert.match(symbol.display_signature, /#memory/);
 }
 assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
-assert.equal(symbols.get("Callback").display_signature, "Callback :: #fn_ptr(path: $P) -> string");
+assert.equal(symbols.get("Callback").display_signature, "#memory { returns_borrow(path), noescape(path) }\nCallback :: #fn_ptr(path: $P) -> string");
+
+assert.equal(symbols.get("bare").summary, "A borrowed path view with a leading contract.");
+assert.equal(symbols.get("Callback").summary, "A callback retains the contract of its function-pointer type.");
+assert.match(symbols.get("grouped").display_signature, /^#memory \{\}\ngrouped/);
+assert.equal(symbols.get("inline_contract").summary, "Visibility before an inline contract.");
+assert.equal(symbols.get("after_contract").summary, "Visibility after a multiline contract.");
+assert.match(symbols.get("after_contract").signature, /^#memory \{ reads\(value\), noescape\(value\), \}\n/);
+assert(!symbols.has("hidden_unit_contract") && !symbols.has("hidden_contract"));
+const fixtureLines = readFileSync(join(root, "scripts/tests/reference-fixture/Fixture.glo"), "utf8").split(/\r?\n/);
+assert.equal(symbols.get("after_contract").source_line,
+  fixtureLines.findIndex(line => line.includes("#public after_contract ::")) + 1);
 
 const locationModule = modules.find(module => module.name === "Source_Location");
 assert.ok(locationModule);
@@ -130,10 +141,11 @@ const trySymbols = new Map(tryModule.symbols.map(symbol => [symbol.name, symbol]
 assert.equal(trySymbols.size, 5);
 const propagation = trySymbols.get("?");
 assert.equal(propagation.kind, "method");
+assert.equal(propagation.summary, "Propagates with the current boundary witness.");
 assert.equal(propagation.owner_typeclass, "Try");
 assert.equal(propagation.has_default, true);
 assert.equal(propagation.display_signature,
-  "'?' :: (#empty: $Target, value: Carrier) -> Try_Branch(Output, Target) #operator(suffix, try(Target))");
+  "#memory { reads(value), noescape(value) }\n'?' :: (#empty: $Target, value: Carrier) -> Try_Branch(Output, Target) #operator(suffix, try(Target))");
 assert.equal(propagation.searchable_signature, "(Carrier) -> Try_Branch(Output, Target)");
 assert.deepEqual(propagation.function_info.parameters.map(parameter => [parameter.name, parameter.value_type, parameter.modifiers]), [
   ["#empty", "$Target", ["empty type witness"]], ["value", "Carrier", []],
@@ -147,4 +159,4 @@ assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.n
   "Output", "Residual", "from_output", "from_residual", "branch", "?",
 ]);
 
-console.log("Reference extraction checks passed: visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, read-only and writable pointers, typed flags, function pointers, source locations, and try(Target) operators.");
+console.log("Reference extraction checks passed: leading/trailing memory contracts, documentation across prefixes, visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, read-only and writable pointers, typed flags, function pointers, source locations, and try(Target) operators.");

@@ -10,6 +10,34 @@ theme, and Tree-sitter Glosso highlighting running through WebAssembly.
 GitHub Pages publishes precompiled files from `dist/`. It does not access the
 private Glosso repository or compile the project in GitHub Actions.
 
+## Printable language reference
+
+`docs/glosso-reference.typ` typesets the complete language manual as a linked,
+printable reference. Open `docs/glosso-reference.pdf` for the compiled edition.
+It includes all 146 sections, code examples and transcripts, notes, tables,
+grammar, and diagnostics, with a quick lookup page and PDF bookmarks.
+The website's generated per-symbol standard-library API is separate.
+
+Build with Typst (validated with 0.15.1):
+
+```sh
+typst compile docs/glosso-reference.typ docs/glosso-reference.pdf
+```
+
+The adjacent `docs/reference-manual.json` is a checked-in snapshot extracted
+from the catalog, chapter files loaded by `main.glo`, and the sidebar groups
+in `app.js`. After editing the manual, refresh it with Node.js before compiling:
+
+```sh
+node scripts/generate-typst-reference.mjs
+typst compile docs/glosso-reference.typ docs/glosso-reference.pdf
+node scripts/generate-typst-reference.mjs --check
+```
+
+The check fails when the snapshot differs from the current sources. The build
+uses local fonts and no external Typst packages or Glosso compiler. Its font
+fallbacks are listed in the Typst source and the PDF's reproduction notes.
+
 ## Files
 
 - `first.glo` is the compile-time build driver.
@@ -92,7 +120,8 @@ complete C layouts.
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
 compact signatures, parameter constraints and defaults, pointer mutability,
 flag enums, lazy parameters, function-pointer declarations, private-name
-filtering, `#Self_Type` factory results, `#Never` returns, and boundary-aware
+filtering, leading memory-contract attachment and documentation,
+`#Self_Type` factory results, `#Never` returns, and boundary-aware
 `try(Target)` operators.
 The reference gives each module separate Declarations and Methods sections;
 associated functions appear in Methods, while typeclass operations stay inside
@@ -113,9 +142,11 @@ integer or float constants. Syntax checks cover prefix and suffix
 pointer operators, C-string and byte-array literals, Unicode character
 escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
-directives, invalid Try contracts, string capacity, removed memory contracts, and removed pointer qualifiers. It also
-checks that escaping builder views compile, since pointer lifetimes are the
-programmer's responsibility; that dangling-view fixture is never executed.
+directives, invalid Try contracts, string capacity, and removed pointer qualifiers.
+Memory checks cover leading contracts, strict exported boundaries, double release,
+body-contract violations, report flags, and warning/error/off analysis modes.
+Escaping local pointers check the diagnostics. A separate builder-view escape
+records a current analysis gap; neither dangling fixture is executed.
 Pass a compiler path as its optional first argument to test another build.
 For the local installation, run
 `node scripts/test-language.mjs "$HOME/.local/glosso/bin/glosso"` with
@@ -144,7 +175,8 @@ Only public declarations and marked comments reach the reference. Explicit
 `#public(unit)` declarations are excluded. Inherent methods and associated
 functions retain their qualified owner names. Inherent headers such as
 `Counter ::: #public { ... }` set the default visibility of their members;
-nested visibility groups and individual overrides are respected. A `///` line documents the declaration
+nested visibility groups and individual overrides are respected. Leading `#memory` blocks stay attached to the following signature and its documentation.
+A `///` line documents the declaration
 written under it, and `//!` lines write the file's intro, which becomes the
 module summary. A plain `//` is an implementation note the reference never
 shows, and a further slash cancels the marker, which keeps the `////` rules
@@ -195,7 +227,7 @@ example, use `file.read()`, `File.open(path)`, and `read_file(path, max_count)`,
 Core string, numeric, and collection methods remain available. Compiler and
 Bindgen option lists are string slices; use
 `Library_Spec.library_spec("name", artifact)` to describe a Bindgen artifact,
-`Workspace.create_workspace("name")` to create a workspace, and
+`Workspace.create("name")` to create a workspace, and
 `add_build_file(path, workspace)` to compile a source file. Managed values
 move by value and clean up through `Drop`; fallible cleanup needs a compatible
 result boundary or `#on_drop_error`. Chapter examples, the build driver, and the
@@ -221,18 +253,29 @@ their containing lexical block. Structs accept `#align(N)` with a literal
 power-of-two alignment, including alongside `#packed`.
 Runtime concatenation and repetition use builders or formatting; `+` is
 available for compile-time string constants. The `string.cat()`,
-`string.repeat()`, and `string.into_temporary()` helpers have been removed.
+`string.repeat()` helpers have been removed. `string.into_temporary()` is
+available again for owned temporary-arena allocations: it transfers the release
+obligation to the arena without extending the bytes' lifetime.
 Import `Strings/Memory` for owned UTF-8 buffer cleanup with `string.free()`,
 or import the `Strings` umbrella for `Memory`, `Utf8`, and `Utf16`. A temporary
-string needs no transfer marker and expires when its arena is reclaimed.
+string expires when its arena is reset or restored. Use `into_temporary()` only
+when handing an owned arena allocation back to that arena; never for heap storage.
 Both compile-time engines use a default execution budget of 2^28 steps;
 `GLOSSO_COMPTIME_STEP_LIMIT=0` removes that limit.
 
 Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
 Pointer types use read-only `*T` and writable `*mut T`; many-pointers and views
-use `[*]T` / `[*]mut T` and `[]T` / `[]mut T`. The `const` qualifier,
-`#memory` contracts, and borrow-check options have been removed. Ownership
-checking rejects reuse after a move; it does not enforce pointer/view lifetimes.
+use `[*]T` / `[*]mut T` and `[]T` / `[]mut T`. The `const` qualifier has been removed. Leading
+`#memory { ... }` contracts describe access, escapes, invalidation, allocation,
+release, and returned origins. Body contracts are checked; bodyless declarations
+supply external contracts. Private functions can use inference. Temporal memory
+analysis defaults to `--borrow-check=warning`; use `--borrow-check=error` to
+reject findings, `--borrow-check=off` to disable body analysis, and
+`--borrow-check-std` to include standard-library bodies. `#enable(memory_strict);`
+requires contracts at exported and external memory boundaries.
+`--memory-signatures`, `--memory-axioms`, and `--memory-report` print inferred
+contracts, external contracts, and the inventory. Move checking and `Drop`
+remain responsible for managed-value transfers and automatic destruction.
 The literal `c"hello"` is a zero-terminated
 `cstring`; `b"hello"` is a fixed byte array. `ManuallyDrop(T)` suppresses automatic
 destruction until the value is extracted or explicitly destroyed. The generated

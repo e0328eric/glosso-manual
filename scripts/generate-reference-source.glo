@@ -554,7 +554,8 @@ reference_header_ends_with :: (out: *mut String_Builder, suffix: string) -> bool
 }
 
 reference_header_starts_braced_directive :: (out: *mut String_Builder) -> bool {
-    return reference_header_ends_with(out, "#modify");
+    return reference_header_ends_with(out, "#modify") ||
+        reference_header_ends_with(out, "#memory");
 }
 
 reference_header :: (source: string, start: ssize) -> Reference_Header {
@@ -1599,6 +1600,9 @@ reference_parse_file :: (
     pending_class := "";
     pending_inherent := "";
     pending_constraints := "";
+    memory_contract := "";
+    memory_summary := "";
+    memory_public: ssize = -1;
     while cursor < source.count {
         line_end := reference_line_end(source, cursor);
         line := source[cursor..line_end];
@@ -1607,6 +1611,7 @@ reference_parse_file :: (
         owner_typeclass := scope_class[depth];
         owner_inherent := scope_inherent[depth];
         visible := scope_public[depth];
+        if memory_public >= 0 visible = memory_public == 1;
         if code.starts_with("#public(unit)") {
             visible = false;
             code = code[13..code.count].trim();
@@ -1616,6 +1621,29 @@ reference_parse_file :: (
         } else if code.starts_with("#private ") {
             visible = false;
             code = code[9..code.count].trim();
+        }
+        // A leading contract is part of the following declaration, not a scope.
+        // Read it as one balanced block so braces/comments cannot hide methods
+        // or disconnect their documentation from the declaration they describe.
+        if declaration_depth && code.starts_with("#memory") {
+            open := cursor + reference_index_of(line, "#memory") + 7;
+            while open < source.count && reference_is_space(source[open]) open += 1;
+            if open < source.count && source[open] == cast(u8)(#char "{") {
+                close := reference_matching_brace(source, open);
+                if close >= 0 {
+                    memory_contract = reference_normalize_space(
+                        reference_without_comments(source[cursor..close + 1]));
+                    marker := reference_index_of(memory_contract, "#memory");
+                    memory_contract = memory_contract[marker..memory_contract.count];
+                    memory_summary = reference_previous_summary(source, cursor);
+                    memory_public = 0;
+                    if visible memory_public = 1;
+                    for i: cursor..close + 1
+                        if source[i] == cast(u8)(#char "\n") line_number += 1;
+                    cursor = close + 1;
+                    continue;
+                }
+            }
         }
         child_declarations := false;
         child_public := false;
@@ -1681,6 +1709,8 @@ reference_parse_file :: (
                         module_name,
                         reference_previous_summary(source, cursor),
                     );
+                    if summary.count == 0 && memory_contract.count > 0
+                        summary = memory_summary;
                     if right.starts_with("instance ") || right.starts_with("instance !") {
                         instance_tail := right[8..right.count].trim();
                         negative := false;
@@ -1782,6 +1812,11 @@ reference_parse_file :: (
                                 );
                             }
                         } else symbol.kind = "constant";
+                        if memory_contract.count > 0 {
+                            symbol.signature = tprint("%\n%", memory_contract, symbol.signature);
+                            if symbol.display_signature.count > 0
+                                symbol.display_signature = tprint("%\n%", memory_contract, symbol.display_signature);
+                        }
                         module.*.symbols.push(symbol);
                         inserted := &module.*.symbols[module.*.symbols.count - 1];
                         symbol_count.* += 1;
@@ -1795,6 +1830,11 @@ reference_parse_file :: (
                     }
                 }
             }
+        }
+        if code.count > 0 {
+            memory_contract = "";
+            memory_summary = "";
+            memory_public = -1;
         }
         next_depth := depth + reference_brace_delta(line);
         if child_declarations && next_depth == depth && reference_index_of_byte(code, cast(u8)(#char "{")) < 0 {
