@@ -1031,6 +1031,50 @@ render_section_123 :: () {
     note(37, #string,oneline
         \\Historical contracts after the signature remain accepted, including #memory(...). Prefer leading braced contracts in new code. Contracts describe memory behavior; Drop still determines automatic destruction and move semantics.
     );
+    subheading(38, "Result places and release identities");
+    paragraph(39, #string,oneline
+        \\Use returned for the whole result, returned.Ok for a result payload, and returned.0 or returned.1 for tuple components. A two-argument returns_borrow(returned.field, source) ties only that result field to source. Named results can replace returned paths. released_by(place: ..., by: ..., instance: ...) keeps each acquisition paired with its release operation and allocator identity.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Context";
+        \\
+        \\#memory { kills(pointer), reads(allocator), noescape(pointer, allocator) }
+        \\release_byte :: (pointer: *mut u8, allocator: Allocator)
+        \\    #foreign "c" "release_byte";
+        \\
+        \\#memory {
+        \\    reads(allocator),
+        \\    noescape(allocator),
+        \\    returns_fresh(returned.0, returned.1),
+        \\    released_by(place: returned.0, by: release_byte, instance: allocator),
+        \\    released_by(place: returned.1, by: release_byte, instance: allocator),
+        \\}
+        \\acquire_pair :: (allocator: Allocator) -> (*mut u8, *mut u8)
+        \\    #foreign "c" "acquire_pair";
+    );
+    paragraph(41, #string,oneline
+        \\This foreign API is schematic. Each returned pointer has a separate release obligation; releasing the first does not release the second. The instance identifies the allocator used for acquisition. A contract records those obligations but does not generate release calls. leak or leak(returned.0) explicitly permits an unreleased acquisition at the selected result; use it only when that behavior is intentional.
+    );
+    subheading(42, "Function-pointer contracts");
+    paragraph(43, #string,oneline
+        \\Place a leading contract before a named #fn_ptr declaration to describe indirect calls. The contract belongs to that function-pointer type, so callers can use its effects without knowing the runtime target. The same extraction and display apply to receiver methods and typeclass operations.
+    );
+    code_block(44, "glosso", #string
+        \\#memory { reads(value), noescape(value) }
+        \\Byte_Reader :: #fn_ptr(value: *u8) -> u8;
+        \\
+        \\#memory { reads(value), noescape(value) }
+        \\read_byte :: (value: *u8) -> u8 { return value.*; }
+        \\
+        \\main :: () {
+        \\    reader: Byte_Reader = read_byte;
+        \\    byte: u8 = 65;
+        \\    #assert reader(&byte) == 65;
+        \\}
+    );
+    note(45, #string,oneline
+        \\The standard-library reference shows written contracts as EFFECT and TARGETS / VALUES rows. An explicit #memory {} is labeled as an empty contract; a declaration without one is labeled separately. These tables are extracted from source. Use --memory-signatures, --memory-axioms, and --memory-report for compiler analysis.
+    );
 }
 
 render_section_124 :: () {
@@ -1316,11 +1360,33 @@ render_section_127 :: () {
         \\What it does not relax is read-only access. The gate is tested inside the
         \\branch that has already established the qualifier direction is
         \\legal, so adding writable access remains an error under the gate:
-        \\`writable: *s64 = readonly;` with `readonly: *s64` reports
-        \\`error: got *s64, expected *s64`.
+        \\`writable: *mut s64 = readonly;` with `readonly: *s64` reports
+        \\`error: got *s64, expected *mut s64`.
     );
     subheading(35, "The gate that tightens");
+    paragraph(36, #string,oneline
+        \\#enable(memory_strict); requires a written contract on every public function and every bodyless declaration whose signature crosses a memory boundary. Private implementation functions may still use inference. An explicit #memory {} meets the presence requirement, and its body is checked against that empty effect set. The runtime entry point is not automatically public; write #public when exporting a source declaration.
+    );
+    code_block(37, "glosso", #string
+        \\#enable(memory_strict);
+        \\
+        \\#public view :: (source: []u8) -> []u8 { return source; }
+        \\main :: () {}
+    );
+    code_block(38, "text", #string
+        \\error: exported function 'view' requires a #memory contract under memory_strict
+    );
+    paragraph(39, #string,oneline
+        \\Add #memory { reads(source), noescape(source), returns_borrow(source) } immediately before view to describe its borrowed result. Strict mode also rejects a named overlay on an imported function; keep that contract beside its declaration or use a bounded call-site assertion.
+    );
     table_header(40, "Rule   —   Diagnostic");
+    table_row(41, "Bodyless memory boundary without a contract   |   Requires a complete #memory contract under memory_strict.");
+    table_row(42, "Public function without a contract   |   Requires a #memory contract under memory_strict.");
+    table_row(43, "Overlay on an imported function   |   A strict module cannot overlay the imported function.");
+    paragraph(44, #string,oneline
+        \\Bare unknown is rejected under memory_strict; write an explicit hole such as unknown(reason: "external API") or unknown(arg: source). Contract diagnostics are independent of the temporal --borrow-check severity. Disabling body analysis does not waive boundary contracts. #disable(memory_strict); ends the gate for following declarations.
+    );
+
     subheading(45, "The checks a gate keeps");
     paragraph(46, #string,oneline
         \\`allow_union_unwrap` removes a compile-time rule and replaces it

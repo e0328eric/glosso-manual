@@ -23,7 +23,7 @@ assert.equal(modules.length, 3);
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 23, "default-private declarations, unit declarations, and private groups must be excluded");
+assert.equal(symbols.size, 25, "default-private declarations, unit declarations, and private groups must be excluded");
 assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
 assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
 for (const name of ["Box.make", "Box.get", "Box.set"]) {
@@ -92,6 +92,36 @@ for (const name of ["legacy", "bare", "Callback"]) {
   assert.doesNotMatch(symbol.display_signature, /\bwhere\b/);
   assert.match(symbol.display_signature, /#memory/);
 }
+// Structured effects drive the contract table, independently of the signature text.
+const effects = name => symbols.get(name).function_info.memory_contracts;
+assert.deepEqual(effects("bare"), [
+  { effect: "reads", arguments: ["path"] },
+  { effect: "noescape", arguments: ["path"] },
+  { effect: "returns_borrow", arguments: ["path"] },
+]);
+assert.deepEqual(effects("legacy"), [{ effect: "returns_borrow", arguments: ["path"] }]);
+assert.deepEqual(effects("Callback"), [
+  { effect: "returns_borrow", arguments: ["path"] },
+  { effect: "noescape", arguments: ["path"] },
+]);
+assert.deepEqual(effects("Box.get"), [
+  { effect: "reads", arguments: ["#self"] },
+  { effect: "noescape", arguments: ["#self"] },
+]);
+assert.equal(symbols.get("grouped").function_info.memory_declared, true);
+assert.deepEqual(effects("grouped"), []);
+assert.equal(open.function_info.memory_declared, false);
+assert.deepEqual(effects("open"), []);
+assert.deepEqual(effects("acquire_pair"), [
+  { effect: "returns_fresh", arguments: ["returned.0", "returned.1"] },
+  { effect: "released_by", arguments: ["place: returned.0", "by: release", "instance: allocator"] },
+  { effect: "released_by", arguments: ["place: returned.1", "by: release", "instance: allocator"] },
+  { effect: "unknown", arguments: ["arg: arg(0).data", 'reason: "external, { opaque } API"'] },
+]);
+assert.deepEqual(effects("old_parentheses"), [
+  { effect: "reads", arguments: ["value"] },
+  { effect: "noescape", arguments: ["value"] },
+]);
 assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
 assert.equal(symbols.get("Callback").display_signature, "#memory { returns_borrow(path), noescape(path) }\nCallback :: #fn_ptr(path: $P) -> string");
 
@@ -154,6 +184,14 @@ assert.deepEqual(propagation.function_info.parameters[0].constraints, [
   "Try(Target)",
   "(Try(Carrier).Residual == Try(Target).Residual || Propagate(Try(Carrier).Residual, Try(Target).Residual))",
 ]);
+const propagationEffects = [
+  { effect: "reads", arguments: ["value"] },
+  { effect: "noescape", arguments: ["value"] },
+];
+assert.deepEqual(propagation.function_info.memory_contracts, propagationEffects);
+const nestedPropagation = trySymbols.get("Try").class_info.members.find(member => member.name === "?");
+assert.equal(nestedPropagation.function_info.memory_declared, true);
+assert.deepEqual(nestedPropagation.function_info.memory_contracts, propagationEffects);
 assert.equal(trySymbols.get("Try").class_info.minimal, "from_output, from_residual, branch");
 assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.name), [
   "Output", "Residual", "from_output", "from_residual", "branch", "?",

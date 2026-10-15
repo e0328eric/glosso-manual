@@ -9,9 +9,16 @@ Reference_Parameter :: struct {
     constraints: [..]string;
 }
 
+Reference_Memory_Contract :: struct {
+    effect: string;
+    arguments: [..]string;
+}
+
 Reference_Function :: struct {
     parameters: [..]Reference_Parameter;
     return_type: string;
+    memory_declared: bool;
+    memory_contracts: [..]Reference_Memory_Contract;
     where_clauses: [..]string;
 }
 
@@ -133,6 +140,8 @@ reference_serialize_symbols :: (values: []mut Reference_Symbol) -> Serialization
 
 reference_set_function :: (out: *mut Reference_Function, value: Reference_Function) {
     out.*.return_type = value.return_type;
+    out.*.memory_declared = value.memory_declared;
+    _ := out.*.memory_contracts.replace(value.memory_contracts.take());
     _ := out.*.parameters.replace(value.parameters.take());
     _ := out.*.where_clauses.replace(value.where_clauses.take());
 }
@@ -146,6 +155,13 @@ reference_set_type_info :: (out: *mut Reference_Type_Info, value: Reference_Type
 reference_clone_function :: (value: *Reference_Function) -> Reference_Function {
     out: Reference_Function;
     out.return_type = value.*.return_type;
+    out.memory_declared = value.*.memory_declared;
+    for i: 0..value.*.memory_contracts.count {
+        contract := &value.*.memory_contracts[i];
+        copy: Reference_Memory_Contract = .{ .effect = contract.*.effect };
+        for argument: contract.*.arguments copy.arguments.push(argument);
+        out.memory_contracts.push(copy);
+    }
     for clause: value.*.where_clauses out.where_clauses.push(clause);
     for parameter_index: 0..value.*.parameters.count {
         parameter := &value.*.parameters[parameter_index];
@@ -177,6 +193,16 @@ reference_clone_function :: (value: *Reference_Function) -> Reference_Function {
         fields: [..]Serialization_Field;
         fields.push(.{ .name = "parameters", .value = reference_serialize_parameters(value.*.parameters.view()) });
         fields.push(.{ .name = "return_type", .value = serialize(value.*.return_type) });
+        fields.push(.{ .name = "memory_declared", .value = serialize(value.*.memory_declared) });
+        contracts: [..]Serialization_Value;
+        for i: 0..value.*.memory_contracts.count {
+            contract := &value.*.memory_contracts[i];
+            contract_fields: [..]Serialization_Field;
+            contract_fields.push(.{ .name = "effect", .value = serialize(contract.*.effect) });
+            contract_fields.push(.{ .name = "arguments", .value = reference_serialize_strings(contract.*.arguments.view()) });
+            contracts.push(Serialization_Value.serialization_structure_value("Reference_Memory_Contract", contract_fields));
+        }
+        fields.push(.{ .name = "memory_contracts", .value = Serialization_Value.serialization_sequence(contracts) });
         fields.push(.{ .name = "where_clauses", .value = reference_serialize_strings(value.*.where_clauses.view()) });
         return Serialization_Value.serialization_structure_value("Reference_Function", fields);
     }
@@ -1256,6 +1282,72 @@ reference_return_type :: (tail: string) -> string {
     return reference_copy_string(value);
 }
 
+// Preserve source effects, including named arguments and nested result places.
+reference_memory_contract :: (raw: string) -> Reference_Memory_Contract {
+    contract: Reference_Memory_Contract;
+    value := raw.trim();
+    if value.count == 0 return contract;
+    open := reference_index_of_byte(value, cast(u8)(#char "("));
+    if open < 0 || !value.ends_with(")") {
+        contract.effect = reference_copy_string(value);
+        return contract;
+    }
+    contract.effect = reference_copy_string(value[0..open].trim());
+    arguments := reference_split_top_level(value[open + 1..value.count - 1]);
+    for argument: arguments
+        contract.arguments.push(reference_copy_string(argument.trim()));
+    return contract;
+}
+
+reference_parse_memory_contracts :: (
+    tail: string,
+    function: *mut Reference_Function,
+) {
+    offset: ssize = 0;
+    while offset < tail.count {
+        marker := reference_find_top_level_word(tail, "#memory", offset);
+        if marker < 0 break;
+        cursor := marker + 7;
+        while cursor < tail.count && reference_is_space(tail[cursor]) cursor += 1;
+        raw := "";
+        if cursor < tail.count && tail[cursor] == cast(u8)(#char "(") {
+            close := reference_matching_paren(tail, cursor);
+            if close < 0 break;
+            raw = tail[cursor + 1..close];
+            offset = close + 1;
+        } else if cursor < tail.count && tail[cursor] == cast(u8)(#char "{") {
+            close := reference_matching_brace(tail, cursor);
+            if close < 0 break;
+            raw = tail[cursor + 1..close];
+            offset = close + 1;
+        } else {
+            end := cursor;
+            while end < tail.count && reference_is_identifier_continue(tail[end]) end += 1;
+            if end == cursor break;
+            argument_open := end;
+            while argument_open < tail.count && reference_is_space(tail[argument_open])
+                argument_open += 1;
+            if argument_open < tail.count && tail[argument_open] == cast(u8)(#char "(") {
+                close := reference_matching_paren(tail, argument_open);
+                if close < 0 break;
+                raw = tail[cursor..close + 1];
+                offset = close + 1;
+            } else {
+                raw = tail[cursor..end];
+                offset = end;
+            }
+        }
+        function.*.memory_declared = true;
+        parts := reference_split_top_level(raw);
+        for part: parts {
+            contract := reference_memory_contract(part);
+            if contract.effect.count > 0
+                function.*.memory_contracts.push(contract);
+        }
+        parts.free();
+    }
+}
+
 reference_display_decorations :: (value: string) -> string {
     // Keep directives such as #operator, but elide the modifier's code body.
     marker := reference_find_top_level_word(value, "#modify");
@@ -1281,6 +1373,7 @@ reference_function_info :: (right: string) -> Reference_Function {
     parts.free();
     tail := right[close + 1..right.count];
     function.return_type = reference_return_type(tail);
+    reference_parse_memory_contracts(tail, &function);
     reference_parse_where_clauses(tail, &function);
     return function;
 }
@@ -1813,6 +1906,7 @@ reference_parse_file :: (
                             }
                         } else symbol.kind = "constant";
                         if memory_contract.count > 0 {
+                            reference_parse_memory_contracts(memory_contract, &symbol.function_info);
                             symbol.signature = tprint("%\n%", memory_contract, symbol.signature);
                             if symbol.display_signature.count > 0
                                 symbol.display_signature = tprint("%\n%", memory_contract, symbol.display_signature);

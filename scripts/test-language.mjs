@@ -146,6 +146,9 @@ assert.equal(compile("pointer_view_escape", "object", process.env, ["--borrow-ch
 // Preserve the limitation as a compile-only fixture; its pointer is dangling.
 assert.equal(compile("string_view_escape", "object", process.env, ["--borrow-check=error"]).status, 0);
 
+assert.equal(compileAndRun("memory_callbacks"), "");
+const resultPlaces = compile("memory_result_places", "object", process.env, ["--borrow-check=error"]);
+assert.equal(resultPlaces.status, 0, `${resultPlaces.stdout}\n${resultPlaces.stderr}`);
 assert.equal(compileAndRun("current_memory"), "memory contracts passed\n");
 const strictMemory = compile("current_memory", "object", process.env, [
   "--borrow-check=error", "--memory-signatures", "--memory-axioms", "--memory-report",
@@ -160,6 +163,13 @@ for (const [name, diagnostic] of [
   const checked = compile(name, "object", process.env, ["--borrow-check=error"]);
   assert.notEqual(checked.status, 0, `${name}: memory violation compiled successfully`);
   assert.match(`${checked.stdout}\n${checked.stderr}`, diagnostic);
+}
+
+// Contract requirements still apply when temporal body checking is disabled.
+for (const name of ["memory_strict_boundary", "memory_strict_unknown"]) {
+  const checked = compile(name, "object", process.env, ["--borrow-check=off"]);
+  assert.notEqual(checked.status, 0, `${name}: strict boundary requirements were disabled`);
+  assert.match(`${checked.stdout}\n${checked.stderr}`, /memory_strict/);
 }
 
 console.log("Language checks passed: leading memory contracts, strict boundaries, release obligations, borrow analysis modes and reports, temporary string transfers, Strings umbrella, allocator-matched string cleanup, builder repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

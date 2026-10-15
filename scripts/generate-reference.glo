@@ -603,10 +603,10 @@ reference_stream_function_rows :: (
     function: ?*mut Serialization_Value,
     details: *mut String_Builder,
     detail_count: *mut ssize,
-) -> (ssize, ssize, string) {
+) -> (ssize, ssize, string, ssize, ssize, bool) {
     first_parameter := detail_count.*;
     if !function
-        return first_parameter, 0, "";
+        return first_parameter, 0, "", detail_count.*, 0, false;
 
     parameters := reference_json_array(function, "parameters");
     for i: 0..parameters.count {
@@ -627,8 +627,20 @@ reference_stream_function_rows :: (
     }
     parameter_count := detail_count.* - first_parameter;
     return_type := reference_json_text(function, "return_type");
-    return first_parameter, parameter_count, return_type;
-
+    first_memory := detail_count.*;
+    contracts := reference_json_array(function, "memory_contracts");
+    for i: 0..contracts.count {
+        contract := &contracts[i];
+        arguments := reference_json_array(contract, "arguments");
+        argument_text := "—";
+        if arguments.count > 0
+            argument_text = reference_join_json_texts(arguments, ", ");
+        reference_stream_detail_row(details, reference_json_text(contract, "effect"), argument_text);
+        detail_count.* += 1;
+    }
+    return first_parameter, parameter_count, return_type,
+        first_memory, detail_count.* - first_memory,
+        reference_json_bool(function, "memory_declared");
 }
 
 reference_stream_type_details :: (
@@ -702,7 +714,8 @@ reference_stream_typeclass_members :: (
         kind := reference_json_text(member, "kind");
         if kind == "associated-type" associated += 1;
         if kind == "method" methods += 1;
-        first_parameter, parameter_count, return_type := reference_stream_function_rows(
+        first_parameter, parameter_count, return_type,
+            first_memory, memory_count, memory_declared := reference_stream_function_rows(
                 reference_json_field(member, "function_info"),
                 details,
                 detail_count,
@@ -724,6 +737,9 @@ reference_stream_typeclass_members :: (
         members_out.write_string(", .first_parameter = "); reference_write_integer(members_out, first_parameter);
         members_out.write_string(", .parameter_count = "); reference_write_integer(members_out, parameter_count);
         members_out.write_string(", .return_type = "); reference_write_escaped_string(members_out, return_type, true);
+        members_out.write_string(", .first_memory = "); reference_write_integer(members_out, first_memory);
+        members_out.write_string(", .memory_count = "); reference_write_integer(members_out, memory_count);
+        members_out.write_string(", .memory_declared = "); reference_write_boolean(members_out, memory_declared);
         members_out.write_string(" },\n");
         member_count.* += 1;
     }
@@ -815,7 +831,8 @@ reference_generate_outputs :: (
             symbol := ordered[i];
             detail_kind, first_detail, type_detail_count :=
                 reference_stream_type_details(symbol, &glo_details, &detail_count);
-            first_parameter, parameter_count, return_type := reference_stream_function_rows(
+            first_parameter, parameter_count, return_type,
+                first_memory, memory_count, memory_declared := reference_stream_function_rows(
                     reference_json_field(symbol, "function_info"),
                     &glo_details,
                     &detail_count,
@@ -859,6 +876,9 @@ reference_generate_outputs :: (
             glo_symbols.write_string(", .first_parameter = "); reference_write_integer(&glo_symbols, first_parameter);
             glo_symbols.write_string(", .parameter_count = "); reference_write_integer(&glo_symbols, parameter_count);
             glo_symbols.write_string(", .return_type = "); reference_write_escaped_string(&glo_symbols, return_type, true);
+            glo_symbols.write_string(", .first_memory = "); reference_write_integer(&glo_symbols, first_memory);
+            glo_symbols.write_string(", .memory_count = "); reference_write_integer(&glo_symbols, memory_count);
+            glo_symbols.write_string(", .memory_declared = "); reference_write_boolean(&glo_symbols, memory_declared);
             glo_symbols.write_string(", .minimal = "); reference_write_escaped_string(&glo_symbols, minimal, true);
             glo_symbols.write_string(", .minimal_explicit = "); reference_write_boolean(&glo_symbols, minimal_explicit);
             glo_symbols.write_string(", .first_member = "); reference_write_integer(&glo_symbols, first_member);
@@ -947,6 +967,9 @@ reference_generate_outputs :: (
         \\    first_parameter: s32;
         \\    parameter_count: s32;
         \\    return_type: string;
+        \\    first_memory: s32;
+        \\    memory_count: s32;
+        \\    memory_declared: bool;
         \\    minimal: string;
         \\    minimal_explicit: bool;
         \\    first_member: s32;
@@ -972,6 +995,9 @@ reference_generate_outputs :: (
         \\    first_parameter: s32;
         \\    parameter_count: s32;
         \\    return_type: string;
+        \\    first_memory: s32;
+        \\    memory_count: s32;
+        \\    memory_declared: bool;
         \\}
         \\
         \\Std_Instance_Doc :: struct {

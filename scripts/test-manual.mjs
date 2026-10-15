@@ -366,7 +366,8 @@ for (const width of [390, 1280]) {
     assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
     assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
     assert(!text.includes('#magic "str_concat"'), `Removed string intrinsic in chapter ${index}`);
-    if (index === 123) assert(text.includes("--borrow-check=error") && text.includes("returns_borrow"), "Memory contracts chapter is stale");
+    if (index === 123) assert(text.includes("--borrow-check=error") && text.includes("returns_borrow") && text.includes("Byte_Reader"), "Memory contracts chapter is stale");
+    if (index === 127) assert(text.includes("strict module cannot overlay") && text.includes("unknown(reason:"), "Strict memory rules are missing");
     if (index === 27) assert(text.includes("Strings/Memory"), "Owned-string cleanup imports are stale");
     if (index === 105) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is stale");
     if (index === 142) assert(text.includes("These six directories"), "Namespace-only directory list is stale");
@@ -442,6 +443,28 @@ for (const width of [390, 1280]) {
   assert.equal(instance.exports.glo_manual_get_module(), stringMemory);
   assert.equal(instance.exports.glo_manual_get_reference_methods(), 1);
   assert(textRuns.some(run => run.value === "string.free" && run.anchor));
+
+  // Contract rows are rendered for free functions, receiver methods, callback
+  // types and nested class operations, rather than only copied into signatures.
+  text = openSymbolSearch(width, metaModule, "type_of");
+  assert(text.includes("#MEMORY CONTRACTS"));
+  assert(textRuns.some(run => run.value === "noescape"));
+  assert(textRuns.some(run => run.value === "val"));
+  text = openSymbolSearch(width, moduleIndex("String_Builder"), "String_Builder.to_string");
+  assert(textRuns.some(run => run.value === "returns_borrow"));
+  assert(textRuns.some(run => run.value === "#self"));
+  text = openSymbolSearch(width, moduleIndex("Context"), "Allocator_Proc");
+  assert(textRuns.some(run => run.value === "maybe_kills"));
+  assert(textRuns.some(run => run.value === "unknown"));
+  text = openSymbolSearch(width, moduleIndex("Io/Core"), "read");
+  assert(textRuns.some(run => run.value === "read" && run.anchor));
+  assert(textRuns.some(run => run.value === "writes"));
+  assert(textRuns.some(run => run.value === "reader, destination"));
+  text = openSymbolSearch(width, moduleIndex("Gui/Native"), "gui_scene_end");
+  assert(text.includes("Written empty contract (#memory {})."));
+  instance.exports.glo_manual_select_module(moduleIndex("Prelude/Drop"));
+  text = render(width);
+  assert(text.includes("No written #memory contract"));
 
   // Browse a real multi-page Methods section and confirm search can navigate
   // directly to a late method, while a typeclass operation targets its owner.

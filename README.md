@@ -5,7 +5,8 @@ The Glosso language manual is a static website rendered by Glosso and
 
 The site includes the language chapters, a generated public standard-library
 reference, global name and function-signature search, a persistent light/dark
-theme, and Tree-sitter Glosso highlighting running through WebAssembly.
+theme, written memory-contract tables, and Tree-sitter Glosso highlighting
+running through WebAssembly.
 
 GitHub Pages publishes precompiled files from `dist/`. It does not access the
 private Glosso repository or compile the project in GitHub Actions.
@@ -123,6 +124,13 @@ flag enums, lazy parameters, function-pointer declarations, private-name
 filtering, leading memory-contract attachment and documentation,
 `#Self_Type` factory results, `#Never` returns, and boundary-aware
 `try(Target)` operators.
+The reference restores a separate `#MEMORY CONTRACTS` table for functions,
+receiver methods, named function-pointer types, and nested typeclass operations.
+Effects and their arguments come from leading or historical trailing contracts.
+Written empty contracts are distinguished from declarations without a contract;
+these are source contracts, while compiler inference is available through the
+compiler report flags. Named result places and allocator/releaser labels are
+preserved.
 The reference gives each module separate Declarations and Methods sections;
 associated functions appear in Methods, while typeclass operations stay inside
 their class declaration. Search opens the matching section and page.
@@ -144,7 +152,9 @@ escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
 access, and generic struct literals. It also checks rejection of removed
 directives, invalid Try contracts, string capacity, and removed pointer qualifiers.
 Memory checks cover leading contracts, strict exported boundaries, double release,
-body-contract violations, report flags, and warning/error/off analysis modes.
+body-contract violations, indirect calls, separate tuple-result release identities,
+report flags, and warning/error/off analysis modes. Strict boundary requirements
+are also checked with body analysis disabled.
 Escaping local pointers check the diagnostics. A separate builder-view escape
 records a current analysis gap; neither dangling fixture is executed.
 Pass a compiler path as its optional first argument to test another build.
@@ -272,7 +282,9 @@ supply external contracts. Private functions can use inference. Temporal memory
 analysis defaults to `--borrow-check=warning`; use `--borrow-check=error` to
 reject findings, `--borrow-check=off` to disable body analysis, and
 `--borrow-check-std` to include standard-library bodies. `#enable(memory_strict);`
-requires contracts at exported and external memory boundaries.
+requires contracts at public and external memory boundaries, rejects overlays
+on imported functions, and requires explicit `unknown(...)` holes. These
+requirements also apply when temporal body checking is off.
 `--memory-signatures`, `--memory-axioms`, and `--memory-report` print inferred
 contracts, external contracts, and the inventory. Move checking and `Drop`
 remain responsible for managed-value transfers and automatic destruction.
