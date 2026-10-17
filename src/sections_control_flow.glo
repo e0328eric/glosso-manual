@@ -80,7 +80,7 @@ render_section_87 :: () {
         \\shortcut.
     );
     paragraph(15, #string,oneline
-        \\A case label is an ordinary expression, so without the semicolon the
+        \\A case label ends at its semicolon; without it the
         \\parser has no way to know that the label has ended and the arm body has
         \\begun. Omitting it reports the first token of the body.
     );
@@ -387,10 +387,12 @@ render_section_88 :: () {
 
 render_section_89 :: () {
     paragraph(0, #string,oneline
-        \\Glosso has no `switch` keyword. A switch is an `if` whose condition is a
-        \\subject expression followed immediately by `==` and `{`. The braces hold
-        \\case arms rather than statements, each arm opening with a `case` label
-        \\that ends in a semicolon, and the default arm is spelled `else;`.
+        \\Glosso has no `switch` keyword. A switch is an `if` followed by a subject
+        \\expression, `==`, and a case block. Each arm starts with `case`, a pattern,
+        \\and a mandatory semicolon; the default arm is spelled `else;`.
+        \\`if subject == { ... }` and `if #pattern subject == { ... }` are equivalent
+        \\spellings of the same pattern switch. Both support payload captures,
+        \\nested patterns, guards, and the same exhaustiveness checks.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
@@ -448,8 +450,8 @@ render_section_89 :: () {
     );
     subheading(8, "The shape");
     code_block(9, "text", #string
-        \\if [#partial] <subject> == {
-        \\case <label> [, <label>]* ;
+        \\if [#partial] [#pattern] <subject> == {
+        \\case <pattern> [, <pattern>]* [if <condition>];
         \\    <statements>
         \\...
         \\else;
@@ -457,12 +459,11 @@ render_section_89 :: () {
         \\}
     );
     paragraph(10, #string,oneline
-        \\The semicolon after a label and after `else` is mandatory, and it is
-        \\mandatory because a label is an ordinary expression: nothing else marks
-        \\where the label ends and the arm body begins. Omitting it reports the
-        \\first token of the body, `error: unexpected token 'print'` for
-        \\`case 1 print("one\n");`. Arm bodies are statement lists, not blocks,
-        \\and they are not braced.
+        \\The semicolon after a case pattern and its optional guard, and after
+        \\`else`, is mandatory: it separates the label from the arm body.
+        \\Omitting it reports the first token of the body,
+        \\`error: unexpected token 'print'` for `case 1 print("one\n");`.
+        \\Arm bodies are statement lists and do not need their own braces.
     );
     paragraph(11, #string,oneline
         \\An arm runs to the next `case`, the `else`, or the closing brace. There
@@ -473,9 +474,11 @@ render_section_89 :: () {
     );
     subheading(12, "Case labels by subject type");
     paragraph(13, #string,oneline
-        \\A label is a literal, a range, an enum constant, or a union variant,
-        \\depending on what the subject is. Several labels may share one arm by
-        \\separating them with commas.
+        \\A case label uses the pattern language for the subject's type. Literals,
+        \\ranges, enum constants, and union variants are common labels; struct and
+        \\slice patterns and nested payload patterns work here too. Several
+        \\patterns may share one arm by separating them with commas or `|`.
+        \\The Pattern Vocabulary describes the full set of patterns.
     );
     table_header(14, "Subject   —   Label spellings");
     table_row(15, "integer   |   `case 7;`, `case 1, 2, 3;`, `case ..=0;`, `case 4..=9;`, `case 10..;`");
@@ -488,7 +491,9 @@ render_section_89 :: () {
     );
     table_row(19, "`bool`   |   `case true;`, `case false;`");
     table_row(20, "enum   |   `case Level.Warn;`, `case .Warn;`, `case .Warn, .Error;`");
-    table_row(21, "tagged union   |   `case Name;`, `case .Name;`, `case Name(text);`, `case .Name(text);`");
+    table_row(21, #string,oneline
+        \\tagged union   |   `case Name;`, `case .Name;`, `case Name(text);`, `case .Name(text);`, `case Token.Name(text);`
+    );
     table_row(22, "`?T`, `E!T`   |   `case .Some(v);`, `case .None;`, `case .Ok(v);`, `case .Err(e);`");
     table_row(23, "any   |   `else;`");
     paragraph(24, #string,oneline
@@ -532,11 +537,53 @@ render_section_89 :: () {
         \\dotted Eof, payload is the empty tuple: 1
     );
     note(27, #string,oneline
-        \\An enum constant may be written qualified or with a leading dot, but a
-        \\union variant may not be qualified here: `case Token.Name(s);` is
-        \\`error: '' is not a variant of union Token`. Use `Name(s)` or
-        \\`.Name(s)`. The qualified spelling is accepted in a `#pattern` switch,
-        \\which is a different form.
+        \\A union variant may be qualified, dotted, or bare in a case label:
+        \\`case Token.Name(text);`, `case .Name(text);`, and `case Name(text);`
+        \\match the same variant and bind the same payload. Adding `#pattern`
+        \\before the subject does not change which labels are accepted.
+    );
+    subheading(38, #string,oneline
+        \\Captures and case guards
+    );
+    paragraph(39, #string,oneline
+        \\A guard is introduced by `if`: `case .Some(x) if x > 0;`.
+        \\The pattern first checks the tag and binds `x`; the guard can then
+        \\read it. Cases are tried in order. If the guard is false, matching
+        \\continues at the next case; after a successful case body, the switch
+        \\ends. Each case has its own capture scope.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\
+        \\describe :: (val: ?s64) {
+        \\    if val == {
+        \\    case .Some(x) if x > 0;
+        \\        print("value is positive\n");
+        \\    case .Some(x);
+        \\        print("value is nonpositive\n");
+        \\    case .None;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    describe(.Some(5));
+        \\    describe(.Some(0));
+        \\    describe(.Some(-2));
+        \\    describe(.None);
+        \\}
+    );
+    code_block(41, "text", #string
+        \\value is positive
+        \\value is nonpositive
+        \\value is nonpositive
+    );
+    note(42, #string,oneline
+        \\The second `.Some(x)` covers zero and negative values, so its message
+        \\says "nonpositive". The `.None` arm does nothing. The unguarded
+        \\`.Some(x)` and `.None` arms make this switch exhaustive; a guarded
+        \\`.Some(x)` alone does not cover every `Some` value. Write
+        \\`case .Some(x) if x > 0 && x < 100;` for a compound guard.
+        \\`case .Some(x) && x > 0;` is not valid case syntax.
     );
     subheading(28, "Nothing matched");
     paragraph(29, #string,oneline
@@ -558,11 +605,11 @@ render_section_89 :: () {
         \\fell out of the ssize switch
     );
     paragraph(32, #string,oneline
-        \\Scalar and enum statement switches are coverage-checked by default.
-        \\A gap reports non-exhaustive switch with a missing-case witness.
-        \\Cover every value, add else, or use #partial for intentional fall-through.
-        \\Tagged-union switches likewise require all variants, else, or #partial.
-        \\Covered arms can receive an unreachable-pattern warning.
+        \\Statement switches are exhaustive by default, with or without the
+        \\`#pattern` marker. A gap reports `non-exhaustive switch` with a
+        \\missing-case witness. Cover every value, add `else`, or use `#partial`
+        \\to allow unmatched values to continue after the switch. Arms already
+        \\covered by earlier cases can receive an unreachable-pattern warning.
     );
     paragraph(33, #string,oneline
         \\`#partial` waives that requirement and is written immediately after
@@ -594,12 +641,12 @@ render_section_89 :: () {
         \\`error: cannot switch on a raw union (it has no tag)`.
     );
     paragraph(37, #string,oneline
-        \\One arm may not capture from several tags whose payloads differ:
-        \\`case .Name(x), .Code(x);` is `error: a case with several tags cannot
-        \\capture a payload - the tags have different payload types`. Grouping
-        \\tags that share a body is covered in `case A, B;` Groups and
-        \\`#falling`, and the coverage analysis itself in Exhaustiveness, Guards,
-        \\and Reachability.
+        \\Grouped patterns may capture when every alternative binds the same names
+        \\at the same types: `case .Name(x), .Text(x);` works when both payloads
+        \\are strings. Alternatives with different payload types, such as
+        \\`.Name(x)` and `.Code(x)`, cannot bind the same `x`. The comma spelling
+        \\follows the same rules as `|`. See `case A, B;` Groups and `#falling`,
+        \\and Exhaustiveness, Guards, and Reachability.
     );
 }
 
@@ -613,8 +660,12 @@ render_section_90 :: () {
     );
     table_header(1, "Form   —   Shape");
     table_row(2, "conditional   |   `ifx cond then-expr else else-expr`");
-    table_row(3, "value switch   |   `ifx subject == { case L; expr; ... else; expr; }`");
-    table_row(4, "pattern switch   |   `ifx #pattern [subject] == { case P; expr; ... }`");
+    table_row(3, #string,oneline
+        \\subject switch   |   `ifx [#pattern] subject == { case P [if cond]; expr; ... }`
+    );
+    table_row(4, #string,oneline
+        \\subject-less switch   |   `ifx #pattern == { case cond; expr; ... else; expr; }`
+    );
     code_block(5, "glosso", #string
         \\#import "Io";
         \\
@@ -653,11 +704,12 @@ render_section_90 :: () {
         \\gt
     );
     paragraph(7, #string,oneline
-        \\The switch forms share the subject and label grammar of the statement
-        \\switch, including the mandatory semicolon after each label and after
-        \\`else`. The subject-less pattern form takes arbitrary boolean
-        \\predicates as its labels. `ifx` does not accept `#partial`:
-        \\`ifx #partial c == { ... }` is
+        \\With a subject, `ifx subject == { ... }` and
+        \\`ifx #pattern subject == { ... }` are equivalent. They use the same
+        \\patterns and guards as the statement switch, including the mandatory
+        \\semicolon after each label and after `else`. The subject-less form
+        \\keeps `#pattern` and takes boolean conditions as its labels.
+        \\`ifx` does not accept `#partial`: `ifx #partial c == { ... }` is
         \\`error: unexpected directive 'partial'`, since waiving coverage would
         \\leave the expression with no value to produce.
     );
@@ -767,11 +819,10 @@ render_section_90 :: () {
     paragraph(26, #string,oneline
         \\Subjects whose domain cannot be enumerated are never total on literals
         \\alone. An `f64` or `string` subject with only literal labels reports
-        \\`note: missing case: _`, and the subject-less predicate form reports the
-        \\same witness under `error: non-exhaustive #pattern switch`, because an
-        \\arbitrary boolean predicate proves nothing about coverage. The analysis
-        \\behind the witnesses is described in Exhaustiveness, Guards, and
-        \\Reachability.
+        \\`note: missing case: _`. A subject-less switch without `else` reports
+        \\the same witness under `error: cannot decide a value for this ifx`,
+        \\because arbitrary boolean conditions prove nothing about coverage.
+        \\The analysis is described in Exhaustiveness, Guards, and Reachability.
     );
     paragraph(27, #string,oneline
         \\When the subject is known at compile time and no arm matches it, the
@@ -835,11 +886,12 @@ render_section_90 :: () {
 
 render_section_91 :: () {
     paragraph(0, #string,oneline
-        \\`#pattern` introduces the pattern language. A pattern is one construct
-        \\that does two things at once: it tests a value's shape and it binds
-        \\names to the parts it found. That pairing is why patterns are the only
-        \\way to read a tagged union's payload, since the binding cannot happen
-        \\without the test having succeeded.
+        \\A pattern tests a value's shape and binds names to the parts it found.
+        \\This pairing makes it possible to read a tagged union's payload only
+        \\after proving its active variant. `#pattern` introduces a pattern test
+        \\in an ordinary condition, a bind-or-diverge statement, or a pattern
+        \\quote. A switch case already accepts patterns, so its subject may be
+        \\written with or without the `#pattern` marker.
     );
     paragraph(1, #string,oneline
         \\This chapter covers where a pattern may appear and the two rules that
@@ -851,10 +903,28 @@ render_section_91 :: () {
     table_row(3, "`if #pattern P = subject { ... }`   |   condition   |   One-shot test; captures reach the then-branch.");
     table_row(4, "`if #pattern { P1 = s1; P2 = s2; }`   |   condition   |   Multi-arm test; all arms must match; captures join.");
     table_row(5, "`while #pattern P = subject { ... }`   |   condition   |   Re-tested and re-bound each iteration.");
-    table_row(6, "`if [#partial] #pattern [subject] == { case P; ... }`   |   statement   |   Pattern switch.");
-    table_row(7, "`ifx #pattern [subject] == { case P; expr; ... }`   |   expression   |   Pattern switch that yields a value.");
+    table_row(6, #string,oneline
+        \\`if [#partial] [#pattern] subject == { case P; ... }`   |   statement   |   Switch on a value; `#pattern` is optional.
+    );
+    table_row(7, #string,oneline
+        \\`ifx [#pattern] subject == { case P; expr; ... }`   |   expression   |   Switch on a value and yield a result; `#pattern` is optional.
+    );
+    table_row(38, #string,oneline
+        \\`if [#partial] #pattern == { case condition; ... }`   |   statement   |   Subject-less switch; `#pattern` is required.
+    );
+    table_row(39, #string,oneline
+        \\`ifx #pattern == { case condition; expr; ... }`   |   expression   |   Subject-less switch that yields a value.
+    );
     table_row(8, "`#pattern P := subject else { ... };`   |   statement   |   Bind into the enclosing scope or diverge.");
     table_row(9, "`#pattern P`   |   expression   |   A quote: a compile-time value of type `Pattern`.");
+    paragraph(40, #string,oneline
+        \\For a union subject, `if val == { case .Some(x); ... }` and
+        \\`if #pattern val == { case .Some(x); ... }` have the same meaning,
+        \\capture scope, guards, and coverage requirements. A single-pattern
+        \\condition still needs `#pattern`: `if #pattern .Some(x) = val { ... }`.
+        \\Compose that test with `&& x > 0`; in a case label, introduce the guard
+        \\with `if x > 0`. Switching on a Value gives a complete example.
+    );
     paragraph(10, #string,oneline
         \\The parser tells these apart by scanning ahead from the pattern for a
         \\depth-zero `=` or `:=`. A depth-zero `=` makes it a test, a `:=` makes it
@@ -887,7 +957,7 @@ render_section_91 :: () {
         \\        if v <= 1 { o = .None; } else { o = .Some(v - 1); }
         \\    }
         \\
-        \\    if #pattern s == {
+        \\    if s == {
         \\    case Shape.Circle(r); print("switch: circle %\n", r);
         \\    case Shape.Rect(w);   print("switch: rect %\n", w);
         \\    case Shape.Empty;     print("switch: empty\n");
@@ -954,11 +1024,11 @@ render_section_91 :: () {
         \\not huge
     );
     note(19, #string,oneline
-        \\Do not put `||` between two pattern tests. It compiles, but `||` short
-        \\circuits, so the untaken alternative's captures are in scope and never
-        \\written; the arm reads uninitialised storage. `|` inside a single
-        \\pattern is the supported spelling for alternatives, and it forces every
-        \\alternative to bind the same names at the same types.
+        \\A pattern test cannot be an operand of `||`; the compiler rejects it
+        \\because a short-circuited branch would leave captures unbound.
+        \\Use `|` inside one pattern when either alternative may match the same
+        \\subject, and bind the same names at the same types in every alternative.
+        \\Use separate switch cases or nested tests for other alternatives.
     );
     paragraph(20, #string,oneline
         \\A test cannot be negated. `!(#pattern P = subject)` is
@@ -1302,13 +1372,14 @@ render_section_92 :: () {
     );
     subheading(37, "Guards and compound conditions");
     paragraph(38, #string,oneline
-        \\A case in a `#pattern` switch may carry a guard: `case P if <cond>;`
-        \\matches when `P` matches and `cond` is then true, and a failing guard
-        \\tries the next case rather than leaving the switch. That is the
-        \\behaviour an `if` nested inside the arm body cannot express. The guard is
-        \\checked with the full condition grammar, so it sees the arm's captures
-        \\and may itself contain a `#pattern` test that binds more names. Outside a
-        \\switch, `&&` composes a test with an ordinary condition in the same way.
+        \\A case may carry a guard in either switch spelling:
+        \\`case P if <condition>;` first matches `P` and then tests the condition.
+        \\A false guard tries the next case. An `if` nested inside the body runs
+        \\after the case has already been selected, so it does not retry later
+        \\cases. The guard sees the pattern's captures and may contain `&&`,
+        \\ordinary boolean expressions, or additional `#pattern` tests that bind
+        \\more names. Outside a switch, compose a pattern test with an extra
+        \\condition using `if #pattern P = subject && condition { ... }`.
     );
     code_block(39, "glosso", #string
         \\#import "Io";
@@ -1322,7 +1393,7 @@ render_section_92 :: () {
         \\}
         \\
         \\describe :: (s: Shape) -> string {
-        \\    if #pattern s == {
+        \\    if s == {
         \\    case Shape.Circle(r) if r > 100.0;                              return "huge circle";
         \\    case Shape.Circle(r) if #pattern Size.Big(scale) = classify(r);
         \\        print("  scale %\n", scale);
@@ -1357,12 +1428,10 @@ render_section_92 :: () {
         \\has the consequences.
     );
     note(42, #string,oneline
-        \\`||` between two pattern tests compiles but is unsound. `||`
-        \\short-circuits, so the captures of the alternative that was not evaluated
-        \\are in scope and were never written:
-        \\`if #pattern .X(p) = u || #pattern .Y(q) = w print("% %\n", p, q);` prints
-        \\`1 0`, where the `0` is an uninitialised capture. Use a switch or nested
-        \\tests instead.
+        \\`||` cannot combine pattern tests: the compiler reports
+        \\`error: a '#pattern' test cannot be an operand of '||'`, because only
+        \\one side may run and the other side's captures would not exist.
+        \\Use a switch, nested tests, or an or-pattern over one subject instead.
     );
     note(43, #string,oneline
         \\A pattern test cannot be negated. `if !(#pattern .Some(v) = o)` is
@@ -1582,7 +1651,7 @@ render_section_93 :: () {
         \\the intervals the instance returned, clamped to `u8`.
     );
     code_block(30, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: 0..=47
         \\note: missing case: 58..=64
         \\note: missing case: 91..=96
@@ -1615,12 +1684,12 @@ render_section_94 :: () {
         \\value, so it may contain `_` where any value would do.
     );
     paragraph(2, #string,oneline
-        \\The coverage analysis governs #pattern switches, scalar and enum statement
-        \\switches, and the switch forms of ifx. An incomplete statement switch reports
-        \\non-exhaustive switch and lists missing cases; add else or #partial when
-        \\coverage is intentionally incomplete. An ifx reports cannot decide a value
-        \\for this ifx and requires an else arm or complete coverage. Tagged-union
-        \\statement switches also check that every variant is handled.
+        \\The same coverage analysis governs switches with and without `#pattern`,
+        \\including tagged unions and the switch forms of `ifx`. An incomplete
+        \\statement switch reports `non-exhaustive switch` and lists missing
+        \\cases; cover them, add `else`, or use `#partial`. An `ifx` reports
+        \\`cannot decide a value for this ifx` and requires complete coverage or
+        \\an `else` arm.
     );
     subheading(3, "Enumerable and opaque domains");
     paragraph(4, #string,oneline
@@ -1661,7 +1730,7 @@ render_section_94 :: () {
         \\main :: () { print("%\n", area(Shape.Rect(2.0))); }
     );
     code_block(16, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Shape.Empty
         \\note: cover them, or add 'else' or '#partial'
     );
@@ -1699,7 +1768,7 @@ render_section_94 :: () {
         \\}
     );
     code_block(30, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Big.B
         \\note: missing case: Big.C
         \\note: missing case: Big.D
@@ -1731,7 +1800,7 @@ render_section_94 :: () {
         \\}
     );
     code_block(34, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Shape.Circle(_)
         \\note: cover them, or add 'else' or '#partial'
     );
@@ -1744,10 +1813,10 @@ render_section_94 :: () {
     subheading(36, "Reachability");
     paragraph(37, #string,oneline
         \\The same usefulness call, run against the arms that precede each arm,
-        \\reports arms that can never be entered. This is a warning, not an
-        \\error, and it runs whether or not the switch has an `else`. It applies
-        \\only to `#pattern` switches with a subject; duplicate labels in a plain
-        \\switch are not diagnosed, and the first matching arm wins.
+        \\reports arms that can never be entered. This is a warning and runs
+        \\whether or not the switch has an `else`. It applies to switches with
+        \\a subject, with or without `#pattern`; the first matching case whose
+        \\guard succeeds wins.
     );
     code_block(38, "glosso", #string
         \\#import "Io";
@@ -1772,22 +1841,21 @@ render_section_94 :: () {
         \\while an unguarded `case any;` makes them all dead.
     );
     note(41, #string,oneline
-        \\`#partial`, written immediately after `if` and before `#pattern`, waives
-        \\the coverage requirement; control then falls out of the switch when
-        \\nothing matches. It is the right answer when the uncovered cases are
-        \\genuinely uninteresting, and the wrong answer when a later edit adds a
-        \\variant, because `#partial` is exactly the annotation that stops the
-        \\compiler from pointing at the new one.
+        \\`#partial`, written immediately after `if` and before the subject or
+        \\optional `#pattern` marker, waives the coverage requirement. When no
+        \\case matches, execution continues after the switch. Use it when
+        \\unhandled values are intentional; adding a new union variant will then
+        \\no longer require this switch to handle it. `ifx` cannot be partial.
     );
 }
 
 render_section_95 :: () {
     paragraph(0, #string,oneline
-        \\A case label may name several values at once: `case A, B;` runs its body
-        \\when the subject matches any of the listed labels. The labels are values
-        \\of the subject's type, so the form works for integers, strings, `#char`
-        \\literals, floats, booleans, enum constants and union tags. It is one arm
-        \\with several labels, not several arms.
+        \\A case may list several patterns: `case A, B;` runs its body when the
+        \\subject matches either alternative. The comma is equivalent to the
+        \\or-pattern `A | B` in both switch spellings. It works with literals,
+        \\ranges, enum constants, union variants, and nested patterns. It is one
+        \\arm with a shared body and an optional shared guard.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
@@ -1825,12 +1893,13 @@ render_section_95 :: () {
         \\loud
         \\affirmative
     );
-    subheading(3, "The no-binding restriction");
+    subheading(3, #string,oneline
+        \\Captures in grouped cases
+    );
     paragraph(4, #string,oneline
-        \\A multi-label case may not capture. The arm body would have to be checked
-        \\against every listed tag at once, and the captured name would have a
-        \\different type in each, so the compiler rejects the combination outright
-        \\rather than picking one.
+        \\Grouped alternatives may capture, provided every alternative binds
+        \\exactly the same names at the same types. That gives the shared body
+        \\one set of bindings regardless of which alternative matched.
     );
     code_block(5, "glosso", #string
         \\#import "Io";
@@ -1846,19 +1915,20 @@ render_section_95 :: () {
         \\}
     );
     code_block(6, "text", #string
-        \\error: a case with several tags cannot capture a payload - the tags have different payload types
+        \\stringy hi
     );
     paragraph(7, #string,oneline
-        \\The diagnostic fires on the presence of a capture in a multi-tag case,
-        \\not on a comparison of the payload types, so it appears even when the
-        \\tags agree, as `Name` and `Text` do above. Grouping tags whose payloads
-        \\are irrelevant is fine: `case .Eof, .Nil;` on two `void` variants
-        \\compiles and covers both.
+        \\`Name` and `Text` both carry `string`, so `.Name(x), .Text(x)` binds
+        \\`x` as a string and the example compiles. If one alternative instead
+        \\carries an integer, the compiler reports incompatible or-pattern
+        \\binding types. Capturing `x` in only one alternative is also rejected.
+        \\Grouping tags while ignoring their payloads, such as
+        \\`case .Name, .Text;`, binds nothing and covers both variants.
     );
     paragraph(8, #string,oneline
-        \\The construct for one body over several shapes with a capture is the
-        \\or-pattern in a `#pattern` switch, which requires the alternatives to
-        \\bind the same names at the same types and so has no such problem.
+        \\The `|` spelling expresses the same alternatives and obeys the same
+        \\capture rules. Adding `#pattern` before the switch subject changes
+        \\neither spelling's meaning.
     );
     code_block(9, "glosso", #string
         \\#import "Io";
@@ -1877,10 +1947,10 @@ render_section_95 :: () {
         \\sized 2
     );
     paragraph(11, #string,oneline
-        \\The comma spelling is not available in a `#pattern` switch:
-        \\`case Shape.Circle(r), Shape.Rect(r);` there is
-        \\`error: unexpected token ','`. A pattern case takes exactly one pattern,
-        \\and `|` is how alternatives are written inside it.
+        \\`case Shape.Circle(r), Shape.Rect(r);` is equivalent to the `|` case
+        \\above, including in `if #pattern s == { ... }`. A guard follows the
+        \\complete list: `case Shape.Circle(r), Shape.Rect(r) if r > 1.0;`.
+        \\If that guard fails, matching continues at the next case.
     );
     subheading(12, "`#falling`");
     paragraph(13, #string,oneline
@@ -1916,17 +1986,18 @@ render_section_95 :: () {
         \\I
     );
     paragraph(16, #string,oneline
-        \\Four placements are rejected, each with its own message. Anything written
-        \\after `#falling` in the same body is unreachable by construction, so the
-        \\parser refuses it; an `else` arm and the final case have no following body
-        \\to enter. The fourth is the restriction on binding switches, developed
-        \\below.
+        \\Four placements are rejected. Anything after `#falling` in the same
+        \\body is unreachable, so the parser refuses it. An `else` arm and the
+        \\final case have no following case body to enter. Falling into a body
+        \\whose case captures values or has a guard is also rejected.
     );
     table_header(17, "Placement   —   Diagnostic");
     table_row(18, "not the last statement of the case   |   `error: '#falling' must be the last statement of a case`");
     table_row(19, "on the `else` arm   |   `error: '#falling' on an 'else' arm has nothing to fall into`");
     table_row(20, "on the last case   |   `error: '#falling' on the last case has no body to fall into`");
-    table_row(21, "in a switch whose cases bind   |   `error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind`");
+    table_row(21, #string,oneline
+        \\into a case with captures or a guard   |   `error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind`
+    );
     paragraph(22, #string,oneline
         \\The last-case error carries `note: it would leave the switch on every
         \\subject that reaches it; delete it`. A `#falling` with nowhere to fall is
@@ -1935,14 +2006,12 @@ render_section_95 :: () {
     );
     subheading(23, "Where `#falling` is allowed");
     paragraph(24, #string,oneline
-        \\Entering a body whose test never ran is harmless when that body binds
-        \\nothing, and unsound the moment it binds something: the body would read a
-        \\payload from a variant it was not dispatched on. The rule follows the
-        \\hazard rather than trying to re-test. Two switch forms can bind and are
-        \\excluded outright: the tagged-union switch and every `#pattern` switch.
-        \\What remains is the plain value switch over integers, strings, characters,
-        \\floats and booleans, and the enum switch, which is what the feature is
-        \\for.
+        \\The restriction applies to the case being entered, regardless of the
+        \\subject's type or the presence of `#pattern`. Its pattern must bind
+        \\nothing and it must have no guard: `#falling` would skip both the
+        \\binding step and the guard. A tagged-union case that discards its
+        \\payload can therefore be a destination, while a scalar case that
+        \\captures a value cannot.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
@@ -1960,15 +2029,14 @@ render_section_95 :: () {
     );
     code_block(26, "text", #string
         \\error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind
-        \\note: S8 requires a tagged union's payload to be reached through a capture in the arm that proved the tag, so every case here binds
+        \\note: the case it falls into destructures, and its captures would not have been bound
         \\note: group the tags with 'case A, B;' if they share a body, or lift the shared work into a function
     );
     paragraph(27, #string,oneline
-        \\In a `#pattern` switch the first note reads
-        \\`note: a #pattern switch exists to destructure, so its cases bind`
-        \\instead. The second note is the same in both, and is the whole remedy:
-        \\group the labels, or move the shared work into a procedure both arms
-        \\call.
+        \\A guarded destination instead carries the note
+        \\`note: the case it falls into is guarded, and the guard would never run`.
+        \\The rule is the same with or without `#pattern`. Group alternatives
+        \\that share a body, or move shared work into a procedure both cases call.
     );
     paragraph(28, #string,oneline
         \\A `#falling` arm still covers its own case. It always runs its own
