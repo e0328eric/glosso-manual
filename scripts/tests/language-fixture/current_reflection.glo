@@ -1,0 +1,58 @@
+#import "Io";
+#import "Meta";
+#import "Math/Matrix";
+#import "String_Builder";
+
+calls: ssize;
+side_effect :: () -> s64 { calls += 1; return 7; }
+
+first :: () -> s64 {
+    helper :: () -> s64 { return 1; }
+    Local :: struct { value: s64; }
+    item := Local.{ .value = helper() };
+    return item.value;
+}
+
+second :: () -> s64 {
+    helper :: () -> s64 { return 2; }
+    Local :: struct { value: s64; }
+    item := Local.{ .value = helper() };
+    return item.value;
+}
+
+Aligned :: struct #c_call #align(32) { value: s32; }
+Packed :: struct #packed #align(2) { a: u8; b: s32; }
+Outer :: struct #c_call { tag: u8; item: Aligned; }
+Box :: struct { value: $T; }
+
+main :: () {
+    #assert type_name(?s64) == "?s64";
+    #assert type_name(??s64) == "??s64";
+    #assert type_name(string!?*s64) == "string!?*s64";
+    #assert type_name(Box(s64)) == "Box(s64)";
+    #assert type_name(*const s64) == "*const s64";
+    #assert type_name([]const u8) == "[]const u8";
+    Byte :: u8;
+    bytes: [4]Byte;
+    #assert type_of(bytes) == [4]u8;
+    M :: Matrix(s64, 2, 3);
+    matrix: M = #matrix .[1, 2, 3; 4, 5, 6];
+    #assert matrix[5] == 6;
+    #assert first() == 1 && second() == 2;
+
+    T :: type_of(side_effect());
+    #assert T == s64 && calls == 0;
+    erased: any = cast(s32)7;
+    #assert type_of(erased) == any;
+    builder := String_Builder.builder_from_string("hello");
+    #assert type_of(builder) == String_Builder;
+    view := builder.to_string();
+    moved := builder;
+    #assert moved.to_string() == "hello" && view == "hello";
+
+    #assert type_info(Aligned).alignment == 32 && size_of(Aligned) == 32;
+    #assert type_info(Packed).alignment == 2 && size_of(Packed) == 6;
+    outer: Outer;
+    #assert cast(usize)&outer.item - cast(usize)&outer == 32;
+    print("current reflection passed\n");
+}

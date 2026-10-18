@@ -1,8 +1,11 @@
 import { Language, Parser, Query } from "./web-tree-sitter.js";
 import { referenceIndex } from "./reference-index.js";
+import { createReferenceLinker } from "./reference-links.js";
+
+const referenceLinker = createReferenceLinker(referenceIndex);
 
 // BEGIN GENERATED TREE-SITTER QUERY
-const GLOSSO_HIGHLIGHTS_QUERY = "[\r\n  \"if\"\r\n  \"ifx\"\r\n  \"else\"\r\n  \"while\"\r\n  \"for\"\r\n  \"return\"\r\n  \"break\"\r\n  \"continue\"\r\n  \"struct\"\r\n  \"union\"\r\n  \"enum\"\r\n  \"enum_flags\"\r\n  \"using\"\r\n  \"noalias\"\r\n  \"defer\"\r\n  \"where\"\r\n  \"cast\"\r\n  \"acast\"\r\n  \"typeclass\"\r\n  \"instance\"\r\n  \"distinct\"\r\n] @keyword\r\n\r\n[\r\n  \"#comptime\"\r\n  \"#lazy\"\r\n  \"#import\"\r\n  \"#load\"\r\n  \"#private_section\"\r\n  \"#thread_local\"\r\n  \"#library\"\r\n  \"#fn_ptr\"\r\n  \"#as\"\r\n  \"#empty\"\r\n  \"#raw\"\r\n  \"#aos\"\r\n  \"#soa\"\r\n  \"#operator\"\r\n  \"#precedence\"\r\n  \"#modify\"\r\n  \"#expand\"\r\n  \"#magic\"\r\n  \"#foreign\"\r\n  \"#memory\"\r\n  \"#c_call\"\r\n  \"#packed\"\r\n  \"#no_context\"\r\n  \"#dump\"\r\n  \"#fallback\"\r\n  \"#must\"\r\n  \"#noreturn\"\r\n  \"#returns_twice\"\r\n  \"#inline\"\r\n  \"#bytes\"\r\n  \"#asm\"\r\n  \"#push_context\"\r\n  \"#push_allocator\"\r\n  \"#if\"\r\n  \"#insert\"\r\n  \"#compile_error\"\r\n  \"#pattern\"\r\n  \"#try\"\r\n  \"#minimal\"\r\n  \"#falling\"\r\n  \"#meaningful\"\r\n  \"#code\"\r\n  \"#string\"\r\n  \"#simd\"\r\n  \"#enable\"\r\n  \"#disable\"\r\n  \"#derive\"\r\n  \"#assert\"\r\n] @attribute\r\n\r\n(from_directive) @attribute\r\n(comptime_modifier) @attribute\r\n\r\n(comment) @comment\r\n(string_literal) @string\r\n(multiline_string_line) @string\r\n(char_literal) @character\r\n(integer_literal) @number\r\n(float_literal) @number.float\r\n(boolean_literal) @boolean\r\n(null_literal) @constant.builtin\r\n(label_none_literal) @constant.builtin\r\n(context_expression) @constant.builtin\r\n(context_type) @type.builtin\r\n\r\n; Give every identifier a baseline capture first. Context-specific captures below\r\n; must come later so clients that resolve overlapping captures by query order do\r\n; not paint functions, parameters, properties, and types as plain variables.\r\n(identifier) @variable\r\n(code_splice_identifier) @variable\r\n(non_hygienic_identifier) @variable\r\n(label) @label\r\n(quoted_operator) @operator\r\n(operator) @operator\r\n(prefix_operator) @operator\r\n(suffix_operator) @operator\r\n(range_operator) @operator\r\n(binding_operator) @operator\r\n(constant_pattern_operator) @operator\r\n(try_operator) @operator\r\n\r\n; Types\r\n(named_type [\r\n  (identifier)\r\n  (code_splice_identifier)\r\n] @type)\r\n(generic_type\r\n  name: [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type)\r\n(generic_type\r\n  member: [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type)\r\n(generic_type_variable\r\n  name: (identifier) @type)\r\n(type_constructor_pattern [\r\n  (identifier)\r\n  (code_splice_identifier)\r\n] @type)\r\n(generic_type_constructor_pattern\r\n  name: [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type)\r\n(instance_declaration\r\n  class: (identifier) @type)\r\n\r\n(named_declaration\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type.definition)\r\n  [\r\n    (function_pointer_type_declaration)\r\n    (typeclass_declaration)\r\n    (distinct_type_declaration)\r\n    (struct_declaration)\r\n    (enum_flags_declaration)\r\n    (enum_declaration)\r\n    (union_declaration)\r\n  ])\r\n(nested_declaration\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type.definition)\r\n  [\r\n    (struct_declaration)\r\n    (enum_declaration)\r\n    (union_declaration)\r\n  ])\r\n(typeclass_associated_type\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type.definition))\r\n(instance_associated_type\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n  ] @type.definition))\r\n\r\n; Parameters\r\n(named_argument name: (identifier) @variable.parameter)\r\n(typeclass_parameter name: (identifier) @variable.parameter)\r\n(lambda_parameter name: (identifier) @variable.parameter)\r\n(parameter\r\n  name: (binding_list [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (non_hygienic_identifier)\r\n  ] @variable.parameter))\r\n(parameter\r\n  name: [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (non_hygienic_identifier)\r\n  ] @variable.parameter)\r\n(comptime_parameter\r\n  name: (binding_list [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (non_hygienic_identifier)\r\n  ] @variable.parameter))\r\n(fn_ptr_parameter name: (identifier) @variable.parameter)\r\n(function_type\r\n  (type_element name: (identifier) @variable.parameter))\r\n(structured_asm_input_operand name: (identifier) @variable.parameter)\r\n(structured_asm_output_operand name: (identifier) @variable.parameter)\r\n\r\n; Properties\r\n(struct_field name: (identifier) @property)\r\n(union_field name: (identifier) @property)\r\n(enum_variant name: (identifier) @constant)\r\n(struct_literal_field name: (identifier) @property)\r\n(struct_pattern_field name: (identifier) @property)\r\n(shorthand_member_expression field: (identifier) @property)\r\n(shorthand_member_pattern field: (identifier) @property)\r\n(postfix_expression field: (identifier) @property)\r\n(pattern_postfix_expression field: (identifier) @property)\r\n\r\n; Functions\r\n(named_declaration\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (quoted_operator)\r\n  ] @function)\r\n  (function_declaration))\r\n(nested_declaration\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (quoted_operator)\r\n  ] @function)\r\n  (function_declaration))\r\n(typeclass_method_signature\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (quoted_operator)\r\n  ] @function))\r\n(instance_method\r\n  name: (declaration_name [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (quoted_operator)\r\n  ] @function))\r\n(postfix_expression\r\n  function: [\r\n    (identifier)\r\n    (code_splice_identifier)\r\n    (non_hygienic_identifier)\r\n  ] @function.call)\r\n(postfix_expression\r\n  function: (postfix_expression\r\n    field: [\r\n      (identifier)\r\n      (code_splice_identifier)\r\n    ] @function.method.call))\r\n(memory_argument_reference\r\n  function: (identifier) @function.call)\r\n\r\n(library_modifier) @attribute\r\n(inline_modifier) @attribute\r\n(string_modifier) @attribute\r\n(partial_directive) @attribute\r\n(pattern_rest) @operator\r\n(matrix_type \"Matrix\" @type.builtin)\r\n(simd_type \"Simd\" @type.builtin)\r\n(variadic_constraint (identifier) @type)\r\n(minimal_method (identifier) @function)\r\n(memory_simple_effect) @attribute\r\n(memory_parameter_effect_kind) @attribute\r\n(memory_borrow_place_effect \"returns_borrow\" @attribute)\r\n(memory_release_effect \"released_by\" @attribute)\r\n(memory_resource_effect [\"resource\" \"released_by\"] @attribute)\r\n(asm_operand_direction) @keyword\r\n(structured_asm_constraint_kind) @constant.builtin\r\n(structured_asm_operand_flag) @attribute\r\n(structured_asm_clobber_kind) @constant.builtin\r\n(import_selector mode: _ @attribute)\r\n(expand_directive mode: (identifier) @attribute)\r\n(distinct_derive_directive mode: _ @attribute)\r\n";
+const GLOSSO_HIGHLIGHTS_QUERY = "[\n  \"if\"\n  \"ifx\"\n  \"else\"\n  \"while\"\n  \"for\"\n  \"return\"\n  \"break\"\n  \"continue\"\n  \"struct\"\n  \"union\"\n  \"enum\"\n  \"enum_flags\"\n  \"using\"\n  \"noalias\"\n  \"mut\"\n  \"const\"\n  \"raw\"\n  \"raw_mut\"\n  \"volatile\"\n  \"defer\"\n  \"where\"\n  \"cast\"\n  \"acast\"\n  \"typeclass\"\n  \"instance\"\n  \"distinct\"\n] @keyword\n\n(caller_return_statement \"`return\" @keyword)\n(caller_defer_statement \"`defer\" @keyword)\n\n[\n  \"#comptime\"\n  \"#lazy\"\n  \"#import\"\n  \"#load\"\n  \"#export\"\n  \"#thread_local\"\n  \"#library\"\n  \"#fn_ptr\"\n  \"#as\"\n  \"#empty\"\n  \"#raw\"\n  \"#aos\"\n  \"#soa\"\n  \"#operator\"\n  \"#modify\"\n  \"#expand\"\n  \"#magic\"\n  \"#foreign\"\n  \"#c_call\"\n  \"#packed\"\n  \"#align\"\n  \"#no_context\"\n  \"#dump\"\n  \"#must\"\n  \"#on_drop_error\"\n  \"#returns_twice\"\n  \"#inline\"\n  \"#bytes\"\n  \"#asm\"\n  \"#push_context\"\n  \"#push_allocator\"\n  \"#if\"\n  \"#insert\"\n  \"#compile_error\"\n  \"#pattern\"\n  \"#try\"\n  \"#minimal\"\n  \"#falling\"\n  \"#meaningful\"\n  \"#code\"\n  \"#string\"\n  \"#simd\"\n  \"#matrix\"\n  \"#enable\"\n  \"#disable\"\n  \"#derive\"\n  \"#lifetimes\"\n  \"#memory\"\n  \"#fresh_result\"\n  \"#unchecked_transfer\"\n  \"#assert\"\n  \"#public\"\n  \"#private\"\n] @attribute\n\n(from_directive) @attribute\n(comptime_modifier) @attribute\n\n(comment) @comment\n(string_literal) @string\n(c_string_literal) @string\n(byte_string_literal) @string\n(multiline_string_line) @string\n(char_literal) @character\n(integer_literal) @number\n(float_literal) @number.float\n(boolean_literal) @boolean\n(null_literal) @constant.builtin\n(label_none_literal) @constant.builtin\n(context_expression) @constant.builtin\n(source_location_expression) @constant.builtin\n(context_type) @type.builtin\n(self_type) @type.builtin\n(never_type) @type.builtin\n(self_expression) @variable.builtin\n\n; Give every identifier a baseline capture first. Context-specific captures below\n; must come later so clients that resolve overlapping captures by query order do\n; not paint functions, parameters, properties, and types as plain variables.\n(identifier) @variable\n(code_splice_identifier) @variable\n(non_hygienic_identifier) @variable\n(label) @label\n(lifetime) @label\n(lifetimes_directive (identifier) @label)\n(quoted_operator) @operator\n(operator) @operator\n(prefix_operator) @operator\n(for_pointer_binder) @operator\n(suffix_operator) @operator\n(range_operator) @operator\n(binding_operator) @operator\n(constant_pattern_operator) @operator\n(try_operator) @operator\n(postfix_expression [\".*\" \".&\"] @operator)\n(expression_statement [\".*\" \".&\"] @operator)\n(enum_variant \"-\" @operator)\n\n; Types\n(named_type [\n  (identifier)\n  (code_splice_identifier)\n] @type)\n(generic_type\n  name: [\n    (identifier)\n    (code_splice_identifier)\n  ] @type)\n(generic_type\n  member: [\n    (identifier)\n    (code_splice_identifier)\n  ] @type)\n(generic_type_variable\n  name: (identifier) @type)\n(type_constructor_pattern [\n  (identifier)\n  (code_splice_identifier)\n] @type)\n(generic_type_constructor_pattern\n  name: [\n    (identifier)\n    (code_splice_identifier)\n  ] @type)\n(instance_declaration\n  class: (identifier) @type)\n\n; Keep this list aligned with `parser_builtin_type_name` in ../glosso.\n(\n  [\n    (named_type (identifier) @type.builtin)\n    (generic_type name: (identifier) @type.builtin)\n    (type_constructor_pattern (identifier) @type.builtin)\n    (generic_type_constructor_pattern name: (identifier) @type.builtin)\n  ]\n  (#any-of? @type.builtin\n    \"ssize\" \"usize\" \"rune\" \"bool\"\n    \"string\" \"cstring\" \"string16\" \"cstring16\"\n    \"type\" \"void\" \"any\" \"label\"\n    \"Code\" \"Pattern\" \"Namespace\" \"Library\" \"Typeclass\" \"Macro\"\n    \"s8\" \"s16\" \"s32\" \"s64\" \"s128\"\n    \"u8\" \"u16\" \"u32\" \"u64\" \"u128\"\n    \"f16\" \"f32\" \"f64\" \"f80\" \"f128\"\n    \"c32\" \"c64\" \"c128\" \"c160\" \"c256\"))\n\n(named_declaration\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n  ] @type.definition)\n  [\n    (function_pointer_type_declaration)\n    (typeclass_declaration)\n    (distinct_type_declaration)\n    (struct_declaration)\n    (enum_flags_declaration)\n    (enum_declaration)\n    (union_declaration)\n  ])\n(nested_declaration\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n  ] @type.definition)\n  [\n    (function_pointer_type_declaration)\n    (struct_declaration)\n    (enum_declaration)\n    (union_declaration)\n  ])\n(typeclass_associated_type\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n  ] @type.definition))\n(instance_associated_type\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n  ] @type.definition))\n\n; Parameters\n(named_argument name: (identifier) @variable.parameter)\n(typeclass_parameter name: (identifier) @variable.parameter)\n(lambda_parameter name: (identifier) @variable.parameter)\n(on_drop_error_statement error: (identifier) @variable.parameter)\n(parameter\n  name: (binding_list [\n    (identifier)\n    (code_splice_identifier)\n    (non_hygienic_identifier)\n  ] @variable.parameter))\n(parameter\n  name: [\n    (identifier)\n    (code_splice_identifier)\n    (non_hygienic_identifier)\n  ] @variable.parameter)\n(comptime_parameter\n  name: (binding_list [\n    (identifier)\n    (code_splice_identifier)\n    (non_hygienic_identifier)\n  ] @variable.parameter))\n(fn_ptr_parameter name: (identifier) @variable.parameter)\n(function_type\n  (type_element name: (identifier) @variable.parameter))\n(structured_asm_input_operand name: (identifier) @variable.parameter)\n(structured_asm_output_operand name: (identifier) @variable.parameter)\n\n; Properties\n(struct_field name: (identifier) @property)\n(union_field name: (identifier) @property)\n(enum_variant name: (identifier) @constant)\n(struct_literal_field name: (identifier) @property)\n(struct_pattern_field name: (identifier) @property)\n(shorthand_member_expression field: (identifier) @property)\n(shorthand_member_pattern field: (identifier) @property)\n(postfix_expression field: (identifier) @property)\n(expression_statement field: (identifier) @property)\n(pattern_postfix_expression field: (identifier) @property)\n\n; Functions\n(named_declaration\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n    (quoted_operator)\n  ] @function)\n  (function_declaration))\n(nested_declaration\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n    (quoted_operator)\n  ] @function)\n  (function_declaration))\n(typeclass_method_signature\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n    (quoted_operator)\n  ] @function))\n(instance_method\n  name: (declaration_name [\n    (identifier)\n    (code_splice_identifier)\n    (quoted_operator)\n  ] @function))\n(inherent_method\n  name: (identifier) @function)\n(postfix_expression\n  function: [\n    (identifier)\n    (code_splice_identifier)\n    (non_hygienic_identifier)\n  ] @function.call)\n(postfix_expression\n  function: (postfix_expression\n    field: [\n      (identifier)\n      (code_splice_identifier)\n    ] @function.method.call))\n(expression_statement\n  field: [\n    (identifier)\n    (code_splice_identifier)\n  ] @function.method.call\n  . (argument_list))\n\n(library_modifier) @attribute\n(inline_modifier) @attribute\n(string_modifier) @attribute\n(partial_directive) @attribute\n(pattern_rest) @operator\n(matrix_type \"Matrix\" @type.builtin)\n(simd_type \"Simd\" @type.builtin)\n(variadic_constraint (identifier) @type)\n(minimal_method (identifier) @function)\n(asm_operand_direction) @keyword\n(structured_asm_constraint_kind) @constant.builtin\n(structured_asm_operand_flag) @attribute\n(structured_asm_clobber_kind) @constant.builtin\n(import_selector mode: _ @attribute)\n(load_modifier \"embed\" @attribute)\n(expand_directive mode: (identifier) @attribute)\n(insert_scope \"scope\" @attribute)\n(visibility_modifier \"unit\" @attribute)\n(operator_try_modifier \"try\" @attribute)\n(operator_try_modifier target: (identifier) @type)\n\n; Memory contracts use effect names and labels only within the directive.\n(memory_effect (identifier) @attribute)\n(memory_release_argument name: (identifier) @attribute)\n(memory_typed_releaser method: (identifier) @function)\n(memory_unknown_argument name: (identifier) @attribute)\n(memory_trusted_statement \"trusted\" @attribute)\n(memory_place . (identifier) @variable.parameter)\n(memory_place field: (identifier) @property)\n((memory_place . (identifier) @variable.builtin)\n  (#eq? @variable.builtin \"returned\"))\n(memory_qualified_name field: (identifier) @property)\n((memory_qualified_name . (identifier) @variable.builtin)\n  (#eq? @variable.builtin \"returned\"))\n(memory_overlay target: (memory_qualified_name (identifier) @function .))\n(memory_release_argument (memory_qualified_name (identifier) @function .))\n((memory_effect\n  kind: (identifier) @_memory_effect\n  (memory_qualified_name (identifier) @function .))\n  (#any-of? @_memory_effect \"released_by\" \"gives\" \"maybe_gives\"))\n";
 // END GENERATED TREE-SITTER QUERY
 
 const scene = document.querySelector("#scene");
@@ -16,6 +19,10 @@ const nativeSidebarTitle = document.querySelector("#native-sidebar-title");
 const nativeSidebarFilter = document.querySelector("#native-sidebar-filter");
 const nativeSidebarIndex = document.querySelector("#native-sidebar-index");
 const nativeSidebarItems = document.querySelector("#native-sidebar-items");
+const pageOutline = document.querySelector("#page-outline");
+const menuToggle = document.querySelector("#menu-toggle");
+const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+const searchHelp = document.querySelector("#search-help");
 const canvas = document.querySelector("#measure");
 const context = canvas.getContext("2d");
 const decoder = new TextDecoder("utf-8");
@@ -25,17 +32,20 @@ const fonts = [
   'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
   '"Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
+  'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
   'Georgia, Cambria, "Times New Roman", serif',
 ];
 const keywordSet = new Set([
-  "acast", "break", "case", "cast", "continue", "defer", "do", "else", "enum", "enum_flags",
-  "fallthrough", "for", "if", "import", "in", "instance", "match", "noalias", "return", "struct",
-  "switch", "typeclass", "union", "using", "where", "while",
+  "acast", "break", "case", "cast", "continue", "defer", "distinct", "else", "enum", "enum_flags",
+  "for", "if", "ifx", "instance", "noalias", "return", "struct", "typeclass", "union", "using",
+  "where", "while",
 ]);
+const builtinConstants = new Set(["context", "false", "null", "true"]);
 const primitiveTypes = new Set([
-  "any", "bool", "Code", "cstring", "cstring16", "f16", "f32", "f64", "f80", "f128", "int",
-  "label", "s8", "s16", "s32", "s64", "s128", "string", "string16", "type", "u8", "u16",
-  "u32", "u64", "u128", "uint", "void",
+  "any", "bool", "Code", "cstring", "cstring16", "c32", "c64", "c128", "c160", "c256",
+  "f16", "f32", "f64", "f80", "f128", "ssize", "label", "Library", "Macro", "Matrix",
+  "Namespace", "Pattern", "rune", "s8", "s16", "s32", "s64", "s128", "Simd", "string", "string16",
+  "type", "Typeclass", "u8", "u16", "u32", "u64", "u128", "usize", "void",
 ]);
 
 let instance;
@@ -45,12 +55,14 @@ let searchBridgeAddress = 0;
 let pointerX = 0;
 let pointerY = 0;
 let pointerDown = false;
+let nativePointerPress = null;
 let pendingFrame = false;
 let lastFrame = performance.now();
 let parser;
 let highlightQuery;
 let highlighterMode = "loading";
 let applyingHash = false;
+let replaceBrowserRoute = true;
 let sidebarScrollTop = 0;
 let sidebarScrollMaximum = 0;
 let lastSidebarSelection = "";
@@ -58,6 +70,11 @@ let nativeSidebarView = -1;
 let nativeSidebarSelected = -2;
 const nativeSidebarQueries = ["", ""];
 const highlightCache = new Map();
+const codeScrollPositions = new Map();
+let pendingHeading = "";
+let lastOutline = "";
+let lastDocumentHash = "#/manual";
+const isMobileLayout = () => document.documentElement.clientWidth < 860;
 
 // Keep the language guide grouped the same way as the original manual. The
 // values are section indices exported by the Glosso manual model.
@@ -125,12 +142,16 @@ function cornerRadius(element, address) {
 
 function classFor(type, text) {
   const lower = type.toLowerCase();
+  const arbitraryInteger = /^[su]([1-9][0-9]*)$/.exec(text);
   if (lower.includes("comment")) return "tok-comment";
   if (lower.includes("string") || /^"/.test(text)) return "tok-string";
   if (lower.includes("number") || lower.includes("integer") || lower.includes("float") || /^\d/.test(text)) return "tok-number";
   if (text.startsWith("#")) return "tok-directive";
+  if (builtinConstants.has(text)) return "tok-constant";
   if (keywordSet.has(text)) return "tok-keyword";
-  if (primitiveTypes.has(text) || /(?:type|struct|union|enum)/.test(lower)) return "tok-type";
+  if (primitiveTypes.has(text)
+      || (arbitraryInteger && Number(arbitraryInteger[1]) <= 65535)
+      || /(?:type|struct|union|enum)/.test(lower)) return "tok-type";
   if (lower.includes("function") || lower.includes("procedure") || lower.includes("call")) return "tok-function";
   if (/^'[A-Za-z_]/.test(text) && !text.endsWith("'")) return "tok-label";
   if (lower.includes("operator") || /^[+\-*/<>!@%^&|~?.,:=]+$/.test(text)) return "tok-operator";
@@ -222,24 +243,60 @@ function highlight(source) {
   return refined.length ? refined : fallbackTokens(source);
 }
 
-function renderHighlighted(element, source) {
+function renderReferenceText(element, source, scope, tokens = [{ text: source }], prose = false) {
+  let tokenEnd = 0;
+  const literals = tokens.flatMap(token => {
+    const start = tokenEnd;
+    tokenEnd += token.text.length;
+    return /tok-(?:comment|string|character)/.test(token.className ?? "") ? [{ start, end: tokenEnd }] : [];
+  });
+  const links = scope ? referenceLinker.ranges(source, scope, prose)
+    .filter(link => !literals.some(literal => link.start < literal.end && link.end > literal.start)) : [];
+  let tokenIndex = 0;
+  let tokenOffset = 0;
+  let offset = 0;
+  const appendUntil = (parent, end) => {
+    while (offset < end) {
+      const token = tokens[tokenIndex];
+      const length = Math.min(end - offset, token.text.length - tokenOffset);
+      const span = document.createElement("span");
+      span.textContent = token.text.slice(tokenOffset, tokenOffset + length);
+      if (token.className) span.className = token.className;
+      parent.appendChild(span);
+      offset += length;
+      tokenOffset += length;
+      if (tokenOffset === token.text.length) { tokenIndex += 1; tokenOffset = 0; }
+    }
+  };
+  for (const link of links) {
+    appendUntil(element, link.start);
+    const anchor = document.createElement("a");
+    anchor.className = "clay-reference-link";
+    anchor.href = link.href;
+    anchor.title = `Open documentation for ${link.name}`;
+    appendUntil(anchor, link.end);
+    element.appendChild(anchor);
+  }
+  appendUntil(element, source.length);
+}
+
+function renderHighlighted(element, source, scope) {
   let tokens = highlightCache.get(source);
   if (!tokens || tokens.mode !== highlighterMode) {
     tokens = { mode: highlighterMode, values: highlight(source) };
     highlightCache.set(source, tokens);
   }
-  for (const token of tokens.values) {
-    const span = document.createElement("span");
-    span.textContent = token.text;
-    if (token.className) span.className = token.className;
-    element.appendChild(span);
-  }
+  renderReferenceText(element, source, scope, tokens.values);
 }
 
 async function initializeHighlighter() {
   try {
     await Parser.init({ locateFile: () => new URL("./web-tree-sitter.wasm", import.meta.url).href });
-    const language = await Language.load(new URL("./tree-sitter-glosso.wasm", import.meta.url).href);
+    // The embedded query changes with the grammar. Revalidate the parser even
+    // when a reload retains a fresh HTTP-cache entry for the previous Wasm.
+    const grammarResponse = await fetch(new URL("./tree-sitter-glosso.wasm", import.meta.url), { cache: "no-cache" });
+    if (!grammarResponse.ok) throw new Error(`Grammar request failed: ${grammarResponse.status}`);
+    const language = await Language.load(new Uint8Array(await grammarResponse.arrayBuffer()));
     if (!GLOSSO_HIGHLIGHTS_QUERY) throw new Error("The embedded Tree-sitter query is empty; run `glosso first.glo -- tree-sitter`");
     highlightQuery = new Query(language, GLOSSO_HIGHLIGHTS_QUERY);
     parser = new Parser();
@@ -293,12 +350,19 @@ function parseType(raw) {
     return { name: layout.toLowerCase(), args: [parseType(rest.join(" "))] };
   }
   if (value.startsWith("*")) {
-    const stars = value.match(/^\*+/)?.[0] ?? "*";
-    value = value.slice(stars.length).replace(/^(?:const|volatile)\s+/, "").trim();
-    return { name: stars, args: [parseType(value)] };
+    value = value.slice(1).trim();
+    const qualifiers = value.match(/^(?:(?:const|volatile)\s+)+/)?.[0] ?? "";
+    value = value.slice(qualifiers.length).trim();
+    const shape = "*" + qualifiers.trim().split(/\s+/).filter(Boolean).sort().join(" ");
+    return { name: shape, args: [parseType(value)] };
   }
   const array = value.match(/^(\[(?:\*|\.\.|[^\]]*)\])(.*)$/);
-  if (array) return { name: array[1].replace(/\s/g, ""), args: [parseType(array[2])] };
+  if (array) {
+    const element = array[2].trim();
+    const qualifiers = element.match(/^(?:(?:const|volatile)\s+)+/)?.[0] ?? "";
+    const shape = array[1].replace(/\s/g, "") + qualifiers.trim().split(/\s+/).filter(Boolean).sort().join(" ");
+    return { name: shape, args: [parseType(element.slice(qualifiers.length))] };
+  }
   if (outerParens(value)) {
     const parts = splitTopLevel(value.slice(1, -1));
     if (parts.length === 1) return parseType(parts[0]);
@@ -372,9 +436,9 @@ function unify(query, candidate, bindings, queryBindings) {
 function constraintsAllow(signature, bindings) {
   const where = signature.match(/\bwhere\s+(.+)$/)?.[1];
   if (!where) return true;
-  const numeric = /^(?:int|uint|[su](?:8|16|32|64|128)|f(?:16|32|64|80|128))$/i;
+  const numeric = /^(?:ssize|usize|[su][0-9]+|f(?:16|32|64|80|128))$/i;
   const floating = /^f(?:16|32|64|80|128)$/i;
-  const integer = /^(?:int|uint|[su](?:8|16|32|64|128))$/i;
+  const integer = /^(?:ssize|usize|[su][0-9]+)$/i;
   const strings = /^(?:string|cstring|string16|cstring16)$/i;
   for (const match of where.matchAll(/\b(Floating|Fractional|RealFloat|Num|BitArithmetic)\s*\(\s*\$?([A-Z][A-Za-z0-9_]*)/g)) {
     const actual = bindings.get(match[2]);
@@ -383,16 +447,18 @@ function constraintsAllow(signature, bindings) {
     if (match[1] === "Num" && !numeric.test(actual)) return false;
     if (match[1] === "BitArithmetic" && !integer.test(actual)) return false;
   }
-  for (const match of where.matchAll(/\b(Is_Bool|Is_Complex|Is_Float|Is_Integer|Is_Numeric|Is_Pointer|Is_Procedure|Is_Simd|Is_String)\s*\(\s*\$?([A-Z][A-Za-z0-9_]*)/g)) {
+  for (const match of where.matchAll(/\b(Is_Bool|Is_Character|Is_Complex|Is_Float|Is_Integer|Is_Numeric|Is_Pointer|Is_Procedure|Is_Rune|Is_Simd|Is_String)\s*\(\s*\$?([A-Z][A-Za-z0-9_]*)/g)) {
     const actual = bindings.get(match[2]);
     if (!actual) continue;
     if (match[1] === "Is_Bool" && actual.toLowerCase() !== "bool") return false;
-    if (match[1] === "Is_Complex" && !/^complex(?:32|64|128)?$/i.test(actual)) return false;
+    if (match[1] === "Is_Character" && actual.toLowerCase() !== "rune") return false;
+    if (match[1] === "Is_Complex" && !/^c(?:32|64|128|160|256)$/i.test(actual)) return false;
     if (match[1] === "Is_Float" && !floating.test(actual)) return false;
     if (match[1] === "Is_Integer" && !integer.test(actual)) return false;
     if (match[1] === "Is_Numeric" && !numeric.test(actual)) return false;
     if (match[1] === "Is_Pointer" && !/^(?:\*|\[\*\])/.test(actual)) return false;
     if (match[1] === "Is_Procedure" && !/(?:->|fn_ptr)/i.test(actual)) return false;
+    if (match[1] === "Is_Rune" && actual.toLowerCase() !== "rune") return false;
     if (match[1] === "Is_Simd" && !/^Simd\(/i.test(actual)) return false;
     if (match[1] === "Is_String" && !strings.test(actual)) return false;
   }
@@ -561,15 +627,34 @@ function bindCodeCopyButton(button, source) {
   });
 }
 
+// Clay supplies the original string address for every measured word and
+// rendered line, so inline code remains formatted across line boundaries.
+function proseSegments(value, chars, baseChars) {
+  let code = baseChars > 0 && chars >= baseChars
+    && (textAt(baseChars, chars - baseChars).match(/`/g)?.length ?? 0) % 2 === 1;
+  return value.split("`").map((text, index) => {
+    if (index) code = !code;
+    return { text, code };
+  });
+}
+
+function renderProse(element, segments, scope) {
+  for (const segment of segments) {
+    const node = document.createElement(segment.code ? "code" : "span");
+    renderReferenceText(node, segment.text, scope, undefined, !segment.code);
+    element.appendChild(node);
+  }
+}
+
 function nativeSidebarEntries(currentView) {
   if (currentView === 1) return referenceIndex.modules.map((module, index) => ({ index, label: module[0] }));
   return referenceIndex.manual.map((section, index) => ({ index, label: section[0] }));
 }
 
 function nativeSidebarButton(entry, selectedIndex) {
-  const button = document.createElement("button");
+  const button = document.createElement("a");
   button.className = "native-sidebar-item";
-  button.type = "button";
+  button.href = `#/${nativeSidebarView === 1 ? "std" : "manual"}/${entry.index}`;
   button.dataset.index = String(entry.index);
   button.textContent = entry.label;
   if (entry.index === selectedIndex) button.setAttribute("aria-current", "page");
@@ -613,7 +698,7 @@ function populateNativeSidebar(currentView, selectedIndex, alignSelection = fals
       if (!selected) return;
       const sidebarBounds = nativeSidebar.getBoundingClientRect();
       const selectedBounds = selected.getBoundingClientRect();
-      if (selectedBounds.top < sidebarBounds.top + 138 || selectedBounds.bottom > sidebarBounds.bottom - 16) {
+      if (selectedBounds.top < sidebarBounds.top + 24 || selectedBounds.bottom > sidebarBounds.bottom - 16) {
         selected.scrollIntoView({ block: "center", behavior: "auto" });
       }
     });
@@ -621,25 +706,81 @@ function populateNativeSidebar(currentView, selectedIndex, alignSelection = fals
 }
 
 function syncNativeSidebar(currentView, selectedIndex) {
+  // Keep documentation navigation available while searching.
   if (currentView === 2) {
-    nativeSidebar.hidden = true;
-    nativeSidebarView = currentView;
-    nativeSidebarSelected = selectedIndex;
+    if (nativeSidebarView < 0) syncNativeSidebar(0, -1);
     return;
   }
-
-  nativeSidebar.hidden = false;
   const viewChanged = nativeSidebarView !== currentView;
   const selectionChanged = nativeSidebarSelected !== selectedIndex;
   nativeSidebarView = currentView;
   nativeSidebarSelected = selectedIndex;
-  nativeSidebarTitle.textContent = currentView === 1 ? "MODULES" : "CHAPTERS";
-  nativeSidebarFilter.placeholder = currentView === 1 ? "Filter modules..." : "Filter chapters...";
+  nativeSidebarTitle.textContent = currentView === 1 ? "Modules" : "Chapters";
+  nativeSidebarFilter.placeholder = currentView === 1 ? "Filter modules…" : "Filter chapters…";
+  nativeSidebarFilter.setAttribute("aria-label", currentView === 1 ? "Filter modules" : "Filter chapters");
   nativeSidebarFilter.value = nativeSidebarQueries[currentView] ?? "";
-  nativeSidebarIndex.textContent = currentView === 1 ? "Library index" : "Manual index";
-  nativeSidebarIndex.toggleAttribute("aria-current", currentView === 1 && selectedIndex < 0);
-  if (viewChanged) nativeSidebar.scrollTop = 0;
-  populateNativeSidebar(currentView, selectedIndex, selectionChanged && !viewChanged);
+  nativeSidebarIndex.textContent = currentView === 1 ? "All modules" : "All chapters";
+  nativeSidebarIndex.href = currentView === 1 ? "#/std" : "#/manual";
+  if (selectedIndex < 0) nativeSidebarIndex.setAttribute("aria-current", "page");
+  else nativeSidebarIndex.removeAttribute("aria-current");
+  const itemPage = currentView === 1 && (instance.exports.glo_manual_get_symbol() >= 0 || instance.exports.glo_manual_get_type() >= 0);
+  if (viewChanged || itemPage) nativeSidebar.scrollTop = 0;
+  populateNativeSidebar(currentView, selectedIndex, selectionChanged && !viewChanged && !itemPage);
+}
+
+function documentRoute() {
+  const currentView = instance.exports.glo_manual_get_view();
+  if (currentView === 1) {
+    const module = instance.exports.glo_manual_get_module();
+    const symbol = instance.exports.glo_manual_get_symbol();
+    const type = instance.exports.glo_manual_get_type();
+    return `#/std${module >= 0 ? `/${module}` : ""}${symbol >= 0 ? `/item/${symbol}` : type >= 0 ? `/type/${type}` : ""}`;
+  }
+  if (currentView === 2) return `#/search${searchInput.value ? `?q=${encodeURIComponent(searchInput.value)}` : ""}`;
+  const section = instance.exports.glo_manual_get_section();
+  return `#/manual${section >= 0 ? `/${section}` : ""}`;
+}
+
+function handleDocumentLink(event) {
+  if (!instance || event.defaultPrevented || event.button !== 0 ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const href = event.target.closest("a[href]")?.getAttribute("href");
+  if (!href?.startsWith("#/")) return;
+  event.preventDefault();
+  // Apply the route before a pointer-up render can write the old Wasm route
+  // back to history. Modified clicks still use the anchor's native href.
+  if (href !== location.hash) history.pushState(null, "", href);
+  applyHash(); // The current permalink also reopens a folded method.
+}
+
+function syncOutline(headings) {
+  const route = documentRoute();
+  const signature = JSON.stringify([route, headings.map(heading => [heading.id, heading.label, heading.href])]);
+  if (signature === lastOutline) return;
+  lastOutline = signature;
+  pageOutline.hidden = !headings.length || instance.exports.glo_manual_get_view() === 2;
+  const title = document.createElement("h3");
+  title.textContent = "Sections";
+  const links = headings.map(heading => {
+    const link = document.createElement("a");
+    link.href = heading.href ?? `${route}?heading=${encodeURIComponent(heading.id)}`;
+    if (heading.href) {
+      link.className = "outline-item";
+    }
+    link.textContent = heading.label;
+    return link;
+  });
+  pageOutline.replaceChildren(title, ...links);
+}
+
+function setSidebarOpen(open, restoreFocus = false) {
+  document.documentElement.classList.toggle("mobile-layout", isMobileLayout());
+  document.body.classList.toggle("sidebar-open", open);
+  menuToggle.setAttribute("aria-expanded", String(open));
+  menuToggle.setAttribute("aria-label", open ? "Close navigation" : "Open navigation");
+  nativeSidebar.inert = isMobileLayout() && !open;
+  if (open) nativeSidebar.querySelector("[aria-current], a")?.focus();
+  else if (restoreFocus) menuToggle.focus();
 }
 
 function renderCommands(arrayAddress) {
@@ -650,6 +791,16 @@ function renderCommands(arrayAddress) {
   const stack = [{ parent: fragment, x: 0, y: 0, clip: null }];
   const codeCopyButtons = [];
   const codeSources = [];
+  const codeViewports = [];
+  const tableViewports = [];
+  const headingGroups = new Map();
+  let referenceScope = instance.exports.glo_manual_get_view() === 1
+    ? referenceLinker.context(instance.exports.glo_manual_get_module(),
+      Math.max(instance.exports.glo_manual_get_symbol(), instance.exports.glo_manual_get_type()))
+    : referenceLinker.context();
+  for (const viewport of scene.querySelectorAll(".clay-scroll-region")) {
+    codeScrollPositions.set(viewport.dataset.id, viewport.scrollLeft);
+  }
   let maximumY = Math.max(320, window.innerHeight - topbar.offsetHeight);
   sidebarScrollMaximum = 0;
   for (let index = 0; index < length; index += 1) {
@@ -716,14 +867,25 @@ function renderCommands(arrayAddress) {
     const userData = data.getUint32(command + 60, true);
     const marker = markerAt(userData);
     const isSourceLink = type === 3 && marker.startsWith("source-link");
-    const isSymbolAnchor = type === 3 && marker.startsWith("symbol-anchor");
+    const isSymbolAnchor = type === 3 && (marker.startsWith("symbol-anchor") || marker.startsWith("anchor-item:"));
+    const item = type === 3 && (marker.startsWith("item:") || marker.startsWith("anchor-item:"))
+      ? /^(?:anchor-)?item:(\d+):([01]);/.exec(textAt(userData, 48)) : null;
+    const fold = type === 3 && marker.startsWith("fold:")
+      ? /^fold:(\d+):([01]):([01]);/.exec(textAt(userData, 48)) : null;
     const isCodeCopy = type === 3 && marker.startsWith("code-copy");
     const isCodeGlosso = type === 3 && marker.startsWith("code-glosso");
     const isGlossoSource = type === 3 && marker.startsWith("glosso-source") || isCodeGlosso;
     const isCodeSource = isCodeGlosso || type === 3 && marker.startsWith("code-source");
+    const isHeading = type === 3 && (marker.startsWith("doc-heading") || marker.startsWith("page-title") || fold?.[3] === "1");
+    const isPageTitle = isHeading && marker.startsWith("page-title");
+    const route = type === 3 && marker.startsWith("route:")
+      ? /^route:([01]):(-?\d+);/.exec(textAt(userData, 32)) : null;
+    const isCodeViewport = type === 1 && marker.startsWith("code-viewport");
+    const isTableViewport = type === 1 && marker.startsWith("table-scroll");
+    const isAction = type === 3 && (marker.startsWith("action") || marker.startsWith("disabled"));
     const element = commandElement(
       `${type === 3 ? "clay-text" : ""}${isSourceLink ? " clay-source-link" : ""}${isCodeCopy ? " clay-code-copy" : ""}${isSymbolAnchor ? " clay-symbol-anchor" : ""}`,
-      isSourceLink ? "a" : isCodeCopy ? "button" : "div",
+      isSourceLink || route || item ? "a" : isCodeCopy || isAction || fold && !isHeading ? "button" : isHeading ? (isPageTitle ? "h1" : "h2") : "div",
     );
     element.style.left = `${Math.round(x - current.x)}px`;
     const scrollAdjustment = stack.length > 1 ? sidebarScrollTop : 0;
@@ -736,6 +898,20 @@ function renderCommands(arrayAddress) {
     if (type === 1) {
       element.style.background = mappedColor(command + 16);
       cornerRadius(element, command + 32);
+      if (isCodeViewport || isTableViewport) {
+        element.classList.add("clay-scroll-region", isCodeViewport ? "clay-code-body" : "clay-table");
+        element.dataset.id = String(data.getUint32(command + 64, true));
+        element.removeAttribute("aria-hidden");
+        element.setAttribute("role", "region");
+        element.setAttribute("aria-label", isCodeViewport ? "Code example" : "Scrollable documentation table");
+        element.tabIndex = 0;
+        if (isCodeViewport) codeViewports.push({ element, x, y, height });
+        else {
+          const pageRight = Math.min(document.documentElement.clientWidth, 1300) - (document.documentElement.clientWidth >= 860 ? 32 : 16);
+          element.style.width = `${Math.max(0, Math.min(width, pageRight - x))}px`;
+          tableViewports.push({ element, x, y, height });
+        }
+      }
     } else if (type === 2) {
       const borderColor = mappedColor(command + 16);
       const widths = [48, 50, 52, 54].map(offset => data.getUint16(command + offset, true));
@@ -752,10 +928,79 @@ function renderCommands(arrayAddress) {
       const letterSpacing = data.getUint16(command + 48, true);
       const lineHeight = data.getUint16(command + 50, true);
       const value = textAt(chars, textLength);
-      if (isGlossoSource) renderHighlighted(element, value);
+      element.removeAttribute("aria-hidden");
+      if (isHeading) {
+        const key = data.getUint32(command + 24, true);
+        const group = headingGroups.get(key);
+        if (group) {
+          group.label += ` ${value}`;
+          element.setAttribute("aria-hidden", "true");
+        } else headingGroups.set(key, { element, label: fold ? value.replace(/^[▾▸]\s*/, "") : value, pageTitle: isPageTitle });
+        element.classList.add("clay-heading");
+      }
+      if (route) {
+        element.classList.add("clay-route-link");
+        element.href = `#/${route[1] === "1" ? "std" : "manual"}${Number(route[2]) >= 0 ? `/${route[2]}` : ""}`;
+      }
+      if (item) {
+        const symbol = referenceIndex.symbols[Number(item[1])];
+        referenceScope = referenceLinker.context(symbol[4], Number(item[1]));
+        element.classList.add("clay-route-link");
+        element.href = `#/std/${symbol[4]}/${item[2] === "1" ? "type" : "item"}/${item[1]}`;
+        if (symbol[5] === "method" && fontSize === 18) {
+          const key = `item:${item[1]}`;
+          const group = headingGroups.get(key);
+          if (group) group.label += ` ${value}`;
+          else headingGroups.set(key, { element, label: value, href: element.getAttribute("href") });
+        }
+      }
+      if (fontId === 5 || fontId === 4) element.classList.add("clay-prose");
+      const linkScope = !isSourceLink && !route && !item && !fold && !isHeading && !isAction && !isCodeCopy
+        ? referenceScope : undefined;
+      if (isGlossoSource) renderHighlighted(element, value, linkScope);
+      else if (fontId === 5 || fontId === 4) renderProse(element, proseSegments(value, chars, data.getUint32(command + 24, true)), linkScope);
+      else if (linkScope && tableViewports.some(viewport => y >= viewport.y && y + height <= viewport.y + viewport.height + 1 && x >= viewport.x))
+        renderReferenceText(element, value, linkScope);
       else element.textContent = value;
+      if (fold) {
+        const control = isHeading ? document.createElement("button") : element;
+        if (isHeading) {
+          control.replaceChildren(...element.childNodes);
+          element.appendChild(control);
+        }
+        control.classList.add("clay-fold");
+        if (isHeading && element.getAttribute("aria-hidden") === "true") control.tabIndex = -1;
+        control.type = "button";
+        control.dataset.foldId = fold[1];
+        control.setAttribute("aria-expanded", String(fold[2] === "1"));
+        control.setAttribute("aria-label", `${fold[2] === "1" ? "Collapse" : "Expand"} ${value.replace(/^[▾▸]\s*/, "")}`);
+        control.addEventListener("click", event => {
+          event.stopPropagation();
+          pointerDown = false;
+          instance.exports.glo_manual_toggle_fold(Number(fold[1]));
+          scheduleRender();
+        });
+      }
+      if (isAction) {
+        element.classList.add("clay-action");
+        element.type = "button";
+        element.disabled = marker.startsWith("disabled");
+        element.dataset.actionId = String(data.getUint32(command + 64, true));
+        element.addEventListener("click", event => {
+          event.stopPropagation();
+          pointerX = x + width / 2;
+          pointerY = y + height / 2;
+          pointerDown = true;
+          renderFrame();
+          pointerDown = false;
+          renderFrame();
+        });
+      }
       if (isSourceLink) {
         element.href = sourceUrl(value);
+        element.style.maxWidth = `${Math.max(0, document.documentElement.clientWidth - x - 16)}px`;
+        element.style.textOverflow = "ellipsis";
+        element.title = value;
         element.target = "_blank";
         element.rel = "noreferrer";
         element.removeAttribute("aria-hidden");
@@ -775,8 +1020,46 @@ function renderCommands(arrayAddress) {
       element.style.letterSpacing = `${letterSpacing}px`;
       element.style.lineHeight = `${lineHeight || fontSize}px`;
     }
-    current.parent.appendChild(element);
+    const tableViewport = !isTableViewport && tableViewports.findLast(viewport => y >= viewport.y && y + height <= viewport.y + viewport.height + 1 && x >= viewport.x);
+    const codeViewport = isCodeSource && codeViewports.findLast(viewport => y >= viewport.y && y < viewport.y + viewport.height);
+    if (codeViewport) {
+      element.style.left = `${Math.round(x - codeViewport.x)}px`;
+      element.style.top = `${Math.round(y - codeViewport.y)}px`;
+      codeViewport.element.appendChild(element);
+    } else if (tableViewport) {
+      element.style.left = `${Math.round(x - tableViewport.x)}px`;
+      element.style.top = `${Math.round(y - tableViewport.y)}px`;
+      tableViewport.element.appendChild(element);
+    } else current.parent.appendChild(element);
   }
+  const headings = [];
+  const slugs = new Set();
+  for (const heading of headingGroups.values()) {
+    heading.element.setAttribute("aria-label", heading.label);
+    if (heading.href) {
+      headings.push({ label: heading.label, href: heading.href });
+      continue;
+    }
+    const foldControl = heading.element.querySelector(".clay-fold");
+    if (foldControl) foldControl.setAttribute("aria-label", `${foldControl.getAttribute("aria-expanded") === "true" ? "Collapse" : "Expand"} ${heading.label}`);
+    if (heading.pageTitle) {
+      const currentView = instance.exports.glo_manual_get_view();
+      if (currentView === 1 && instance.exports.glo_manual_get_module() >= 0 &&
+          instance.exports.glo_manual_get_symbol() < 0 && instance.exports.glo_manual_get_type() < 0)
+        heading.label = referenceIndex.modules[instance.exports.glo_manual_get_module()][0];
+      heading.element.setAttribute("aria-label", heading.label);
+      document.title = `${heading.label} — Glosso`;
+      continue;
+    }
+    const slug = heading.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "section";
+    let id = slug;
+    for (let suffix = 2; slugs.has(id); suffix += 1) id = `${slug}-${suffix}`;
+    slugs.add(id);
+    heading.element.id = id;
+    // The sidebar lists major sections; repeated parameter/field tables stay in the article.
+    if (!["Parameters", "Fields", "Variants", "Flags"].includes(heading.label)) headings.push({ id, label: heading.label });
+  }
+  syncOutline(headings);
   for (let index = 0; index < codeCopyButtons.length; index += 1) {
     const button = codeCopyButtons[index];
     const nextY = codeCopyButtons[index + 1]?.y ?? Number.POSITIVE_INFINITY;
@@ -792,15 +1075,31 @@ function renderCommands(arrayAddress) {
     }
     bindCodeCopyButton(button.element, source);
   }
+  const focused = scene.contains(document.activeElement) ? document.activeElement : null;
+  const focusedLink = focused?.getAttribute("href");
+  const focusedLinkOccurrence = focusedLink
+    ? [...scene.querySelectorAll("a")].filter(link => link.getAttribute("href") === focusedLink).indexOf(focused) : -1;
+  const focusedAction = focused?.dataset.actionId;
+  const focusedFold = focused?.dataset.foldId;
   scene.replaceChildren(fragment);
+  // Clay redraws on pointer movement. Preserve keyboard focus and code scrolling.
+  if (focusedLink) [...scene.querySelectorAll("a")].filter(link => link.getAttribute("href") === focusedLink)[focusedLinkOccurrence]?.focus({ preventScroll: true });
+  else if (focusedFold) scene.querySelector(`[data-fold-id="${focusedFold}"]`)?.focus({ preventScroll: true });
+  else if (focusedAction) scene.querySelector(`[data-action-id="${focusedAction}"]`)?.focus({ preventScroll: true });
+  else if (focused) scene.focus({ preventScroll: true });
+  for (const viewport of [...codeViewports, ...tableViewports]) viewport.element.scrollLeft = codeScrollPositions.get(viewport.element.dataset.id) ?? 0;
   const activeScrollbar = scene.querySelector(".clay-scrollbar");
   if (activeScrollbar) activeScrollbar.scrollTop = sidebarScrollTop;
   scene.style.height = `${Math.ceil(maximumY)}px`;
   applyScrollRequest();
+  if (pendingHeading) {
+    document.getElementById(pendingHeading)?.scrollIntoView({ block: "start" });
+    pendingHeading = "";
+  }
 }
 
-// Navigation decided inside the Wasm frame — a search result, a module card, a
-// pager — cannot move the document itself, so the model records where the new
+// Navigation decided inside the Wasm frame — a search result, a module card,
+// or an item link — cannot move the document itself, so the model records where the new
 // article should start and the host applies it once the commands are in place.
 function applyScrollRequest() {
   const request = instance.exports.glo_manual_get_scroll_request();
@@ -816,36 +1115,38 @@ function applyScrollRequest() {
 function syncBrowserState() {
   const currentView = instance.exports.glo_manual_get_view();
   document.querySelectorAll("[data-view]").forEach(button => {
-    if (button.classList.contains("nav-button")) button.toggleAttribute("aria-current", Number(button.dataset.view) === currentView);
+    if (Number(button.dataset.view) === currentView) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
   const selectedIndex = currentView === 1
     ? instance.exports.glo_manual_get_module()
     : currentView === 0 ? instance.exports.glo_manual_get_section() : -1;
-  const sidebarSelection = `${currentView}:${selectedIndex}`;
+  const sidebarSelection = `${currentView}:${selectedIndex}:${instance.exports.glo_manual_get_symbol()}:${instance.exports.glo_manual_get_type()}`;
   if (sidebarSelection !== lastSidebarSelection) {
     lastSidebarSelection = sidebarSelection;
     syncNativeSidebar(currentView, selectedIndex);
   }
   if (applyingHash) return;
-  let hash;
-  if (currentView === 1) {
-    const module = instance.exports.glo_manual_get_module();
-    hash = `#/std${module >= 0 ? `/${module}` : ""}`;
-  } else if (currentView === 2) {
-    hash = `#/search${searchInput.value ? `?q=${encodeURIComponent(searchInput.value)}` : ""}`;
-  } else {
-    hash = `#/manual/${instance.exports.glo_manual_get_section()}`;
+  const hash = documentRoute();
+  const locationBase = location.hash.split("?")[0];
+  if (location.hash !== hash && !(currentView !== 2 && locationBase === hash)) {
+    const replace = replaceBrowserRoute || !location.hash || currentView === 2 && locationBase === "#/search";
+    history[replace ? "replaceState" : "pushState"](null, "", hash);
   }
-  if (location.hash !== hash) history.replaceState(null, "", hash);
+  replaceBrowserRoute = false;
+  if (currentView !== 2) lastDocumentHash = location.hash;
 }
 
 function renderFrame(now = performance.now()) {
   pendingFrame = false;
+  // Replacing a pressed native link/button cancels its browser click. A frame
+  // already queued by hover, highlighting, or resize must wait for release.
+  if (nativePointerPress) return;
   const delta = Math.min(.05, Math.max(0, (now - lastFrame) / 1000));
   lastFrame = now;
   instance.exports.glo_main(
     scratchAddress,
-    window.innerWidth,
+    document.documentElement.clientWidth,
     Math.max(320, window.innerHeight - topbar.offsetHeight),
     pointerX,
     pointerY,
@@ -857,34 +1158,71 @@ function renderFrame(now = performance.now()) {
 }
 
 function scheduleRender() {
-  if (pendingFrame || !instance) return;
+  if (pendingFrame || !instance || nativePointerPress) return;
   pendingFrame = true;
   requestAnimationFrame(renderFrame);
 }
 
+function finishNativePointerPress() {
+  if (!nativePointerPress) return;
+  nativePointerPress = null;
+  scheduleRender();
+}
+
+function deferNativePointerRelease(event) {
+  const press = nativePointerPress;
+  if (press?.pointerId !== event.pointerId) return;
+  // A drag released outside the control may produce no click. Resume on the
+  // next frame in that case, without ending a newer press with the same id.
+  requestAnimationFrame(() => {
+    if (nativePointerPress === press) finishNativePointerPress();
+  });
+}
+
 function setView(nextView, focusSearch = false) {
   if (!instance) return;
+  if (nextView === 2 && instance.exports.glo_manual_get_view() !== 2) lastDocumentHash = location.hash;
   instance.exports.glo_manual_set_view(nextView);
   if (nextView === 2) writeSearchResults(searchDocumentation(searchInput.value));
   window.scrollTo({ top: 0, behavior: "auto" });
   scheduleRender();
+  setSidebarOpen(false);
   if (focusSearch) requestAnimationFrame(() => searchInput.focus());
 }
 
 function applyHash() {
   if (!instance) return;
   applyingHash = true;
+  pointerDown = false;
+  replaceBrowserRoute = true;
   const raw = location.hash.replace(/^#\/?/, "");
   const [path, search = ""] = raw.split("?");
-  const [route = "manual", id] = path.split("/");
-  if (route === "std") instance.exports.glo_manual_select_module(id === undefined ? -1 : Number(id));
+  const [route = "manual", id, section, item] = path.split("/");
+  pendingHeading = new URLSearchParams(search).get("heading") ?? "";
+  if (pendingHeading && `#/${path}` === documentRoute()) {
+    applyingHash = false;
+    setSidebarOpen(false);
+    scheduleRender();
+    return;
+  }
+  if (route === "std") {
+    const module = id !== undefined && /^\d+$/.test(id) && Number(id) < referenceIndex.modules.length ? Number(id) : -1;
+    instance.exports.glo_manual_select_module(module);
+    const index = item !== undefined && /^\d+$/.test(item) ? Number(item) : -1;
+    if (module >= 0 && referenceIndex.symbols[index]?.[4] === module) {
+      if (section === "item") instance.exports.glo_manual_select_symbol(index);
+      else if (section === "type") instance.exports.glo_manual_select_type(index);
+    }
+    // Old /declarations and /methods URLs resolve to the unified module index.
+  }
   else if (route === "search") {
     const query = new URLSearchParams(search).get("q") ?? searchInput.value;
     searchInput.value = query;
     instance.exports.glo_manual_set_view(2);
     writeSearchResults(searchDocumentation(query));
-  } else instance.exports.glo_manual_select_section(Number.isFinite(Number(id)) ? Number(id) : 0);
+  } else instance.exports.glo_manual_select_section(id !== undefined && Number.isInteger(Number(id)) && Number(id) >= 0 && Number(id) < referenceIndex.manual.length ? Number(id) : -1);
   applyingHash = false;
+  setSidebarOpen(false);
   window.scrollTo({ top: 0, behavior: "auto" });
   scheduleRender();
 }
@@ -901,16 +1239,30 @@ function setTheme(theme) {
   themeToggle.textContent = dark ? "☀" : "☾";
   themeToggle.title = dark ? "Use light mode" : "Use dark mode";
   themeToggle.setAttribute("aria-label", themeToggle.title);
-  document.querySelector('meta[name="theme-color"]').content = dark ? "#11151c" : "#f6f5f1";
+  document.querySelector('meta[name="theme-color"]').content = dark ? "#171c22" : "#fffdf8";
   try { localStorage.setItem("glosso-theme", theme); } catch { /* Theme still applies without storage. */ }
   scheduleRender();
 }
 
-document.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => setView(Number(button.dataset.view), Number(button.dataset.view) === 2)));
+menuToggle.addEventListener("click", () => setSidebarOpen(!document.body.classList.contains("sidebar-open")));
+sidebarBackdrop.addEventListener("click", () => setSidebarOpen(false, true));
+setSidebarOpen(false);
+document.querySelector("#help-toggle").addEventListener("click", () => searchHelp.showModal());
+document.querySelector('.skip-link').addEventListener("click", event => {
+  event.preventDefault();
+  scene.focus();
+  window.scrollTo({ top: 0, behavior: "auto" });
+});
+nativeSidebar.addEventListener("click", event => {
+  if (event.target.closest("a")) {
+    setSidebarOpen(false);
+    if (event.target.closest('[data-view="2"]')) requestAnimationFrame(() => searchInput.focus());
+  }
+});
 themeToggle.addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
-searchInput.addEventListener("focus", () => setView(2));
 searchInput.addEventListener("input", () => {
   if (!instance) return;
+  if (instance.exports.glo_manual_get_view() !== 2) lastDocumentHash = location.hash;
   instance.exports.glo_manual_set_view(2);
   writeSearchResults(searchDocumentation(searchInput.value));
   scheduleRender();
@@ -920,36 +1272,48 @@ nativeSidebarFilter.addEventListener("input", () => {
   nativeSidebarQueries[nativeSidebarView] = nativeSidebarFilter.value;
   populateNativeSidebar(nativeSidebarView, nativeSidebarSelected);
 });
-nativeSidebarItems.addEventListener("click", event => {
-  const button = event.target.closest(".native-sidebar-item");
-  if (!button || !instance) return;
-  const index = Number(button.dataset.index);
-  if (nativeSidebarView === 1) instance.exports.glo_manual_select_module(index);
-  else instance.exports.glo_manual_select_section(index);
-  window.scrollTo({ top: 0, behavior: "auto" });
-  scheduleRender();
-});
-nativeSidebarIndex.addEventListener("click", () => {
-  if (!instance) return;
-  if (nativeSidebarView === 1) instance.exports.glo_manual_select_module(-1);
-  else instance.exports.glo_manual_select_section(0);
-  window.scrollTo({ top: 0, behavior: "auto" });
-  scheduleRender();
-});
 window.addEventListener("keydown", event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" || event.key === "/" && !/^(INPUT|TEXTAREA)$/.test(event.target.tagName)) {
+  const editing = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName) || event.target.isContentEditable;
+  if (!searchHelp.open && ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" || event.key === "/" && !editing)) {
     event.preventDefault();
     setView(2, true);
   }
+  if (event.key === "Escape" && !searchHelp.open) {
+    if (document.body.classList.contains("sidebar-open")) setSidebarOpen(false, true);
+    else if (instance?.exports.glo_manual_get_view() === 2) {
+      searchInput.blur();
+      location.hash = lastDocumentHash;
+    }
+  }
+  if (event.key === "Tab" && isMobileLayout() && document.body.classList.contains("sidebar-open")) {
+    const controls = [menuToggle, ...nativeSidebar.querySelectorAll('a, input, button')];
+    const first = controls[0], last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  }
 });
+// Capture before code/table controls can stop propagation. Keep the DOM
+// stable through the native click, including modified clicks and touch taps.
+window.addEventListener("pointerdown", event => {
+  if (scene.contains(event.target) && event.target.closest("a, button, input, textarea, select, .clay-scroll-region"))
+    nativePointerPress = { pointerId: event.pointerId };
+}, { capture: true });
+window.addEventListener("pointerup", deferNativePointerRelease, { capture: true });
+window.addEventListener("click", finishNativePointerPress, { capture: true });
+window.addEventListener("pointercancel", finishNativePointerPress, { capture: true });
+window.addEventListener("blur", finishNativePointerPress);
+document.addEventListener("click", handleDocumentLink);
+// Back/Forward updates the URL before hashchange. Apply its earlier popstate
+// event so a queued redraw cannot push the previous Wasm route back to history.
+window.addEventListener("popstate", applyHash);
 window.addEventListener("hashchange", applyHash);
 window.addEventListener("pointermove", event => {
-  if (nativeSidebar.contains(event.target)) return;
+  if (!scene.contains(event.target) || event.target.closest("a, button, .clay-scroll-region")) return;
   updatePointer(event);
   scheduleRender();
 }, { passive: true });
 window.addEventListener("pointerdown", event => {
-  if (nativeSidebar.contains(event.target)) {
+  if (!scene.contains(event.target) || event.target.closest("a, button, .clay-scroll-region")) {
     pointerDown = false;
     return;
   }
@@ -958,13 +1322,17 @@ window.addEventListener("pointerdown", event => {
   scheduleRender();
 });
 window.addEventListener("pointerup", event => {
+  // A quick click can begin and end before the scheduled animation frame.
+  // Clay must observe the pressed state to report a release to navigation.
+  const nativeControl = event.target.closest("a, button, input, textarea, select");
+  if (pointerDown && instance && !nativeControl) renderFrame();
   pointerDown = false;
   if (nativeSidebar.contains(event.target)) return;
   updatePointer(event);
   scheduleRender();
 });
 window.addEventListener("pointercancel", () => { pointerDown = false; scheduleRender(); });
-window.addEventListener("resize", scheduleRender, { passive: true });
+window.addEventListener("resize", () => { setSidebarOpen(false); scheduleRender(); }, { passive: true });
 window.addEventListener("wheel", event => {
   if (nativeSidebar.contains(event.target)) return;
   const bounds = scene.getBoundingClientRect();
@@ -984,6 +1352,9 @@ initializeHighlighter();
 
 const imports = {
   env: {
+    abort() {
+      throw new Error("The Glosso runtime aborted.");
+    },
     write(file, address, length) {
       const output = textAt(address, length);
       if (file === 2) console.error(output);
@@ -1002,7 +1373,17 @@ const imports = {
       const value = textAt(chars, length);
       context.font = `${[1, 3, 4].includes(fontId) ? 700 : 400} ${fontSize}px ${fonts[fontId] || fonts[0]}`;
       const metrics = context.measureText(value);
-      const width = metrics.width + Math.max(0, value.length - 1) * letterSpacing;
+      let measuredWidth = metrics.width;
+      if (fontId === 5 || fontId === 4) {
+        const baseChars = data.getUint32(textSlice + 8, true);
+        measuredWidth = proseSegments(value, chars, baseChars).reduce((total, segment) => {
+          context.font = segment.code
+            ? `${[1, 3, 4].includes(fontId) ? 700 : 400} ${fontSize * .84}px ${fonts[2]}`
+            : `${fontId === 4 ? 700 : 400} ${fontSize}px ${fonts[fontId]}`;
+          return total + context.measureText(segment.text).width;
+        }, 0);
+      }
+      const width = measuredWidth + Math.max(0, value.length - 1) * letterSpacing;
       const height = (metrics.fontBoundingBoxAscent || fontSize * .8) + (metrics.fontBoundingBoxDescent || fontSize * .2);
       data.setFloat32(addressOfDimensions, width, true);
       data.setFloat32(addressOfDimensions + 4, height, true);

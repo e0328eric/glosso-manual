@@ -1,35 +1,28 @@
 // Sections 87-104: control flow.
 
+#public(unit) {
+
 render_section_87 :: () {
     paragraph(0, #string,oneline
-        \\A statement is the unit a procedure body is built from. Most statement
-        \\forms finish by consuming a single `;` if one is there and moving on if
-        \\it is not. A semicolon is therefore a terminator the parser tolerates,
-        \\not a separator it demands: a statement ends where its grammar ends, and
-        \\the terminator carries no information the parser did not already have.
+        \\A statement is the unit a procedure body is built from. The ordinary
+        \\simple forms are terminated statements: local declarations,
+        \\assignments and update assignments, expression statements such as a
+        \\call, `return`, and legacy inline assembly all require `;`. A newline
+        \\never substitutes for it. Control-flow and other body-ended statements
+        \\instead finish when their own body finishes.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
-        \\    a := 1
+        \\    a := 1;
         \\    b := 2;
-        \\    c := a + b
-        \\    print("a=% b=% c=%\n", a, b, c)
+        \\    c := a + b;
+        \\    print("a={} b={} c={}\n", a, b, c);
         \\}
     );
     code_block(2, "text", #string
         \\a=1 b=2 c=3
-    );
-    paragraph(3, #string,oneline
-        \\The forms that offer the optional semicolon are the ones that end in an
-        \\expression or a short clause: declarations, assignments, expression
-        \\statements, `return`, `break`, `continue`, `using`, and the directive
-        \\statements. A form that ends in a body does not offer it, because the
-        \\closing brace has already ended the statement and there is nothing left
-        \\for the semicolon to terminate. `if n > 0 { ... };`,
-        \\`while i < 1 { ... };` and `{ ... };` are each
-        \\`error: unexpected token ';'`.
     );
     subheading(4, "Newlines are not terminators");
     paragraph(5, #string,oneline
@@ -42,12 +35,12 @@ render_section_87 :: () {
     code_block(6, "glosso", #string
         \\#import "Io";
         \\
-        \\double :: (n: int) -> int { return n * 2; }
+        \\double :: (n: ssize) -> ssize { return n * 2; }
         \\
         \\main :: () {
         \\    z := double
-        \\    (3)
-        \\    print("z=%\n", z)
+        \\    (3);
+        \\    print("z={}\n", z);
         \\}
     );
     code_block(7, "text", #string
@@ -56,23 +49,38 @@ render_section_87 :: () {
     note(8, #string,oneline
         \\`double` on one line and `(3)` on the next is one call expression,
         \\`double(3)`, not a reference to `double` followed by a parenthesised
-        \\`3`. A leading `(`, `[`, `.` or binary operator on a continuation line
-        \\joins the line above it. Terminate the statement with `;` whenever the
-        \\next line starts with one of those.
+        \\`3`; the required terminator comes after the closing parenthesis. A
+        \\leading `(`, `[`, `.`, or binary operator on a continuation line joins
+        \\the line above it, however the source is laid out.
     );
     subheading(9, "Where a semicolon is mandatory");
     paragraph(10, #string,oneline
-        \\There are exactly three places where the parser calls for a semicolon
-        \\rather than merely accepting one. All three are positions where a
-        \\construct is followed by more source that could otherwise be read as a
-        \\continuation of it.
+        \\Required semicolons fall into the simple-statement forms and the
+        \\delimiter positions below. File scope adds its own declaration rule.
     );
     table_header(11, "Place   —   Form");
     table_row(12, "After a switch case label   |   `case 1;`, `case .Red;`, `case P if guard;`");
     table_row(13, "After a switch `else`   |   `else;`");
     table_row(14, "After a label statement   |   `'name;`; the older `'name:` is also accepted");
+    table_row(52, "After a local binding   |   `x := 1;`, `LIMIT :: 64;`, `buffer: [8]u8;`");
+    table_row(53, "After assignment or update assignment   |   `x = 2;`, `total += x;`");
+    table_row(54, "After `return`   |   `return;`, `return value;`, `return a, b;`");
+    table_row(55, "After an expression statement or legacy `#asm`   |   `work();`, `value;`, `#asm \"nop\";`");
+    table_row(56, "After a non-definition top-level declaration   |   `#import \"Io\";`, `LIMIT :: 64;`, `Alias :: ssize;`");
+    paragraph(57, #string,oneline
+        \\A `#code` quote provides the main contextual exception. A local
+        \\declaration, assignment, expression statement, value-bearing `return`,
+        \\or legacy `#asm` immediately before any `}` while inside the quote may
+        \\end there. The quote mode includes nested blocks, not just the outer
+        \\quote; at the outer brace this is what makes `#code { value }` an
+        \\expression. In an expression-position
+        \\`#inline while` or `#inline for`, an ordinary expression statement in
+        \\the generated body may instead end with `,`. Outside a `#code`
+        \\quotation, ordinary runtime and compile-time blocks receive neither
+        \\shortcut.
+    );
     paragraph(15, #string,oneline
-        \\A case label is an ordinary expression, so without the semicolon the
+        \\A case label ends at its semicolon; without it the
         \\parser has no way to know that the label has ended and the arm body has
         \\begun. Omitting it reports the first token of the body.
     );
@@ -99,11 +107,10 @@ render_section_87 :: () {
         \\Switching on a Value.
     );
     paragraph(19, #string,oneline
-        \\The label statement is the one case that is not diagnosed. A `'name`
-        \\token is read as a label statement only when the next token is `;` or
-        \\`:`; otherwise it is an ordinary expression of type `label`, evaluated
-        \\and discarded. The label is then never defined, and the error surfaces
-        \\at the jump instead.
+        \\A `'name` token is read as a label statement only when the next token is
+        \\`;` or `:`. Without either punctuation it begins an ordinary expression
+        \\statement, whose required terminator is missing; the parser immediately
+        \\blames the first token of the following statement.
     );
     code_block(20, "glosso", #string
         \\#import "Io";
@@ -114,21 +121,23 @@ render_section_87 :: () {
         \\'here
         \\    i += 1;
         \\    if i < 3 goto('here);
-        \\    print("i=%\n", i);
+        \\    print("i={}\n", i);
         \\}
     );
     code_block(21, "text", #string
-        \\error: no label 'here' in this procedure (define it with `'here:`)
-        \\  --> label.glo:8:14
+        \\error: unexpected token 'i'
+        \\  --> label.glo:7:5
         \\  |
-        \\8 |     if i < 3 goto('here);
-        \\  |              ^^^^
+        \\7 |     i += 1;
+        \\  |     ^
     );
     note(22, #string,oneline
         \\There is no empty statement. A semicolon is consumed only by the
-        \\statement in front of it, so a stray one has nothing to attach to:
-        \\both `;` on its own and the second `;` of `a := 1;;` are
-        \\`error: unexpected token ';'`.
+        \\statement in front of it, so a stray one has nothing to attach to.
+        \\Inside a body, both `;` on its own and the second `;` of `a := 1;;`
+        \\are `error: unexpected token ';'`. At file scope a stray semicolon is
+        \\`error: expected a declaration, found ';'`; after a braced definition
+        \\its help says that the declaration already ended at `}`.
     );
     subheading(23, "The statement inventory");
     paragraph(24, #string,oneline
@@ -139,26 +148,25 @@ render_section_87 :: () {
         \\label is recognised before an expression for the same reason.
     );
     table_header(25, "Form   —   What it is");
-    table_row(26, "`#memory ...`   |   A memory-contract overlay.");
-    table_row(27, "`name :: (...)`, `name :: struct`, `name :: enum`, `name :: union`, `name :: distinct`   |   A nested declaration, hoisted to file scope.");
+    table_row(27, "`name :: (...)`, `name :: struct`, `name :: enum`, `name :: union`, `name :: distinct`   |   A declaration local to its containing lexical block.");
     table_row(28, "`{ ... }`   |   A bare block, which introduces a scope.");
     table_row(29, "`'name;`   |   A label.");
-    table_row(30, "`return`, `return e`, `return a, b`   |   Leaves the procedure.");
-    table_row(31, "`break`, `continue`   |   Leaves or restarts the innermost loop.");
+    table_row(30, "`return;`, `return e;`, `return a, b;`   |   Leaves the procedure.");
+    table_row(31, "`break` / `break;`, `continue` / `continue;`   |   Leaves or restarts the innermost loop.");
     table_row(32, "`while cond body`, `for ... body`   |   The two loops.");
     table_row(33, "`#inline while ...`, `#inline for ...`   |   The unrolled loops.");
     table_row(34, "`defer stmt`, `#try defer stmt`   |   Runs a statement at block exit.");
-    table_row(35, "`using name;`   |   Opens an aggregate's fields into the scope.");
+    table_row(35, "`using name` / `using name;`   |   Opens an aggregate's fields into the scope.");
     table_row(36, "`if ...`   |   The conditional, the switch, and the pattern switch.");
     table_row(37, "`#if ...`   |   The static conditional and the static switch.");
-    table_row(38, "`#push_context [e] body`, `#push_allocator (e);`   |   Overrides the implicit context or its allocator.");
-    table_row(39, "`#comptime e`, `#comptime { ... }`, `#comptime -> T { ... }`   |   Compile-time evaluation.");
-    table_row(40, "`#assert cond, msg;`, `#compile_error msg;`   |   Compile-time checks.");
-    table_row(41, "`#insert e;`, `#bytes e;`, `#asm ...`   |   Splices a generated statement, raw bytes, or assembly.");
+    table_row(38, "`#push_context [e] body`, `#push_allocator (e)` [`;`]   |   Overrides the implicit context or its allocator.");
+    table_row(39, "`#comptime e` [`;`], `#comptime { ... }` [`;`], `#comptime -> T { ... }` [`;`]   |   Compile-time evaluation.");
+    table_row(40, "`#assert cond, msg` [`;`], `#compile_error msg` [`;`]   |   Compile-time checks.");
+    table_row(41, "`#insert e` [`;`], `#bytes e` [`;`], `#asm { ... }` [`;`] or legacy `#asm e;`   |   Splices a generated statement, raw bytes, or assembly.");
     table_row(42, "`case label;`   |   A case fragment. Legal only inside a `#code` quote.");
-    table_row(43, "`x := e`, `x : T = e`, `x :: e`, `a, b := f()`   |   A variable or constant declaration.");
-    table_row(44, "`target = value`, `target op= value`   |   Assignment and update assignment.");
-    table_row(45, "any expression   |   An expression statement.");
+    table_row(43, "`x := e;`, `x : T = e;`, `x :: e;`, `a, b := f();`   |   A variable or constant declaration.");
+    table_row(44, "`target = value;`, `target op= value;`   |   Assignment and update assignment.");
+    table_row(45, "`expression;`   |   An expression statement.");
     bullet(46, #string,oneline
         \\A nested `X :: (...)`, `struct`, `enum`, `union` or `distinct` inside a
         \\procedure body is not a local: it is lifted onto the file's declaration
@@ -167,7 +175,7 @@ render_section_87 :: () {
     );
     bullet(47, #string,oneline
         \\`return`, `break` and `continue` are also expressions, of the bottom
-        \\type `#noreturn`, so they may appear where a value is expected. `ifx`
+        \\type `#Never`, so they may appear where a value is expected. `ifx`
         \\Expressions shows the arms this makes possible.
     );
     bullet(48, #string,oneline
@@ -176,28 +184,29 @@ render_section_87 :: () {
         \\described in Bind or Diverge.
     );
     paragraph(49, #string,oneline
-        \\One program that exercises the less common entries, all of which are
-        \\statements and none of which need a semicolon that is not shown:
+        \\One program that exercises the less common entries follows. Every
+        \\required terminator is shown, and body-ended forms close with `}`:
     );
     code_block(50, "glosso", #string
         \\#import "Io";
         \\#import "Memory";
+        \\#import "Context";
         \\
-        \\Point :: struct { x: int; y: int; }
+        \\Point :: struct { x: ssize; y: ssize; }
         \\
         \\main :: () {
         \\    p: Point = .{ .x = 1, .y = 2 };
         \\    using p;
-        \\    print("using % %\n", x, y);
+        \\    print("using {} {}\n", x, y);
         \\
-        \\    { inner := 3; print("block %\n", inner); }
+        \\    { inner := 3; print("block {}\n", inner); }
         \\
         \\    #assert 1 + 1 == 2, "arithmetic still works";
-        \\    N :: #comptime -> int { total := 0; for i: 1..=4 total += i; return total; };
-        \\    print("N %\n", N);
+        \\    N :: #comptime -> ssize { total := 0; for i: 1..=4 total += i; return total; };
+        \\    print("N {}\n", N);
         \\
         \\    #insert "generated := 5;";
-        \\    print("generated %\n", generated);
+        \\    print("generated {}\n", generated);
         \\
         \\    defer print("deferred\n");
         \\
@@ -301,7 +310,7 @@ render_section_88 :: () {
     table_row(15, "pointer, many-pointer, function pointer, `label`   |   The value is not null.");
     table_row(16, "`?T` whose payload is pointer-shaped   |   The value is present.");
     table_row(17, "`string`, `cstring`, `string16`, `cstring16`   |   `.count` is not zero.");
-    table_row(18, "`[]T`, `[..]T`   |   `.count` is not zero.");
+    table_row(18, "`[]const T`, `[..]T`   |   `.count` is not zero.");
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
@@ -317,10 +326,10 @@ render_section_88 :: () {
         \\    lv := Level.Info;
         \\    if lv    print("Level.Info truthy\n"); else print("Level.Info falsy\n");
         \\
-        \\    p: ?*int = .None;
-        \\    if p     print("null ?*int truthy\n"); else print("null ?*int falsy\n");
+        \\    p: ?*ssize = .None;
+        \\    if p     print("null ?*ssize truthy\n"); else print("null ?*ssize falsy\n");
         \\
-        \\    xs: [3]int = .[1, 2, 3];
+        \\    xs: [3]ssize = .[1, 2, 3];
         \\    empty := xs[0..0];
         \\    if empty print("empty view truthy\n"); else print("empty view falsy\n");
         \\}
@@ -332,11 +341,11 @@ render_section_88 :: () {
         \\"" falsy
         \\"x" truthy
         \\Level.Info falsy
-        \\null ?*int falsy
+        \\null ?*ssize falsy
         \\empty view falsy
     );
     paragraph(21, #string,oneline
-        \\`?*T` is truthy exactly when it is present because the optional pointer
+        \\`?*const T` is truthy exactly when it is present because the optional pointer
         \\is stored in the pointer's null niche: `.None` is the null bit pattern,
         \\so the presence test and the null test are the same instruction. An
         \\optional over a payload with no niche has no such coincidence, and it
@@ -347,7 +356,7 @@ render_section_88 :: () {
         \\lowered. A struct condition is
         \\`error: values of type P have no native truthiness rule`, and
         \\`o: ?s64` is
-        \\`error: values of type Option_int have no native truthiness rule`. Test
+        \\`error: values of type ?s64 have no native truthiness rule`. Test
         \\a struct against something explicit, and match an optional with
         \\`if #pattern .Some(v) = o` or `if o == { case .Some(v); ... }`.
     );
@@ -363,7 +372,7 @@ render_section_88 :: () {
     table_row(27, "`ifx`   |   Must be `bool`   |   Run time");
     table_row(28, "`#if`   |   Must be `bool` and compile-time known   |   Compile time");
     paragraph(29, #string,oneline
-        \\`ifx 3 "a" else "b"` is `error: got int, expected bool`, and `#if 1`
+        \\`ifx 3 "a" else "b"` is `error: got ssize, expected bool`, and `#if 1`
         \\is `error: #if condition must be bool, got comptime_int`. The
         \\expression form is covered in `ifx` Expressions and the static form in
         \\Static Branching with `#if`.
@@ -378,15 +387,17 @@ render_section_88 :: () {
 
 render_section_89 :: () {
     paragraph(0, #string,oneline
-        \\Glosso has no `switch` keyword. A switch is an `if` whose condition is a
-        \\subject expression followed immediately by `==` and `{`. The braces hold
-        \\case arms rather than statements, each arm opening with a `case` label
-        \\that ends in a semicolon, and the default arm is spelled `else;`.
+        \\Glosso has no `switch` keyword. A switch is an `if` followed by a subject
+        \\expression, `==`, and a case block. Each arm starts with `case`, a pattern,
+        \\and a mandatory semicolon; the default arm is spelled `else;`.
+        \\`if subject == { ... }` and `if #pattern subject == { ... }` are equivalent
+        \\spellings of the same pattern switch. Both support payload captures,
+        \\nested patterns, guards, and the same exhaustiveness checks.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
         \\
-        \\classify :: (n: int) -> string {
+        \\classify :: (n: ssize) -> string {
         \\    if n == {
         \\    case ..=0;     return "non-positive";
         \\    case 1, 2, 3;  return "small";
@@ -397,7 +408,7 @@ render_section_89 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% % % % %\n", classify(-5), classify(0), classify(2), classify(7), classify(99));
+        \\    print("{} {} {} {} {}\n", classify(-5), classify(0), classify(2), classify(7), classify(99));
         \\}
     );
     code_block(2, "text", #string
@@ -415,11 +426,11 @@ render_section_89 :: () {
     code_block(5, "glosso", #string
         \\#import "Io";
         \\
-        \\P :: struct { a: int; }
+        \\P :: struct { a: ssize; }
         \\
         \\main :: () {
         \\    p: P = { .a = 1 };
-        \\    print("%\n", p.a);
+        \\    print("{}\n", p.a);
         \\}
     );
     code_block(6, "text", #string
@@ -439,8 +450,8 @@ render_section_89 :: () {
     );
     subheading(8, "The shape");
     code_block(9, "text", #string
-        \\if [#partial] <subject> == {
-        \\case <label> [, <label>]* ;
+        \\if [#partial] [#pattern] <subject> == {
+        \\case <pattern> [, <pattern>]* [if <condition>];
         \\    <statements>
         \\...
         \\else;
@@ -448,12 +459,11 @@ render_section_89 :: () {
         \\}
     );
     paragraph(10, #string,oneline
-        \\The semicolon after a label and after `else` is mandatory, and it is
-        \\mandatory because a label is an ordinary expression: nothing else marks
-        \\where the label ends and the arm body begins. Omitting it reports the
-        \\first token of the body, `error: unexpected token 'print'` for
-        \\`case 1 print("one\n");`. Arm bodies are statement lists, not blocks,
-        \\and they are not braced.
+        \\The semicolon after a case pattern and its optional guard, and after
+        \\`else`, is mandatory: it separates the label from the arm body.
+        \\Omitting it reports the first token of the body,
+        \\`error: unexpected token 'print'` for `case 1 print("one\n");`.
+        \\Arm bodies are statement lists and do not need their own braces.
     );
     paragraph(11, #string,oneline
         \\An arm runs to the next `case`, the `else`, or the closing brace. There
@@ -464,9 +474,11 @@ render_section_89 :: () {
     );
     subheading(12, "Case labels by subject type");
     paragraph(13, #string,oneline
-        \\A label is a literal, a range, an enum constant, or a union variant,
-        \\depending on what the subject is. Several labels may share one arm by
-        \\separating them with commas.
+        \\A case label uses the pattern language for the subject's type. Literals,
+        \\ranges, enum constants, and union variants are common labels; struct and
+        \\slice patterns and nested payload patterns work here too. Several
+        \\patterns may share one arm by separating them with commas or `|`.
+        \\The Pattern Vocabulary describes the full set of patterns.
     );
     table_header(14, "Subject   —   Label spellings");
     table_row(15, "integer   |   `case 7;`, `case 1, 2, 3;`, `case ..=0;`, `case 4..=9;`, `case 10..;`");
@@ -479,7 +491,9 @@ render_section_89 :: () {
     );
     table_row(19, "`bool`   |   `case true;`, `case false;`");
     table_row(20, "enum   |   `case Level.Warn;`, `case .Warn;`, `case .Warn, .Error;`");
-    table_row(21, "tagged union   |   `case Name;`, `case .Name;`, `case Name(text);`, `case .Name(text);`");
+    table_row(21, #string,oneline
+        \\tagged union   |   `case Name;`, `case .Name;`, `case Name(text);`, `case .Name(text);`, `case Token.Name(text);`
+    );
     table_row(22, "`?T`, `E!T`   |   `case .Some(v);`, `case .None;`, `case .Ok(v);`, `case .Err(e);`");
     table_row(23, "any   |   `else;`");
     paragraph(24, #string,oneline
@@ -498,21 +512,21 @@ render_section_89 :: () {
         \\
         \\main :: () {
         \\    lv := Level.Warn;
-        \\    if lv == { case Level.Info; print("qualified Info\n"); case Level.Warn; print("qualified Warn\n"); }
+        \\    if #partial lv == { case Level.Info; print("qualified Info\n"); case Level.Warn; print("qualified Warn\n"); }
         \\    if lv == { case .Info; print("dotted Info\n"); case .Warn, .Error; print("dotted Warn or Error\n"); }
         \\
         \\    t: Token = .Code(42);
         \\    if t == {
-        \\    case Name(text); print("bare Name %\n", text);
-        \\    case Code(v);    print("bare Code %\n", v);
+        \\    case Name(text); print("bare Name {}\n", text);
+        \\    case Code(v);    print("bare Code {}\n", v);
         \\    case Eof;        print("bare Eof\n");
         \\    }
         \\
         \\    e: Token = .Eof;
         \\    if e == {
-        \\    case .Name(text);   print("dotted Name %\n", text);
-        \\    case .Code(v);      print("dotted Code %\n", v);
-        \\    case .Eof(nothing); print("dotted Eof, payload is the empty tuple: %\n", nothing == .());
+        \\    case .Name(text);   print("dotted Name {}\n", text);
+        \\    case .Code(v);      print("dotted Code {}\n", v);
+        \\    case .Eof(nothing); print("dotted Eof, payload is the empty tuple: {}\n", nothing == .());
         \\    }
         \\}
     );
@@ -523,38 +537,79 @@ render_section_89 :: () {
         \\dotted Eof, payload is the empty tuple: 1
     );
     note(27, #string,oneline
-        \\An enum constant may be written qualified or with a leading dot, but a
-        \\union variant may not be qualified here: `case Token.Name(s);` is
-        \\`error: '' is not a variant of union Token`. Use `Name(s)` or
-        \\`.Name(s)`. The qualified spelling is accepted in a `#pattern` switch,
-        \\which is a different form.
+        \\A union variant may be qualified, dotted, or bare in a case label:
+        \\`case Token.Name(text);`, `case .Name(text);`, and `case Name(text);`
+        \\match the same variant and bind the same payload. Adding `#pattern`
+        \\before the subject does not change which labels are accepted.
+    );
+    subheading(38, #string,oneline
+        \\Captures and case guards
+    );
+    paragraph(39, #string,oneline
+        \\A guard is introduced by `if`: `case .Some(x) if x > 0;`.
+        \\The pattern first checks the tag and binds `x`; the guard can then
+        \\read it. Cases are tried in order. If the guard is false, matching
+        \\continues at the next case; after a successful case body, the switch
+        \\ends. Each case has its own capture scope.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\
+        \\describe :: (val: ?s64) {
+        \\    if val == {
+        \\    case .Some(x) if x > 0;
+        \\        print("value is positive\n");
+        \\    case .Some(x);
+        \\        print("value is nonpositive\n");
+        \\    case .None;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    describe(.Some(5));
+        \\    describe(.Some(0));
+        \\    describe(.Some(-2));
+        \\    describe(.None);
+        \\}
+    );
+    code_block(41, "text", #string
+        \\value is positive
+        \\value is nonpositive
+        \\value is nonpositive
+    );
+    note(42, #string,oneline
+        \\The second `.Some(x)` covers zero and negative values, so its message
+        \\says "nonpositive". The `.None` arm does nothing. The unguarded
+        \\`.Some(x)` and `.None` arms make this switch exhaustive; a guarded
+        \\`.Some(x)` alone does not cover every `Some` value. Write
+        \\`case .Some(x) if x > 0 && x < 100;` for a compound guard.
+        \\`case .Some(x) && x > 0;` is not valid case syntax.
     );
     subheading(28, "Nothing matched");
     paragraph(29, #string,oneline
-        \\When no arm matches and there is no `else;`, control falls out of the
-        \\switch and continues after it. There is no trap, because a statement
-        \\switch is not obliged to produce anything. The expression form is
-        \\obliged to, and behaves differently; see `ifx` Expressions.
+        \\A #partial statement switch can leave values unhandled. If no arm matches
+        \\and there is no else, execution continues after that switch. Without
+        \\#partial, the compiler requires exhaustive coverage or an else arm.
+        \\An ifx expression must always produce a value.
     );
     code_block(30, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
         \\    n := 7;
-        \\    if n == { case 1; print("one\n"); case 2; print("two\n"); }
-        \\    print("fell out of the int switch\n");
+        \\    if #partial n == { case 1; print("one\n"); case 2; print("two\n"); }
+        \\    print("fell out of the ssize switch\n");
         \\}
     );
     code_block(31, "text", #string
-        \\fell out of the int switch
+        \\fell out of the ssize switch
     );
     paragraph(32, #string,oneline
-        \\Integer, float, string, character, `bool` and enum subjects are not
-        \\coverage-checked in this form, and duplicate labels are not diagnosed:
-        \\the first matching arm wins and the rest are dead. A tagged-union
-        \\subject is the exception. Its switch must name every variant, or carry
-        \\`else;`, or be marked `#partial`; otherwise it is
-        \\`error: switch is exhaustive by default; add else or #partial`.
+        \\Statement switches are exhaustive by default, with or without the
+        \\`#pattern` marker. A gap reports `non-exhaustive switch` with a
+        \\missing-case witness. Cover every value, add `else`, or use `#partial`
+        \\to allow unmatched values to continue after the switch. Arms already
+        \\covered by earlier cases can receive an unreachable-pattern warning.
     );
     paragraph(33, #string,oneline
         \\`#partial` waives that requirement and is written immediately after
@@ -571,7 +626,7 @@ render_section_89 :: () {
         \\
         \\main :: () {
         \\    t: Token = .Code(7);
-        \\    if #partial t == { case .Code(v); print("partial code %\n", v); }
+        \\    if #partial t == { case .Code(v); print("partial code {}\n", v); }
         \\}
     );
     code_block(35, "text", #string
@@ -586,12 +641,12 @@ render_section_89 :: () {
         \\`error: cannot switch on a raw union (it has no tag)`.
     );
     paragraph(37, #string,oneline
-        \\One arm may not capture from several tags whose payloads differ:
-        \\`case .Name(x), .Code(x);` is `error: a case with several tags cannot
-        \\capture a payload - the tags have different payload types`. Grouping
-        \\tags that share a body is covered in `case A, B;` Groups and
-        \\`#falling`, and the coverage analysis itself in Exhaustiveness, Guards,
-        \\and Reachability.
+        \\Grouped patterns may capture when every alternative binds the same names
+        \\at the same types: `case .Name(x), .Text(x);` works when both payloads
+        \\are strings. Alternatives with different payload types, such as
+        \\`.Name(x)` and `.Code(x)`, cannot bind the same `x`. The comma spelling
+        \\follows the same rules as `|`. See `case A, B;` Groups and `#falling`,
+        \\and Exhaustiveness, Guards, and Reachability.
     );
 }
 
@@ -605,8 +660,12 @@ render_section_90 :: () {
     );
     table_header(1, "Form   —   Shape");
     table_row(2, "conditional   |   `ifx cond then-expr else else-expr`");
-    table_row(3, "value switch   |   `ifx subject == { case L; expr; ... else; expr; }`");
-    table_row(4, "pattern switch   |   `ifx #pattern [subject] == { case P; expr; ... }`");
+    table_row(3, #string,oneline
+        \\subject switch   |   `ifx [#pattern] subject == { case P [if cond]; expr; ... }`
+    );
+    table_row(4, #string,oneline
+        \\subject-less switch   |   `ifx #pattern == { case cond; expr; ... else; expr; }`
+    );
     code_block(5, "glosso", #string
         \\#import "Io";
         \\
@@ -615,25 +674,25 @@ render_section_90 :: () {
         \\
         \\main :: () {
         \\    enabled := true;
-        \\    print("%\n", ifx enabled "on" else "off");
+        \\    print("{}\n", ifx enabled "on" else "off");
         \\
         \\    n := 5;
-        \\    print("%\n", ifx n > 10 "big" else ifx n > 3 "mid" else "small");
+        \\    print("{}\n", ifx n > 10 "big" else ifx n > 3 "mid" else "small");
         \\
         \\    score := 85;
-        \\    print("%\n", ifx score == { case 90; "A"; case 85; "B"; else; "C"; });
+        \\    print("{}\n", ifx score == { case 90; "A"; case 85; "B"; else; "C"; });
         \\
         \\    c := Color.Blue;
-        \\    print("%\n", ifx c == { case .Red; "red"; case .Green; "green"; case .Blue; "blue"; });
+        \\    print("{}\n", ifx c == { case .Red; "red"; case .Green; "green"; case .Blue; "blue"; });
         \\
         \\    s: Shape = .Rect(3.0);
-        \\    print("%\n", ifx #pattern s == {
+        \\    print("{}\n", ifx #pattern s == {
         \\    case Shape.Circle(r); 3.0 * r * r;
         \\    case Shape.Rect(w);   w * w;
         \\    case Shape.Empty;     0.0;
         \\    });
         \\
-        \\    print("%\n", ifx #pattern == { case n > 3; "gt"; else; "le"; });
+        \\    print("{}\n", ifx #pattern == { case n > 3; "gt"; else; "le"; });
         \\}
     );
     code_block(6, "text", #string
@@ -645,11 +704,12 @@ render_section_90 :: () {
         \\gt
     );
     paragraph(7, #string,oneline
-        \\The switch forms share the subject and label grammar of the statement
-        \\switch, including the mandatory semicolon after each label and after
-        \\`else`. The subject-less pattern form takes arbitrary boolean
-        \\predicates as its labels. `ifx` does not accept `#partial`:
-        \\`ifx #partial c == { ... }` is
+        \\With a subject, `ifx subject == { ... }` and
+        \\`ifx #pattern subject == { ... }` are equivalent. They use the same
+        \\patterns and guards as the statement switch, including the mandatory
+        \\semicolon after each label and after `else`. The subject-less form
+        \\keeps `#pattern` and takes boolean conditions as its labels.
+        \\`ifx` does not accept `#partial`: `ifx #partial c == { ... }` is
         \\`error: unexpected directive 'partial'`, since waiving coverage would
         \\leave the expression with no value to produce.
     );
@@ -679,7 +739,7 @@ render_section_90 :: () {
         \\main :: () {
         \\    score := 85;
         \\    w := ifx score == { case 85; print("computing\n"); score * 2; else; 0; };
-        \\    print("w %\n", w);
+        \\    print("w {}\n", w);
         \\}
     );
     code_block(14, "text", #string
@@ -691,7 +751,7 @@ render_section_90 :: () {
         \\`error: an ifx arm must end in an expression`, reported at the offending
         \\statement. An arm that ends in a `void` call is subtler: the arm's type
         \\becomes `void`, and the mismatch surfaces on the next arm instead, as
-        \\`error: got int, expected void`.
+        \\`error: got ssize, expected void`.
     );
     paragraph(16, #string,oneline
         \\The arms are expressions, not blocks. `ifx b { 1 } else { 2 }` does not
@@ -708,6 +768,7 @@ render_section_90 :: () {
     );
     code_block(19, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\main :: () {
         \\    b := true;
@@ -715,8 +776,8 @@ render_section_90 :: () {
         \\    a := ifx b 1 else 2.5;
         \\    c := ifx b n else 7;
         \\    d := ifx b cast(f32)1.0 else 2.0;
-        \\    print("% % %\n", type_name(type_of(a)), type_name(type_of(c)), type_name(type_of(d)));
-        \\    print("% % %\n", a, c, d);
+        \\    print("{} {} {}\n", type_name(type_of(a)), type_name(type_of(c)), type_name(type_of(d)));
+        \\    print("{} {} {}\n", a, c, d);
         \\}
     );
     code_block(20, "text", #string
@@ -725,7 +786,7 @@ render_section_90 :: () {
     );
     paragraph(21, #string,oneline
         \\Arms with no join are an error reported against the arm that does not
-        \\fit: `ifx b 1 else "two"` is `error: got int, expected string`.
+        \\fit: `ifx b 1 else "two"` is `error: got ssize, expected string`.
     );
     subheading(22, "Totality");
     paragraph(23, #string,oneline
@@ -743,7 +804,7 @@ render_section_90 :: () {
         \\main :: () {
         \\    c := Color.Red;
         \\    name := ifx c == { case .Red; "red"; case .Green; "green"; };
-        \\    print("%\n", name);
+        \\    print("{}\n", name);
         \\}
     );
     code_block(25, "text", #string
@@ -758,11 +819,10 @@ render_section_90 :: () {
     paragraph(26, #string,oneline
         \\Subjects whose domain cannot be enumerated are never total on literals
         \\alone. An `f64` or `string` subject with only literal labels reports
-        \\`note: missing case: _`, and the subject-less predicate form reports the
-        \\same witness under `error: non-exhaustive #pattern switch`, because an
-        \\arbitrary boolean predicate proves nothing about coverage. The analysis
-        \\behind the witnesses is described in Exhaustiveness, Guards, and
-        \\Reachability.
+        \\`note: missing case: _`. A subject-less switch without `else` reports
+        \\the same witness under `error: cannot decide a value for this ifx`,
+        \\because arbitrary boolean conditions prove nothing about coverage.
+        \\The analysis is described in Exhaustiveness, Guards, and Reachability.
     );
     paragraph(27, #string,oneline
         \\When the subject is known at compile time and no arm matches it, the
@@ -785,7 +845,7 @@ render_section_90 :: () {
     );
     subheading(30, "Diverging arms");
     paragraph(31, #string,oneline
-        \\`return`, `break` and `continue` are expressions of type `#noreturn`,
+        \\`return`, `break` and `continue` are expressions of type `#Never`,
         \\the bottom type, which coerces to every type because the coercion can
         \\never run. An `ifx` arm may therefore leave instead of producing a
         \\value, which is how a loop body filters and binds in one step.
@@ -800,14 +860,14 @@ render_section_90 :: () {
         \\        w := ifx v < 6 v else break;
         \\        total += w;
         \\    }
-        \\    print("total=%\n", total);
+        \\    print("total={}\n", total);
         \\
         \\    evens := 0;
         \\    for v: xs {
         \\        w := ifx v % 2 == 0 v else continue;
         \\        evens += w;
         \\    }
-        \\    print("evens=%\n", evens);
+        \\    print("evens={}\n", evens);
         \\}
     );
     code_block(33, "text", #string
@@ -816,9 +876,9 @@ render_section_90 :: () {
     );
     note(34, #string,oneline
         \\The join takes the other arm's type first, so a bare numeric literal
-        \\beside a diverging arm is checked against `#noreturn` and fails:
+        \\beside a diverging arm is checked against `#Never` and fails:
         \\`x := ifx b 1 else return -1;` is
-        \\`error: got int, expected #noreturn`. Naming the value first
+        \\`error: got ssize, expected #Never`. Naming the value first
         \\(`ifx b y else return -1`) or writing the `ifx` directly in a `return`
         \\both work, because the expected type is then known from context.
     );
@@ -826,11 +886,12 @@ render_section_90 :: () {
 
 render_section_91 :: () {
     paragraph(0, #string,oneline
-        \\`#pattern` introduces the pattern language. A pattern is one construct
-        \\that does two things at once: it tests a value's shape and it binds
-        \\names to the parts it found. That pairing is why patterns are the only
-        \\way to read a tagged union's payload, since the binding cannot happen
-        \\without the test having succeeded.
+        \\A pattern tests a value's shape and binds names to the parts it found.
+        \\This pairing makes it possible to read a tagged union's payload only
+        \\after proving its active variant. `#pattern` introduces a pattern test
+        \\in an ordinary condition, a bind-or-diverge statement, or a pattern
+        \\quote. A switch case already accepts patterns, so its subject may be
+        \\written with or without the `#pattern` marker.
     );
     paragraph(1, #string,oneline
         \\This chapter covers where a pattern may appear and the two rules that
@@ -842,10 +903,28 @@ render_section_91 :: () {
     table_row(3, "`if #pattern P = subject { ... }`   |   condition   |   One-shot test; captures reach the then-branch.");
     table_row(4, "`if #pattern { P1 = s1; P2 = s2; }`   |   condition   |   Multi-arm test; all arms must match; captures join.");
     table_row(5, "`while #pattern P = subject { ... }`   |   condition   |   Re-tested and re-bound each iteration.");
-    table_row(6, "`if [#partial] #pattern [subject] == { case P; ... }`   |   statement   |   Pattern switch.");
-    table_row(7, "`ifx #pattern [subject] == { case P; expr; ... }`   |   expression   |   Pattern switch that yields a value.");
+    table_row(6, #string,oneline
+        \\`if [#partial] [#pattern] subject == { case P; ... }`   |   statement   |   Switch on a value; `#pattern` is optional.
+    );
+    table_row(7, #string,oneline
+        \\`ifx [#pattern] subject == { case P; expr; ... }`   |   expression   |   Switch on a value and yield a result; `#pattern` is optional.
+    );
+    table_row(38, #string,oneline
+        \\`if [#partial] #pattern == { case condition; ... }`   |   statement   |   Subject-less switch; `#pattern` is required.
+    );
+    table_row(39, #string,oneline
+        \\`ifx #pattern == { case condition; expr; ... }`   |   expression   |   Subject-less switch that yields a value.
+    );
     table_row(8, "`#pattern P := subject else { ... };`   |   statement   |   Bind into the enclosing scope or diverge.");
-    table_row(9, "`#pattern P`   |   expression   |   A quote: a compile-time value of type `pattern`.");
+    table_row(9, "`#pattern P`   |   expression   |   A quote: a compile-time value of type `Pattern`.");
+    paragraph(40, #string,oneline
+        \\For a union subject, `if val == { case .Some(x); ... }` and
+        \\`if #pattern val == { case .Some(x); ... }` have the same meaning,
+        \\capture scope, guards, and coverage requirements. A single-pattern
+        \\condition still needs `#pattern`: `if #pattern .Some(x) = val { ... }`.
+        \\Compose that test with `&& x > 0`; in a case label, introduce the guard
+        \\with `if x > 0`. Switching on a Value gives a complete example.
+    );
     paragraph(10, #string,oneline
         \\The parser tells these apart by scanning ahead from the pattern for a
         \\depth-zero `=` or `:=`. A depth-zero `=` makes it a test, a `:=` makes it
@@ -867,27 +946,27 @@ render_section_91 :: () {
         \\main :: () {
         \\    s: Shape = .Circle(2.0);
         \\
-        \\    if #pattern Shape.Circle(r) = s  print("test: r = %\n", r);
+        \\    if #pattern Shape.Circle(r) = s  print("test: r = {}\n", r);
         \\
-        \\    if #pattern Shape.Rect(w) = s { print("rect %\n", w); }
+        \\    if #pattern Shape.Rect(w) = s { print("rect {}\n", w); }
         \\    else                          { print("test with else: not a rect\n"); }
         \\
         \\    o: ?s64 = .Some(3);
         \\    while #pattern .Some(v) = o {
-        \\        print("loop: v = %\n", v);
+        \\        print("loop: v = {}\n", v);
         \\        if v <= 1 { o = .None; } else { o = .Some(v - 1); }
         \\    }
         \\
-        \\    if #pattern s == {
-        \\    case Shape.Circle(r); print("switch: circle %\n", r);
-        \\    case Shape.Rect(w);   print("switch: rect %\n", w);
+        \\    if s == {
+        \\    case Shape.Circle(r); print("switch: circle {}\n", r);
+        \\    case Shape.Rect(w);   print("switch: rect {}\n", w);
         \\    case Shape.Empty;     print("switch: empty\n");
         \\    }
         \\
-        \\    print("bind or diverge: % %\n", port_of(.Some(8)), port_of(.None));
+        \\    print("bind or diverge: {} {}\n", port_of(.Some(8)), port_of(.None));
         \\
         \\    CIRCLE :: #pattern Shape.Circle(r);
-        \\    if #pattern #insert CIRCLE = s  print("quote: r = %\n", r);
+        \\    if #pattern #insert CIRCLE = s  print("quote: r = {}\n", r);
         \\}
     );
     code_block(12, "text", #string
@@ -914,7 +993,7 @@ render_section_91 :: () {
         \\    p: Pair = .{ .first = 4, .second = 9 };
         \\    q: Pair = .{ .first = 4, .second = 1 };
         \\    if #pattern { Pair.{ .first = a, ... } = p; Pair.{ .first = == a, ... } = q; }
-        \\        print("both start at %\n", a);
+        \\        print("both start at {}\n", a);
         \\    else
         \\        print("they differ\n");
         \\}
@@ -936,7 +1015,7 @@ render_section_91 :: () {
         \\
         \\main :: () {
         \\    s: Shape = .Rect(3.0);
-        \\    if #pattern .Rect(w) = s && w > 1.0   print("wide rect %\n", w);
+        \\    if #pattern .Rect(w) = s && w > 1.0   print("wide rect {}\n", w);
         \\    if #pattern .Rect(w) = s && w > 100.0 print("huge\n"); else print("not huge\n");
         \\}
     );
@@ -945,11 +1024,11 @@ render_section_91 :: () {
         \\not huge
     );
     note(19, #string,oneline
-        \\Do not put `||` between two pattern tests. It compiles, but `||` short
-        \\circuits, so the untaken alternative's captures are in scope and never
-        \\written; the arm reads uninitialised storage. `|` inside a single
-        \\pattern is the supported spelling for alternatives, and it forces every
-        \\alternative to bind the same names at the same types.
+        \\A pattern test cannot be an operand of `||`; the compiler rejects it
+        \\because a short-circuited branch would leave captures unbound.
+        \\Use `|` inside one pattern when either alternative may match the same
+        \\subject, and bind the same names at the same types in every alternative.
+        \\Use separate switch cases or nested tests for other alternatives.
     );
     paragraph(20, #string,oneline
         \\A test cannot be negated. `!(#pattern P = subject)` is
@@ -961,10 +1040,10 @@ render_section_91 :: () {
     subheading(21, "The quote");
     paragraph(22, #string,oneline
         \\`#pattern P` with no subject is not a test but a quote: a value of the
-        \\built-in type `pattern`. The type is compile-time only and has no
+        \\built-in type `Pattern`. The type is compile-time only and has no
         \\storage, so a quote is bound with `::` and spliced back into pattern
         \\position with `#insert`. Binding one with `:=` is
-        \\`error: a 'pattern' value is compile-time only; bind it with '::' rather
+        \\`error: a 'Pattern' value is compile-time only; bind it with '::' rather
         \\than ':='`. Patterns as Compile-Time Values covers the introspection
         \\intrinsics built on this.
     );
@@ -996,10 +1075,10 @@ render_section_91 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", describe(Value.Number(3)));
-        \\    print("%\n", describe(Value.Number(400)));
-        \\    print("%\n", describe(Value.Text("hello")));
-        \\    print("%\n", describe(Value.Nothing()));
+        \\    print("{}\n", describe(Value.Number(3)));
+        \\    print("{}\n", describe(Value.Number(400)));
+        \\    print("{}\n", describe(Value.Text("hello")));
+        \\    print("{}\n", describe(Value.Nothing()));
         \\}
     );
     code_block(27, "text", #string
@@ -1037,12 +1116,12 @@ render_section_91 :: () {
         \\main :: () {
         \\    d := 7;
         \\    p: Pair = .{ .first = 5, .second = 9 };
-        \\    if #pattern Pair.{ .first = d, .second = == 0 } = p { print("matched, d = %\n", d); }
-        \\    else                                                { print("rejected, d = %\n", d); }
-        \\    print("after, d = %\n", d);
+        \\    if #pattern Pair.{ .first = d, .second = == 0 } = p { print("matched, d = {}\n", d); }
+        \\    else                                                { print("rejected, d = {}\n", d); }
+        \\    print("after, d = {}\n", d);
         \\
         \\    q: Pair = .{ .first = 4, .second = 4 };
-        \\    if #pattern Pair.{ .first = a, .second = == a } = q  print("both fields are %\n", a);
+        \\    if #pattern Pair.{ .first = a, .second = == a } = q  print("both fields are {}\n", a);
         \\}
     );
     code_block(33, "text", #string
@@ -1127,21 +1206,21 @@ render_section_92 :: () {
         \\
         \\main :: () {
         \\    n := 3; f := 2.5; s := "hi"; b := true;
-        \\    if #pattern 3 = n     print("int literal\n");
+        \\    if #pattern 3 = n     print("ssize literal\n");
         \\    if #pattern 2.5 = f   print("float literal\n");
         \\    if #pattern "hi" = s  print("string literal\n");
         \\    if #pattern true = b  print("bool literal\n");
         \\
-        \\    if #pattern v = n  print("binding v = %\n", v);
+        \\    if #pattern v = n  print("binding v = {}\n", v);
         \\    if #pattern _ = n  print("wildcard\n");
         \\
         \\    p: Pair = .{ .first = 1, .second = 2 };
         \\    if #pattern Pair.{ .first = *fp, ... } = p  fp.* = 42;
-        \\    print("through the pointer, first = %\n", p.first);
+        \\    print("through the pointer, first = {}\n", p.first);
         \\}
     );
     code_block(21, "text", #string
-        \\int literal
+        \\ssize literal
         \\float literal
         \\string literal
         \\bool literal
@@ -1166,12 +1245,12 @@ render_section_92 :: () {
         \\
         \\main :: () {
         \\    t: Token = .Name("total");
-        \\    if #pattern Token.Name(text) = t  print("qualified: %\n", text);
-        \\    if #pattern .Name(text) = t       print("leading dot: %\n", text);
+        \\    if #pattern Token.Name(text) = t  print("qualified: {}\n", text);
+        \\    if #pattern .Name(text) = t       print("leading dot: {}\n", text);
         \\
         \\    e: Token = .Eof;
         \\    if #pattern Token.Eof = e            print("tag only\n");
-        \\    if #pattern Token.Eof(nothing) = e   print("void capture: %\n", nothing == .());
+        \\    if #pattern Token.Eof(nothing) = e   print("void capture: {}\n", nothing == .());
         \\
         \\    c := Color.Green;
         \\    if #pattern Color.Green = c  print("enum qualified\n");
@@ -1216,15 +1295,15 @@ render_section_92 :: () {
         \\
         \\main :: () {
         \\    p: Pair = .{ .first = 4, .second = 9 };
-        \\    if #pattern Pair.{ .first = a, .second = b } = p  print("named % %\n", a, b);
-        \\    if #pattern Pair.{ .second, ... } = p             print("shorthand %\n", second);
-        \\    if #pattern .{ x, y } = p                         print("positional % %\n", x, y);
+        \\    if #pattern Pair.{ .first = a, .second = b } = p  print("named {} {}\n", a, b);
+        \\    if #pattern Pair.{ .second, ... } = p             print("shorthand {}\n", second);
+        \\    if #pattern .{ x, y } = p                         print("positional {} {}\n", x, y);
         \\
         \\    items: [5]s64 = .[10, 20, 30, 40, 50];
-        \\    if #pattern .[head, ..., tail] = items[..]  print("head % tail %\n", head, tail);
-        \\    if #pattern .[a2, b2, ...] = items[..]      print("prefix % %\n", a2, b2);
+        \\    if #pattern .[head, ..., tail] = items[..]  print("head {} tail {}\n", head, tail);
+        \\    if #pattern .[a2, b2, ...] = items[..]      print("prefix {} {}\n", a2, b2);
         \\    two: [2]s64 = .[7, 8];
-        \\    if #pattern .[u, v] = two[..]  print("exact % %\n", u, v);
+        \\    if #pattern .[u, v] = two[..]  print("exact {} {}\n", u, v);
         \\    if #pattern .[u2] = two[..]    print("unreached\n"); else print("length mismatch\n");
         \\}
     );
@@ -1242,9 +1321,9 @@ render_section_92 :: () {
         \\`error: a slice pattern may use '...' at most once`, because two gaps of
         \\unknown width leave the elements between them at no fixed offset. A slice
         \\pattern applied to a non-array is
-        \\`error: slice pattern needs an array or slice value, got int`, and a
+        \\`error: slice pattern needs an array or slice value, got ssize`, and a
         \\struct pattern applied to a non-struct is
-        \\`error: struct pattern needs a struct value, got int`.
+        \\`error: struct pattern needs a struct value, got ssize`.
     );
     subheading(32, "Or-patterns, `@`, and constant patterns");
     paragraph(33, #string,oneline
@@ -1266,7 +1345,7 @@ render_section_92 :: () {
         \\
         \\main :: () {
         \\    s: Shape = .Rect(3.0);
-        \\    if #pattern Shape.Circle(r) | Shape.Rect(r) = s  print("or-pattern r = %\n", r);
+        \\    if #pattern Shape.Circle(r) | Shape.Rect(r) = s  print("or-pattern r = {}\n", r);
         \\
         \\    q: Pair = .{ .first = 255, .second = 1 };
         \\    if #pattern Pair.{ .first = == LIMIT, ... } = q  print("first is at LIMIT\n");
@@ -1274,7 +1353,7 @@ render_section_92 :: () {
         \\    else print("fields differ\n");
         \\
         \\    if #pattern whole @ Pair.{ .first, ... } = q
-        \\        print("first = %  whole.second = %\n", first, whole.second);
+        \\        print("first = {}  whole.second = {}\n", first, whole.second);
         \\}
     );
     code_block(35, "text", #string
@@ -1286,20 +1365,21 @@ render_section_92 :: () {
     paragraph(36, #string,oneline
         \\The three ways an or-pattern's alternatives can disagree each have their
         \\own diagnostic:
-        \\`error: or-pattern binds 'r' as f64 here but as int in another alternative`,
+        \\`error: or-pattern binds 'r' as f64 here but as ssize in another alternative`,
         \\`error: or-pattern alternative binds 'q', which the other alternatives do not`,
         \\and `error: or-pattern alternative does not bind 'r', which another
         \\alternative does`.
     );
     subheading(37, "Guards and compound conditions");
     paragraph(38, #string,oneline
-        \\A case in a `#pattern` switch may carry a guard: `case P if <cond>;`
-        \\matches when `P` matches and `cond` is then true, and a failing guard
-        \\tries the next case rather than leaving the switch. That is the
-        \\behaviour an `if` nested inside the arm body cannot express. The guard is
-        \\checked with the full condition grammar, so it sees the arm's captures
-        \\and may itself contain a `#pattern` test that binds more names. Outside a
-        \\switch, `&&` composes a test with an ordinary condition in the same way.
+        \\A case may carry a guard in either switch spelling:
+        \\`case P if <condition>;` first matches `P` and then tests the condition.
+        \\A false guard tries the next case. An `if` nested inside the body runs
+        \\after the case has already been selected, so it does not retry later
+        \\cases. The guard sees the pattern's captures and may contain `&&`,
+        \\ordinary boolean expressions, or additional `#pattern` tests that bind
+        \\more names. Outside a switch, compose a pattern test with an extra
+        \\condition using `if #pattern P = subject && condition { ... }`.
     );
     code_block(39, "glosso", #string
         \\#import "Io";
@@ -1313,10 +1393,10 @@ render_section_92 :: () {
         \\}
         \\
         \\describe :: (s: Shape) -> string {
-        \\    if #pattern s == {
+        \\    if s == {
         \\    case Shape.Circle(r) if r > 100.0;                              return "huge circle";
         \\    case Shape.Circle(r) if #pattern Size.Big(scale) = classify(r);
-        \\        print("  scale %\n", scale);
+        \\        print("  scale {}\n", scale);
         \\        return "big circle";
         \\    case Shape.Circle(r);  return "small circle";
         \\    case Shape.Rect(w);    return "rect";
@@ -1325,12 +1405,12 @@ render_section_92 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", describe(Shape.Circle(500.0)));
-        \\    print("%\n", describe(Shape.Circle(50.0)));
-        \\    print("%\n", describe(Shape.Circle(1.0)));
+        \\    print("{}\n", describe(Shape.Circle(500.0)));
+        \\    print("{}\n", describe(Shape.Circle(50.0)));
+        \\    print("{}\n", describe(Shape.Circle(1.0)));
         \\    r: Shape = .Rect(3.0);
-        \\    print("%\n", describe(r));
-        \\    if #pattern .Rect(w) = r && w > 1.0  print("wide rect %\n", w);
+        \\    print("{}\n", describe(r));
+        \\    if #pattern .Rect(w) = r && w > 1.0  print("wide rect {}\n", w);
         \\}
     );
     code_block(40, "text", #string
@@ -1348,12 +1428,10 @@ render_section_92 :: () {
         \\has the consequences.
     );
     note(42, #string,oneline
-        \\`||` between two pattern tests compiles but is unsound. `||`
-        \\short-circuits, so the captures of the alternative that was not evaluated
-        \\are in scope and were never written:
-        \\`if #pattern .X(p) = u || #pattern .Y(q) = w print("% %\n", p, q);` prints
-        \\`1 0`, where the `0` is an uninitialised capture. Use a switch or nested
-        \\tests instead.
+        \\`||` cannot combine pattern tests: the compiler reports
+        \\`error: a '#pattern' test cannot be an operand of '||'`, because only
+        \\one side may run and the other side's captures would not exist.
+        \\Use a switch, nested tests, or an or-pattern over one subject instead.
     );
     note(43, #string,oneline
         \\A pattern test cannot be negated. `if !(#pattern .Some(v) = o)` is
@@ -1399,7 +1477,7 @@ render_section_93 :: () {
         \\#import "Io";
         \\
         \\report :: (n: s64) {
-        \\    print("n = %:", n);
+        \\    print("n = {}:", n);
         \\    if #pattern 0..3 = n   print(" 0..3");
         \\    if #pattern 0..=3 = n  print(" 0..=3");
         \\    if #pattern 5.. = n    print(" 5..");
@@ -1440,7 +1518,7 @@ render_section_93 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% % % %\n", grade(95), grade(83), grade(70), grade(12));
+        \\    print("{} {} {} {}\n", grade(95), grade(83), grade(70), grade(12));
         \\}
     );
     code_block(14, "text", #string
@@ -1459,8 +1537,11 @@ render_section_93 :: () {
     paragraph(17, #string,oneline
         \\The subject must be an integer or an enum. Anything else is
         \\`error: a range pattern needs an integer subject, got string`. Enum
-        \\subjects work because a discriminant is an integer underneath, and `#char`
-        \\bounds work because a character literal is one too.
+        \\subjects work because a discriminant is an integer underneath. ASCII
+        \\`#char` literals default to `u8`, so byte ranges work directly.
+        \\`rune` is not an integer: a rune subject reports
+        \\`error: a range pattern needs an integer subject, got rune`. Cast to
+        \\an integer explicitly when the intended domain is scalar numbers.
     );
     code_block(18, "glosso", #string
         \\#import "Io";
@@ -1474,8 +1555,9 @@ render_section_93 :: () {
         \\    if #pattern Color.Red..=Color.Blue = v  print("unreached\n");
         \\    else print("violet is outside\n");
         \\
-        \\    b: u8 = #char "q";
-        \\    if #pattern #char "a" ..= #char "z" = b  print("lower-case byte\n");
+        \\    b: u8 = cast(u8)(#char "q");
+        \\    if #pattern cast(u8)(#char "a") ..= cast(u8)(#char "z") = b
+        \\        print("lower-case byte\n");
         \\}
     );
     code_block(19, "text", #string
@@ -1488,19 +1570,19 @@ render_section_93 :: () {
         \\`ToPattern` is a one-method class declared in the Prelude. Its method
         \\takes its argument `#comptime`, since the whole point is to produce a
         \\pattern during checking, and returns the compile-time-only type
-        \\`pattern`.
+        \\`Pattern`.
     );
     code_block(22, "glosso", #string
         \\ToPattern :: typeclass (T: type) {
-        \\    to_pattern :: (#comptime value: T) -> pattern;
+        \\    to_pattern :: (#comptime value: T) -> Pattern;
         \\}
         \\
-        \\Range($T) :: instance ToPattern where Is_Integer(T) {
-        \\    to_pattern :: (#comptime value: Range(T)) -> pattern #magic "range_to_pattern";
+        \\Range($T) ::: instance ToPattern where Is_Integer(T) {
+        \\    to_pattern :: (#comptime value: Range(T)) -> Pattern #magic "range_to_pattern";
         \\}
         \\
-        \\RangeInclusive($T) :: instance ToPattern where Is_Integer(T) {
-        \\    to_pattern :: (#comptime value: RangeInclusive(T)) -> pattern #magic "range_inclusive_to_pattern";
+        \\RangeInclusive($T) ::: instance ToPattern where Is_Integer(T) {
+        \\    to_pattern :: (#comptime value: RangeInclusive(T)) -> Pattern #magic "range_inclusive_to_pattern";
         \\}
     );
     paragraph(23, #string,oneline
@@ -1517,7 +1599,7 @@ render_section_93 :: () {
     paragraph(25, #string,oneline
         \\A user type joins the pattern language by declaring a `ToPattern`
         \\instance whose method returns a pattern quote. `#insert` in pattern
-        \\position is the splice, both for a value that is already a `pattern` and
+        \\position is the splice, both for a value that is already a `Pattern` and
         \\for a value whose type has an instance, which is what makes
         \\`case #insert Ascii_Class.Digit;` legal against a `u8` subject.
     );
@@ -1526,12 +1608,12 @@ render_section_93 :: () {
         \\
         \\Ascii_Class :: enum { Digit; Alpha; }
         \\
-        \\Ascii_Class :: instance ToPattern {
-        \\    to_pattern :: (#comptime c: Ascii_Class) -> pattern {
+        \\Ascii_Class ::: instance ToPattern {
+        \\    to_pattern :: (#comptime c: Ascii_Class) -> Pattern {
         \\        if c == {
-        \\        case .Digit; return to_pattern(#char "0" ..= #char "9");
-        \\        case .Alpha; return #pattern #insert to_pattern(#char "a" ..= #char "z")
-        \\                                    | #insert to_pattern(#char "A" ..= #char "Z");
+        \\        case .Digit; return to_pattern(cast(u8)(#char "0") ..= cast(u8)(#char "9"));
+        \\        case .Alpha; return #pattern #insert to_pattern(cast(u8)(#char "a") ..= cast(u8)(#char "z"))
+        \\                                    | #insert to_pattern(cast(u8)(#char "A") ..= cast(u8)(#char "Z"));
         \\        }
         \\    }
         \\}
@@ -1545,9 +1627,9 @@ render_section_93 :: () {
         \\}
         \\
         \\main :: () {
-        \\    describe(#char "x");
-        \\    describe(#char "7");
-        \\    describe(#char "!");
+        \\    describe(cast(u8)(#char "x"));
+        \\    describe(cast(u8)(#char "7"));
+        \\    describe(cast(u8)(#char "!"));
         \\}
     );
     code_block(27, "text", #string
@@ -1569,7 +1651,7 @@ render_section_93 :: () {
         \\the intervals the instance returned, clamped to `u8`.
     );
     code_block(30, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: 0..=47
         \\note: missing case: 58..=64
         \\note: missing case: 91..=96
@@ -1577,8 +1659,8 @@ render_section_93 :: () {
         \\note: cover them, or add 'else' or '#partial'
     );
     note(31, #string,oneline
-        \\A `pattern` value is compile-time only. `p := #pattern .Some(v);` is
-        \\`error: a 'pattern' value is compile-time only; bind it with '::' rather
+        \\A `Pattern` value is compile-time only. `p := #pattern .Some(v);` is
+        \\`error: a 'Pattern' value is compile-time only; bind it with '::' rather
         \\than ':='`. The type and its introspection intrinsics belong to the
         \\chapter on patterns as compile-time values.
     );
@@ -1602,17 +1684,12 @@ render_section_94 :: () {
         \\value, so it may contain `_` where any value would do.
     );
     paragraph(2, #string,oneline
-        \\The analysis governs `#pattern` switches and the switch forms of `ifx`.
-        \\`ifx` reuses the same witnesses under its own wording,
-        \\`error: cannot decide a value for this ifx` followed by
-        \\`note: missing case: Color.Blue` and
-        \\`note: cover every case, or add an 'else' arm`; its chapter has the rest.
-        \\A tagged-union statement switch is checked more crudely, by counting the
-        \\tags an arm names, and reports
-        \\`error: switch is exhaustive by default; add else or #partial`. A plain
-        \\statement switch over an integer, string, float, boolean or enum subject
-        \\is not coverage-checked at all; the chapter on switching on a value
-        \\covers that.
+        \\The same coverage analysis governs switches with and without `#pattern`,
+        \\including tagged unions and the switch forms of `ifx`. An incomplete
+        \\statement switch reports `non-exhaustive switch` and lists missing
+        \\cases; cover them, add `else`, or use `#partial`. An `ifx` reports
+        \\`cannot decide a value for this ifx` and requires complete coverage or
+        \\an `else` arm.
     );
     subheading(3, "Enumerable and opaque domains");
     paragraph(4, #string,oneline
@@ -1650,10 +1727,10 @@ render_section_94 :: () {
         \\    }
         \\}
         \\
-        \\main :: () { print("%\n", area(Shape.Rect(2.0))); }
+        \\main :: () { print("{}\n", area(Shape.Rect(2.0))); }
     );
     code_block(16, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Shape.Empty
         \\note: cover them, or add 'else' or '#partial'
     );
@@ -1691,7 +1768,7 @@ render_section_94 :: () {
         \\}
     );
     code_block(30, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Big.B
         \\note: missing case: Big.C
         \\note: missing case: Big.D
@@ -1723,7 +1800,7 @@ render_section_94 :: () {
         \\}
     );
     code_block(34, "text", #string
-        \\error: non-exhaustive #pattern switch
+        \\error: non-exhaustive switch
         \\note: missing case: Shape.Circle(_)
         \\note: cover them, or add 'else' or '#partial'
     );
@@ -1736,10 +1813,10 @@ render_section_94 :: () {
     subheading(36, "Reachability");
     paragraph(37, #string,oneline
         \\The same usefulness call, run against the arms that precede each arm,
-        \\reports arms that can never be entered. This is a warning, not an
-        \\error, and it runs whether or not the switch has an `else`. It applies
-        \\only to `#pattern` switches with a subject; duplicate labels in a plain
-        \\switch are not diagnosed, and the first matching arm wins.
+        \\reports arms that can never be entered. This is a warning and runs
+        \\whether or not the switch has an `else`. It applies to switches with
+        \\a subject, with or without `#pattern`; the first matching case whose
+        \\guard succeeds wins.
     );
     code_block(38, "glosso", #string
         \\#import "Io";
@@ -1764,22 +1841,21 @@ render_section_94 :: () {
         \\while an unguarded `case any;` makes them all dead.
     );
     note(41, #string,oneline
-        \\`#partial`, written immediately after `if` and before `#pattern`, waives
-        \\the coverage requirement; control then falls out of the switch when
-        \\nothing matches. It is the right answer when the uncovered cases are
-        \\genuinely uninteresting, and the wrong answer when a later edit adds a
-        \\variant, because `#partial` is exactly the annotation that stops the
-        \\compiler from pointing at the new one.
+        \\`#partial`, written immediately after `if` and before the subject or
+        \\optional `#pattern` marker, waives the coverage requirement. When no
+        \\case matches, execution continues after the switch. Use it when
+        \\unhandled values are intentional; adding a new union variant will then
+        \\no longer require this switch to handle it. `ifx` cannot be partial.
     );
 }
 
 render_section_95 :: () {
     paragraph(0, #string,oneline
-        \\A case label may name several values at once: `case A, B;` runs its body
-        \\when the subject matches any of the listed labels. The labels are values
-        \\of the subject's type, so the form works for integers, strings, `#char`
-        \\literals, floats, booleans, enum constants and union tags. It is one arm
-        \\with several labels, not several arms.
+        \\A case may list several patterns: `case A, B;` runs its body when the
+        \\subject matches either alternative. The comma is equivalent to the
+        \\or-pattern `A | B` in both switch spellings. It works with literals,
+        \\ranges, enum constants, union variants, and nested patterns. It is one
+        \\arm with a shared body and an optional shared guard.
     );
     code_block(1, "glosso", #string
         \\#import "Io";
@@ -1796,7 +1872,7 @@ render_section_95 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% % %\n", classify(5), classify(1), classify(9));
+        \\    print("{} {} {}\n", classify(5), classify(1), classify(9));
         \\
         \\    lvl := Level.Warn;
         \\    if lvl == {
@@ -1806,7 +1882,7 @@ render_section_95 :: () {
         \\    }
         \\
         \\    word := "yes";
-        \\    if word == {
+        \\    if #partial word == {
         \\    case "y", "yes", "true";  print("affirmative\n");
         \\    case "n", "no", "false";  print("negative\n");
         \\    }
@@ -1817,12 +1893,13 @@ render_section_95 :: () {
         \\loud
         \\affirmative
     );
-    subheading(3, "The no-binding restriction");
+    subheading(3, #string,oneline
+        \\Captures in grouped cases
+    );
     paragraph(4, #string,oneline
-        \\A multi-label case may not capture. The arm body would have to be checked
-        \\against every listed tag at once, and the captured name would have a
-        \\different type in each, so the compiler rejects the combination outright
-        \\rather than picking one.
+        \\Grouped alternatives may capture, provided every alternative binds
+        \\exactly the same names at the same types. That gives the shared body
+        \\one set of bindings regardless of which alternative matched.
     );
     code_block(5, "glosso", #string
         \\#import "Io";
@@ -1832,25 +1909,26 @@ render_section_95 :: () {
         \\main :: () {
         \\    t: Token = .Text("hi");
         \\    if t == {
-        \\    case .Name(x), .Text(x);  print("stringy %\n", x);
+        \\    case .Name(x), .Text(x);  print("stringy {}\n", x);
         \\    case .Eof;                print("eof\n");
         \\    }
         \\}
     );
     code_block(6, "text", #string
-        \\error: a case with several tags cannot capture a payload - the tags have different payload types
+        \\stringy hi
     );
     paragraph(7, #string,oneline
-        \\The diagnostic fires on the presence of a capture in a multi-tag case,
-        \\not on a comparison of the payload types, so it appears even when the
-        \\tags agree, as `Name` and `Text` do above. Grouping tags whose payloads
-        \\are irrelevant is fine: `case .Eof, .Nil;` on two `void` variants
-        \\compiles and covers both.
+        \\`Name` and `Text` both carry `string`, so `.Name(x), .Text(x)` binds
+        \\`x` as a string and the example compiles. If one alternative instead
+        \\carries an integer, the compiler reports incompatible or-pattern
+        \\binding types. Capturing `x` in only one alternative is also rejected.
+        \\Grouping tags while ignoring their payloads, such as
+        \\`case .Name, .Text;`, binds nothing and covers both variants.
     );
     paragraph(8, #string,oneline
-        \\The construct for one body over several shapes with a capture is the
-        \\or-pattern in a `#pattern` switch, which requires the alternatives to
-        \\bind the same names at the same types and so has no such problem.
+        \\The `|` spelling expresses the same alternatives and obeys the same
+        \\capture rules. Adding `#pattern` before the switch subject changes
+        \\neither spelling's meaning.
     );
     code_block(9, "glosso", #string
         \\#import "Io";
@@ -1860,7 +1938,7 @@ render_section_95 :: () {
         \\main :: () {
         \\    s: Shape = .Rect(2.0);
         \\    if #pattern s == {
-        \\    case Shape.Circle(r) | Shape.Rect(r);  print("sized %\n", r);
+        \\    case Shape.Circle(r) | Shape.Rect(r);  print("sized {}\n", r);
         \\    case Shape.Empty;                      print("empty\n");
         \\    }
         \\}
@@ -1869,10 +1947,10 @@ render_section_95 :: () {
         \\sized 2
     );
     paragraph(11, #string,oneline
-        \\The comma spelling is not available in a `#pattern` switch:
-        \\`case Shape.Circle(r), Shape.Rect(r);` there is
-        \\`error: unexpected token ','`. A pattern case takes exactly one pattern,
-        \\and `|` is how alternatives are written inside it.
+        \\`case Shape.Circle(r), Shape.Rect(r);` is equivalent to the `|` case
+        \\above, including in `if #pattern s == { ... }`. A guard follows the
+        \\complete list: `case Shape.Circle(r), Shape.Rect(r) if r > 1.0;`.
+        \\If that guard fails, matching continues at the next case.
     );
     subheading(12, "`#falling`");
     paragraph(13, #string,oneline
@@ -1908,17 +1986,18 @@ render_section_95 :: () {
         \\I
     );
     paragraph(16, #string,oneline
-        \\Four placements are rejected, each with its own message. Anything written
-        \\after `#falling` in the same body is unreachable by construction, so the
-        \\parser refuses it; an `else` arm and the final case have no following body
-        \\to enter. The fourth is the restriction on binding switches, developed
-        \\below.
+        \\Four placements are rejected. Anything after `#falling` in the same
+        \\body is unreachable, so the parser refuses it. An `else` arm and the
+        \\final case have no following case body to enter. Falling into a body
+        \\whose case captures values or has a guard is also rejected.
     );
     table_header(17, "Placement   —   Diagnostic");
     table_row(18, "not the last statement of the case   |   `error: '#falling' must be the last statement of a case`");
     table_row(19, "on the `else` arm   |   `error: '#falling' on an 'else' arm has nothing to fall into`");
     table_row(20, "on the last case   |   `error: '#falling' on the last case has no body to fall into`");
-    table_row(21, "in a switch whose cases bind   |   `error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind`");
+    table_row(21, #string,oneline
+        \\into a case with captures or a guard   |   `error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind`
+    );
     paragraph(22, #string,oneline
         \\The last-case error carries `note: it would leave the switch on every
         \\subject that reaches it; delete it`. A `#falling` with nowhere to fall is
@@ -1927,14 +2006,12 @@ render_section_95 :: () {
     );
     subheading(23, "Where `#falling` is allowed");
     paragraph(24, #string,oneline
-        \\Entering a body whose test never ran is harmless when that body binds
-        \\nothing, and unsound the moment it binds something: the body would read a
-        \\payload from a variant it was not dispatched on. The rule follows the
-        \\hazard rather than trying to re-test. Two switch forms can bind and are
-        \\excluded outright: the tagged-union switch and every `#pattern` switch.
-        \\What remains is the plain value switch over integers, strings, characters,
-        \\floats and booleans, and the enum switch, which is what the feature is
-        \\for.
+        \\The restriction applies to the case being entered, regardless of the
+        \\subject's type or the presence of `#pattern`. Its pattern must bind
+        \\nothing and it must have no guard: `#falling` would skip both the
+        \\binding step and the guard. A tagged-union case that discards its
+        \\payload can therefore be a destination, while a scalar case that
+        \\captures a value cannot.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
@@ -1944,23 +2021,22 @@ render_section_95 :: () {
         \\main :: () {
         \\    t: Token = .Code(3);
         \\    if t == {
-        \\    case .Name(s);  print("name %\n", s); #falling;
-        \\    case .Code(v);  print("code %\n", v);
+        \\    case .Name(s);  print("name {}\n", s); #falling;
+        \\    case .Code(v);  print("code {}\n", v);
         \\    case .Eof;      print("eof\n");
         \\    }
         \\}
     );
     code_block(26, "text", #string
         \\error: '#falling' enters the next case's body without running its test, so it is not allowed in a switch whose cases can bind
-        \\note: S8 requires a tagged union's payload to be reached through a capture in the arm that proved the tag, so every case here binds
+        \\note: the case it falls into destructures, and its captures would not have been bound
         \\note: group the tags with 'case A, B;' if they share a body, or lift the shared work into a function
     );
     paragraph(27, #string,oneline
-        \\In a `#pattern` switch the first note reads
-        \\`note: a #pattern switch exists to destructure, so its cases bind`
-        \\instead. The second note is the same in both, and is the whole remedy:
-        \\group the labels, or move the shared work into a procedure both arms
-        \\call.
+        \\A guarded destination instead carries the note
+        \\`note: the case it falls into is guarded, and the guard would never run`.
+        \\The rule is the same with or without `#pattern`. Group alternatives
+        \\that share a body, or move shared work into a procedure both cases call.
     );
     paragraph(28, #string,oneline
         \\A `#falling` arm still covers its own case. It always runs its own
@@ -2019,13 +2095,13 @@ render_section_96 :: () {
         \\
         \\serve :: (found: bool) -> s64 {
         \\    #pattern .Some(cfg) := lookup(found) else { return -1; }
-        \\    print("serving % on %\n", cfg.name, cfg.port);
+        \\    print("serving {} on {}\n", cfg.name, cfg.port);
         \\    return cfg.port;
         \\}
         \\
         \\main :: () {
-        \\    print("ok = %\n", serve(true));
-        \\    print("missing = %\n", serve(false));
+        \\    print("ok = {}\n", serve(true));
+        \\    print("missing = {}\n", serve(false));
         \\
         \\    xs: [3]?s64 = .[.Some(1), .None, .Some(3)];
         \\    total := 0;
@@ -2033,7 +2109,7 @@ render_section_96 :: () {
         \\        #pattern .Some(v) := x else { continue; }
         \\        total += v;
         \\    }
-        \\    print("total = %\n", total);
+        \\    print("total = {}\n", total);
         \\}
     );
     code_block(3, "text", #string
@@ -2063,12 +2139,12 @@ render_section_96 :: () {
         \\main :: () {
         \\    o: ?s64 = .Some(3);
         \\    #pattern .Some(v) := o else { print("absent\n"); }
-        \\    print("v = %\n", v);
+        \\    print("v = {}\n", v);
         \\}
     );
     code_block(8, "text", #string
         \\error: the 'else' of a '#pattern ... :=' binding must not return normally
-        \\note: it has to be #noreturn - end it with 'return', 'break', 'continue', or a call to a #noreturn function
+        \\note: it has to be #Never - end it with 'return', 'break', 'continue', or a call to a #Never function
     );
     paragraph(9, #string,oneline
         \\For the same reason the `else` block is checked without the bindings.
@@ -2085,8 +2161,8 @@ render_section_96 :: () {
     table_header(12, "Form   —   Diverges   —   Why");
     table_row(13, "`return`, `return e`   |   yes   |   leaves the procedure");
     table_row(14, "`break`, `continue`   |   yes   |   leaves the enclosing loop iteration");
-    table_row(15, "`goto('label)`   |   yes   |   `goto` is declared `#noreturn`");
-    table_row(16, "a call to a `#noreturn` procedure   |   yes   |   the declaration says it does not return");
+    table_row(15, "`goto('label)`   |   yes   |   `goto` is declared `#Never`");
+    table_row(16, "a call to a `#Never` procedure   |   yes   |   the declaration says it does not return");
     table_row(17, "`if` with both branches diverging   |   yes   |   neither path reaches the end");
     table_row(18, "an exhaustive switch, all arms diverging   |   yes   |   every arm leaves and one always runs");
     table_row(19, "`while true { }`   |   no   |   the walk does not evaluate the condition");
@@ -2095,13 +2171,13 @@ render_section_96 :: () {
         \\check does not reason about loop conditions, so
         \\`#pattern .Some(v) := o else { while true { } }` is rejected with the
         \\same "must not return normally" error. Write an explicit `return` or a
-        \\call to a `#noreturn` procedure instead.
+        \\call to a `#Never` procedure instead.
     );
     code_block(21, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
         \\
-        \\bail :: (msg: string) #noreturn { print("fatal: %\n", msg); exit(2); }
+        \\bail :: (msg: string) -> #Never { print("fatal: {}\n", msg); exit(2); }
         \\
         \\both_ways :: (o: ?s64, flag: bool) -> s64 {
         \\    #pattern .Some(v) := o else { if flag { return -1; } else { return -2; } }
@@ -2131,9 +2207,9 @@ render_section_96 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% % % %\n", both_ways(.None, true), by_goto(.None),
+        \\    print("{} {} {} {}\n", both_ways(.None, true), by_goto(.None),
         \\                       by_switch(.None, 1), by_switch(.None, 7));
-        \\    print("%\n", by_bail(.Some(5)));
+        \\    print("{}\n", by_bail(.Some(5)));
         \\}
     );
     code_block(22, "text", #string
@@ -2145,8 +2221,8 @@ render_section_96 :: () {
         \\The `else` is mandatory and must be a block. Omitting it is
         \\`error: unexpected token ';'` at the end of the statement, and writing a
         \\single statement instead of a block, as in `else return -1;`, is
-        \\`error: unexpected token 'return'`. A trailing `;` after the block is
-        \\optional, as everywhere else.
+        \\`error: unexpected token 'return'`. This form explicitly accepts an
+        \\optional trailing `;` after the block.
     );
     paragraph(25, #string,oneline
         \\The parser decides between the bind form, the test form and the quote by
@@ -2170,8 +2246,8 @@ render_section_96 :: () {
         \\Every pattern shape is otherwise available, and the subject may be any
         \\expression. `?T` and `E!T` are the common subjects: `#pattern .Ok(v) :=
         \\parse(text) else { return -1; }` is the error-handling spelling for a
-        \\procedure that does not want to propagate, which the chapter on `Try`,
-        \\`?`, and `#try` contrasts with propagation.
+        \\procedure that does not want to propagate, which the chapter on `Try`, `?`,
+        \\and `#try` contrasts with propagation.
     );
     note(29, #string,oneline
         \\The bind form is the answer the compiler points at when a pattern test is
@@ -2185,7 +2261,7 @@ render_section_96 :: () {
 render_section_97 :: () {
     paragraph(0, #string,oneline
         \\A `#pattern P` written without `= subject` is a quote rather than a
-        \\test: it produces a value of the built-in type `pattern` that carries
+        \\test: it produces a value of the built-in type `Pattern` that carries
         \\the pattern's syntax. The parser decides between the two by scanning
         \\ahead for a depth-zero `=`. `==` is a different token, so a constant
         \\pattern such as `#pattern == LIMIT` is never mistaken for a test.
@@ -2207,8 +2283,8 @@ render_section_97 :: () {
         \\
         \\describe :: (t: Token) {
         \\    if #pattern t == {
-        \\    case #insert NUMBER;   print("number %\n", n);
-        \\    case #insert NAME;     print("name %\n", text);
+        \\    case #insert NUMBER;   print("number {}\n", n);
+        \\    case #insert NAME;     print("name {}\n", text);
         \\    case Token.Eof;        print("eof\n");
         \\    }
         \\}
@@ -2234,7 +2310,7 @@ render_section_97 :: () {
 
     subheading(5, "A pattern has no storage");
     paragraph(6, #string,oneline
-        \\`pattern` is a compile-time-only type. `size_of(pattern)` is `0`, its
+        \\`Pattern` is a compile-time-only type. `size_of(Pattern)` is `0`, its
         \\values are dropped from every runtime argument list, and reaching
         \\lowering with one is an error. The checker rejects them where they are
         \\written rather than where they are first used, which is why the
@@ -2245,12 +2321,12 @@ render_section_97 :: () {
         \\form, and may not be stored in an aggregate or in a runtime variable.
     );
     bullet(8, #string,oneline
-        \\`p := #pattern .Some(v);` is `error: a 'pattern' value is compile-time
+        \\`p := #pattern .Some(v);` is `error: a 'Pattern' value is compile-time
         \\only; bind it with '::' rather than ':='`.
     );
     bullet(9, #string,oneline
-        \\`Holder :: struct { p: pattern; }` is `error: field 'p' has the
-        \\compile-time-only type 'pattern', which has no storage`.
+        \\`Holder :: struct { p: Pattern; }` is `error: field 'p' has the
+        \\compile-time-only type 'Pattern', which has no storage`.
     );
     bullet(10, #string,oneline
         \\A quote written where a test was meant, as in `if #pattern n { ... }`,
@@ -2259,7 +2335,7 @@ render_section_97 :: () {
     );
     paragraph(11, #string,oneline
         \\`Code` is the other compile-time-only type and obeys the same rules;
-        \\the two share their machinery. `pattern` differs in two ways, both
+        \\the two share their machinery. `Pattern` differs in two ways, both
         \\covered below: identity is structural rather than by node, and a splice
         \\deep-clones instead of adopting the quoted nodes.
     );
@@ -2289,7 +2365,7 @@ render_section_97 :: () {
         \\
         \\main :: () {
         \\    s: Shape = .Rect(3.0);
-        \\    if #pattern #insert CIRCLE | #insert RECT = s print("either r=%\n", r);
+        \\    if #pattern #insert CIRCLE | #insert RECT = s print("either r={}\n", r);
         \\}
     );
     code_block(16, "text", "either r=3");
@@ -2298,7 +2374,7 @@ render_section_97 :: () {
         \\spliced at two differently typed sites reuses the same nodes, and the
         \\types stamped by the first check survive into the second; a pattern is
         \\matched against a type by definition, so it cannot afford that. A
-        \\spliced value that is not already a `pattern` is converted through its
+        \\spliced value that is not already a `Pattern` is converted through its
         \\type's `ToPattern` instance, which is how a range enters a pattern; see
         \\Ranges in Patterns and `ToPattern`.
     );
@@ -2317,11 +2393,11 @@ render_section_97 :: () {
         \\
         \\EOF_PATTERN :: #pattern Token.Eof;
         \\
-        \\matches :: (#comptime p: pattern, t: Token) -> bool { return #pattern #insert p = t; }
+        \\matches :: (#comptime p: Pattern, t: Token) -> bool { return #pattern #insert p = t; }
         \\
         \\main :: () {
         \\    t := Token.Eof();
-        \\    print("% % %\n", matches(EOF_PATTERN, t), matches(#pattern Token.Eof, t),
+        \\    print("{} {} {}\n", matches(EOF_PATTERN, t), matches(#pattern Token.Eof, t),
         \\                     matches(#pattern Token.Name(s), t));
         \\}
     );
@@ -2360,8 +2436,8 @@ render_section_97 :: () {
         \\main :: () {
         \\    n := 255;
         \\    m := 7;
-        \\    print("backtick name vs MAX: % %\n", #pattern `MAX = n, #pattern `MAX = m);
-        \\    print("bare ident binds:     % %\n", #pattern MAX = n, #pattern MAX = m);
+        \\    print("backtick name vs MAX: {} {}\n", #pattern `MAX = n, #pattern `MAX = m);
+        \\    print("bare ident binds:     {} {}\n", #pattern MAX = n, #pattern MAX = m);
         \\}
     );
     code_block(31, "text", #string
@@ -2379,15 +2455,15 @@ render_section_97 :: () {
         \\
         \\Token :: union { Number: f64; Name: string; Eof: void; }
         \\
-        \\exactly :: (#comptime v: f64) -> pattern {
+        \\exactly :: (#comptime v: f64) -> Pattern {
         \\    return #pattern Token.Number(== ``v);
         \\}
         \\
         \\EXACT :: #comptime exactly(2.5);
         \\
         \\main :: () {
-        \\    print("2.5 -> %\n", #pattern #insert EXACT = Token.Number(2.5));
-        \\    print("1.0 -> %\n", #pattern #insert EXACT = Token.Number(1.0));
+        \\    print("2.5 -> {}\n", #pattern #insert EXACT = Token.Number(2.5));
+        \\    print("1.0 -> {}\n", #pattern #insert EXACT = Token.Number(1.0));
         \\}
     );
     code_block(34, "text", #string
@@ -2412,12 +2488,12 @@ render_section_97 :: () {
         \\`Token.Number(n)` binds `n` as `f64` only against `Token`.
     );
     code_block(38, "glosso", #string
-        \\pattern_binder_count  :: (T: type, #comptime P: pattern) -> s64
-        \\pattern_binder_name   :: (T: type, #comptime P: pattern, i: s64) -> string
-        \\pattern_binder_type   :: (T: type, #comptime P: pattern, i: s64) -> type
-        \\pattern_missing_count :: (T: type, Ps: []pattern) -> s64
-        \\pattern_missing       :: (T: type, Ps: []pattern, i: s64) -> string
-        \\pattern_is_useful     :: (T: type, Ps: []pattern, #comptime Q: pattern) -> bool
+        \\pattern_binder_count  :: (T: type, #comptime P: Pattern) -> ssize
+        \\pattern_binder_name   :: (T: type, #comptime P: Pattern, i: ssize) -> string
+        \\pattern_binder_type   :: (T: type, #comptime P: Pattern, i: ssize) -> type
+        \\pattern_missing_count :: (T: type, Ps: []Pattern) -> ssize
+        \\pattern_missing       :: (T: type, Ps: []Pattern, i: ssize) -> string
+        \\pattern_is_useful     :: (T: type, Ps: []Pattern, #comptime Q: Pattern) -> bool
     );
     code_block(39, "glosso", #string
         \\#import "Io";
@@ -2429,13 +2505,13 @@ render_section_97 :: () {
         \\NAME   :: #pattern Token.Name(text);
         \\
         \\main :: () {
-        \\    print("binder count = %\n", pattern_binder_count(Token, NUMBER));
-        \\    print("binder 0 = % : %\n", pattern_binder_name(Token, NUMBER, 0),
+        \\    print("binder count = {}\n", pattern_binder_count(Token, NUMBER));
+        \\    print("binder 0 = {} : {}\n", pattern_binder_name(Token, NUMBER, 0),
         \\                                type_name(pattern_binder_type(Token, NUMBER, 0)));
-        \\    print("missing count = %\n", pattern_missing_count(Token, .[NUMBER, NAME]));
-        \\    print("missing 0 = %\n", pattern_missing(Token, .[NUMBER, NAME], 0));
-        \\    print("useful = %\n",  pattern_is_useful(Token, .[NUMBER], #pattern Token.Number(2.0)));
-        \\    print("useful2 = %\n", pattern_is_useful(Token, .[NUMBER], #pattern Token.Eof));
+        \\    print("missing count = {}\n", pattern_missing_count(Token, .[NUMBER, NAME]));
+        \\    print("missing 0 = {}\n", pattern_missing(Token, .[NUMBER, NAME], 0));
+        \\    print("useful = {}\n",  pattern_is_useful(Token, .[NUMBER], #pattern Token.Number(2.0)));
+        \\    print("useful2 = {}\n", pattern_is_useful(Token, .[NUMBER], #pattern Token.Eof));
         \\}
     );
     code_block(40, "text", #string
@@ -2570,7 +2646,7 @@ render_section_98 :: () {
         \\    return x + x;
         \\}
         \\
-        \\main :: () { print("%\n", only_ints(21)); }
+        \\main :: () { print("{}\n", only_ints(21)); }
     );
     code_block(15, "text", "42");
     paragraph(16, #string,oneline
@@ -2612,32 +2688,33 @@ render_section_98 :: () {
 
     subheading(25, "The limits");
     paragraph(26, #string,oneline
-        \\`#if` is a statement. At file scope it is not a declaration and the
-        \\parser says so: `error: bad decl name 'if'`. Nothing in `std/` uses a
-        \\top-level `#if`; target gates are written inside a procedure body.
+        \\At module scope, #if selects declarations, imports, and libraries.
+        \\Only the active branch contributes them to the module. Operator syntax
+        \\and loads that supply operators must remain unconditional because the
+        \\operator prescan runs before semantic branch selection.
     );
     paragraph(27, #string,oneline
-        \\`#if` cannot conditionally declare. A nested procedure, struct, enum,
-        \\union or `distinct` declaration is hoisted to file scope by the parser,
-        \\before any condition is evaluated, so it escapes the branch it was
-        \\written in and exists whether or not that branch was selected.
+        \\Inside a procedure, local functions and types belong to their lexical
+        \\block. A function declared inside a braced #if branch does not become
+        \\a top-level function. Use module-level conditional declarations when
+        \\a selected function should be callable elsewhere in the module.
     );
     code_block(28, "glosso", #string
         \\#import "Io";
         \\
-        \\main :: () {
-        \\    #if false {
-        \\        dead :: () { print("declared inside a dead branch\n"); }
-        \\    }
-        \\    dead();
+        \\#if true {
+        \\    selected :: () -> ssize { return 1; }
+        \\} else {
+        \\    selected :: () -> ssize { return 2; }
         \\}
+        \\
+        \\main :: () { print("selected={}\n", selected()); }
     );
-    code_block(29, "text", "declared inside a dead branch");
+    code_block(29, "text", "selected=1");
     note(30, #string,oneline
-        \\`#if false` removes statements, not declarations. To compile a
-        \\procedure out of a build, guard its body, or select between two whole
-        \\files with the load and import machinery described in Source Files,
-        \\Imports, and Loads.
+        \\Module-level #if can select between complete implementations with the
+        \\same name. Inactive branches introduce no declarations or dependencies.
+        \\Source Files, Imports, and Loads covers conditional module loading.
     );
     paragraph(31, #string,oneline
         \\A braced `#if` branch does not open a scope of its own. The selected
@@ -2651,7 +2728,7 @@ render_section_98 :: () {
         \\
         \\main :: () {
         \\    #if true { v := 5; }
-        \\    print("%\n", v);
+        \\    print("{}\n", v);
         \\}
     );
     code_block(33, "text", "5");
@@ -2703,24 +2780,24 @@ render_section_99 :: () {
         \\
         \\main :: () {
         \\    i := 0;
-        \\    while i < 3 { print("i=%\n", i); i += 1; }
+        \\    while i < 3 { print("i={}\n", i); i += 1; }
         \\
         \\    j := 0;
         \\    while j < 2 j += 1;
-        \\    print("j=%\n", j);
+        \\    print("j={}\n", j);
         \\
         \\    k := 0;
         \\    while true { k += 1; if k == 4 break; }
-        \\    print("k=%\n", k);
+        \\    print("k={}\n", k);
         \\
         \\    seen := 0;
         \\    n := 0;
         \\    while n < 5 { n += 1; if n % 2 == 0 continue; seen += n; }
-        \\    print("seen=%\n", seen);
+        \\    print("seen={}\n", seen);
         \\
         \\    countdown := 3;
         \\    while countdown { countdown -= 1; }
-        \\    print("countdown=%\n", countdown);
+        \\    print("countdown={}\n", countdown);
         \\}
     );
     code_block(3, "text", #string
@@ -2766,22 +2843,22 @@ render_section_99 :: () {
         \\main :: () {
         \\    opt: ?s64 = .Some(3);
         \\    while #pattern .Some(v) = opt {
-        \\        print("v=%\n", v);
+        \\        print("v={}\n", v);
         \\        if v <= 1 opt = .None; else opt = .Some(v - 1);
         \\    }
         \\
         \\    o: ?s64 = .Some(4);
         \\    steps := 0;
         \\    while #pattern .Some(v) = o && v > 2 { steps += 1; o = .Some(v - 1); }
-        \\    print("steps=%\n", steps);
+        \\    print("steps={}\n", steps);
         \\
         \\    c: Node = .{ .value = 3, .next = .None };
-        \\    b: Node = .{ .value = 2, .next = .Some(*c) };
-        \\    a: Node = .{ .value = 1, .next = .Some(*b) };
+        \\    b: Node = .{ .value = 2, .next = .Some(&c) };
+        \\    a: Node = .{ .value = 1, .next = .Some(&b) };
         \\    total := 0;
-        \\    cursor: ?*Node = .Some(*a);
+        \\    cursor: ?*Node = .Some(&a);
         \\    while #pattern .Some(p) = cursor { total += p.*.value; cursor = p.*.next; }
-        \\    print("total=%\n", total);
+        \\    print("total={}\n", total);
         \\}
     );
     code_block(11, "text", #string
@@ -2812,7 +2889,7 @@ render_section_99 :: () {
         \\        .Some(l) = left;
         \\        .Some(r) = right;
         \\    } {
-        \\        print("l=% r=%\n", l, r);
+        \\        print("l={} r={}\n", l, r);
         \\        if l == 1 left = .None; else left = .Some(l - 1);
         \\        right = .Some(r + 10);
         \\    }
@@ -2856,11 +2933,11 @@ render_section_99 :: () {
         \\    sum := 0;
         \\    i ::= 0;
         \\    #inline while i < 4 { sum += i; i += 1; }
-        \\    print("sum=%\n", sum);
+        \\    print("sum={}\n", sum);
         \\
         \\    k ::= 0;
         \\    #inline while k < field_count(Vec3) {
-        \\        print("field %\n", field_name(Vec3, k));
+        \\        print("field {}\n", field_name(Vec3, k));
         \\        k += 1;
         \\    }
         \\}
@@ -2903,29 +2980,33 @@ render_section_100 :: () {
         \\one-token modifier.
     );
     code_block(1, "ebnf", #string
-        \\for [ "<" ] [ ":" expansion ] [ value [ "," index ] ":" ] iterable body
+        \\for [ "<" ] [ ":" expansion ] [ [ "*" ] value [ "," index ] ":" ] iterable body
     );
     table_header(2, "Piece   —   Written   —   Effect");
     table_row(3, "reverse   |   `<` right after `for`   |   iterate from the high end");
     table_row(4, "expansion   |   `:name`   |   use that iteration macro");
     table_row(5, "value   |   `v:`   |   name the element variable");
     table_row(6, "index   |   `v, i:`   |   name the index variable too");
+    table_row(38, "pointer binding   |   `*v:` or `*v, i:`   |   bind the element's address through `PointerIterable`");
     paragraph(7, #string,oneline
         \\The value variable defaults to `it` and the index variable to
         \\`it_index`. Renaming them adds names rather than replacing them: the
         \\compiler prepends `v := it;` and `i := it_index;` to the body, so both
-        \\the chosen name and the default are live in the same body. `it_index`
-        \\is a `u64` and counts iterations from zero, whatever the element type
-        \\is.
+        \\the chosen name and the default are live in the same body. Compiler-native
+        \\and bundled collection and range paths bind the index as `ssize`; a user
+        \\expansion may deliberately bind another type. Runtime
+        \\and macro-expanded loops count steps from zero, including in reverse; a
+        \\statically expanded tuple or fixed array instead uses the element's
+        \\actual index, so those indices descend in reverse.
     );
     code_block(8, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
-        \\    for 0..3 print("it=% it_index=%\n", it, it_index);
-        \\    for i: 0..3 print("i=%\n", i);
-        \\    for value, index: 10..13 print("value=% index=%\n", value, index);
-        \\    for n: 0..2 print("both live: n=% it=% it_index=%\n", n, it, it_index);
+        \\    for 0..3 print("it={} it_index={}\n", it, it_index);
+        \\    for i: 0..3 print("i={}\n", i);
+        \\    for value, index: 10..13 print("value={} index={}\n", value, index);
+        \\    for n: 0..2 print("both live: n={} it={} it_index={}\n", n, it, it_index);
         \\}
     );
     code_block(9, "text", #string
@@ -2960,22 +3041,22 @@ render_section_100 :: () {
         \\#import "Io";
         \\
         \\main :: () {
-        \\    for i: 0..=3 print("inclusive %\n", i);
-        \\    for < i: 0..4 print("reverse %\n", i);
+        \\    for i: 0..=3 print("inclusive {}\n", i);
+        \\    for < i: 0..4 print("reverse {}\n", i);
         \\
         \\    r := 0..3;
-        \\    for i: r print("stored Range %\n", i);
+        \\    for i: r print("stored Range {}\n", i);
         \\
         \\    rt := ..4;
-        \\    for i: rt print("RangeTo %\n", i);
+        \\    for i: rt print("RangeTo {}\n", i);
         \\
         \\    rti := ..=2;
-        \\    for i: rti print("RangeToInclusive %\n", i);
+        \\    for i: rti print("RangeToInclusive {}\n", i);
         \\
         \\    rf := 10..;
-        \\    for i: rf { print("RangeFrom %\n", i); if i == 12 break; }
+        \\    for i: rf { print("RangeFrom {}\n", i); if i == 12 break; }
         \\
-        \\    for < i: rt print("reverse RangeTo %\n", i);
+        \\    for < i: rt print("reverse RangeTo {}\n", i);
         \\}
     );
     code_block(19, "text", #string
@@ -3007,52 +3088,56 @@ render_section_100 :: () {
     );
     paragraph(20, #string,oneline
         \\The induction variable takes the low bound's type, and a literal low
-        \\bound is a compile-time number that takes the default `int`. So
-        \\`for i: 0..count` counts in `int` however `count` is typed, while
+        \\bound is a compile-time number that takes the default `ssize`. So
+        \\`for i: 0..count` counts in `ssize`, so `count` must be convertible
+        \\to that width without narrowing. An `s64` upper bound is rejected
+        \\on a 32-bit target even when its runtime value is small; write
+        \\`for i: cast(s64)0..count` to keep a fixed-width induction variable,
+        \\or check the bound before converting it to `ssize`.
         \\`for i: lo..hi` with `lo` declared `u8` counts in `u8`. A stored range
         \\does not go through that rule at all: `Range(T)` unified both operands
         \\when it was built, so `r := 0..count; for i: r` counts in `count`'s
         \\type.
     );
     note(21, #string,oneline
-        \\A narrow or unsigned induction type does not terminate at the ends of
-        \\its range. The loop steps one value past the bound to decide it is
-        \\done, which `u8` cannot represent: `for < i: lo..hi` over `u8` bounds
-        \\`0` and `3` yields `2, 1, 0, 255, 254, ...` and runs forever, and so
-        \\does a forward loop that ends at `255`. Letting the low bound win is
-        \\the deliberate defence, because a literal low bound then pins the loop
-        \\to `int`; a stored range gives that defence up.
+        \\A finite range decides whether another value exists before stepping
+        \\outside its bounds. Narrow and unsigned endpoints are therefore safe:
+        \\`for < i: lo..hi` over `u8` bounds `0` and `3` yields `2, 1, 0` and
+        \\stops, while `0..=255` yields all 256 `u8` values and stops at `255`.
+        \\An open-ended `RangeFrom` has no such end condition; integer stepping
+        \\wraps after the maximum, so its body must eventually `break` or return.
     );
     paragraph(22, #string,oneline
         \\Reverse iteration of an open-ended range is `error: reverse for cannot
         \\use an open-ended RangeFrom`, since there is no last element to start
         \\from. A float range is `error: for range needs prev/next for f64`: the
         \\element type must be an integer or supply a `Step` instance. An enum
-        \\range is accepted by the checker and then rejected by the lowerer with
-        \\`error: range step has no typeclass target`, so iterate an integer
-        \\range and cast.
+        \\without one receives the same diagnostic; defining `Step` makes a
+        \\bounded enum range iterable. Prefix ranges such as `..last`
+        \\additionally require a `RangeOrigin` instance.
     );
 
     subheading(23, "Arrays, views, and dynamic arrays");
     paragraph(24, #string,oneline
-        \\A fixed array, a view and a dynamic array all iterate by element, with
-        \\`it_index` counting positions. A view produced by slicing iterates the
-        \\slice, and its indices start at zero rather than at the slice's offset.
+        \\A fixed array, a view and a dynamic array all use the prelude's blanket
+        \\`Iterable` instance. They iterate by element, with `it_index` counting
+        \\steps. A view produced by slicing iterates the slice, and its indices
+        \\start at zero rather than at the slice's offset.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
         \\#import "Memory";
         \\
         \\main :: () {
-        \\    xs: [4]int = .[10, 20, 30, 40];
-        \\    for x: xs print("fixed x=% at %\n", x, it_index);
-        \\    for x, i: xs[1..3] print("view x=% at %\n", x, i);
+        \\    xs: [4]ssize = .[10, 20, 30, 40];
+        \\    for x: xs print("fixed x={} at {}\n", x, it_index);
+        \\    for x, i: xs[1..3] print("view x={} at {}\n", x, i);
         \\
-        \\    d: [..]int;
-        \\    defer array_free(*d);
-        \\    array_add(*d, 7);
-        \\    array_add(*d, 8);
-        \\    for x, i: d print("dyn x=% at %\n", x, i);
+        \\    d: [..]ssize;
+        \\    defer d.free();
+        \\    d.push(7);
+        \\    d.push(8);
+        \\    for x, i: d print("dyn x={} at {}\n", x, i);
         \\}
     );
     code_block(26, "text", #string
@@ -3068,101 +3153,129 @@ render_section_100 :: () {
     paragraph(27, #string,oneline
         \\A tuple is also iterable, and is unrolled rather than looped, because
         \\its elements need not share a type. Writing `#inline for` over one is
-        \\the explicit spelling of the same expansion; see `#inline for`. A
-        \\`string` is not iterable: the checker accepts `for c: s` and the
-        \\lowerer rejects it with `error: for target is not iterable`, since a
-        \\string has no element type to step through.
+        \\the explicit spelling of the same expansion; see `#inline for`.
+        \\Strings instead decode Unicode and yield `rune` for every encoding.
+        \\UTF-8 and UTF-16 iteration combines a complete scalar, malformed input
+        \\produces U+FFFD while consuming at least one code unit, and reverse
+        \\iteration follows scalar boundaries. `it_index` is an `ssize` scalar
+        \\ordinal starting at zero in either direction, not a byte or code-unit
+        \\offset. Direct indexing remains code-unit-oriented. `Simd` vectors and
+        \\matrices are iterable too; a matrix walks row-major. These non-tuple
+        \\paths are Prelude instances.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    text := "A가";
+        \\    for r, i: text
+        \\        print("{}:{}:{}\n", i, type_name(type_of(r)), cast(u32)r);
+        \\    for < r, i: text print("reverse {}:{}\n", i, cast(u32)r);
+        \\}
+    );
+    code_block(51, "text", #string
+        \\0:rune:65
+        \\1:rune:44032
+        \\reverse 0:44032
+        \\reverse 1:65
     );
     paragraph(28, #string,oneline
-        \\Two behaviours of the array loop are worth knowing before relying on
-        \\them. The element variable is a copy, so assigning to it does not write
-        \\back; and `for <` over an array, a view or a dynamic array does not
-        \\reverse anything, because the array lowering ignores the flag. Only
-        \\ranges and custom expansions that honour the flag actually run
-        \\backwards.
+        \\A by-value array walk snapshots the container before it starts: its
+        \\count and element reads come from that snapshot even if the original is
+        \\changed in the body. The element variable is a copy, so assigning to it
+        \\does not write back. `for <` is honoured and reads the snapshot from the
+        \\high end; its `it_index` is still the step count `0, 1, 2, ...`, not the
+        \\original element position.
     );
     code_block(29, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
-        \\    xs: [3]int = .[1, 2, 3];
-        \\    for < v: xs print("for < over an array: %\n", v);
+        \\    xs: [3]ssize = .[1, 2, 3];
+        \\    for < v, k: xs print("reverse v={} at step {}\n", v, k);
         \\
         \\    for v: xs v += 100;
-        \\    print("array unchanged: % % %\n", xs[0], xs[1], xs[2]);
+        \\    print("array unchanged: {} {} {}\n", xs[0], xs[1], xs[2]);
         \\
-        \\    for i: 0..5 { print("range i=%\n", i); i += 2; }
-        \\    for v, k: xs { print("index k=%\n", k); k += 1; }
+        \\    for i: 0..5 { print("range i={}\n", i); i += 2; }
+        \\    for v, k: xs { print("index k={}\n", k); k += 100; }
         \\}
     );
     code_block(30, "text", #string
-        \\for < over an array: 1
-        \\for < over an array: 2
-        \\for < over an array: 3
+        \\reverse v=3 at step 0
+        \\reverse v=2 at step 1
+        \\reverse v=1 at step 2
         \\array unchanged: 1 2 3
         \\range i=0
         \\range i=3
         \\index k=0
+        \\index k=1
         \\index k=2
     );
     note(31, #string,oneline
-        \\Assigning to the induction variable of a range loop changes the loop
-        \\counter, and so does assigning to the index variable of an array loop.
-        \\Only the element variable of an array loop is a copy. The output above
-        \\shows all three: the range loop visits `0` and `3`, the array's
-        \\elements are untouched, and the array loop visits indices `0` and `2`.
+        \\Assigning to the induction variable of a native range loop changes its
+        \\counter, so the range above visits `0` and `3`. The array expansion's
+        \\named value and index are aliases local to the inserted body: changing
+        \\`v` leaves the array untouched, and changing `k` does not change the
+        \\expansion's private cursor, so every index is still visited.
     );
 
     subheading(32, "Iterating by pointer");
     paragraph(33, #string,oneline
-        \\There is no by-pointer `for`. `for *v: xs` and `for * v: xs` are both
-        \\`error: unexpected token ':'`. The prelude's `For_Flags` declares a
-        \\`POINTER` bit, but the compiler never sets it: the flags argument it
-        \\builds is `For_Flags.REVERSE` for a reverse loop and a cast zero
-        \\otherwise.
+        \\`for *v: xs` selects `PointerIterable.for_pointer_expansion` and binds
+        \\`v` (and the default `it`) to `*const T`, the address of the current element.
+        \\Write through `v.*` to change the container. The prelude supplies this
+        \\instance for every array shape, and `for < *v: xs` walks it backwards.
     );
     paragraph(34, #string,oneline
-        \\To write through the elements, iterate a range of indices and index the
-        \\array. The index is the loop's own variable, so this is also the way to
-        \\walk two arrays in step.
+        \\The container expression must be addressable. Ranges compute values and
+        \\have no elements to point into; tuples have no addressable homogeneous
+        \\element; strings are read-only; and `Simd` lanes and matrix elements
+        \\have no pointer iteration instance. Mutable local array storage is
+        \\addressable inside `#comptime` too, so pointer iteration can update it.
+        \\A pointer array walk is
+        \\deliberately not snapshotted: a dynamic array's count is reread each
+        \\step, and growing it far enough to reallocate can leave the current
+        \\element pointer dangling. Avoid structural mutation while such a loop
+        \\is active.
     );
     code_block(35, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
-        \\    xs: [4]int = .[10, 20, 30, 40];
-        \\    for i: 0..xs.count xs[i] += 1;
-        \\    print("after write-through: % % % %\n", xs[0], xs[1], xs[2], xs[3]);
+        \\    xs: [4]ssize = .[10, 20, 30, 40];
+        \\    for *x, i: xs x.* += cast(ssize)(i + 1);
+        \\    print("after write-through: {} {} {} {}\n", xs[0], xs[1], xs[2], xs[3]);
         \\}
     );
-    code_block(36, "text", "after write-through: 11 21 31 41");
+    code_block(36, "text", "after write-through: 11 22 33 44");
     paragraph(37, #string,oneline
         \\`break`, `continue` and `defer` behave in a `for` exactly as they do in
         \\a `while`: `break` leaves the loop, `continue` starts the next
         \\iteration, and a `defer` in the body runs at the end of every
-        \\iteration. A target that is neither a range, an array, a tuple nor a
-        \\type with an iteration macro is `error: for-each needs an array, got
-        \\P`; supplying that macro is Custom Iteration with `for_expansion`.
+        \\iteration. A type without the protocol is `'P' is not iterable; it
+        \\needs an Iterable instance`; supplying that instance is Custom
+        \\Iteration with `for_expansion`.
     );
 }
 
 render_section_101 :: () {
     paragraph(0, #string,oneline
-        \\A `for` whose target is not a range, an array or a tuple dispatches to
-        \\a macro named `for_expansion`, chosen by the target's type. The
-        \\contract is a one-method typeclass, so a container joins the loop
-        \\syntax by writing an instance.
+        \\A non-inline `for` over an array, string, `Simd`, matrix, or custom
+        \\container dispatches to a macro named `for_expansion`, chosen by the
+        \\target's type. The contract is a one-method typeclass, so a container
+        \\joins the loop syntax by writing an instance. Direct and stored ranges
+        \\retain native range lowering, while tuples are expanded statically.
     );
     code_block(1, "glosso", #string
         \\// std/Prelude/Primitive_Typeclasses.glo
         \\Iterable :: typeclass (T: type) {
-        \\    for_expansion :: (val: T, body: Code, flags: For_Flags) #expand;
+        \\    for_expansion :: (val: T, body: Code, reverse: bool) #expand;
         \\}
         \\
-        \\// std/Prelude/Primitive_Operators.glo
-        \\For_Flags :: enum_flags u32 {
-        \\    POINTER :: 16#1;
-        \\    REVERSE :: 16#2;
+        \\PointerIterable :: typeclass (T: type) where Iterable(T) {
+        \\    for_pointer_expansion :: (val: *T, body: Code, reverse: bool) #expand
         \\}
     );
     paragraph(2, #string,oneline
@@ -3171,7 +3284,9 @@ render_section_101 :: () {
         \\the expansion decides how many times and in what order to splice it.
         \\When the loop renamed its variables, the compiler has already prepended
         \\`v := it;` and `i := it_index;` to that `Code`, which is why an
-        \\expansion never sees the chosen names.
+        \\expansion never sees the chosen names. A pointer expansion instead
+        \\receives `*const T`, the address of the container, and must bind `it` to an
+        \\element address rather than an element copy.
     );
 
     subheading(3, "What an expansion owes the loop");
@@ -3197,8 +3312,8 @@ render_section_101 :: () {
         \\Node :: struct { value: s64; next: ?*Node; }
         \\List :: struct { head: ?*Node; }
         \\
-        \\List :: instance Iterable {
-        \\    for_expansion :: (list: List, body: Code, flags: For_Flags) #expand {
+        \\List ::: instance Iterable {
+        \\    for_expansion :: (list: List, body: Code, reverse: bool) #expand {
         \\        cursor := list.head;
         \\        step := 0;
         \\        while #pattern .Some(node) = cursor {
@@ -3213,15 +3328,15 @@ render_section_101 :: () {
         \\
         \\main :: () {
         \\    c: Node = .{ .value = 30, .next = .None };
-        \\    b: Node = .{ .value = 20, .next = .Some(*c) };
-        \\    a: Node = .{ .value = 10, .next = .Some(*b) };
-        \\    list: List = .{ .head = .Some(*a) };
+        \\    b: Node = .{ .value = 20, .next = .Some(&c) };
+        \\    a: Node = .{ .value = 10, .next = .Some(&b) };
+        \\    list: List = .{ .head = .Some(&a) };
         \\
-        \\    for list print("default names: % at %\n", it, it_index);
+        \\    for list print("default names: {} at {}\n", it, it_index);
         \\
         \\    total := 0;
-        \\    for value, index: list { total += value; print("named: % at %\n", value, index); }
-        \\    print("total = %\n", total);
+        \\    for value, index: list { total += value; print("named: {} at {}\n", value, index); }
+        \\    print("total = {}\n", total);
         \\}
     );
     code_block(9, "text", #string
@@ -3240,34 +3355,37 @@ render_section_101 :: () {
         \\loop.
     );
 
-    subheading(11, "The flags");
+    subheading(11, "The direction parameter");
     paragraph(12, #string,oneline
         \\The third parameter carries what the loop header asked for. The
-        \\compiler builds it from the header alone: `For_Flags.REVERSE` when the
-        \\header wrote `<`, and a cast zero otherwise.
+        \\compiler builds it from the header alone, and it is a macro parameter,
+        \\so `#if reverse` selects a branch at expansion time. Walking by
+        \\pointer is not a flag on this class: `for *x: c` selects
+        \\`PointerIterable.for_pointer_expansion`, which receives the container
+        \\by pointer and binds `it` to each element's address.
     );
-    table_header(13, "Flag   —   Value   —   Set when");
-    table_row(14, "`REVERSE`   |   `16#2`   |   the header is `for <`");
-    table_row(15, "`POINTER`   |   `16#1`   |   never; the compiler does not set it");
+    table_header(13, "Header   —   `reverse`");
+    table_row(14, "`for x: c`   |   `false`");
+    table_row(15, "`for < x: c`   |   `true`");
     paragraph(16, #string,oneline
-        \\An expansion that ignores `REVERSE` silently iterates forward, which is
-        \\what the built-in array loop does. Honouring it is a matter of reading
-        \\the bit and choosing a direction; the prelude's own `Range` instance
-        \\does exactly this.
+        \\An expansion that ignores `reverse` silently iterates forward.
+        \\Honouring it is a matter of reading the parameter and choosing a
+        \\direction; the prelude's own instances all do, arrays and ranges
+        \\included, which is why `for <` over an array walks backwards without
+        \\the compiler lowering the loop itself.
     );
     code_block(17, "glosso", #string
         \\#import "Io";
         \\
-        \\Ring :: struct { items: [8]s64; start: s64; count: s64; }
+        \\Ring :: struct { items: [8]s64; start: ssize; count: ssize; }
         \\
         \\ring_push :: (r: *Ring, value: s64) {
         \\    r.*.items[(r.*.start + r.*.count) % 8] = value;
         \\    r.*.count += 1;
         \\}
         \\
-        \\Ring :: instance Iterable {
-        \\    for_expansion :: (r: Ring, body: Code, flags: For_Flags) #expand {
-        \\        reverse := (flags & For_Flags.REVERSE) != cast(For_Flags)0;
+        \\Ring ::: instance Iterable {
+        \\    for_expansion :: (r: Ring, body: Code, reverse: bool) #expand {
         \\        step := 0;
         \\        while step < r.count {
         \\            offset := ifx reverse r.count - 1 - step else step;
@@ -3282,13 +3400,13 @@ render_section_101 :: () {
         \\main :: () {
         \\    r: Ring;
         \\    r.start = 6;
-        \\    ring_push(*r, 10);
-        \\    ring_push(*r, 20);
-        \\    ring_push(*r, 30);
+        \\    ring_push(&r, 10);
+        \\    ring_push(&r, 20);
+        \\    ring_push(&r, 30);
         \\
-        \\    for r print("% at %\n", it, it_index);
-        \\    for < v, i: r print("reverse % at %\n", v, i);
-        \\    for v: r { if v == 20 continue; print("kept %\n", v); }
+        \\    for r print("{} at {}\n", it, it_index);
+        \\    for < v, i: r print("reverse {} at {}\n", v, i);
+        \\    for v: r { if v == 20 continue; print("kept {}\n", v); }
         \\}
     );
     code_block(18, "text", #string
@@ -3317,27 +3435,26 @@ render_section_101 :: () {
     );
     note(22, #string,oneline
         \\An expansion must advance its cursor before `#insert body`, not after,
-        \\or `continue` in a loop body never terminates. The `Ring` above
-        \\increments `step` first for this reason. The prelude's `Range` instance
-        \\does not, which is visible when a range is forced through it:
-        \\`for :for_expansion v: 1..5 { if v == 2 continue; print("v=%\n", v); }`
-        \\prints `v=1` and then hangs. Ordinary range and array loops are lowered
-        \\by the compiler, not by that instance, and handle `continue` correctly.
+        \\or `continue` in a loop body repeats the same element forever. The
+        \\`Ring` above increments `step` first for this reason. Every prelude
+        \\instance follows the same rule, including the `Range` instance reached
+        \\explicitly by `for :for_expansion`; `continue` is therefore safe on
+        \\both the native and macro-expanded paths.
     );
 
     subheading(23, "Naming an expansion");
     paragraph(24, #string,oneline
         \\`for :name` selects an expansion by name instead of by type. The named
         \\procedure need not be a typeclass method: any `#expand` macro with the
-        \\value, `Code` and `For_Flags` parameters will do, which is the way to
-        \\give one type several iteration orders.
+        \\value, `Code` and `bool` parameters will do, which is the way to give
+        \\one type several iteration orders.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
         \\
-        \\Span :: struct { start: s64; count: s64; }
+        \\Span :: struct { start: s64; count: ssize; }
         \\
-        \\stepping :: (s: Span, body: Code, flags: For_Flags) #expand {
+        \\stepping :: (s: Span, body: Code, reverse: bool) #expand {
         \\    step := 0;
         \\    while step < s.count {
         \\        `it := s.start + step * 2;
@@ -3349,8 +3466,8 @@ render_section_101 :: () {
         \\
         \\main :: () {
         \\    s: Span = .{ .start = 100, .count = 3 };
-        \\    for :stepping v, i: s print("stepping % at %\n", v, i);
-        \\    for :for_expansion v, i: 1..4 print("explicit builtin % at %\n", v, i);
+        \\    for :stepping v, i: s print("stepping {} at {}\n", v, i);
+        \\    for :for_expansion v, i: 1..4 print("explicit builtin {} at {}\n", v, i);
         \\}
     );
     code_block(26, "text", #string
@@ -3368,11 +3485,14 @@ render_section_101 :: () {
         \\`Iterable` instance rather than the compiler's native range lowering.
     );
     paragraph(28, #string,oneline
-        \\An explicit expansion cannot be combined with `#inline`, which consults
-        \\the name only on the non-inline path; and a type with no instance and
-        \\no named expansion is `error: for-each needs an array, got P`. The
-        \\related range protocols, `Step` and `RangeOrigin`, are described in
-        \\Iteration and Range Typeclasses.
+        \\An explicit expansion selector is consulted only on the non-inline
+        \\path, so `#inline` cannot select it. A selector also cannot be combined
+        \\with the pointer binder: because a named expansion decides what `it`
+        \\means, write `for :for_pointer_expansion x: value` without `*` when
+        \\that is deliberately the macro you want. A type with no instance and
+        \\no named expansion is `'P' is not iterable; it needs an Iterable
+        \\instance`. The related range protocols, `Step` and `RangeOrigin`, are
+        \\described in Iteration and Range Typeclasses.
     );
 }
 
@@ -3386,11 +3506,11 @@ render_section_102 :: () {
         \\rejected outright.
     );
     paragraph(1, #string,oneline
-        \\The set is that small because unrolling means the body is checked
-        \\once per element, and only a tuple and a fixed array have a length
-        \\the checker knows. A view, a dynamic array and a user `Iterable`
-        \\all carry their count at run time, so there is no number of copies
-        \\to make.
+        \\Static expansion is a dedicated compiler path. A tuple and a fixed
+        \\array have a shape the checker can enumerate, while a view or dynamic
+        \\array has only a run-time count. A user `Iterable` is rejected even if
+        \\its author knows a fixed length: `#inline` does not invoke iteration
+        \\macros, so custom compile-time unrolling must be written explicitly.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
@@ -3399,17 +3519,17 @@ render_section_102 :: () {
         \\    xs :: .[2, 3, 5];
         \\    p := 0;
         \\    #inline for x: xs p += x;
-        \\    print("p=%\n", p);
+        \\    print("p={}\n", p);
         \\
         \\    t :: .(1, "two", 3.0);
-        \\    #inline for t print("tuple elem: %\n", it);
+        \\    #inline for t print("tuple elem: {}\n", it);
         \\
         \\    q := 0;
         \\    #inline for n: 0..3 q += n;
-        \\    print("q=%\n", q);
+        \\    print("q={}\n", q);
         \\
         \\    ys: [3]s64 = .[10, 20, 30];
-        \\    #inline for v, i: ys print("v=% i=%\n", v, i);
+        \\    #inline for v, i: ys print("v={} i={}\n", v, i);
         \\}
     );
     code_block(3, "text", #string
@@ -3432,10 +3552,10 @@ render_section_102 :: () {
     );
     table_header(5, "Iterable   —   Effect of `#inline for`");
     table_row(6, "a tuple literal, `.(a, b, c)`   |   unrolled; `#inline` is optional, a tuple is always expanded statically");
-    table_row(7, "a fixed array, `[N]T`   |   unrolled into N copies; this is what `#inline` buys");
+    table_row(7, "a fixed array, `[N]T`   |   unrolled into N copies; `#inline for *x:` may bind each copy to an element address");
     table_row(8, "a literal range, `0..n` or `0..=n`   |   an ordinary runtime loop; the directive is ignored");
     table_row(9, "a stored `Range` value   |   rejected");
-    table_row(10, "a view `[]T` or a dynamic array `[..]T`   |   rejected");
+    table_row(10, "a view `[]const T` or a dynamic array `[..]T`   |   rejected");
     table_row(11, "a type with an `Iterable` instance   |   rejected");
     paragraph(12, #string,oneline
         \\The two rejections have distinct wording. A view or a dynamic array
@@ -3451,20 +3571,15 @@ render_section_102 :: () {
     paragraph(14, #string,oneline
         \\Unrolling is what makes a tuple iterable at all. Each copy of the
         \\body is checked against the type of the element it was made for, so
-        \\one loop can call a generic procedure at four different
-        \\instantiations and can branch on the element type with `#if`.
+        \\one loop can inspect each element's type and branch on it with `#if`.
     );
     code_block(15, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\describe :: (v: $T) {
-        \\    print("% : %\n", v, type_name(T));
-        \\}
-        \\
         \\main :: () {
-        \\    row :: .(7, "seven", 7.5, true);
-        \\    #inline for row describe(it);
+        \\    row :: .(cast(ssize)7, "seven", cast(f64)7.5, true);
+        \\    #inline for row print("{}\n", type_name(type_of(it)));
         \\
         \\    #inline for row {
         \\        #if type_of(it) == string print("  a string\n");
@@ -3473,21 +3588,24 @@ render_section_102 :: () {
         \\}
     );
     code_block(16, "text", #string
-        \\7 : int
-        \\seven : string
-        \\7.5 : f64
-        \\1 : bool
+        \\ssize
+        \\string
+        \\f64
+        \\bool
         \\  not a string
         \\  a string
         \\  not a string
         \\  not a string
+    );
+    note(40, #string,oneline
+        \\Inline tuple iteration retains the concrete type of each element. The example reflects on each element directly and formats its type name as a string. A generic formatting helper can also select a Formatter instance for the element type.
     );
     paragraph(17, #string,oneline
         \\Writing `for row` without the directive produces the same expansion.
         \\A tuple has no runtime element type to loop over, so the checker
         \\takes the static path whether or not `#inline` is present. The
         \\directive matters only for a fixed array, where both lowerings exist
-        \\and the plain `for` would emit a real loop.
+        \\and the plain `for` expands through the prelude to a real loop.
     );
     subheading(18, "The loop variable is not a compile-time constant");
     paragraph(19, #string,oneline
@@ -3503,9 +3621,9 @@ render_section_102 :: () {
         \\main :: () {
         \\    xs :: .[1, 2, 3];
         \\    #inline for xs {
-        \\        #insert tprint("k_% :: %;", it, it);
+        \\        #insert tprint("k_{} :: {};", it, it);
         \\    }
-        \\    print("%\n", k_1);
+        \\    print("{}\n", k_1);
         \\}
     );
     code_block(21, "text", "error: unknown const it");
@@ -3516,16 +3634,17 @@ render_section_102 :: () {
         \\assignment into a recorded compile-time value.
     );
     code_block(23, "glosso", #string
-        \\#import "Io";
         \\#import "Format";
+        \\#import "Io";
+        \\#import "String_Builder";
         \\
         \\main :: () {
         \\    i ::= 0;
         \\    #inline while i < 3 {
-        \\        #insert tprint("k_% :: % * 10;", i, i);
+        \\        #insert tprint("k_{} :: {} * 10;", i, i);
         \\        i += 1;
         \\    }
-        \\    print("% % %\n", k_0, k_1, k_2);
+        \\    print("{} {} {}\n", k_0, k_1, k_2);
         \\}
     );
     code_block(24, "text", "0 10 20");
@@ -3548,7 +3667,7 @@ render_section_102 :: () {
         \\main :: () {
         \\    Ts :: .[s64, f64, bool, string];
         \\    #inline for T: Ts {
-        \\        print("% is % bytes\n", type_name(T), size_of(T));
+        \\        print("{} is {} bytes\n", type_name(T), size_of(T));
         \\    }
         \\}
     );
@@ -3566,22 +3685,21 @@ render_section_102 :: () {
         \\    Ts :: .[s64, f64, bool];
         \\    i ::= 0;
         \\    #inline while i < 3 {
-        \\        print("%\n", type_name(Ts[i]));
+        \\        print("{}\n", type_name(Ts[i]));
         \\        i += 1;
         \\    }
         \\}
     );
     code_block(31, "text", #string
-        \\int
+        \\s64
         \\f64
         \\bool
     );
     note(32, #string,oneline
-        \\The restriction is on the loop variable's value, not its type. A
-        \\generic call binds `$T` from the argument's type and works
-        \\per element, and `#if type_of(it) == string` selects a branch per
-        \\copy. Only intrinsics and declarations that need the value itself
-        \\are affected.
+        \\The restriction is on the loop variable's value, not its type. A generic
+        \\call binds `$T` from the argument's type and works per element, and `#if
+        \\type_of(it) == string` selects a branch per copy. Only intrinsics and
+        \\declarations that need the value itself are affected.
     );
     subheading(33, "break, scope, and defer");
     paragraph(34, #string,oneline
@@ -3613,8 +3731,8 @@ render_section_102 :: () {
         \\    xs :: .[1, 2, 3];
         \\    #inline for xs {
         \\        doubled := it * 2;
-        \\        defer print("leaving %\n", it);
-        \\        print("doubled %\n", doubled);
+        \\        defer print("leaving {}\n", it);
+        \\        print("doubled {}\n", doubled);
         \\    }
         \\}
     );
@@ -3627,16 +3745,19 @@ render_section_102 :: () {
         \\leaving 3
     );
     bullet(41, #string,oneline
-        \\Assigning to the element variable writes to that copy's local only.
-        \\`#inline for v: xs { v += 100; }` leaves `xs` unchanged, exactly as
-        \\the runtime array loop does.
+        \\Assigning to the by-value element variable writes to that copy's local
+        \\only. `#inline for v: xs { v += 100; }` leaves `xs` unchanged, exactly
+        \\as the runtime array loop does. A fixed array may instead use
+        \\`#inline for *v: xs { v.* += 100; }`; each unrolled copy binds the
+        \\element's address and changes the original array. Tuples do not support
+        \\pointer binding.
     );
     subheading(42, "Reverse, and explicit expansions");
     paragraph(43, #string,oneline
-        \\`#inline for <` reverses. This is worth stating on its own because
-        \\the runtime array loop does not: `for < v: xs` over an array, a view
-        \\or a dynamic array silently iterates forward, while the unroller
-        \\emits its copies in reverse index order.
+        \\Both `#inline for <` and runtime `for <` reverse an array walk. Their
+        \\indices differ: the unroller emits copies in reverse original-index
+        \\order, so `it_index` descends; the prelude expansion defines
+        \\`it_index` as a step count, so it still rises from zero.
     );
     code_block(44, "glosso", #string
         \\#import "Io";
@@ -3644,9 +3765,9 @@ render_section_102 :: () {
         \\main :: () {
         \\    xs: [3]s64 = .[1, 2, 3];
         \\    print("inline reverse:\n");
-        \\    #inline for < v, i: xs print("  v=% i=%\n", v, i);
+        \\    #inline for < v, i: xs print("  v={} i={}\n", v, i);
         \\    print("runtime reverse:\n");
-        \\    for < v, i: xs print("  v=% i=%\n", v, i);
+        \\    for < v, i: xs print("  v={} i={}\n", v, i);
         \\}
     );
     code_block(45, "text", #string
@@ -3655,9 +3776,9 @@ render_section_102 :: () {
         \\  v=2 i=1
         \\  v=1 i=0
         \\runtime reverse:
-        \\  v=1 i=0
+        \\  v=3 i=0
         \\  v=2 i=1
-        \\  v=3 i=2
+        \\  v=1 i=2
     );
     paragraph(46, #string,oneline
         \\An explicit expansion selector cannot be combined with `#inline`. The
@@ -3700,14 +3821,16 @@ render_section_103 :: () {
     );
     code_block(3, "glosso", #string
         \\'first;      // label statement: defines the label
-        \\'third       // NOT a label statement - an expression of type `label`
+        \\('third);    // expression statement: evaluates a `label` value
     );
     paragraph(4, #string,oneline
-        \\A bare `'third` on its own line is an expression statement whose
-        \\value is a label literal, so no label is defined and a later
-        \\`goto('third)` reports that the procedure has no such label. A label
-        \\statement at file scope is not a statement at all and is rejected as
-        \\a declaration: `error: bad decl name 'here'`.
+        \\Parentheses force `'third` into expression position; the final `;`
+        \\then terminates that expression statement, so no label is defined and
+        \\a later `goto('third)` reports that the procedure has no such label. A
+        \\bare `'third` followed by another statement is instead missing the
+        \\required expression terminator and fails at that next statement. A
+        \\label statement at file scope is not a statement at all and is rejected
+        \\as a declaration: `error: bad decl name 'here'`.
     );
     note(5, #string,oneline
         \\The parser also accepts a colon, `'name:`, and defines the same
@@ -3732,11 +3855,12 @@ render_section_103 :: () {
         \\    ctx: ?*Execution_Context = .None,
         \\    value: any = false,
         \\    return_code: s32 = 1,
-        \\) #noreturn #magic "jump_goto"
-        \\  #memory unknown;
+        \\) -> #Never #magic "jump_goto"
         \\
-        \\label_is_valid :: (target: label) -> bool #magic "label_is_valid";
-        \\label_is_local :: (target: label) -> bool #magic "label_is_local";
+        \\label ::: #public {
+        \\    is_valid :: (#self) -> bool #magic "label_is_valid";
+        \\    is_local :: (#self) -> bool #magic "label_is_local";
+        \\}
     );
     code_block(9, "glosso", #string
         \\#import "Io";
@@ -3751,7 +3875,7 @@ render_section_103 :: () {
         \\    goto('done);
         \\    print("skipped\n");
         \\'done;
-        \\    print("i=%\n", i);
+        \\    print("i={}\n", i);
         \\
         \\    target := 'first;
         \\    target = 'second;
@@ -3765,13 +3889,6 @@ render_section_103 :: () {
     code_block(10, "text", #string
         \\i=3
         \\right
-    );
-    paragraph(11, #string,oneline
-        \\`goto` is `#noreturn`, which is why `print("skipped\n")` above is
-        \\never reached and never lowered. Its `#memory unknown` contract tells
-        \\the memory analysis that a transfer may do anything to reachable
-        \\storage, which is the honest description of a jump that can land in
-        \\another frame.
     );
     subheading(12, "The label pre-pass");
     paragraph(13, #string,oneline
@@ -3798,7 +3915,7 @@ render_section_103 :: () {
         \\    for i: 0..4 {
         \\        for j: 0..4 {
         \\            if i * j > 4 goto('escaped);
-        \\            print("i=% j=%\n", i, j);
+        \\            print("i={} j={}\n", i, j);
         \\        }
         \\    }
         \\'escaped;
@@ -3820,40 +3937,46 @@ render_section_103 :: () {
         \\escaped
     );
     paragraph(18, #string,oneline
-        \\An inward jump works as well, in both directions. Execution resumes
-        \\at the label; the block's own entry code, including any
-        \\initialisation written above the label, does not run.
+        \\A forward jump may cross a declaration or enter a nested construct.
+        \\Execution resumes at the label. A crossed variable still has runtime
+        \\storage and remains assignable, but its initializer and every other
+        \\statement skipped on the way to the label do not run.
     );
     code_block(19, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
         \\
         \\main :: () {
-        \\    n := 1;
-        \\    if n == 1 goto('inside);
-        \\    print("not skipped by noreturn\n");
-        \\    {
-        \\        print("block head\n");
+        \\    goto('over);
+        \\    y := 42;
+        \\'over;
+        \\    y = 7;
+        \\    print("y={}\n", y);
+        \\
+        \\    i := 0;
+        \\    goto('inside);
+        \\    while i < 3 {
+        \\        print("top {}\n", i);
         \\'inside;
-        \\        print("block tail\n");
+        \\        print("inside {}\n", i);
+        \\        i += 1;
         \\    }
-        \\    print("after block\n");
         \\}
     );
     code_block(20, "text", #string
-        \\block tail
-        \\after block
+        \\y=7
+        \\inside 0
+        \\top 1
+        \\inside 1
+        \\top 2
+        \\inside 2
     );
     note(21, #string,oneline
-        \\A forward `goto` into a nested block does not compile when the jump
-        \\is unconditional. Because `goto` is `#noreturn`, everything after it is
-        \\discarded up to the next label in the same statement list, and a
-        \\label buried inside a block does not stop that scan. The block is
-        \\dropped whole, and lowering then cannot find the destination:
-        \\`error: branch targets unknown label 'U.inside' [opcode Jmp] while
-        \\lowering 'main' at IR instruction 0`. Guarding the jump with an `if`,
-        \\as above, or placing the target block earlier in the body, both
-        \\avoid it.
+        \\Labels are collected for the whole procedure before unreachable code
+        \\is discarded. Lowering reserves storage for a declaration that a jump
+        \\crosses; only its initializer is dead. A label inside a block or loop
+        \\also keeps that construct as an entry point. After the first mid-body
+        \\pass, normal loop control resumes, as the `top 1` line demonstrates.
     );
     subheading(22, "Duplicate labels");
     paragraph(23, #string,oneline
@@ -3874,16 +3997,16 @@ render_section_103 :: () {
         \\A label in value position is an expression of the built-in type
         \\`label`. It can be stored in a variable, passed to a procedure, held
         \\in a struct field, and compared. `#undefined` is the absent label,
-        \\and `label_is_valid` distinguishes it from a real one. A `goto`
+        \\and `label.is_valid` distinguishes it from a real one. A `goto`
         \\through a variable is a computed jump and is not checked against the
         \\procedure's label set.
     );
     table_header(28, "Form   —   Meaning");
     table_row(29, "`'name;`   |   statement; defines the label");
     table_row(30, "`'name`   |   expression of type `label`");
-    table_row(31, "`#undefined`   |   the absent label; `label_is_valid` is false");
+    table_row(31, "`#undefined`   |   the absent label; `label.is_valid` is false");
     table_row(32, "`proc,,'name`   |   a stable entry point at `'name` inside `proc`");
-    table_row(33, "`label_is_local(t)`   |   true only for a label in the procedure making the call");
+    table_row(33, "`t.is_local()`   |   true only for a label in the procedure making the call");
     code_block(34, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
@@ -3895,7 +4018,7 @@ render_section_103 :: () {
         \\'entry;
         \\    n += 1;
         \\    if n < 2 goto('entry);
-        \\    print("first n=%\n", n);
+        \\    print("first n={}\n", n);
         \\}
         \\
         \\second :: () {
@@ -3903,16 +4026,16 @@ render_section_103 :: () {
         \\'entry;
         \\    m += 2;
         \\    if m < 4 goto('entry);
-        \\    print("second m=%\n", m);
+        \\    print("second m={}\n", m);
         \\}
         \\
         \\main :: () {
         \\    first();
         \\    second();
         \\    h := Handler.{ .landing = 'stop, .name = "stop" };
-        \\    print("field valid: % name %\n", label_is_valid(h.landing), h.name);
+        \\    print("field valid: {} name {}\n", h.landing.is_valid(), h.name);
         \\    absent: label = #undefined;
-        \\    print("absent is label: %\n", label_is_valid(absent));
+        \\    print("absent is label: {}\n", absent.is_valid());
         \\    goto(h.landing);
         \\    print("skipped\n");
         \\'stop;
@@ -3958,12 +4081,6 @@ render_section_103 :: () {
     code_block(40, "text", #string
         \\before goto
         \\after goto
-    );
-    note(41, #string,oneline
-        \\Any release obligation parked in a `defer` is skipped by a jump over
-        \\it. Free the resource before the `goto`, or place the obligation in a
-        \\scope the jump does not leave. What the compiler tracks here is
-        \\described in Ownership and Release Obligations.
     );
     subheading(42, "Targets");
     paragraph(43, #string,oneline
@@ -4016,11 +4133,11 @@ render_section_104 :: () {
         \\alignment for the target. On `x86_64-pc-windows-msvc`,
         \\`size_of(Context_Storage)` is 640. A program never reads its fields;
         \\it only ever hands the address of the enclosing `Execution_Context`
-        \\to `context_save`, `context_prepare` and `goto`.
+        \\to `Execution_Context.save`, `Execution_Context.prepare` and `goto`.
     );
-    subheading(4, "`context_save`");
+    subheading(4, "`Execution_Context.save`");
     paragraph(5, #string,oneline
-        \\`context_save` captures the current continuation into a context and
+        \\`Execution_Context.save` captures the current continuation into a context and
         \\returns `0`. When that context is later restored, the same call
         \\returns again, this time with the restoring `goto`'s `return_code`,
         \\and the `goto`'s `value` has been written into `ctx.inbox`. The
@@ -4028,22 +4145,20 @@ render_section_104 :: () {
         \\in a shape that survives the second return.
     );
     code_block(6, "glosso", #string
-        \\context_save :: (ctx: *Execution_Context) -> s32
-        \\    #returns_twice #magic "jump_context_save"
-        \\    #memory(writes(ctx), noescape(ctx));
+        \\Execution_Context ::: #public {
+        \\    save :: (*#self) -> s32
+        \\        #returns_twice #magic "jump_context_save"
         \\
-        \\context_prepare :: (
-        \\    ctx: *Execution_Context,
-        \\    stack: []u8,
-        \\    local: ?*Execution_Local = .None,
-        \\) #magic "jump_context_prepare"
-        \\  #memory(writes(ctx), escapes(stack), escapes(local));
+        \\    prepare :: (*#self, stack: []u8,
+        \\        local: ?*Execution_Local = .None)
+        \\        #magic "jump_context_prepare"
+        \\}
     );
     code_block(7, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
         \\
-        \\resume_saved :: (saved: *Execution_Context) #noreturn {
+        \\resume_saved :: (saved: *Execution_Context) -> #Never {
         \\    goto(#undefined, .ctx = saved, .value = "carried", .return_code = 7);
         \\}
         \\
@@ -4051,12 +4166,12 @@ render_section_104 :: () {
         \\    saved: Execution_Context;
         \\    saved.local = execution_local();
         \\
-        \\    code := context_save(*saved);
+        \\    code := saved.save();
         \\    if code == 0 {
-        \\        print("captured, code=%\n", code);
-        \\        resume_saved(*saved);
+        \\        print("captured, code={}\n", code);
+        \\        resume_saved(&saved);
         \\    }
-        \\    print("restored, code=% inbox=%\n", code, saved.inbox);
+        \\    print("restored, code={} inbox={}\n", code, saved.inbox);
         \\}
     );
     code_block(8, "text", #string
@@ -4064,10 +4179,11 @@ render_section_104 :: () {
         \\restored, code=7 inbox=carried
     );
     paragraph(9, #string,oneline
-        \\Setting `saved.local = execution_local()` before the capture is not
-        \\optional bookkeeping. A restored context becomes the active execution
-        \\local, so a context captured without one would resume with no
-        \\exception stack and no payload storage.
+        \\`save()` records the active execution-local block automatically;
+        \\the explicit assignment above is redundant. `prepare()` instead
+        \\uses the block supplied by its `local` argument. Restoring a context
+        \\publishes its recorded block, including its exception stack and
+        \\payload storage.
     );
     subheading(10, "The three modes of `goto`");
     paragraph(11, #string,oneline
@@ -4083,12 +4199,12 @@ render_section_104 :: () {
         \\`value` and `return_code` are only meaningful in the two restoring
         \\modes. `value` is stored in the destination context's `inbox` before
         \\control arrives, and `return_code` becomes the value the destination's
-        \\`context_save` returns; it defaults to `1` so a restored capture can
+        \\`Execution_Context.save` returns; it defaults to `1` so a restored capture can
         \\never be mistaken for the original `0`.
     );
-    subheading(17, "`context_prepare`");
+    subheading(17, "`Execution_Context.prepare`");
     paragraph(18, #string,oneline
-        \\`context_prepare` builds a complete machine image over a stack the
+        \\`Execution_Context.prepare` builds a complete machine image over a stack the
         \\caller owns, without transferring control. Entering it with the
         \\third mode above runs the named label on that stack. This is the
         \\primitive behind coroutines.
@@ -4101,33 +4217,29 @@ render_section_104 :: () {
         \\    fresh: Execution_Context;
         \\    fresh_local: Execution_Local;
         \\    caller: Execution_Context;
-        \\    stack: [..]u8;
+        \\    stack: [65536]u8;
         \\}
         \\
         \\#thread_local storage: State = .{};
         \\
-        \\on_fresh_stack :: () #noreturn {
+        \\on_fresh_stack :: () -> #Never {
         \\'entry;
-        \\    state := *storage;
-        \\    print("running on the fresh stack, inbox=%\n", state.*.fresh.inbox);
-        \\    goto(#undefined, .ctx = *state.*.caller, .value = "and back", .return_code = 9);
+        \\    state := &storage;
+        \\    print("running on the fresh stack, inbox={}\n", state.*.fresh.inbox);
+        \\    goto(#undefined, .ctx = &state.*.caller, .value = "and back", .return_code = 9);
         \\}
         \\
         \\main :: () {
-        \\    state := *storage;
-        \\    stack: [..]u8;
-        \\    for i: 0..64 * 1024 array_add(*stack, cast(u8)0);
-        \\    state.*.stack = stack;
+        \\    state := &storage;
         \\
-        \\    context_prepare(*state.*.fresh, array_view(state.*.stack), .local = *state.*.fresh_local);
+        \\    state.*.fresh.prepare(state.*.stack[..], .local = &state.*.fresh_local);
         \\    state.*.caller.local = execution_local();
         \\
-        \\    code := context_save(*state.*.caller);
+        \\    code := state.*.caller.save();
         \\    if code == 0 {
-        \\        goto(on_fresh_stack,,'entry, .ctx = *state.*.fresh, .value = "hello");
+        \\        goto(on_fresh_stack,,'entry, .ctx = &state.*.fresh, .value = "hello");
         \\    }
-        \\    print("caller resumed: code=% inbox=%\n", code, state.*.caller.inbox);
-        \\    array_free(*state.*.stack);
+        \\    print("caller resumed: code={} inbox={}\n", code, state.*.caller.inbox);
         \\}
     );
     code_block(20, "text", #string
@@ -4143,9 +4255,9 @@ render_section_104 :: () {
     );
     subheading(22, "setjmp and longjmp");
     paragraph(23, #string,oneline
-        \\The C pair is two aliases and one four-line procedure:
-        \\`Jump_Buffer :: Execution_Context;`, `setjmp :: context_save;`, and
-        \\`longjmp(buffer, value)` is `goto(#undefined, .ctx = buffer,
+        \\`Jump_Buffer` aliases `Execution_Context`. Capture with
+        \\`buffer.save()`; the old free `setjmp` spelling is no longer supplied.
+        \\`buffer.longjmp(value)` calls `goto(#undefined, .ctx = &buffer,
         \\.return_code = value)` with a zero value promoted to `1`.
     );
     code_block(24, "glosso", #string
@@ -4156,19 +4268,19 @@ render_section_104 :: () {
         \\buffer: Jump_Buffer;
         \\
         \\deep :: (depth: s32) {
-        \\    if depth == 0 longjmp(*buffer, 42);
+        \\    if depth == 0 buffer.longjmp(42);
         \\    deep(depth - 1);
         \\}
         \\
         \\main :: () {
-        \\    print("Context_Storage is % bytes\n", size_of(Context_Storage));
+        \\    print("Context_Storage is {} bytes\n", size_of(Context_Storage));
         \\    buffer.local = execution_local();
-        \\    code := setjmp(*buffer);
+        \\    code := buffer.save();
         \\    if code == 0 {
         \\        print("captured\n");
         \\        deep(3);
         \\    }
-        \\    print("unwound with code %\n", code);
+        \\    print("unwound with code {}\n", code);
         \\}
     );
     code_block(25, "text", #string
@@ -4190,7 +4302,7 @@ render_section_104 :: () {
         \\#import "Io";
         \\#import "Jump";
         \\
-        \\divide :: (handler: label, a: int, b: int) -> int {
+        \\divide :: (handler: label, a: ssize, b: ssize) -> ssize {
         \\    if b == 0 throw(handler, "division by zero");
         \\    return a / b;
         \\}
@@ -4200,17 +4312,17 @@ render_section_104 :: () {
         \\    inner: label = #undefined;
         \\
         \\    try(outer, #code {
-        \\        print("first result %\n", divide(outer, 40, 5));
+        \\        print("first result {}\n", divide(outer, 40, 5));
         \\        try(inner, #code {
         \\            print("before failing call\n");
         \\            divide(outer, 10, 0);
         \\            print("unreachable\n");
         \\        }, #code {
-        \\            print("inner caught %\n", catch());
+        \\            print("inner caught {}\n", catch());
         \\        });
         \\        print("outer body done\n");
         \\    }, #code {
-        \\        print("outer caught %\n", catch());
+        \\        print("outer caught {}\n", catch());
         \\    });
         \\
         \\    print("after try\n");
@@ -4226,27 +4338,27 @@ render_section_104 :: () {
         \\The inner `try` is skipped entirely: the failing call names `outer`,
         \\so the frame walk passes over `inner` and lands in the outer handler,
         \\and neither `outer body done` nor the inner handler runs. For code
-        \\that cannot be expanded inline, `try_call(body, handler, data)` takes
+        \\that cannot be expanded inline, `body.try_call(handler, data)` takes
         \\two function pointers instead of two quotes and always uses the
-        \\innermost frame, and `set_unhandled_exception_handler` installs a
+        \\innermost frame, and `Unhandled_Exception_Handler.set_unhandled_exception_handler` installs a
         \\last resort that a `throw_current` with no active frame reaches
         \\instead of terminating the process.
     );
     subheading(31, "Coroutines");
     paragraph(32, #string,oneline
-        \\A coroutine is a `context_prepare`d context with an owned stack, its
+        \\A coroutine is a `Execution_Context.prepare`d context with an owned stack, its
         \\own `Execution_Local`, and a pointer back to the caller's context.
-        \\`coroutine_resume` saves the caller and switches in; `co_yield` saves
+        \\`Coroutine.resume` saves the caller and switches in; `co_yield` saves
         \\the coroutine and switches back, carrying a value each way through
         \\the inbox. Because the coroutine has a real stack, it may yield from
         \\any depth.
     );
     table_header(33, "Call   —   Result");
-    table_row(34, "`coroutine_create(body, data, stack_size, scheduler)`   |   `?*Coroutine`; absent when allocation fails");
-    table_row(35, "`coroutine_resume(co, input)`   |   runs until the next suspension, returns a `Coroutine_Event`");
+    table_row(34, "`Coroutine.coroutine_create(body, data, stack_size, scheduler)`   |   `?*const Coroutine`; absent when allocation fails");
+    table_row(35, "`co.resume(input)`   |   runs until the next suspension, returns a `Coroutine_Event`");
     table_row(36, "`co_yield(value)`   |   suspends; returns the next `input`");
-    table_row(37, "`co_return(value)`   |   `#noreturn`; ends the coroutine with `Returned`");
-    table_row(38, "`coroutine_destroy(co)`   |   frees the stack, the payload arrays and the record");
+    table_row(37, "`co_return(value)`   |   `#Never`; ends the coroutine with `Returned`");
+    table_row(38, "`co.destroy()`   |   frees the stack, the payload arrays and the record");
     paragraph(39, #string,oneline
         \\`Coroutine_Event` is a tagged union of `Yielded`, `Awaiting`,
         \\`Returned` and `Failed`, and `Coroutine_Status` runs `Fresh`,
@@ -4260,28 +4372,28 @@ render_section_104 :: () {
         \\
         \\counter :: (data: ?*void) -> any {
         \\    input := co_yield(10);
-        \\    print("coroutine received %\n", input);
+        \\    print("coroutine received {}\n", input);
         \\    input = co_yield(20);
-        \\    print("coroutine received %\n", input);
+        \\    print("coroutine received {}\n", input);
         \\    return 30;
         \\}
         \\
         \\report :: (event: Coroutine_Event) {
         \\    if event == {
-        \\    case .Yielded(value);  print("yielded %\n", value);
+        \\    case .Yielded(value);  print("yielded {}\n", value);
         \\    case .Awaiting;        print("awaiting\n");
-        \\    case .Returned(value); print("returned %\n", value);
-        \\    case .Failed(error);   print("failed %\n", error);
+        \\    case .Returned(value); print("returned {}\n", value);
+        \\    case .Failed(error);   print("failed {}\n", error);
         \\    }
         \\}
         \\
         \\main :: () {
-        \\    if #pattern .Some(co) = coroutine_create(counter) {
-        \\        report(coroutine_resume(co, 0));
-        \\        report(coroutine_resume(co, 100));
-        \\        report(coroutine_resume(co, 200));
-        \\        print("status done: %\n", co.*.status == .Done);
-        \\        coroutine_destroy(co);
+        \\    if #pattern .Some(co) = Coroutine.coroutine_create(counter) {
+        \\        report(co.resume(0));
+        \\        report(co.resume(100));
+        \\        report(co.resume(200));
+        \\        print("status done: {}\n", co.*.status == .Done);
+        \\        co.destroy();
         \\    }
         \\}
     );
@@ -4295,16 +4407,16 @@ render_section_104 :: () {
     );
     paragraph(42, #string,oneline
         \\The coroutine body never sees `goto`. It returns a value like any
-        \\procedure, and an internal trampoline wraps it in a `try_call` so a
+        \\procedure, and an internal trampoline wraps it in a `Try_Body.try_call` so a
         \\throw that escapes the body arrives at the caller as a `Failed`
         \\event rather than unwinding past a stack that no longer has a caller.
     );
     subheading(43, "Awaitables and the scheduler");
     paragraph(44, #string,oneline
-        \\`co_await` suspends into the `Waiting` status and links the coroutine
-        \\onto the awaitable's waiter list. `awaitable_complete` publishes the
+        \\`Awaitable.co_await` suspends into the `Waiting` status and links the coroutine
+        \\onto the awaitable's waiter list. `Awaitable.complete` publishes the
         \\result and enqueues every waiter on the scheduler each one was
-        \\created with. `scheduler_run` drains the ready queue, re-enqueuing
+        \\created with. `Scheduler.run` drains the ready queue, re-enqueuing
         \\anything that merely yielded and leaving anything that is awaiting.
     );
     code_block(45, "glosso", #string
@@ -4313,8 +4425,8 @@ render_section_104 :: () {
         \\
         \\waiter :: (data: ?*void) -> any {
         \\    if #pattern .Some(p) = data {
-        \\        value := co_await(cast(*Awaitable)p);
-        \\        print("ready=%\n", value);
+        \\        value := (cast(*Awaitable)p).co_await();
+        \\        print("ready={}\n", value);
         \\        return 9;
         \\    }
         \\    return 0;
@@ -4323,17 +4435,17 @@ render_section_104 :: () {
         \\main :: () {
         \\    scheduler: Scheduler;
         \\    awaitable: Awaitable;
-        \\    awaitable_init(*awaitable);
+        \\    awaitable.init();
         \\
-        \\    created := coroutine_create(waiter, cast(*void)*awaitable, .scheduler = *scheduler);
+        \\    created := Coroutine.coroutine_create(waiter, cast(*void)&awaitable, .scheduler = &scheduler);
         \\    if #pattern .Some(co) = created {
-        \\        scheduler_enqueue(*scheduler, co);
-        \\        scheduler_run(*scheduler);
-        \\        print("waiting=%\n", co.*.status == .Waiting);
-        \\        awaitable_complete(*awaitable, 7);
-        \\        scheduler_run(*scheduler);
-        \\        print("done=%\n", co.*.status == .Done);
-        \\        coroutine_destroy(co);
+        \\        (&scheduler).scheduler_enqueue(co);
+        \\        scheduler.run();
+        \\        print("waiting={}\n", co.*.status == .Waiting);
+        \\        awaitable.complete(7);
+        \\        scheduler.run();
+        \\        print("done={}\n", co.*.status == .Done);
+        \\        co.destroy();
         \\    }
         \\}
     );
@@ -4342,61 +4454,61 @@ render_section_104 :: () {
         \\ready=7
         \\done=1
     );
-    subheading(47, "Nonlocal entry and the payload");
-    paragraph(48, #string,oneline
+    subheading(48, "Nonlocal entry and the payload");
+    paragraph(49, #string,oneline
         \\Entering a `,,` label bypasses the calling sequence, so arguments
         \\cannot ride in registers. `long_goto` is an `#expand` macro that
-        \\handles both cases: when `label_is_local` says the target is in the
+        \\handles both cases: when `label.is_local` says the target is in the
         \\same procedure it jumps without evaluating its arguments at all,
         \\otherwise it packs the variadic pack into the execution-local payload
         \\and then jumps. The destination reads it with `payload()` or the
         \\typed `payload_get(T, i)` and calls `clear_payload()`.
     );
-    code_block(49, "glosso", #string
+    code_block(50, "glosso", #string
         \\#import "Io";
         \\#import "Jump";
         \\
-        \\worker :: () #noreturn {
+        \\worker :: () -> #Never {
         \\'entry;
         \\    arguments := payload();
-        \\    print("arrived with % arguments\n", arguments.count);
-        \\    n := payload_get(int, 0);
+        \\    print("arrived with {} arguments\n", arguments.count);
+        \\    n := payload_get(ssize, 0);
         \\    flag := payload_get(bool, 1);
-        \\    print("n=% flag=%\n", option_unwrap_or(n, 0), option_unwrap_or(flag, false));
+        \\    print("n={} flag={}\n", n.unwrap_or(0), flag.unwrap_or(false));
         \\    clear_payload();
         \\    long_goto(main,,'back, "returning");
         \\}
         \\
         \\main :: () {
         \\    entry := worker,,'entry;
-        \\    print("local: % valid: %\n", label_is_local(entry), label_is_valid(entry));
+        \\    print("local: {} valid: {}\n", entry.is_local(), entry.is_valid());
         \\    long_goto(entry, 40, true);
         \\
         \\'back;
         \\    message := payload_get(string, 0);
-        \\    print("back with %\n", option_unwrap_or(message, ""));
+        \\    print("back with {}\n", message.unwrap_or(""));
         \\    clear_payload();
         \\    exit(0);
         \\}
     );
-    code_block(50, "text", #string
+    code_block(51, "text", #string
         \\local: 0 valid: 1
         \\arrived with 2 arguments
         \\n=40 flag=1
         \\back with returning
     );
-    paragraph(51, #string,oneline
+    paragraph(52, #string,oneline
         \\`payload_get` checks the recorded type name before it reads, so a
         \\mismatched index or type yields `.None` rather than a
         \\reinterpretation. A procedure entered this way has no caller to
-        \\return to, which is why `worker` is `#noreturn` and why `main` ends
+        \\return to, which is why `worker` is `#Never` and why `main` ends
         \\with `exit(0)` instead of running off the end of a frame that was
         \\never entered normally.
     );
-    note(52, #string,oneline
+    note(53, #string,oneline
         \\Restoring a context is the one part of the library that is not
         \\available everywhere. A plain local `goto` lowers on every target; a
-        \\computed `goto` needs an indirect jump; a `context_save` restore
+        \\computed `goto` needs an indirect jump; a `Execution_Context.save` restore
         \\needs a hand-written register switch, and on a CPU without one the
         \\build stops with `error: context restore is not yet supported for
         \\this target CPU`. Portable programs guard the whole region with
@@ -4404,4 +4516,6 @@ render_section_104 :: () {
         \\`examples/goto.glo`, `examples/exceptions.glo` and
         \\`examples/coroutine.glo` do.
     );
+}
+
 }

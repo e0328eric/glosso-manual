@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 56-67: functions and generics.
 
 render_section_56 :: () {
@@ -24,17 +26,17 @@ render_section_56 :: () {
         \\The order of those five slots is fixed. The parser reads all function
         \\directives in one loop and stops at the first `where`, so a directive
         \\written after a constraint is no longer in the directive position and the
-        \\declaration is rejected: `f :: (a: int) where true #inline { }` gives
+        \\declaration is rejected: `f :: (a: ssize) where true #inline { }` gives
         \\`error: function directives must appear before where clauses`. The
         \\corrected spelling puts every directive first and every constraint after
-        \\them, as in `plain :: (a: int) -> int #inline where true { return a + 1; }`.
+        \\them, as in `plain :: (a: ssize) -> ssize #inline where true { return a + 1; }`.
     );
     table_header(3, "Slot   —   Spelling   —   Rule");
     table_row(4, "parameters   |   `( ... )`   |   required, even when empty");
     table_row(5, "result type   |   `-> R`   |   optional; omitting it means `void`");
     table_row(6, "directives   |   `#inline`, `#must`, ...   |   any number, before the first `where`");
     table_row(7, "constraints   |   `where <expr>`   |   any number, after the last directive");
-    table_row(8, "body   |   `{ ... }`   |   required, except on `#magic` and `#foreign`");
+    table_row(8, "body   |   `{ ... }`   |   required, except on `#magic`, `#foreign`, and signature-only typeclass requirements");
     paragraph(9, #string,oneline
         \\The directive vocabulary is given in the chapter Function and Aggregate
         \\Directives, and the constraint language in Constraints with `where`. This
@@ -46,15 +48,15 @@ render_section_56 :: () {
         \\A procedure with no `->` returns `void`. Writing `-> void` explicitly is
         \\accepted and means the same thing. A result type that is not `void`
         \\constrains every `return` expression in the body: returning a value from a
-        \\`void` procedure is `error: got int, expected void`, and returning the
-        \\wrong type is the ordinary conversion diagnostic, `error: got int, expected
+        \\`void` procedure is `error: got ssize, expected void`, and returning the
+        \\wrong type is the ordinary conversion diagnostic, `error: got ssize, expected
         \\string`.
     );
     code_block(12, "glosso", #string
         \\hello :: () { print("hello\n"); }
         \\nothing :: () -> void { print("nothing\n"); }
-        \\add :: (a: int, b: int) -> int { return a + b; }
-        \\add3 :: (a, b, c: int) -> int { return a + b + c; }
+        \\add :: (a: ssize, b: ssize) -> ssize { return a + b; }
+        \\add3 :: (a, b, c: ssize) -> ssize { return a + b + c; }
     );
     paragraph(13, #string,oneline
         \\`add3` uses a shared type annotation: one type applies to every name in the
@@ -62,22 +64,33 @@ render_section_56 :: () {
         \\Default and Named Parameters.
     );
     note(14, #string,oneline
-        \\A procedure that declares a result type and never executes a `return` is
-        \\accepted, and the call yields the zero value of the result type. There is
-        \\no missing-return diagnostic, so a body whose only exit is a forgotten
-        \\branch fails silently rather than at compile time.
+        \\A procedure whose result type is neither `void` nor a union, and whose
+        \\body can reach its closing brace without executing a `return`, is
+        \\rejected at the declaration: `error: function 'no_return_stmt' can
+        \\reach the end of its body without returning a value`, framed on the
+        \\name. The check is on the control flow, not on the presence of the
+        \\keyword, so a body whose only exit is a forgotten branch is caught
+        \\too. Three shapes are exempt: a `void` procedure needs no `return`; a
+        \\union result, `E!T` and `?T` included, still yields its zero value,
+        \\because reaching the end of an `E!void` body is that type's success
+        \\path; and the named-result form below has its `return` appended by the
+        \\parser.
     );
     code_block(15, "glosso", #string
         \\#import "Io";
         \\
-        \\no_return_stmt :: (a: int) -> int { }
+        \\no_return_stmt :: (a: ssize) -> ssize { }
         \\
         \\main :: () {
-        \\    print("no_return_stmt=%\n", no_return_stmt(5));
+        \\    print("no_return_stmt={}\n", no_return_stmt(5));
         \\}
     );
     code_block(16, "text", #string
-        \\no_return_stmt=0
+        \\error: function 'no_return_stmt' can reach the end of its body without returning a value
+        \\  --> ret.glo:3:1
+        \\  |
+        \\3 | no_return_stmt :: (a: ssize) -> ssize { }
+        \\  | ^^^^^^^^^^^^^^
     );
 
     subheading(17, "Multiple and named results");
@@ -89,9 +102,9 @@ render_section_56 :: () {
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
-        \\divmod :: (a: int, b: int) -> (int, int) { return a / b, a % b; }
+        \\divmod :: (a: ssize, b: ssize) -> (ssize, ssize) { return a / b, a % b; }
         \\
-        \\minmax :: (a: int, b: int) -> (lo: int, hi: int) {
+        \\minmax :: (a: ssize, b: ssize) -> (lo: ssize, hi: ssize) {
         \\    if a < b { lo = a; hi = b; return; }
         \\    lo = b;
         \\    hi = a;
@@ -99,13 +112,13 @@ render_section_56 :: () {
         \\
         \\main :: () {
         \\    q, r := divmod(7, 2);
-        \\    print("q=% r=%\n", q, r);
+        \\    print("q={} r={}\n", q, r);
         \\    t := divmod(7, 2);
-        \\    print("t.0=% t.1=%\n", t.0, t.1);
+        \\    print("t.0={} t.1={}\n", t.0, t.1);
         \\    lo, hi := minmax(9, 4);
-        \\    print("lo=% hi=%\n", lo, hi);
+        \\    print("lo={} hi={}\n", lo, hi);
         \\    _, only_r := divmod(9, 4);
-        \\    print("only_r=%\n", only_r);
+        \\    print("only_r={}\n", only_r);
         \\}
     );
     code_block(20, "text", #string
@@ -125,27 +138,27 @@ render_section_56 :: () {
     code_block(22, "glosso", #string
         \\#import "Io";
         \\
-        \\split :: (a: int) -> (lo: int, hi: int) {
+        \\split :: (a: ssize) -> (lo: ssize, hi: ssize) {
         \\    lo = a - 1;
         \\    hi = a + 1;
         \\    return;
         \\}
         \\
-        \\overwrite :: (a: int) -> (lo: int, hi: int) {
+        \\overwrite :: (a: ssize) -> (lo: ssize, hi: ssize) {
         \\    lo = 0;
         \\    hi = 0;
         \\    return a, a * 2;
         \\}
         \\
-        \\zeroes :: () -> (x: int, y: int) { }
+        \\zeroes :: () -> (x: ssize, y: ssize) { }
         \\
         \\main :: () {
         \\    a, b := split(10);
-        \\    print("a=% b=%\n", a, b);
+        \\    print("a={} b={}\n", a, b);
         \\    c, d := overwrite(3);
-        \\    print("c=% d=%\n", c, d);
+        \\    print("c={} d={}\n", c, d);
         \\    e, f := zeroes();
-        \\    print("e=% f=%\n", e, f);
+        \\    print("e={} f={}\n", e, f);
         \\}
     );
     code_block(23, "text", #string
@@ -169,10 +182,9 @@ render_section_56 :: () {
         \\multiple-result value.
     );
     note(28, #string,oneline
-        \\A tuple result has no `Show` instance, so it cannot be handed to `print`
-        \\directly. `print("%\n", divmod(7, 2))` reports error: variadic arg type
-        \\`tuple` does not implement `Show` in call `print`. Destructure first, or
-        \\print the elements.
+        \\A tuple result has no `Show` instance, so the default `{}` has no
+        \\matching `Formatter` for it. Destructure the result and print its
+        \\elements, or supply a custom rendering.
     );
 
     subheading(29, "Bodyless declarations");
@@ -191,57 +203,70 @@ render_section_56 :: () {
         \\raw_add :: (a: s64, b: s64) -> s64 #magic "int_add";
         \\
         \\main :: () {
-        \\    print("c_abs=% raw_add=%\n", c_abs(-5), raw_add(2, 3));
+        \\    print("c_abs={} raw_add={}\n", c_abs(-5), raw_add(2, 3));
         \\}
     );
     code_block(32, "text", #string
         \\c_abs=5 raw_add=5
     );
     paragraph(33, #string,oneline
-        \\The rule runs in both directions. An ordinary declaration ended with a
-        \\semicolon is `error: unexpected token ';'`, and a `#foreign` or `#magic`
-        \\declaration given a body is `error: bad decl name '{'`, because the parser
-        \\finished the declaration at the directive and read the brace as the start
-        \\of the next one.
+        \\The rule runs in both directions. An ordinary signature ended with a
+        \\semicolon instead of a body is `error: unexpected token ';'`. At file
+        \\scope, a `#foreign` or `#magic` declaration must itself end
+        \\with `;`: putting a body directly after the directive first gives
+        \\`error: declaration must end with ';'`, while putting the required
+        \\semicolon before that body leaves `{` to be read as the next
+        \\declaration. It gives `error: bad decl name '{'`. Conversely, a
+        \\procedure that has a body already ended at its
+        \\`}`. At file scope, following it with `;` is `error: expected a
+        \\declaration, found ';'`; inside another body the stray token is the
+        \\ordinary `error: unexpected token ';'`. The nested-declaration parser
+        \\currently accepts an omitted terminator on a bodyless `#foreign` or
+        \\`#magic` signature; that narrow exception does not apply at file scope.
     );
 
     subheading(34, "Nested procedures");
     paragraph(35, #string,oneline
-        \\A `name :: (...)` declaration inside a body is parsed as a declaration and
-        \\then hoisted to file scope, leaving nothing behind at the point where it
-        \\was written. Struct, enum, union, and `distinct` declarations inside a body
-        \\are hoisted the same way. Nesting is therefore a matter of where the reader
-        \\finds the declaration, not of what can see it.
+        \\A procedure declared inside a body is visible within its containing
+        \\lexical block, including to sibling local procedures. It can be called
+        \\before its declaration. Structs, enums, unions, distinct types, typeclasses,
+        \\and function-pointer aliases declared in a body also stay local.
+        \\Their names do not escape into other top-level procedures.
     );
     code_block(36, "glosso", #string
         \\#import "Io";
         \\
-        \\main :: () {
-        \\    nested :: (x: int) -> int { return x * 2; }
-        \\    print("nested=%\n", nested(21));
+        \\first :: () -> ssize {
+        \\    nested :: (x: ssize) -> ssize { return x * 2; }
+        \\    return nested(21);
         \\}
         \\
-        \\elsewhere :: () -> int { return nested(3); }
+        \\second :: () -> ssize {
+        \\    nested :: (x: ssize) -> ssize { return x + 1; }
+        \\    return nested(2);
+        \\}
+        \\
+        \\main :: () { print("nested={} other={}\n", first(), second()); }
     );
     code_block(37, "text", #string
-        \\nested=42
+        \\nested=42 other=3
     );
     bullet(38, #string,oneline
-        \\`elsewhere` compiles: after hoisting, `nested` is an ordinary top-level
-        \\procedure.
+        \\A top-level procedure cannot call either local nested function.
+        \\Pass a function pointer explicitly when a helper must escape its scope.
     );
     bullet(39, #string,oneline
-        \\A nested procedure cannot read the enclosing locals. Referring to one is
-        \\`error: unbound 'base'`, because the body was moved out of that scope.
+        \\An ordinary local procedure cannot capture enclosing runtime locals.
+        \\Pass them as parameters. A macro expands into its caller and follows
+        \\the macro hygiene rules described in Macros with #expand.
     );
     bullet(40, #string,oneline
-        \\Two nested procedures with the same name collide even when they sit in
-        \\different bodies: `error: function 'helper' is already declared`. Hoisting
-        \\puts them both in the same namespace.
+        \\Local functions with the same name in different blocks are independent.
+        \\Duplicate function declarations within one block are rejected.
     );
     bullet(41, #string,oneline
-        \\`name :: <expr>;` inside a body is not hoisted. Only the procedure and
-        \\aggregate forms are.
+        \\A name :: expression binding remains a local constant. Type aliases
+        \\such as Byte :: u8 may be used in annotations within that same scope.
     );
 }
 
@@ -253,8 +278,8 @@ render_section_57 :: () {
         \\argument is what makes a skipped parameter reachable again.
     );
     table_header(1, "Form   —   Meaning");
-    table_row(2, "`b: int = 3`   |   a default for `b`");
-    table_row(3, "`a, b: int = 3`   |   one shared type and one shared default, applied to both names");
+    table_row(2, "`b: ssize = 3`   |   a default for `b`");
+    table_row(3, "`a, b: ssize = 3`   |   one shared type and one shared default, applied to both names");
     table_row(4, "`factor := 2`   |   a default whose type is inferred from it; exactly one name");
     table_row(5, "`f(x, .name = v)`   |   a named argument at the call site");
     paragraph(6, #string,oneline
@@ -266,7 +291,7 @@ render_section_57 :: () {
         \\#import "Io";
         \\
         \\greet :: (name: string, greeting: string = "hello", punct: string = "!") {
-        \\    print("% %%\n", greeting, name, punct);
+        \\    print("{} {}{}\n", greeting, name, punct);
         \\}
         \\
         \\main :: () {
@@ -292,10 +317,10 @@ render_section_57 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\shared :: (a, b: int = 3) -> int { return a * 10 + b; }
+        \\shared :: (a, b: ssize = 3) -> ssize { return a * 10 + b; }
         \\
         \\main :: () {
-        \\    print("shared()=% shared(1)=% shared(1,2)=%\n",
+        \\    print("shared()={} shared(1)={} shared(1,2)={}\n",
         \\          shared(), shared(1), shared(1, 2));
         \\}
     );
@@ -313,10 +338,10 @@ render_section_57 :: () {
     code_block(15, "glosso", #string
         \\#import "Io";
         \\
-        \\scaled :: (x: int, factor := 2) -> int { return x * factor; }
+        \\scaled :: (x: ssize, factor := 2) -> ssize { return x * factor; }
         \\
         \\main :: () {
-        \\    print("scaled=% scaled3=%\n", scaled(5), scaled(5, 3));
+        \\    print("scaled={} scaled3={}\n", scaled(5), scaled(5, 3));
         \\}
     );
     code_block(16, "text", #string
@@ -334,11 +359,11 @@ render_section_57 :: () {
     code_block(19, "glosso", #string
         \\#import "Io";
         \\
-        \\early :: (a: int = 1, b: int) -> int { return a * 100 + b; }
+        \\early :: (a: ssize = 1, b: ssize) -> ssize { return a * 100 + b; }
         \\
         \\main :: () {
-        \\    print("early=%\n", early(.b = 2));
-        \\    print("named-first=%\n", early(.b = 2, 9));
+        \\    print("early={}\n", early(.b = 2));
+        \\    print("named-first={}\n", early(.b = 2, 9));
         \\}
     );
     code_block(20, "text", #string
@@ -357,10 +382,10 @@ render_section_57 :: () {
     code_block(23, "glosso", #string
         \\#import "Io";
         \\
-        \\box :: (w: int = 1, h: int = 1, d: int = 1) -> int { return w * h * d; }
+        \\box :: (w: ssize = 1, h: ssize = 1, d: ssize = 1) -> ssize { return w * h * d; }
         \\
         \\main :: () {
-        \\    print("box=% box2=%\n", box(.d = 2, .w = 3, .h = 4), box(3, .d = 2, .h = 4));
+        \\    print("box={} box2={}\n", box(.d = 2, .w = 3, .h = 4), box(3, .d = 2, .h = 4));
         \\}
     );
     code_block(24, "text", #string
@@ -389,7 +414,7 @@ render_section_57 :: () {
     code_block(29, "text", #string
         \\error: no overload 'f' accepts these arguments
         \\note: possible candidates for 'f':
-        \\candidate: f :: (a: int, b: int = ...) -> int
+        \\candidate: f :: (a: ssize, b: ssize = ...) -> ssize
     );
 
     subheading(30, "When a default is evaluated");
@@ -404,16 +429,35 @@ render_section_57 :: () {
         \\
         \\counter := 0;
         \\
-        \\bump :: () -> int { counter += 1; return counter; }
+        \\bump :: () -> ssize { counter += 1; return counter; }
         \\
-        \\with_call :: (x: int = bump()) -> int { return x; }
+        \\with_call :: (x: ssize = bump()) -> ssize { return x; }
         \\
         \\main :: () {
-        \\    print("call1=% call2=% counter=%\n", with_call(), with_call(), counter);
+        \\    print("call1={} call2={} counter={}\n", with_call(), with_call(), counter);
         \\}
     );
     code_block(33, "text", #string
         \\call1=1 call2=2 counter=2
+    );
+    note(40, #string,oneline
+        \\Evaluation at the call does not relocate source syntax.
+        \\`location: Source_Location = #source_location` captures the position
+        \\where that default was written, not the caller. The parser already
+        \\materialized the directive's filename, line, and column as constants.
+        \\Pass `.location = #source_location` explicitly to capture a call site.
+    );
+    code_block(41, "glosso", #string
+        \\#import "Io";
+        \\locate :: (location: Source_Location = #source_location) -> ssize {
+        \\    return location.line;
+        \\}
+        \\main :: () {
+        \\    print("default={} caller={}\n", locate(), locate(.location = #source_location));
+        \\}
+    );
+    code_block(42, "text", #string
+        \\default=2 caller=6
     );
 
     subheading(34, "Defaults and overloading");
@@ -429,24 +473,24 @@ render_section_57 :: () {
         \\#import "Io";
         \\
         \\Render :: typeclass (T: type) {
-        \\    render :: (value: T, width: int = 4) -> int;
+        \\    render :: (value: T, width: ssize = 4) -> ssize;
         \\}
         \\
-        \\s64 :: instance Render {
-        \\    render :: (value: s64, width: int = 4) -> int { return value * width; }
+        \\s64 ::: instance Render {
+        \\    render :: (value: s64, width: ssize = 4) -> ssize { return value * width; }
         \\}
         \\
-        \\bool :: instance Render {
-        \\    render :: (value: bool, width: int = 9) -> int { if value return width; return 0; }
+        \\bool ::: instance Render {
+        \\    render :: (value: bool, width: ssize = 9) -> ssize { if value return width; return 0; }
         \\}
         \\
         \\main :: () {
-        \\    print("int  = % / %\n", render(3), render(3, 10));
-        \\    print("bool = % / %\n", render(true), render(true, 2));
+        \\    print("ssize  = {} / {}\n", render(3), render(3, 10));
+        \\    print("bool = {} / {}\n", render(true), render(true, 2));
         \\}
     );
     code_block(37, "text", #string
-        \\int  = 12 / 30
+        \\ssize  = 12 / 30
         \\bool = 9 / 2
     );
     paragraph(38, #string,oneline
@@ -457,8 +501,8 @@ render_section_57 :: () {
     );
     note(39, #string,oneline
         \\An instance method must repeat the requirement's defaults. Declaring
-        \\`render :: (value: s64, width: int)` against a requirement that reads
-        \\`width: int = 4` no longer matches, and the instance is rejected with
+        \\`render :: (value: s64, width: ssize)` against a requirement that reads
+        \\`width: ssize = 4` no longer matches, and the instance is rejected with
         \\`error: instance 's64 :: Render' does not satisfy the implicit minimal
         \\definition; missing render`. The value of the default may differ; its
         \\presence may not.
@@ -474,13 +518,14 @@ render_section_58 :: () {
     );
     table_header(1, "Spelling   —   Elements   —   The body sees");
     table_row(2, "`xs: ...`   |   any types, mixed   |   `[]any`");
-    table_row(3, "`xs: ...int`   |   all `int`   |   `[]int`");
-    table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]T`");
+    table_row(40, "`xs: ...any`   |   any types, mixed   |   a heterogeneous tuple; constant indices retain concrete types");
+    table_row(3, "`xs: ...ssize`   |   all `ssize`   |   `[]const ssize`");
+    table_row(4, "`xs: ...$T`   |   all one type, captured as `T`   |   `[]const T`");
     table_row(5, "`xs: ...Show`   |   any type implementing `Show`   |   a pack whose elements keep their own types");
     table_row(6, "`xs: ...(Show && PartialEq)`   |   any type implementing both   |   the same, with both constraints");
     paragraph(7, #string,oneline
         \\The `...` is a type prefix, not a suffix on the name, and it is three dots.
-        \\Two dots is the range operator, and the compiler says so: `xs: ..int` is
+        \\Two dots is the range operator, and the compiler says so: `xs: ..ssize` is
         \\`error: variadic parameter uses '...T'; '..' is the range operator`. A
         \\variadic parameter takes exactly one name (`variadic parameter must have one
         \\name`) and cannot carry a default (`variadic parameter cannot have a default
@@ -490,7 +535,7 @@ render_section_58 :: () {
     subheading(8, "The pack interface");
     paragraph(9, #string,oneline
         \\Every form supports the same three operations: `.count` gives the number of
-        \\arguments as an `s64`, `for` walks the elements with `it` and `it_index`,
+        \\arguments as an `ssize`, `for` walks the elements with `it` and `it_index`,
         \\and a constant index selects one element. A call that passes no variadic
         \\arguments is legal and gives a pack of count zero.
     );
@@ -498,13 +543,13 @@ render_section_58 :: () {
         \\#import "Io";
         \\
         \\describe :: (xs: ...) {
-        \\    print("count=%\n", xs.count);
-        \\    for xs print("  %: %\n", it_index, it);
-        \\    if xs.count > 0 print("  first=%\n", xs[0]);
+        \\    print("count={}\n", xs.count);
+        \\    for xs print("  {}: {}\n", it_index, it);
+        \\    if xs.count > 0 print("  first={}\n", xs[0]);
         \\}
         \\
         \\main :: () {
-        \\    n: int = 7;
+        \\    n: ssize = 7;
         \\    describe(n, "hi", true);
         \\    describe();
         \\}
@@ -520,15 +565,36 @@ render_section_58 :: () {
     paragraph(12, #string,oneline
         \\For the untyped, homogeneous, and generic forms the parameter really is an
         \\array view and can be bound as one: `view: []any = xs;` inside `describe`,
-        \\`view: []int = xs;` inside a `...int` procedure, and `view: []T = xs;`
+        \\`view: []const ssize = xs;` inside a `...ssize` procedure, and `view: []const T = xs;`
         \\inside a `...$T` procedure all compile.
     );
     note(13, #string,oneline
-        \\An untyped pack boxes each argument into `any`, and a bare integer literal
-        \\has no type to box. `count_all(1, 2)` against `count_all :: (xs: ...)`
-        \\reaches the backend undecided and fails late with `error: comptime_int
-        \\reached code generation without a decided type [opcode BoxAny] while
-        \\lowering 'main'`. Give the argument a type, or use a typed pack.
+        \\An untyped pack boxes each argument into `any`. Bare numeric literals
+        \\receive their default runtime types before boxing: `count_all(1, 2)`
+        \\against `count_all :: (xs: ...) -> ssize { return xs.count; }` returns 2.
+        \\Use a typed pack when every element must have one particular type.
+    );
+    paragraph(41, #string,oneline
+        \\Explicit `...any` is different from bare `...`: it preserves the
+        \\argument types in a heterogeneous tuple and accepts ordinary numeric
+        \\literals. A constant index or inline iteration retains each element's
+        \\type, which lets a forwarding wrapper select a `Formatter` instance.
+        \\The whole pack cannot be assigned to `[]any`; that assignment reports
+        \\`got tuple, expected []any`. Expand it with `args...` when forwarding.
+    );
+    note(43, #string,oneline
+        \\Variadic packs do not destroy their elements, and the compiler no longer rejects passing a managed owner through a pack. This does not make the transfer safe: cleanup responsibility can be lost or duplicated. Supply a borrowed pointer or non-owning view supported by the callee, or render the owner to a string without transferring it into the pack.
+    );
+    code_block(42, "glosso", #string
+        \\#import "Format";
+        \\
+        \\render :: (#comptime fmt: string, args: ...any) -> string {
+        \\    return tprint(fmt, args...);
+        \\}
+        \\
+        \\main :: () {
+        \\    text := render("{x} {c}", 255, #char "λ"); // "ff λ"
+        \\}
     );
 
     subheading(14, "Homogeneous and generic packs");
@@ -541,7 +607,7 @@ render_section_58 :: () {
     code_block(16, "glosso", #string
         \\#import "Io";
         \\
-        \\sum :: (xs: ...int) -> int {
+        \\sum :: (xs: ...ssize) -> ssize {
         \\    total := 0;
         \\    for xs total += it;
         \\    return total;
@@ -550,8 +616,8 @@ render_section_58 :: () {
         \\firstof :: (xs: ...$T) -> T { return xs[0]; }
         \\
         \\main :: () {
-        \\    print("sum=% sum0=%\n", sum(1, 2, 3, 4), sum());
-        \\    print("firstof=% firstofs=%\n", firstof(10, 20), firstof("a", "b"));
+        \\    print("sum={} sum0={}\n", sum(1, 2, 3, 4), sum());
+        \\    print("firstof={} firstofs={}\n", firstof(10, 20), firstof("a", "b"));
         \\}
     );
     code_block(17, "text", #string
@@ -560,7 +626,7 @@ render_section_58 :: () {
     );
     paragraph(18, #string,oneline
         \\A wrong element type is reported per argument: `sum(1, "two")` is
-        \\`error: arg type string != int in call sum`. For a generic pack the first
+        \\`error: arg type string != ssize in call sum`. For a generic pack the first
         \\argument decides, and the message names the type it decided on:
         \\`firstof(1, "two")` is `error: arg type string != comptime_int in call
         \\firstof`.
@@ -572,15 +638,16 @@ render_section_58 :: () {
         \\long as each one has an instance of `C`. Several classes are combined with
         \\`&&` inside parentheses. `&&` is the only connective; `...(Show ||
         \\PartialEq)` is `error: unexpected token '||'`, and an empty list is
-        \\`error: constrained variadic parameter needs at least one typeclass`. This
-        \\is the form `print` itself uses, declared as
-        \\`print :: (#comptime fmt: string, args: ...Show)`.
+        \\`error: constrained variadic parameter needs at least one typeclass`.
+        \\`print` instead uses `args: ...any`: its compile-time format parser
+        \\checks `Formatter` for each argument's selected rendering. A wrapper
+        \\that specifically requires default `Show` values can use `...Show`.
     );
     code_block(21, "glosso", #string
         \\#import "Io";
         \\
         \\both :: (v: ...(Show && PartialEq)) {
-        \\    for v print("[%]", it);
+        \\    for v print("[{}]", it);
         \\    print("\n");
         \\}
         \\
@@ -601,20 +668,20 @@ render_section_58 :: () {
     code_block(24, "glosso", #string
         \\#import "Io";
         \\
-        \\only_int :: (x: int) -> int { return x + 1; }
+        \\only_int :: (x: ssize) -> ssize { return x + 1; }
         \\
-        \\f :: (values: ...Show) { for values print("%\n", only_int(it)); }
+        \\f :: (values: ...Show) { for values print("{}\n", only_int(it)); }
         \\
-        \\main :: () { n: int = 1; f(n, "two"); }
+        \\main :: () { n: ssize = 1; f(n, "two"); }
     );
     code_block(25, "text", #string
-        \\error: arg type string != int in call only_int
+        \\error: arg type string != ssize in call only_int
     );
     paragraph(26, #string,oneline
-        \\The same body compiles and runs when both arguments are `int`. Indexing
+        \\The same body compiles and runs when both arguments are `ssize`. Indexing
         \\follows the same rule in reverse: a constant index selects an element with
         \\its own type, but an index the compiler cannot fold degrades the element to
-        \\`any`, giving `error: arg type any != int in call only_int`.
+        \\`any`, giving `error: arg type any != ssize in call only_int`.
     );
 
     subheading(27, "Parameters after a variadic");
@@ -628,10 +695,10 @@ render_section_58 :: () {
     code_block(29, "glosso", #string
         \\#import "Io";
         \\
-        \\tagged :: (xs: ...int, tag: string = "sum") -> int {
+        \\tagged :: (xs: ...ssize, tag: string = "sum") -> ssize {
         \\    total := 0;
         \\    for xs total += it;
-        \\    print("% = %\n", tag, total);
+        \\    print("{} = {}\n", tag, total);
         \\    return total;
         \\}
         \\
@@ -648,25 +715,26 @@ render_section_58 :: () {
     subheading(31, "Call-site expansion");
     paragraph(32, #string,oneline
         \\An existing array can be passed as the whole pack by suffixing the argument
-        \\with `...`. The source may be a fixed array, a view, or a dynamic array;
-        \\what the checker requires is an array type whose element matches the pack.
+        \\with `...`. Use a fixed array or a view whose element type matches the pack.
+        \\A dynamic array owns its storage and cannot move into a variadic pack;
+        \\expand its borrowed view instead, as in sum(dyn[..]...). Managed elements
+        \\cannot be passed by value through a pack, which does not destroy them.
     );
     code_block(33, "glosso", #string
         \\#import "Io";
         \\
-        \\sum :: (xs: ...int) -> int { t := 0; for xs t += it; return t; }
-        \\sum_plus :: (base: int, xs: ...int) -> int { return base + sum(xs...); }
+        \\sum :: (xs: ...ssize) -> ssize { t := 0; for xs t += it; return t; }
+        \\sum_plus :: (base: ssize, xs: ...ssize) -> ssize { return base + sum(xs...); }
         \\
         \\main :: () {
-        \\    fixed: [3]int = .[1, 2, 3];
-        \\    view: []int = fixed[..];
-        \\    print("fixed=% view=%\n", sum(fixed...), sum(view...));
-        \\    dyn: [..]int;
-        \\    array_add(*dyn, 10);
-        \\    array_add(*dyn, 20);
-        \\    print("dyn=%\n", sum(dyn...));
-        \\    array_free(*dyn);
-        \\    print("forward=%\n", sum_plus(100, 1, 2, 3));
+        \\    fixed: [3]ssize = .[1, 2, 3];
+        \\    view: []ssize = fixed[..];
+        \\    print("fixed={} view={}\n", sum(fixed...), sum(view...));
+        \\    dyn: [..]ssize;
+        \\    dyn.push(10);
+        \\    dyn.push(20);
+        \\    print("dyn={}\n", sum(dyn[..]...));
+        \\    print("forward={}\n", sum_plus(100, 1, 2, 3));
         \\}
     );
     code_block(34, "text", #string
@@ -693,7 +761,7 @@ render_section_58 :: () {
     bullet(38, #string,oneline
         \\Expanding something that is not an array reports error: expanded variadic
         \\argument to `sum` must be an array. Expanding the wrong element type
-        \\reports error: expanded variadic arg type `[2]string` != `[]int` in call
+        \\reports error: expanded variadic arg type `[2]string` != `[]const ssize` in call
         \\`sum`.
     );
     note(39, #string,oneline
@@ -706,158 +774,24 @@ render_section_58 :: () {
 
 render_section_59 :: () {
     paragraph(0, #string,oneline
-        \\`noalias` is a keyword, not a directive, and it qualifies a parameter. It
-        \\states that for the duration of the call the storage reached through that
-        \\pointer is not reached through any other pointer the procedure can see. It
-        \\is written before the parameter name, alongside `using`, and before any
-        \\parameter directive.
+        \\noalias is a pointer parameter modifier and a promise made by the caller. During the call, access through that pointer must obey the non-aliasing contract. It is independent of pointer mutability and ownership.
     );
     code_block(1, "glosso", #string
-        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
+        \\copy_one :: (noalias destination: *s64, source: *const s64) {
+        \\    destination.* = source.*;
+        \\}
         \\
-        \\add_all :: (noalias out: [*]s64, noalias a: [*]s64, n: s64) {
-        \\    for i: 0..n out[i] = a[i] * 2;
+        \\main :: () {
+        \\    source: s64 = 42;
+        \\    destination: s64;
+        \\    copy_one(&destination, &source);
         \\}
     );
     paragraph(2, #string,oneline
-        \\The promise exists to be handed to the backend. Each qualified parameter
-        \\becomes an LLVM `noalias` attribute, on the definition and again on every
-        \\call, which is what lets the optimizer keep a loaded value in a register
-        \\across a store through the other pointer, and vectorize loops like
-        \\`add_all` that would otherwise have to assume overlap.
+        \\A receiver can also carry noalias, as in noalias *#self. A writable destination and a read-only source still need distinct storage when the noalias contract requires it. Memory analysis checks overlapping arguments and conflicting live borrows; findings are warnings by default and errors under --borrow-check=error.
     );
-    code_block(3, "text", #string
-        \\define void @glo_copy2(ptr noalias %0, ptr noalias %1) {
-        \\...
-        \\  call void @glo_copy2(ptr noalias %r5.load, ptr noalias %r7.load)
-    );
-
-    subheading(4, "Pointer types only");
-    paragraph(5, #string,oneline
-        \\`noalias` is refused on anything that is not pointer-like, because there is
-        \\nothing to make a promise about. The check runs on the resolved parameter
-        \\type, and the diagnostic reads `noalias parameter 'v' must have a pointer
-        \\type, got int`, with the resolved type in the last position.
-    );
-    table_header(6, "Parameter type   —   `noalias`   —   Reported type");
-    table_row(7, "`*T`, `*const T`   |   accepted   |   n/a");
-    table_row(8, "`[*]T`   |   accepted   |   n/a");
-    table_row(9, "a `#fn_ptr` type   |   accepted   |   n/a");
-    table_row(10, "`?*T`   |   refused   |   `Option__int`");
-    table_row(11, "`[]T`   |   refused   |   `[]int`");
-    table_row(12, "`string`   |   refused   |   `string`");
-    table_row(13, "any scalar or struct   |   refused   |   `int`, `Point`, ...");
-    note(14, #string,oneline
-        \\`?*T` is refused even though it holds a pointer at runtime. An optional
-        \\pointer is a niche union, and the checker sees the union type, which is why
-        \\the message reports `Option__int`. A procedure that wants both the null
-        \\niche and the aliasing promise has to unwrap the option and pass the bare
-        \\`*T` on.
-    );
-
-    subheading(15, "Where else it is refused");
-    paragraph(16, #string,oneline
-        \\Two parameter directives exclude it outright. `#comptime` and `#empty`
-        \\parameters carry no runtime pointer, so there is nothing for the attribute
-        \\to attach to. Outside a parameter list the keyword has no meaning at all.
-    );
-    table_header(17, "Written   —   Diagnostic");
-    table_row(18, "`(noalias noalias p: *int)`   |   `duplicate noalias parameter modifier`");
-    table_row(19, "`(noalias #comptime p: *int)`   |   `noalias cannot qualify a #comptime parameter`");
-    table_row(20, "`(noalias #empty: $T)`   |   `noalias cannot qualify a #empty parameter`");
-    table_row(21, "`(#comptime noalias p: *int)`   |   `unexpected token 'noalias'`");
-    table_row(22, "`(pair: (noalias *int, *int))`   |   `noalias is only valid on function parameters`");
-    paragraph(23, #string,oneline
-        \\The last row is the tuple type. A parenthesized list followed by `->` is a
-        \\function type, where `noalias` is meaningful; the same list without the
-        \\arrow is a tuple type, where it is not. Inside a function type the
-        \\parameters may be unnamed, and the diagnostic then numbers them:
-        \\`f :: (g: (noalias int) -> int)` is `error: noalias function parameter 1
-        \\must have a pointer type, got int`.
-    );
-
-    subheading(24, "Generic parameters");
-    paragraph(25, #string,oneline
-        \\When the parameter's type is a polymorph the check cannot run at the
-        \\declaration, so it is deferred to each instantiation. The same declaration
-        \\is therefore accepted or rejected depending on what it is called with.
-    );
-    code_block(26, "glosso", #string
-        \\#import "Io";
-        \\
-        \\touch :: (noalias p: $T) -> int { return 1; }
-        \\
-        \\main :: () { print("%\n", touch(3)); }
-    );
-    code_block(27, "text", #string
-        \\error: noalias parameter 'p' instantiated with non-pointer type int
-    );
-    paragraph(28, #string,oneline
-        \\`touch(*a)` for an `a: int` compiles and runs. The error is reported at the
-        \\declaration rather than at the offending call, so a generic procedure used
-        \\from several places names none of them.
-    );
-
-    subheading(29, "Part of a function pointer's type");
-    paragraph(30, #string,oneline
-        \\`noalias` is recorded in a function-pointer type and compared when one is
-        \\assigned. It is not a subtyping relation in either direction: a procedure
-        \\without the promise does not satisfy a type that has it, and a procedure
-        \\with the promise does not satisfy a type that lacks it. The second
-        \\direction matters because the attribute is applied at the call site as well
-        \\as at the definition, so a caller that dropped the promise from the type
-        \\would still emit it.
-    );
-    code_block(31, "glosso", #string
-        \\Copy :: #fn_ptr(noalias dst: *int, noalias src: *const int);
-        \\
-        \\do_copy :: (dst: *int, src: *const int) { dst.* = src.*; }
-        \\
-        \\main :: () { c: Copy = do_copy; }
-    );
-    code_block(32, "text", #string
-        \\error: cannot implicitly convert fnptr to fnptr because their noalias parameter contracts differ
-    );
-    paragraph(33, #string,oneline
-        \\Adding `noalias` to `do_copy` makes it compile. Lambdas carry the qualifier
-        \\too, and are checked the same way: `|noalias p: *int| -> int { return p.*; }`
-        \\assigned where a plain `(p: *int) -> int` is expected gives
-        \\`error: lambda parameter 'p' is noalias, but the expected function parameter
-        \\is not`.
-    );
-
-    subheading(34, "What is proved and what is assumed");
-    paragraph(35, #string,oneline
-        \\Nothing is proved. `noalias` is an unchecked promise from the programmer to
-        \\the optimizer, outside the `#memory` contract system, and no analysis
-        \\verifies it. Passing the same pointer to two `noalias` parameters of one
-        \\call compiles clean at every `--borrow-check` setting.
-    );
-    code_block(36, "glosso", #string
-        \\#import "Io";
-        \\
-        \\copy2 :: (noalias dst: *int, noalias src: *const int) { dst.* = src.*; }
-        \\
-        \\main :: () {
-        \\    a: int = 1;
-        \\    b: int = 2;
-        \\    copy2(*a, *b);
-        \\    print("a=%\n", a);
-        \\    copy2(*a, *a);
-        \\    print("aliased a=%\n", a);
-        \\}
-    );
-    code_block(37, "text", #string
-        \\a=2
-        \\aliased a=2
-    );
-    note(38, #string,oneline
-        \\The aliased call above happens to produce the expected value at this
-        \\optimization level, which is exactly the danger: a false `noalias` is not a
-        \\diagnostic and not reliably a visible wrong answer. It changes what the
-        \\optimizer is allowed to assume, so the same source can behave differently at
-        \\a different `-O` level or after an unrelated edit. Add it only where the
-        \\non-overlap is a documented condition of the procedure.
+    note(3, #string,oneline
+        \\Keep noalias only where callers can satisfy it. Backend optimization may rely on the declaration; runtime bounds and null checks do not check aliasing.
     );
 }
 
@@ -873,32 +807,32 @@ render_section_60 :: () {
     code_block(1, "glosso", #string
         \\#import "Io";
         \\
-        \\evals: int = 0;
+        \\evals: ssize = 0;
         \\
         \\probe :: (label: string) -> bool {
         \\    evals += 1;
-        \\    print("  evaluated %\n", label);
+        \\    print("  evaluated {}\n", label);
         \\    return true;
         \\}
         \\
-        \\ignore_it :: (#lazy v: bool) -> int { return 0; }
-        \\use_once  :: (#lazy v: bool) -> int { if v return 1; return 2; }
-        \\use_twice :: (#lazy v: bool) -> int { if v { if v return 3; } return 4; }
+        \\ignore_it :: (#lazy v: bool) -> ssize { return 0; }
+        \\use_once  :: (#lazy v: bool) -> ssize { if v return 1; return 2; }
+        \\use_twice :: (#lazy v: bool) -> ssize { if v { if v return 3; } return 4; }
         \\
         \\main :: () {
         \\    print("ignore_it:\n");
         \\    r := ignore_it(probe("a"));
-        \\    print("  result=% evals=%\n", r, evals);
+        \\    print("  result={} evals={}\n", r, evals);
         \\
         \\    evals = 0;
         \\    print("use_once:\n");
         \\    r = use_once(probe("b"));
-        \\    print("  result=% evals=%\n", r, evals);
+        \\    print("  result={} evals={}\n", r, evals);
         \\
         \\    evals = 0;
         \\    print("use_twice:\n");
         \\    r = use_twice(probe("c"));
-        \\    print("  result=% evals=%\n", r, evals);
+        \\    print("  result={} evals={}\n", r, evals);
         \\}
     );
     code_block(2, "text", #string
@@ -928,14 +862,14 @@ render_section_60 :: () {
     code_block(6, "glosso", #string
         \\#import "Io";
         \\
-        \\counter: int = 1;
+        \\counter: ssize = 1;
         \\
-        \\delayed :: (#lazy v: int) -> int {
+        \\delayed :: (#lazy v: ssize) -> ssize {
         \\    counter = 100;
         \\    return v;
         \\}
         \\
-        \\eager :: (v: int) -> int {
+        \\eager :: (v: ssize) -> ssize {
         \\    counter = 100;
         \\    return v;
         \\}
@@ -945,7 +879,7 @@ render_section_60 :: () {
         \\    a := delayed(counter);
         \\    counter = 1;
         \\    b := eager(counter);
-        \\    print("delayed=% eager=%\n", a, b);
+        \\    print("delayed={} eager={}\n", a, b);
         \\}
     );
     code_block(7, "text", #string
@@ -968,14 +902,14 @@ render_section_60 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\n: int = 0;
+        \\n: ssize = 0;
         \\tick :: () -> bool { n += 1; return true; }
         \\
         \\inner :: (#lazy v: bool) -> bool { if v return v; return false; }
         \\outer :: (#lazy v: bool) -> bool { return inner(v); }
         \\
         \\main :: () {
-        \\    print("outer=% n=%\n", outer(tick()), n);
+        \\    print("outer={} n={}\n", outer(tick()), n);
         \\}
     );
     code_block(12, "text", #string
@@ -1011,7 +945,7 @@ render_section_60 :: () {
         \\    '||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
         \\}
         \\
-        \\(bool, bool) :: instance LogicalAnd {
+        \\(bool, bool) ::: instance LogicalAnd {
         \\    Output :: bool;
         \\    '&&' :: (left: bool, #lazy right: bool) -> Output #magic "bool_and";
         \\}
@@ -1027,26 +961,26 @@ render_section_60 :: () {
         \\#import "Io";
         \\
         \\side :: (label: string, value: bool) -> bool {
-        \\    print("  eval %\n", label);
+        \\    print("  eval {}\n", label);
         \\    return value;
         \\}
         \\
         \\main :: () {
         \\    print("false && side:\n");
         \\    a := side("L", false) && side("R", true);
-        \\    print("  = %\n", a);
+        \\    print("  = {}\n", a);
         \\
         \\    print("true && side:\n");
         \\    b := side("L", true) && side("R", false);
-        \\    print("  = %\n", b);
+        \\    print("  = {}\n", b);
         \\
         \\    print("true || side:\n");
         \\    c := side("L", true) || side("R", false);
-        \\    print("  = %\n", c);
+        \\    print("  = {}\n", c);
         \\
         \\    print("false || side:\n");
         \\    d := side("L", false) || side("R", true);
-        \\    print("  = %\n", d);
+        \\    print("  = {}\n", d);
         \\}
     );
     code_block(20, "text", #string
@@ -1066,7 +1000,7 @@ render_section_60 :: () {
         \\  = 1
     );
     paragraph(21, #string,oneline
-        \\`%` prints a `bool` as `1` or `0`. The right operand runs only when
+        \\`{}` prints a `bool` as `1` or `0`. The right operand runs only when
         \\the left one fails to decide the result, which is what makes the
         \\ordinary guard idiom safe: the bounds test below never indexes out of
         \\range, because `view[i]` is the unevaluated right operand of a `&&`
@@ -1097,18 +1031,18 @@ render_section_60 :: () {
         \\
         \\Flag :: struct { on: bool; }
         \\
-        \\(Flag, Flag) :: instance LogicalAnd {
+        \\(Flag, Flag) ::: instance LogicalAnd {
         \\    Output :: Flag;
         \\    '&&' :: (a: Flag, #lazy b: Flag) -> Flag { if !a.on return a; return b; }
         \\}
         \\
-        \\hits: int = 0;
+        \\hits: ssize = 0;
         \\mk :: (v: bool) -> Flag { hits += 1; return .{ .on = v }; }
         \\
         \\main :: () {
         \\    x: Flag = .{ .on = false };
         \\    r := x && mk(true);
-        \\    print("r=% hits=%\n", r.on, hits);
+        \\    print("r={} hits={}\n", r.on, hits);
         \\}
     );
     code_block(27, "text", #string
@@ -1163,7 +1097,7 @@ render_section_60 :: () {
         \\UNUSED :: #comptime comptime_ignore(1 / 0);
         \\USED   :: #comptime comptime_use(21);
         \\
-        \\main :: () { print("UNUSED=% USED=%\n", UNUSED, USED); }
+        \\main :: () { print("UNUSED={} USED={}\n", UNUSED, USED); }
     );
     code_block(44, "text", #string
         \\UNUSED=7 USED=42
@@ -1195,19 +1129,19 @@ render_section_61 :: () {
     code_block(3, "glosso", #string
         \\#import "Io";
         \\
-        \\pow :: (#comptime n: int, x: int) -> int {
+        \\pow :: (#comptime n: ssize, x: ssize) -> ssize {
         \\    r := 1;
         \\    #inline for i: 0..n r *= x;
         \\    return r;
         \\}
         \\
-        \\addc :: (#comptime a, b: int) -> int { return a + b; }
+        \\addc :: (#comptime a, b: ssize) -> ssize { return a + b; }
         \\
         \\main :: () {
-        \\    print("pow(3,2)=%\n", pow(3, 2));
-        \\    print("addc(4,5)=%\n", addc(4, 5));
+        \\    print("pow(3,2)={}\n", pow(3, 2));
+        \\    print("addc(4,5)={}\n", addc(4, 5));
         \\    K :: 5;
-        \\    print("pow(K,2)=%\n", pow(K, 2));
+        \\    print("pow(K,2)={}\n", pow(K, 2));
         \\}
     );
     code_block(4, "text", #string
@@ -1217,7 +1151,7 @@ render_section_61 :: () {
     );
     paragraph(5, #string,oneline
         \\One `#comptime` covers every name in a shared-type group, so
-        \\`(#comptime a, b: int)` makes both `a` and `b` compile-time. The
+        \\`(#comptime a, b: ssize)` makes both `a` and `b` compile-time. The
         \\argument must be a constant the compile-time evaluator can reduce: a
         \\literal, a `::` constant, or a compile-time call. A mutable local is
         \\not one, and `k := 3; pow(k, 2)` is `error: argument for #comptime
@@ -1231,17 +1165,23 @@ render_section_61 :: () {
     );
     code_block(7, "glosso", #string
         \\#import "Io";
+        \\#import "String_Builder";
+        \\#import "Strings/Memory";
         \\
-        \\banner :: (#comptime width: int = 4, ch: string) -> string {
-        \\    out := "";
-        \\    #inline for i: 0..width out = out + ch;
-        \\    return out;
+        \\banner :: (#comptime width: ssize = 4, ch: string) -> string {
+        \\    builder := String_Builder.make_len_cap();
+        \\    for 0..width builder.write_string(ch);
+        \\    return builder.into_string();
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", banner(.ch = "-"));
-        \\    print("%\n", banner(6, "="));
-        \\    print("%\n", banner(.width = 2, .ch = "*"));
+        \\    a := banner(.ch = "-");
+        \\    defer a.free();
+        \\    b := banner(6, "=");
+        \\    defer b.free();
+        \\    c := banner(.width = 2, .ch = "*");
+        \\    defer c.free();
+        \\    print("{}\n{}\n{}\n", a, b, c);
         \\}
     );
     code_block(8, "text", #string
@@ -1259,14 +1199,14 @@ render_section_61 :: () {
     code_block(11, "glosso", #string
         \\#import "Io";
         \\
-        \\scale :: (#comptime k: int, x: int) -> int { return k * x; }
+        \\scale :: (#comptime k: ssize, x: ssize) -> ssize { return k * x; }
         \\zero_of :: (#empty: $T) -> T { d: T; return d; }
         \\
         \\main :: () {
         \\    n := 10;
-        \\    print("%\n", scale(2, n));
-        \\    print("%\n", scale(3, n));
-        \\    print("%\n", zero_of(s16));
+        \\    print("{}\n", scale(2, n));
+        \\    print("{}\n", scale(3, n));
+        \\    print("{}\n", zero_of(s16));
         \\}
     );
     paragraph(12, #string,oneline
@@ -1274,8 +1214,8 @@ render_section_61 :: () {
         \\produces are these.
     );
     code_block(13, "text", #string
-        \\define i64 @glo_scale__int_int__comptime_df69fa1c4e5525eb(i64 %0) {
-        \\define i64 @glo_scale__int_int__comptime_df6d1e1c4e5798ee(i64 %0) {
+        \\define i64 @glo_scale__ssize_ssize__comptime_df69fa1c4e5525eb(i64 %0) {
+        \\define i64 @glo_scale__ssize_ssize__comptime_df6d1e1c4e5798ee(i64 %0) {
         \\define i16 @glo_zero_of__s16() {
     );
     paragraph(14, #string,oneline
@@ -1308,26 +1248,28 @@ render_section_61 :: () {
         \\parse_as :: (#empty: $T, text: string) -> T { d: T; return d; }
         \\
         \\main :: () {
-        \\    print("zero_of(int)=%\n", zero_of(int));
-        \\    print("zero_of(f64)=%\n", zero_of(f64));
-        \\    print("zero_of(bool)=%\n", zero_of(bool));
-        \\    print("name_of=%\n", name_of(int, string));
-        \\    print("parse_as=%\n", parse_as(s16, "x"));
+        \\    print("zero_of(ssize)={}\n", zero_of(ssize));
+        \\    print("zero_of(f64)={}\n", zero_of(f64));
+        \\    print("zero_of(bool)={}\n", zero_of(bool));
+        \\    print("name_of={}\n", name_of(ssize, string));
+        \\    print("parse_as={}\n", parse_as(s16, "x"));
         \\}
     );
     code_block(24, "text", #string
-        \\zero_of(int)=0
+        \\zero_of(ssize)=0
         \\zero_of(f64)=0
         \\zero_of(bool)=0
         \\name_of=two types
         \\parse_as=0
     );
     paragraph(25, #string,oneline
-        \\One `#empty:` marker may list several types separated by commas, as
-        \\`name_of` does, and a signature may hold more than one marker at
-        \\different positions: `pair :: (#empty: $A, x: s64, #empty: $B)` is
-        \\called as `pair(s16, 1, s32)`. The types are matched positionally in
-        \\the order they are written, interleaved with the runtime arguments.
+        \\One `#empty:` marker may list several types separated by commas,
+        \\as `name_of` does, and a signature may contain several markers.
+        \\All anonymous witnesses must appear before runtime parameters:
+        \\`pair :: (#empty: $A, #empty: $B, x: s64)` is called as
+        \\`pair(s16, s32, 1)`. A witness after `x` is rejected with
+        \\`#empty parameters must appear before runtime parameters`.
+        \\Named `#comptime` parameters retain their own placement rules.
     );
     paragraph(26, #string,oneline
         \\What the slot takes is the type of the expression written there, and
@@ -1338,14 +1280,14 @@ render_section_61 :: () {
     code_block(27, "glosso", #string
         \\#import "Io";
         \\
-        \\hits: int = 0;
+        \\hits: ssize = 0;
         \\side :: () -> f64 { hits += 1; return 1.0; }
         \\
         \\zero_of :: (#empty: $T) -> T { d: T; return d; }
         \\
         \\main :: () {
         \\    z := zero_of(side());
-        \\    print("z=% hits=%\n", z, hits);
+        \\    print("z={} hits={}\n", z, hits);
         \\}
     );
     code_block(28, "text", #string
@@ -1382,10 +1324,10 @@ render_section_61 :: () {
         \\    a := from_string(s64, "-42");
         \\    b := from_string(f64, "2.5");
         \\    c := from_string(bool, "nope");
-        \\    print("a=% b=% c=%\n",
-        \\          option_unwrap_or(a, 0),
-        \\          option_unwrap_or(b, 0.0),
-        \\          option_is_none(c));
+        \\    print("a={} b={} c={}\n",
+        \\          a.unwrap_or(0),
+        \\          b.unwrap_or(0.0),
+        \\          c.is_none());
         \\}
     );
     code_block(34, "text", #string
@@ -1394,12 +1336,12 @@ render_section_61 :: () {
     paragraph(35, #string,oneline
         \\Without the witness the class parameter `To` would appear nowhere in
         \\the argument list and no call could ever decide it. The same pattern
-        \\appears in `Try` (`from_output`, `from_residual`) and in `Propagate`;
+        \\appears in `Try` (`from_output`, `from_residual`, and `?`) and in `Propagate`;
         \\see `Try`, `?`, and `#try`.
     );
     subheading(36, "The four ways to pass a type");
     table_header(37, "Form   —   Call site   —   Runtime slot");
-    table_row(38, "`#comptime v: int`   |   A constant expression   |   None; folded into the body");
+    table_row(38, "`#comptime v: ssize`   |   A constant expression   |   None; folded into the body");
     table_row(39, "`#comptime T: type`   |   A type name   |   None");
     table_row(40, "`T: type`   |   A type name   |   None; promoted only if T is used in the signature");
     table_row(41, "`#empty: $T`   |   A type name or any typed expression   |   None; the expression is discarded");
@@ -1423,6 +1365,7 @@ render_section_62 :: () {
     );
     code_block(1, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Box :: struct { value: $A; }
         \\
@@ -1434,15 +1377,15 @@ render_section_62 :: () {
         \\tag   :: (a: $A, b: $B) -> s64 { return size_of(A) * 100 + size_of(B); }
         \\
         \\main :: () {
-        \\    print("idf=% idf=%\n", idf(3), idf("hi"));
-        \\    print("wider=%\n", wider(4, 9));
+        \\    print("idf={} idf={}\n", idf(3), idf("hi"));
+        \\    print("wider={}\n", wider(4, 9));
         \\    arr: [3]s64 = .[10, 20, 30];
-        \\    print("first=%\n", first(arr[..]));
+        \\    print("first={}\n", first(arr[..]));
         \\    n: s64 = 7;
-        \\    print("deref=%\n", deref(*n));
+        \\    print("deref={}\n", deref(&n));
         \\    bx: Box(s64) = .{ .value = 41 };
-        \\    print("unbox=%\n", unbox(bx));
-        \\    print("tag=%\n", tag(cast(s16)1, cast(s8)2));
+        \\    print("unbox={}\n", unbox(bx));
+        \\    print("tag={}\n", tag(cast(s16)1, cast(s8)2));
         \\}
     );
     code_block(2, "text", #string
@@ -1464,15 +1407,15 @@ render_section_62 :: () {
         \\The capture does not have to be the whole annotation. It may sit at
         \\any depth inside it, and the compiler matches the annotation's shape
         \\against the argument's type to solve for it. That is what makes
-        \\`(xs: []$T)` mean "a view of anything" rather than "a view of a type
+        \\`(xs: []const $T)` mean "a view of anything" rather than "a view of a type
         \\literally named T".
     );
     table_header(6, "Annotation   —   Binds T to");
     table_row(7, "`x: $T`   |   The argument's own type");
-    table_row(8, "`xs: []$T`   |   The element type of a view");
+    table_row(8, "`xs: []const $T`   |   The element type of a view");
     table_row(9, "`xs: [..]$T`   |   The element type of a dynamic array");
-    table_row(10, "`p: *$T`   |   The pointee type");
-    table_row(11, "`p: [*]$T`   |   The pointee type of a many-pointer");
+    table_row(10, "`p: *const $T`   |   The pointee type");
+    table_row(11, "`p: [*]const $T`   |   The pointee type of a many-pointer");
     table_row(12, "`o: ?$T`   |   The payload of an option");
     table_row(13, "`r: $E!$T`   |   Two parameters: the error type and the payload");
     table_row(14, "`b: Box($T)`   |   The argument of a generic aggregate");
@@ -1489,12 +1432,12 @@ render_section_62 :: () {
         \\
         \\main :: () {
         \\    o: ?s64 = .Some(9);
-        \\    print("opt=%\n", takes_opt(o));
+        \\    print("opt={}\n", takes_opt(o));
         \\    r: string!s64 = .Ok(4);
-        \\    print("res=%\n", takes_res(r));
+        \\    print("res={}\n", takes_res(r));
         \\    arr: [3]s64 = .[1,2,3];
-        \\    print("many=%\n", takes_many(arr.data));
-        \\    print("fn=%\n", takes_fn(dbl, 21));
+        \\    print("many={}\n", takes_many(arr.data));
+        \\    print("fn={}\n", takes_fn(dbl, 21));
         \\}
     );
     code_block(17, "text", #string
@@ -1505,8 +1448,8 @@ render_section_62 :: () {
     );
     paragraph(18, #string,oneline
         \\Only types are captured. There is no capture for the length of a fixed
-        \\array: `xs: [$N]$T` is `error: bracket type expects [], [*], [..], or
-        \\[N]`. A procedure that has to work over fixed arrays of several
+        \\array: `xs: [$N]$T` is `error: bracket type expects [], [*], [..], [N], or
+        \\[_]`. A procedure that has to work over fixed arrays of several
         \\lengths takes a view instead, and reads `xs.count`.
     );
     subheading(19, "The rebinding rule");
@@ -1514,11 +1457,11 @@ render_section_62 :: () {
         \\A `$` prefix declares the parameter. Every later mention of the same
         \\name, in the same signature, is written plain. Repeating the `$` is
         \\`error: polymorph $T is already bound; use plain T after the first
-        \\$T`, and the rule applies at any depth: `(a: []$T, b: []$T)` is
+        \\$T`, and the rule applies at any depth: `(a: []const $T, b: []const $T)` is
         \\rejected for the same reason `(a: $T, b: $T)` is.
     );
     code_block(21, "glosso", #string
-        \\zip_len :: (a: []$T, b: []T) -> s64 {
+        \\zip_len :: (a: []$T, b: []T) -> ssize {
         \\    if a.count < b.count return a.count;
         \\    return b.count;
         \\}
@@ -1545,9 +1488,9 @@ render_section_62 :: () {
         \\convert  :: (x: $T) -> $R { return cast(R) x; }
         \\
         \\main :: () {
-        \\    print("explicit=%\n", explicit(s16, 3));
-        \\    print("zero=%\n", zero(f64));
-        \\    print("convert=%\n", convert(int, f64, 3));
+        \\    print("explicit={}\n", explicit(s16, 3));
+        \\    print("zero={}\n", zero(f64));
+        \\    print("convert={}\n", convert(ssize, f64, 3));
         \\}
     );
     code_block(26, "text", #string
@@ -1571,19 +1514,20 @@ render_section_62 :: () {
     );
     code_block(30, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
-        \\make      :: (T: type, n: int) -> int { d: T; return n + size_of(T); }
+        \\make      :: (T: type, n: ssize) -> ssize { d: T; return n + size_of(T); }
         \\idt       :: (T: type, x: T) -> T { return x; }
-        \\conv      :: (x: int, T := f64) -> T { return cast(T) x; }
-        \\defaulted :: (T: type = int, n: int = 3) -> int { d: T; return n + size_of(T); }
+        \\conv      :: (x: ssize, T := f64) -> T { return cast(T) x; }
+        \\defaulted :: (T: type = ssize, n: ssize = 3) -> ssize { d: T; return n + size_of(T); }
         \\
         \\main :: () {
-        \\    print("make=%\n", make(s16, 7));
-        \\    print("idt=%\n", idt(s64, 3));
-        \\    print("conv default=%\n", conv(3));
-        \\    print("conv f32=%\n", conv(3, f32));
-        \\    print("defaulted=%\n", defaulted());
-        \\    print("defaulted s8=%\n", defaulted(s8, 10));
+        \\    print("make={}\n", make(s16, 7));
+        \\    print("idt={}\n", idt(s64, 3));
+        \\    print("conv default={}\n", conv(3));
+        \\    print("conv f32={}\n", conv(3, f32));
+        \\    print("defaulted={}\n", defaulted());
+        \\    print("defaulted s8={}\n", defaulted(s8, 10));
         \\}
     );
     code_block(31, "text", #string
@@ -1602,7 +1546,7 @@ render_section_62 :: () {
     table_row(37, "`(T: type, x: $T)`   |   `type parameter 'T' is already declared; use plain T after the declaration`");
     note(38, #string,oneline
         \\The trailing-position rule accepts only the inferred spelling. Writing
-        \\`f :: (x: int, T: type = f64)` still fails with `error: type parameter
+        \\`f :: (x: ssize, T: type = f64)` still fails with `error: type parameter
         \\'T' must appear before runtime parameters unless it has a default`,
         \\even though the parameter has one; the accepted form is `T := f64`,
         \\with no `: type` annotation and an uppercase initial letter.
@@ -1620,14 +1564,14 @@ render_section_62 :: () {
         \\pick :: (a: $T, b: T) -> T { if a > b return a; return b; }
         \\
         \\main :: () {
-        \\    print("%\n", pick(cast(s64)1, cast(s64)2));
-        \\    print("%\n", pick(cast(s64)3, cast(s64)4));
-        \\    print("%\n", pick(cast(s16)5, cast(s16)6));
-        \\    print("%\n", pick(1.5, 2.5));
+        \\    print("{}\n", pick(cast(s64)1, cast(s64)2));
+        \\    print("{}\n", pick(cast(s64)3, cast(s64)4));
+        \\    print("{}\n", pick(cast(s16)5, cast(s16)6));
+        \\    print("{}\n", pick(1.5, 2.5));
         \\}
     );
     code_block(42, "text", #string
-        \\define i64 @glo_pick__int_int(i64 %0, i64 %1) {
+        \\define i64 @glo_pick__s64_s64(i64 %0, i64 %1) {
         \\define i16 @glo_pick__s16_s16(i16 %0, i16 %1) {
         \\define double @glo_pick__f64_f64(double %0, double %1) {
     );
@@ -1636,8 +1580,8 @@ render_section_62 :: () {
         \\which is exactly the specialization key; the two `s64` calls share
         \\one definition. Because the key is the whole tuple, a procedure
         \\generic in two parameters distinguishes the orders:
-        \\`tag :: (a: $A, b: $B)` yields `glo_tag__int_s16` and
-        \\`glo_tag__s16_int` as separate functions.
+        \\`tag :: (a: $A, b: $B)` yields `glo_tag__s64_s16` and
+        \\`glo_tag__s16_s64` as separate functions.
     );
     paragraph(44, #string,oneline
         \\Instantiation is also where a generic body is really checked. Two
@@ -1664,21 +1608,26 @@ render_section_63 :: () {
     );
     code_block(1, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
+        \\#import "String_Builder";
+        \\#import "Strings/Memory";
         \\
         \\scaled :: (x: $T, k: T) -> T #inline where Is_Numeric(T) where !Is_Bool(T) {
         \\    return x * k;
         \\}
         \\
-        \\rep :: (#comptime n: int, s: string) -> string where n > 0 {
-        \\    out := s;
-        \\    #inline for i: 1..n out = out + s;
-        \\    return out;
+        \\rep :: (#comptime n: ssize, s: string) -> string where n > 0 {
+        \\    builder := String_Builder.make_len_cap();
+        \\    for 0..n builder.write_string(s);
+        \\    return builder.into_string();
         \\}
         \\
         \\main :: () {
-        \\    print("scaled=%\n", scaled(6, 7));
-        \\    print("scaled=%\n", scaled(1.5, 2.0));
-        \\    print("rep=%\n", rep(3, "ab"));
+        \\    print("scaled={}\n", scaled(6, 7));
+        \\    print("scaled={}\n", scaled(1.5, 2.0));
+        \\    repeated := rep(3, "ab");
+        \\    defer repeated.free();
+        \\    print("rep={}\n", repeated);
         \\}
     );
     code_block(2, "text", #string
@@ -1690,7 +1639,7 @@ render_section_63 :: () {
     paragraph(4, #string,oneline
         \\The clauses come after the parameter list, after the return type, and
         \\after every function directive, immediately before the body. The order
-        \\is fixed: `f :: (a: int) where true #inline { }` is `error: function
+        \\is fixed: `f :: (a: ssize) where true #inline { }` is `error: function
         \\directives must appear before where clauses`.
     );
     paragraph(5, #string,oneline
@@ -1713,7 +1662,7 @@ render_section_63 :: () {
     code_block(9, "glosso", #string
         \\#import "Io";
         \\
-        \\is_int_like :: (T: type) -> bool { return T == int || T == s64 || T == s32; }
+        \\is_int_like :: (T: type) -> bool { return T == ssize || T == s64 || T == s32; }
         \\
         \\double  :: (x: $T) -> T where is_int_like(T) { return x + x; }
         \\show_it :: (x: $T) -> string where Show(T) { return show(x); }
@@ -1721,10 +1670,10 @@ render_section_63 :: () {
         \\conj    :: (x: $T) -> T where Show(T) && PartialEq(T, T) { return x; }
         \\
         \\main :: () {
-        \\    print("double=%\n", double(21));
-        \\    print("show_it=%\n", show_it(1.5));
-        \\    print("both=%\n", both(cast(s64)3));
-        \\    print("conj=%\n", conj(7));
+        \\    print("double={}\n", double(21));
+        \\    print("show_it={}\n", show_it(1.5));
+        \\    print("both={}\n", both(cast(s64)3));
+        \\    print("conj={}\n", conj(7));
         \\}
     );
     code_block(10, "text", #string
@@ -1735,7 +1684,7 @@ render_section_63 :: () {
     );
     paragraph(11, #string,oneline
         \\A clause may also constrain a `#comptime` value parameter rather than
-        \\a type. `rep :: (#comptime n: int, s: string) -> string where n > 0`
+        \\a type. `rep :: (#comptime n: ssize, s: string) -> string where n > 0`
         \\accepts `rep(3, "ab")` and rejects `rep(0, "ab")`, because the guard
         \\sees the constant the caller supplied.
     );
@@ -1773,11 +1722,11 @@ render_section_63 :: () {
         \\    else return "opaque";
         \\}
         \\
-        \\Plain :: struct { v: int; }
+        \\Plain :: struct { v: ssize; }
         \\
         \\main :: () {
         \\    p: Plain = .{ .v = 1 };
-        \\    print("% %\n", describe(7), describe(p));
+        \\    print("{} {}\n", describe(7), describe(p));
         \\}
     );
     code_block(24, "text", #string
@@ -1794,7 +1743,7 @@ render_section_63 :: () {
     );
     note(27, #string,oneline
         \\A `where` clause naming something that does not exist is not reported
-        \\at the declaration. `f :: (x: $T) -> int where Show(U)`, with no `U`
+        \\at the declaration. `f :: (x: $T) -> ssize where Show(U)`, with no `U`
         \\anywhere, compiles; every call to `f` then fails with `error:
         \\constraint failed for f`. A constraint that rejects every argument is
         \\usually a misspelled type-parameter name.
@@ -1817,28 +1766,31 @@ render_section_63 :: () {
         \\default against a skolem, class methods resolve abstractly with no
         \\dictionary, and `#meaningful` probes are not run at all, because a
         \\structural probe asks a question about a concrete type by
-        \\construction. What it finds it reports as a warning on the same
-        \\channel as the memory diagnostics, never as an error, so a program the
+        \\construction. What it finds it reports as a warning as a warning, never as an error, so a program the
         \\pre-check complains about still compiles and runs.
     );
     paragraph(31, #string,oneline
-        \\That one-sidedness is thorough enough that the pre-check is quiet in
-        \\practice. A body that adds two values of a type parameter whose
-        \\`where` clause names only `Show` draws no diagnostic at its
-        \\declaration; the missing `Add` is found at the first instantiation
-        \\that lacks it, and the diagnostic is anchored inside the body rather
-        \\than at the call.
+        \\An operator the declared evidence cannot supply is exactly what the
+        \\pre-check reports. A body that adds two values of a type parameter
+        \\whose `where` clause names only `Show` draws
+        \\`warning: no '+' for <T>: the where-clause only provides Show` at the
+        \\declaration, with `note: reported at the definition; add the class to
+        \\the 'where' clause`. The error itself is raised by the first
+        \\instantiation that lacks the instance, and it is anchored inside the
+        \\body rather than at the call; that error aborts the compilation, so
+        \\the program below reports it alone and the warning is not printed
+        \\beside it.
     );
     code_block(32, "glosso", #string
         \\#import "Io";
         \\
         \\sum_two :: (a: $T, b: T) -> T where Show(T) { return a + b; }
         \\
-        \\Point :: struct #derive(Show) { x: int; }
+        \\Point :: struct #derive(Show) { x: ssize; }
         \\
         \\main :: () {
         \\    p: Point = .{ .x = 1 };
-        \\    print("%\n", sum_two(p, p));
+        \\    print("{}\n", sum_two(p, p));
         \\}
     );
     code_block(33, "text", #string
@@ -1857,7 +1809,7 @@ render_section_63 :: () {
     code_block(35, "glosso", #string
         \\#import "Io";
         \\
-        \\never_called :: (a: $T) -> T { print("%\n", totally_unbound_name); return a; }
+        \\never_called :: (a: $T) -> T { print("{}\n", totally_unbound_name); return a; }
         \\
         \\main :: () { print("x\n"); }
     );
@@ -1912,7 +1864,7 @@ render_section_64 :: () {
         \\Vec   :: struct { x: s64; y: s64; }
         \\Plain :: struct { a: s64; }
         \\
-        \\(Vec, Vec) :: instance Add {
+        \\(Vec, Vec) ::: instance Add {
         \\    Output :: Vec;
         \\    '+' :: (a: Vec, b: Vec) -> Vec { return .{ .x = a.x + b.x, .y = a.y + b.y }; }
         \\}
@@ -1921,7 +1873,7 @@ render_section_64 :: () {
         \\ADDS_PLAIN :: #meaningful { p, q: Plain; p + q; };
         \\
         \\main :: () {
-        \\    print("Vec=% Plain=%\n", ADDS_VEC, ADDS_PLAIN);
+        \\    print("Vec={} Plain={}\n", ADDS_VEC, ADDS_PLAIN);
         \\}
     );
     code_block(3, "text", #string
@@ -1946,7 +1898,7 @@ render_section_64 :: () {
         \\main :: () {
         \\    ok := #meaningful { v: Vec; v.x; count(); };
         \\    no := #meaningful { v: Vec; v.nope; };
-        \\    print("ok=% no=% calls=%\n", ok, no, calls);
+        \\    print("ok={} no={} calls={}\n", ok, no, calls);
         \\}
     );
     code_block(7, "text", #string
@@ -1967,7 +1919,7 @@ render_section_64 :: () {
         \\The braceless form binds only as far as a unary expression, so any
         \\binary operator after it belongs to the enclosing expression.
         \\`#meaningful v.left == 3` reads as `(#meaningful v.left) == 3` and
-        \\reports `error: no operator '==' for bool, int`. Write
+        \\reports `error: no operator '==' for bool, ssize`. Write
         \\`#meaningful { v.left == 3; }` when the probe should cover the
         \\comparison.
     );
@@ -1998,7 +1950,7 @@ render_section_64 :: () {
         \\
         \\main :: () {
         \\    m: Meters = cast(Meters) 3.5;
-        \\    print("Show=% adds=% show=%\n", SHOWS, ADDS, show(m));
+        \\    print("Show={} adds={} show={}\n", SHOWS, ADDS, show(m));
         \\}
     );
     code_block(21, "text", #string
@@ -2049,8 +2001,8 @@ render_section_64 :: () {
         \\main :: () {
         \\    l: Left  = .{ .left = 1 };
         \\    r: Right = .{ .right = 2 };
-        \\    print("read=% only=%\n", read_left(l), only_left(l));
-        \\    print("either=% %\n", either(l), either(r));
+        \\    print("read={} only={}\n", read_left(l), only_left(l));
+        \\    print("either={} {}\n", either(l), either(r));
         \\}
     );
     code_block(28, "text", #string
@@ -2066,7 +2018,7 @@ render_section_64 :: () {
         \\error: constraint failed for read_left
         \\   --> probe.glo:12:18
         \\   |
-        \\12 |     print("%\n", read_left(r));
+        \\12 |     print("{}\n", read_left(r));
         \\   |                  ^^^^^^^^^
     );
     paragraph(31, #string,oneline
@@ -2130,7 +2082,7 @@ render_section_64 :: () {
         \\
         \\main :: () {
         \\    l: Left = .{ .left = 4 };
-        \\    print("probe=% call=%\n", PROBE, strict(l));
+        \\    print("probe={} call={}\n", PROBE, strict(l));
         \\}
     );
     code_block(40, "text", #string
@@ -2180,17 +2132,17 @@ render_section_65 :: () {
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
-        \\apply :: (f: (int, int) -> int, a: int, b: int) -> int { return f(a, b); }
+        \\apply :: (f: (ssize, ssize) -> ssize, a: ssize, b: ssize) -> ssize { return f(a, b); }
         \\
         \\main :: () {
-        \\    inc: (int) -> int = |x| x + 1;              // parameter type from the target type
-        \\    zero: () -> int = || 0;                     // empty parameter list
-        \\    dbl := |x: int| -> int { return x * 2; };   // annotated, block body
-        \\    z2  := ||->int { return 5; };               // no parameters, explicit return type
+        \\    inc: (ssize) -> ssize = |x| x + 1;              // parameter type from the target type
+        \\    zero: () -> ssize = || 0;                     // empty parameter list
+        \\    dbl := |x: ssize| -> ssize { return x * 2; };   // annotated, block body
+        \\    z2  := ||->ssize { return 5; };               // no parameters, explicit return type
         \\    add := |a, b| a + b;                        // parameters decided by the first call
-        \\    print("inc=% zero=% dbl=% z2=%\n", inc(4), zero(), dbl(21), z2());
-        \\    print("add=%\n", add(1, 2));
-        \\    print("apply=%\n", apply(|a, b| a * b, 6, 7));
+        \\    print("inc={} zero={} dbl={} z2={}\n", inc(4), zero(), dbl(21), z2());
+        \\    print("add={}\n", add(1, 2));
+        \\    print("apply={}\n", apply(|a, b| a * b, 6, 7));
         \\}
     );
     code_block(3, "text", #string
@@ -2201,16 +2153,16 @@ render_section_65 :: () {
     subheading(4, "The spellings");
     table_header(5, "Spelling   —   Parameters   —   Body");
     table_row(6, "`|x| x + 1`   |   one, type from context   |   one expression, implicitly returned");
-    table_row(7, "`|x: int| x + 1`   |   one, annotated   |   one expression");
-    table_row(8, "`|x: int| -> int { … }`   |   one, annotated   |   block, return type written");
+    table_row(7, "`|x: ssize| x + 1`   |   one, annotated   |   one expression");
+    table_row(8, "`|x: ssize| -> ssize { … }`   |   one, annotated   |   block, return type written");
     table_row(9, "`|a, b| a * b`   |   two, types from context   |   one expression");
     table_row(10, "`|| 0`   |   none   |   one expression");
-    table_row(11, "`||->int { … }`   |   none   |   block, return type written");
-    table_row(12, "`|noalias p: *int| -> int { … }`   |   one, `noalias`   |   block");
+    table_row(11, "`||->ssize { … }`   |   none   |   block, return type written");
+    table_row(12, "`|noalias p: *const ssize| -> ssize { … }`   |   one, `noalias`   |   block");
     paragraph(13, #string,oneline
         \\An explicit return type requires a block. Without one the body is a
         \\single expression that is wrapped in an implicit `return`, and there is
-        \\nowhere for the arrow to attach: `|x: int| -> int x * 2` is
+        \\nowhere for the arrow to attach: `|x: ssize| -> ssize x * 2` is
         \\`error: a lambda with an explicit return type requires a block`. A
         \\block body without a return type is fine; the type comes from the body.
     );
@@ -2232,7 +2184,7 @@ render_section_65 :: () {
         \\written, or the arguments of the first call made through it.
     );
     table_header(18, "Source   —   Example   —   When");
-    table_row(19, "the target type   |   `inc: (int) -> int = |x| x + 1;`   |   at the binding");
+    table_row(19, "the target type   |   `inc: (ssize) -> ssize = |x| x + 1;`   |   at the binding");
     table_row(20, "the callee's parameter type   |   `apply(|a, b| a * b, 6, 7)`   |   at the argument position");
     table_row(21, "the first call's arguments   |   `add := |a, b| a + b; add(1, 2);`   |   at that call");
     paragraph(22, #string,oneline
@@ -2240,8 +2192,8 @@ render_section_65 :: () {
         \\number reaching a parameter takes its default type rather than staying
         \\a literal, because a parameter is a runtime binding and needs a
         \\representation. So `add := |a, b| a + b; add(1, 2); add(1.0, 2.0);`
-        \\fixes the parameters at `int` and then rejects the second call with
-        \\`error: callback argument comptime_float != int`.
+        \\fixes the parameters at `ssize` and then rejects the second call with
+        \\`error: callback argument comptime_float != ssize`.
     );
     paragraph(23, #string,oneline
         \\A lambda with nothing at all to fix its parameters is rejected at the
@@ -2255,27 +2207,30 @@ render_section_65 :: () {
         \\concrete the body is checked and whatever it produces is the return
         \\type, which is why an unannotated lambda can return a `string` built
         \\from an `s64` parameter. When both an annotation and a target type are
-        \\present they must agree: `f: Op = |x: int| -> string { … };` against
-        \\`Op :: #fn_ptr(a: int) -> int;` is
-        \\`error: lambda return type is string, but the expected type is int`.
+        \\present they must agree: `f: Op = |x: ssize| -> string { … };` against
+        \\`Op :: #fn_ptr(a: ssize) -> ssize;` is
+        \\`error: lambda return type is string, but the expected type is ssize`.
     );
     code_block(26, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
+        \\#import "String_Builder";
+        \\#import "Strings/Memory";
         \\
-        \\find_if :: (values: []$T, predicate: (T) -> bool) -> s64 {
-        \\    for values { if predicate(it) return cast(s64) it_index; }
+        \\find_if :: (values: []$T, predicate: (T) -> bool) -> ssize {
+        \\    for values { if predicate(it) return it_index; }
         \\    return -1;
         \\}
         \\
         \\main :: () {
         \\    // The return type is whatever the body produces; nothing is annotated.
-        \\    render := |x: s64| show(x) + "!";
-        \\    print("%\n", render(7));
+        \\    render := |x: s64| tprint("{}!", x);
+        \\    print("{}\n", render(7));
         \\
         \\    // A lambda as a callback: the parameter type comes from the callee's
         \\    // signature after $T is bound.
         \\    storage: [4]s64 = .[3, 9, 12, 5];
-        \\    print("index=%\n", find_if(storage[..], |v| v > 10));
+        \\    print("index={}\n", find_if(storage[..], |v| v > 10));
         \\}
     );
     code_block(27, "text", #string
@@ -2293,7 +2248,7 @@ render_section_65 :: () {
     code_block(30, "glosso", #string
         \\main :: () {
         \\    outer_total := 1;
-        \\    f := |x: int| -> int { return x + outer_total; };
+        \\    f := |x: ssize| -> ssize { return x + outer_total; };
         \\    _ := f(1);
         \\}
     );
@@ -2301,7 +2256,7 @@ render_section_65 :: () {
         \\error: lambda captures local 'outer_total', but captured closures are not supported
         \\  --> capture.glo:3:39
         \\  |
-        \\3 |     f := |x: int| -> int { return x + outer_total; };
+        \\3 |     f := |x: ssize| -> ssize { return x + outer_total; };
         \\  |                                       ^^^^^^^^^^^
         \\help: pass the value as an explicit callback or context argument
     );
@@ -2324,22 +2279,22 @@ render_section_65 :: () {
         \\main :: () {
         \\    // Globals and constants are visible; enclosing locals are not.
         \\    scaled := |x: s64| -> s64 { return x * SCALE + offset; };
-        \\    print("scaled=%\n", scaled(4));
+        \\    print("scaled={}\n", scaled(4));
         \\
         \\    // Named results in a lambda return type.
         \\    split := |v: s64| -> (lo: s64, hi: s64) { lo = v % 10; hi = v / 10; };
         \\    a, b := split(47);
-        \\    print("lo=% hi=%\n", a, b);
+        \\    print("lo={} hi={}\n", a, b);
         \\
         \\    // noalias parameters.
         \\    load := |noalias p: *s64| -> s64 { return p.*; };
         \\    n: s64 = 8;
-        \\    print("load=%\n", load(*n));
+        \\    print("load={}\n", load(&n));
         \\
         \\    // A lambda converts to a named function-pointer type, including a #c_call one.
         \\    op: Bin_Op = |a: s64, b: s64| -> s64 { return a - b; };
         \\    c: C_Op = |v: s64| -> s64 { return v + 1; };
-        \\    print("op=% c=%\n", op(9, 4), c(41));
+        \\    print("op={} c={}\n", op(9, 4), c(41));
         \\}
     );
     code_block(34, "text", #string
@@ -2364,10 +2319,10 @@ render_section_65 :: () {
         \\
         \\main :: () {
         \\    f: Op = |v| { return v * 3; };
-        \\    print("f=%\n", f(4));
+        \\    print("f={}\n", f(4));
         \\
         \\    table: [3]Op = .[named, f, |v: s64| -> s64 { return -v; }];
-        \\    for table print("table[%]=%\n", it_index, it(6));
+        \\    for table print("table[{}]={}\n", it_index, it(6));
         \\}
     );
     code_block(38, "text", #string
@@ -2412,18 +2367,10 @@ render_section_66 :: () {
         \\default to `void`.
     );
     subheading(3, "The suffixes");
-    paragraph(4, #string,oneline
-        \\Two directives may follow the return type, in either order.
-        \\`#c_call` is part of the type: a function must carry `#c_call` to be
-        \\assignable to a `#c_call` pointer, and must not carry it to be
-        \\assignable to a plain one. `#no_context` is accepted in the same
-        \\position but is discarded by the parser and never enters the type, so
-        \\it neither constrains an assignment nor changes a call.
-    );
     table_header(5, "Suffix   —   On a `#fn_ptr` type   —   On a function declaration");
     table_row(6, "`#c_call`   |   part of the type's identity   |   C calling convention, no implicit context");
     table_row(7, "`#no_context`   |   accepted and ignored   |   suppresses the implicit context parameter");
-    paragraph(8, #string,oneline
+    paragraph(9, #string,oneline
         \\A convention mismatch in either direction is
         \\`error: got fnptr, expected fnptr`. The message repeats itself because
         \\both sides print as `fnptr`; the difference is in the convention, not
@@ -2431,7 +2378,7 @@ render_section_66 :: () {
         \\implicitly, so a foreign function assigns to a plain `#fn_ptr` type and
         \\not to a `#c_call` one.
     );
-    code_block(9, "glosso", #string
+    code_block(10, "glosso", #string
         \\#import "Io";
         \\
         \\Bin_Op :: #fn_ptr(a: s64, b: s64) -> s64;
@@ -2440,7 +2387,7 @@ render_section_66 :: () {
         \\Bare   :: #fn_ptr(v: s64) -> s64 #no_context;
         \\
         \\add   :: (a: s64, b: s64) -> s64 { return a + b; }
-        \\shout :: (v: s64) { print("sink %\n", v); }
+        \\shout :: (v: s64) { print("sink {}\n", v); }
         \\twice :: (v: s64) -> s64 #c_call { return v * 2; }
         \\plain :: (v: s64) -> s64 #no_context { return v + 100; }
         \\
@@ -2449,52 +2396,51 @@ render_section_66 :: () {
         \\    s: Sink = shout;
         \\    c: Cb = twice;
         \\    b: Bare = plain;
-        \\    print("op=% c=% b=%\n", op(2, 3), c(21), b(1));
+        \\    print("op={} c={} b={}\n", op(2, 3), c(21), b(1));
         \\    s(7);
         \\}
     );
-    code_block(10, "text", #string
+    code_block(11, "text", #string
         \\op=5 c=42 b=101
         \\sink 7
     );
-    bullet(11, #string,oneline
+    bullet(12, #string,oneline
         \\Parameter names are not part of the identity: a value of
         \\`#fn_ptr(a: s64) -> s64` assigns to `#fn_ptr(different: s64) -> s64`.
     );
-    bullet(12, #string,oneline
-        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const
-        \\s64);` rejects a procedure without both markers with
+    bullet(13, #string,oneline
+        \\`noalias` is. `Copy :: #fn_ptr(noalias dst: *s64, noalias src: *const s64);` rejects a procedure without both markers with
         \\`error: cannot implicitly convert fnptr to fnptr because their noalias
         \\parameter contracts differ`. `noalias` Pointer Parameters covers the
         \\marker itself.
     );
-    bullet(13, #string,oneline
+    bullet(14, #string,oneline
         \\Inside a `#no_context` or `#c_call` body, `context` is unreachable:
         \\`error: cannot access 'context' in a #c_call / #no_context procedure`.
     );
-    subheading(14, "C varargs in a function-pointer type");
-    paragraph(15, #string,oneline
+    subheading(15, "C varargs in a function-pointer type");
+    paragraph(16, #string,oneline
         \\A bare `...` may be the last parameter, with no name and no type. It
         \\requires the C convention: without `#c_call` the declaration is
         \\`error: C vararg function pointer 'Varargs' requires #c_call`. The
         \\type then accepts a `#c_call` vararg function, including a `#foreign`
         \\one.
     );
-    note(16, #string,oneline
+    note(17, #string,oneline
         \\A call made through a vararg function pointer accepts only the fixed
         \\parameters. `s: Summer = sum_s64;` is fine, but `s(3, 10, 20, 12)`
-        \\against `Summer :: #fn_ptr(count: s64, ...) -> s64 #c_call;` reports
+        \\against `Summer :: #fn_ptr(count: ssize, ...) -> s64 #c_call;` reports
         \\`error: callback expects 1 argument(s), got 4`. Call the vararg
         \\function by name when the extra arguments matter.
     );
-    subheading(17, "The anonymous function type");
-    paragraph(18, #string,oneline
+    subheading(18, "The anonymous function type");
+    paragraph(19, #string,oneline
         \\Any parenthesised type list followed by `->` is a function type. This
         \\is the form to use in a parameter, a field, or anywhere else a type is
         \\expected. Names and `noalias` are optional; the names are documentation
         \\only.
     );
-    code_block(19, "glosso", #string
+    code_block(20, "glosso", #string
         \\#import "Io";
         \\
         \\call0 :: (f: () -> s64) -> s64 { return f(); }
@@ -2508,30 +2454,31 @@ render_section_66 :: () {
         \\
         \\main :: () {
         \\    k: s64 = 12;
-        \\    print("% % % %\n", call0(five), call1(|v: s64| -> s64 { return v + 1; }, 8),
-        \\          call2(add, 6), callN(load, *k));
+        \\    print("{} {} {} {}\n", call0(five), call1(|v: s64| -> s64 { return v + 1; }, 8),
+        \\          call2(add, 6), callN(load, &k));
         \\}
     );
-    code_block(20, "text", #string
+    code_block(21, "text", #string
         \\5 9 12 12
     );
-    paragraph(21, #string,oneline
+    paragraph(22, #string,oneline
         \\Without the arrow the same parentheses are a tuple type, and a single
         \\unnamed element in parentheses is just that type. `(s64, string)` is a
         \\two-element tuple; `(s64, string) -> bool` is a function type.
         \\`noalias` outside a function type is
         \\`error: noalias is only valid on function parameters`.
     );
-    subheading(22, "Null and function pointers");
-    paragraph(23, #string,oneline
-        \\A `#fn_ptr` type excludes the zero address, in the same way `*T` and
-        \\`[*]T` do, because the optional form takes the null representation as
+    subheading(23, "Null and function pointers");
+    paragraph(24, #string,oneline
+        \\A `#fn_ptr` type excludes the zero address, in the same way `*const T` and
+        \\`[*]const T` do, because the optional form takes the null representation as
         \\its niche. `?Op` is therefore the same size as `Op` on a 64-bit target
         \\and costs nothing to carry. An absent callback is `.None`, and reading
         \\it back goes through a pattern match like any other option payload.
     );
-    code_block(24, "glosso", #string
+    code_block(25, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Op :: #fn_ptr(v: s64) -> s64;
         \\
@@ -2546,33 +2493,34 @@ render_section_66 :: () {
         \\
         \\main :: () {
         \\    empty: Hook;
-        \\    print("none=%\n", call_or(empty, 5));
+        \\    print("none={}\n", call_or(empty, 5));
         \\    filled: Hook = .{ .procedure = twice };
-        \\    print("some=%\n", call_or(filled, 5));
-        \\    print("Op=% ?Op=%\n", size_of(Op), size_of(?Op));
+        \\    print("some={}\n", call_or(filled, 5));
+        \\    print("Op={} ?Op={}\n", size_of(Op), size_of(?Op));
         \\}
     );
-    code_block(25, "text", #string
+    code_block(26, "text", #string
         \\none=-1
         \\some=10
         \\Op=8 ?Op=8
     );
-    paragraph(26, #string,oneline
+    paragraph(27, #string,oneline
         \\This is the shape the standard library uses for every vtable slot.
-        \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }`
+        \\`Allocator :: struct { procedure: ?Allocator_Proc; data: ?*const void; }`
         \\relies on `.None` being address zero, so a zero-initialized
         \\`Allocator` is the "none installed" value without any extra tag.
     );
-    paragraph(27, #string,oneline
+    paragraph(28, #string,oneline
         \\Producing a function pointer from an address is a checked cast. At
         \\`-O0` and `-O1` a zero address aborts with
-        \\`cast to fnptr of an address that is zero` and exit status 134, and
-        \\the check fires for a written literal too: `cast(Op) 0` builds and
+        \\`cast to fnptr of an address that is zero`. Hosted Windows and Linux
+        \\x86-64 use exit status 134; WASI uses 125. The check fires for a
+        \\written literal too: `cast(Op) 0` builds and
         \\then aborts rather than being rejected during checking. At `-O2` and
         \\above the check is not emitted. Runtime Safety Checks and Panics
         \\covers the family.
     );
-    note(28, #string,oneline
+    note(29, #string,oneline
         \\`f: Op = null;` currently compiles and produces a value the program
         \\must not call: at `-O0` the resulting binary traps, and at higher
         \\levels the call is undefined. `null` denotes `.None` and belongs to an
@@ -2581,15 +2529,6 @@ render_section_66 :: () {
 }
 
 render_section_67 :: () {
-    paragraph(0, #string,oneline
-        \\A directive is `#` followed by a run of letters, digits and
-        \\underscores. The lexer produces one token for any such spelling
-        \\without knowing which names exist, and every directive is then
-        \\dispatched by name at the point in the grammar where it appeared.
-        \\Position is therefore part of a directive's meaning: `#comptime`,
-        \\`#memory`, `#inline` and `#derive` all do different things depending
-        \\on what they are attached to.
-    );
     paragraph(1, #string,oneline
         \\There is no unknown-directive diagnostic. A name the parser does not
         \\accept in that position simply fails to parse, and the error names the
@@ -2610,24 +2549,21 @@ render_section_67 :: () {
     table_header(5, "Directive   —   Form   —   Effect");
     table_row(6, "`#enable` / `#disable`   |   `#enable(feature[, mode]);`   |   opens or closes a feature gate, sticky to the end of the file");
     table_row(7, "`#import`   |   `#import[,only(…)] \"M\";`, or `,hide(…)`   |   loads a standard-library module, optionally under an alias");
-    table_row(8, "`#load`   |   `#load \"path\";`   |   splices a source file into this unit, optionally under an alias");
+    table_row(8, "`#load`   |   `#load \"path\";`   |   loads an isolated relative module; `#load,embed` shares this unit; `#export` reexports a relative dependency");
     table_row(9, "`#library`   |   `N :: #library \"file\";` with `,system`, `,dyn` or `,static`   |   declares a foreign library handle for `#foreign`");
-    table_row(10, "`#fn_ptr`   |   `N :: #fn_ptr(…) -> R [#c_call];`   |   declares a function-pointer type");
     table_row(11, "`#thread_local`   |   `#thread_local <global var decl>`   |   gives the variable thread-local storage");
     table_row(12, "`#comptime`   |   `#comptime { … }` / `X :: #comptime e;`   |   runs during compilation");
     table_row(13, "`#insert`   |   `#insert <string expr>;`   |   splices generated declarations into the file");
-    table_row(14, "`#memory`   |   `#memory <fn> { effects }`   |   attaches a contract to a function declared elsewhere");
     note(15, #string,oneline
-        \\`#if` is not a top-level directive. `#if true { A :: 1; }` at file
-        \\scope is `error: bad decl name 'if'`, because the parser is reading a
-        \\declaration name at that point. Static `#if` is a statement and an
-        \\expression only. `#thread_local` is equally narrow: anything other than
-        \\a global variable after it is
-        \\`error: #thread_local can only prefix a global variable declaration`.
+        \\Module-level `#if` selects declaration blocks at compile time, with
+        \\optional `else #if` and `else` branches. Inactive branches contribute no
+        \\imports, libraries, or declarations. Operator syntax must remain
+        \\unconditional. `#thread_local` is narrower: it prefixes only a global
+        \\variable declaration.
     );
     subheading(16, "Function directives");
     paragraph(17, #string,oneline
-        \\Function directives are written after the return type and before the
+        \\Ordinary function directives are written after the return type and before the
         \\`where` clauses. The order is fixed, and reversing it is diagnosed
         \\rather than accepted, because the clause parser stops looking for
         \\directives once a `where` has been seen.
@@ -2640,20 +2576,22 @@ render_section_67 :: () {
         \\  |                          ^^^^^^^
     );
     table_header(19, "Directive   —   Argument   —   Meaning");
-    table_row(20, "`#operator`   |   one of `prefix`, `suffix`, `left`, `right`, `assign`, with an optional level   |   declares the operator's fixity, and its precedence for the binary modes");
-    table_row(21, "`#precedence`   |   one of `left`, `right`, `assign`, with an optional level   |   precedence and associativity only");
-    table_row(22, "`#expand`   |   none, or `,expression`   |   statement macro, or expression macro");
+    table_row(20, "`#operator`   |   `left`, `right` or `assign`, with an optional integer level   |   declares binary fixity and associativity; a level must be declared somewhere for the spelling");
+    table_row(21, "`#operator`   |   `prefix` or `suffix`, with no level   |   declares unary fixity; `suffix, try(Target)` also passes the enclosing Try boundary type");
+    table_row(22, "`#expand`   |   none, or `,expression`   |   macro; an explicit non-`void` return type also makes it value-producing");
     table_row(23, "`#magic`   |   `\"name\"`   |   compiler intrinsic; the declaration has no body");
     table_row(24, "`#foreign`   |   a library handle or `\"file\"`, then an optional `\"symbol\"`   |   foreign function; no body");
     table_row(25, "`#c_call`   |   none   |   C calling convention; no implicit context");
     table_row(26, "`#no_context`   |   none   |   do not pass the implicit context");
-    table_row(27, "`#noreturn`   |   none   |   control never comes back from this call");
+    table_row(27, "`-> #Never`   |   return type   |   the call never returns; replaces the removed `#noreturn` directive");
     table_row(28, "`#returns_twice`   |   none   |   setjmp-style; the call may resume more than once");
     table_row(29, "`#dump`   |   none   |   print this function's typed IR during compilation");
     table_row(30, "`#must`   |   none   |   discarding the result is an error");
     table_row(31, "`#inline`   |   none, or `,always` / `,never`   |   inlining hint, or a forced decision");
     table_row(32, "`#modify`   |   an expression or a block   |   rewrites the type parameters before instantiation");
-    table_row(33, "`#memory`   |   one effect, or `(effect, …)`   |   memory and ownership contract");
+    table_row(78, "`#memory { ... }`   |   a leading effect block before the declaration   |   checked body contract or external contract; historical trailing placement is also accepted");
+    table_row(76, "`#fresh_result`   |   none; #foreign only   |   declares a result independent of argument storage; the foreign API must satisfy that promise");
+    table_row(77, "`#unchecked_transfer`   |   none   |   accepted on raw storage helpers; it adds no lifetime protection and does not make moved values reusable");
     paragraph(34, #string,oneline
         \\`#inline,sometimes` is `error: #inline expects always or never after
         \\','`, and `#expand,stmt` is `error: #expand expects expression after
@@ -2661,6 +2599,12 @@ render_section_67 :: () {
         \\`error: #foreign refers to unknown library 'nolib' (declare it with
         \\#library)`, and a `#library` modifier outside the three link kinds is
         \\`error: #library modifier must be system, dyn, or static`.
+    );
+    paragraph(71, #string,oneline
+        \\`#expand,expression` is the concise inferred expression form. A macro
+        \\with an explicit non-`void` return type is also an expression macro even
+        \\without that modifier; it may use a statement body and multiple `return`
+        \\sites, but every reachable path must return a value.
     );
     paragraph(35, #string,oneline
         \\`#must` is the one whose diagnostic a reader will meet by accident. It
@@ -2685,7 +2629,7 @@ render_section_67 :: () {
         \\main :: () { _ := addd(1, 2); }
     );
     code_block(39, "text", #string
-        \\; ---- #dump typed-ir addd(a: int, b: int) -> int  [4 ins] ----
+        \\; ---- #dump typed-ir addd(a: ssize, b: ssize) -> ssize  [4 ins] ----
         \\   0  temp_mark v2
         \\   1  magic v3 'int_add' [v0,v1]
         \\   2  temp_restore v2
@@ -2713,8 +2657,8 @@ render_section_67 :: () {
         \\costly :: () -> s64 { calls += 1; return 5; }
         \\
         \\main :: () {
-        \\    print("pow=% zero=%\n", pow(3, 2), zero_of(s64));
-        \\    print("lazy=% calls=%\n", pick(false, costly(), 1), calls);
+        \\    print("pow={} zero={}\n", pow(3, 2), zero_of(s64));
+        \\    print("lazy={} calls={}\n", pick(false, costly(), 1), calls);
         \\}
     );
     code_block(47, "text", #string
@@ -2728,7 +2672,7 @@ render_section_67 :: () {
         \\`enum` and `enum_flags` accept none at all.
     );
     table_header(50, "Target   —   Accepted   —   Notes");
-    table_row(51, "`struct`   |   `#c_call` `#packed` `#modify` `#derive(…)` `#magic \"…\"`   |   `#c_call` and `#packed` both lock declaration order");
+    table_row(51, "`struct`   |   `#c_call` `#packed` `#align(N)` `#modify` `#derive(…)` `#magic \"…\"`   |   `#c_call` and `#packed` both lock declaration order");
     table_row(52, "`union`   |   `#raw` `#derive(…)` `#magic \"…\"`   |   `#raw` makes it a reinterpreting union with no tag");
     table_row(53, "`enum`, `enum_flags`   |   none   |   `Color :: enum #derive(Show)` is `error: unexpected token 'derive'`");
     table_row(54, "`typeclass`   |   `#derive(…)` `#minimal(…)`   |   `#derive` here names the class's own derive macro");
@@ -2751,13 +2695,14 @@ render_section_67 :: () {
     );
     code_block(60, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Reordered :: struct { a: u8; b: u64; c: u8; }
         \\C_Layout  :: struct #c_call { a: u8; b: u64; c: u8; }
         \\Packed    :: struct #packed { a: u8; b: u64; c: u8; }
         \\
         \\main :: () {
-        \\    print("reordered=% c_call=% packed=%\n",
+        \\    print("reordered={} c_call={} packed={}\n",
         \\          size_of(Reordered), size_of(C_Layout), size_of(Packed));
         \\}
     );
@@ -2773,9 +2718,7 @@ render_section_67 :: () {
         \\cover them.
     );
     table_header(64, "Position   —   Directives");
-    table_row(65, "statement   |   `#memory` overlay, `#bytes`, `#asm`, `#inline while`, `#inline for`, `#try defer`, `#push_context`, `#push_allocator`, `#comptime`, `#if`, `#assert`, `#compile_error`, `#insert`");
-    table_row(66, "expression   |   `#comptime`, `#try`, `#pattern`, `#meaningful`, `#undefined`, `#simd`, `#string`, `#inline for`, `#inline while`, `#code`, and a postfix `#memory(…)`");
-    table_row(67, "type   |   `#Context`, `#aos [..]T`, `#soa [..]T`");
+    table_row(67, "type   |   `#Context`, `#Never`, `#Self_Type`, `#aos [..]T`, `#soa [..]T`");
     table_row(68, "switch and case   |   `#partial` on the switch, `#falling` on a case");
     paragraph(69, #string,oneline
         \\`#inline` outside a loop is rejected by name:
@@ -2784,10 +2727,19 @@ render_section_67 :: () {
         \\the `#` reports `error: the built-in Context type is written #Context`.
     );
     note(70, #string,oneline
-        \\`#char` is not a parser directive at all. The lexer recognises
-        \\`#char "A"` and produces the character literal `65` directly, which is
-        \\why its errors read `#char expects a string literal` and
-        \\`unterminated #char string literal` rather than mentioning a token.
-        \\`#char` Character Literals covers it.
+        \\`#char` is not a parser directive. The lexer consumes the whole
+        \\`#char "A"` form and emits a numeric token carrying scalar value `65`
+        \\plus a character-literal marker. The checker preserves that marker:
+        \\ASCII defaults to `u8` and may adopt `s8` or `rune` context, while a non-ASCII
+        \\value defaults to and accepts only `rune`. Because validation happens
+        \\while lexing, malformed forms report `#char expects a string literal` or
+        \\`unterminated #char string literal`. `#char` Character Literals covers
+        \\the complete contextual-typing and escape rules.
     );
+    table_row(72, "`#public`, `#public(unit)`, `#private`   |   declaration prefix or group; also an inherent block header after `:::`   |   declaration audience");
+    table_row(73, "`#self`, `*const #self`, `*const #self`   |   first parameter of an inherent method   |   receiver value or pointer");
+    table_row(74, "`#Self_Type`   |   type in an inherent block or instance   |   the complete matched owner type");
+    table_row(75, "`#on_drop_error(value, error) { ... }`   |   after an owning local declaration   |   handles failure from automatic cleanup");
+}
+
 }

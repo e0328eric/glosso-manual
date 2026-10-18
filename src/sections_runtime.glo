@@ -1,63 +1,67 @@
 // Sections 128-130: runtime behaviour.
 
+#public(unit) {
+
 render_section_128 :: () {
     paragraph(0, #string,oneline
         \\Glosso compiles a small family of safety checks into the generated
         \\code. Each one guards an operation whose failure would otherwise
         \\corrupt memory quietly, and each one, when it fails, stops the process
         \\on the spot. They are not exceptions: nothing catches them, no `defer`
-        \\runs, and the exit status is the same fixed value for all of them.
+        \\runs. Each check writes a short failure category, and the way the
+        \\target terminates determines its exit status.
     );
     paragraph(1, #string,oneline
-        \\Whether they are emitted at all is decided by a single comparison in
-        \\the driver: the checks are on when the optimization level is 0 or 1
-        \\and off at 2 and above. The default is `-O1`, so a program built with
-        \\no flags carries them. The size modes are the trap, because they are
-        \\not a separate axis: `-Os`, `-Oz` and `-Ozz` each set an underlying
-        \\level of 2 or 3, and so drop the checks along with everything else the
-        \\higher levels drop.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     table_header(2, "Flag   —   Underlying level   —   Runtime checks");
-    table_row(3, "`-O0`   |   0   |   on, and the debug allocator with them");
+    table_row(3, "`-O0`   |   0   |   on");
     table_row(4, "`-O1` (default)   |   1   |   on");
     table_row(5, "`-O2`   |   2   |   off");
     table_row(6, "`-O3`   |   3   |   off");
-    table_row(7, "`-Os`   |   2   |   off");
-    table_row(8, "`-Oz`   |   3   |   off");
-    table_row(9, "`-Ozz`   |   3   |   off");
+    table_row(7, "`-Os`   |   2 plus `Small`   |   off");
+    table_row(8, "`-Oz`   |   3 plus `VerySmall`   |   off");
+    table_row(9, "`-Ozz`   |   3 plus `Tiny`   |   off");
     paragraph(10, #string,oneline
         \\The flags themselves are covered in the chapter on backends,
-        \\artifacts, and optimization levels; the allocator that `-O0` swaps in
-        \\is covered in the chapter on the debug allocator. This chapter is
-        \\about what the checks test and what happens when one of them fires.
+        \\artifacts, and optimization levels. The debug allocator is selected
+        \\independently with `GLOSSO_DEBUG_ALLOCATOR` and has its own chapter.
+        \\This chapter is about what the checks test and what happens when one
+        \\of them fires.
     );
     subheading(11, "The check family");
     paragraph(12, #string,oneline
-        \\There are exactly four checks. They are emitted by the backend, not
+        \\There are exactly six checks. They are emitted by the backend, not
         \\by a library, so no import turns them on and no call disables an
         \\individual one.
     );
     table_header(13, "Check   —   Guards   —   Message on failure");
-    table_row(14, "integer overflow   |   `+`, `-`, `*` and prefix `-` on an integer or enum operand   |   none");
-    table_row(15, "array bounds   |   indexing a value that carries a count   |   none");
-    table_row(16, "null address   |   `cast(*T)`, `cast([*]T)` and `cast(#fn_ptr)` of an integer or enum   |   `cast to *int of an address that is zero`");
-    table_row(17, "union tag   |   a payload read under `#enable(allow_union_unwrap)`   |   names the wanted variant and the ones the type has");
-    paragraph(18, #string,oneline
-        \\Two of the four say nothing at all. That is deliberate: an overflow or
-        \\an out-of-range index can be reconstructed from the faulting
-        \\instruction, while a wrong union variant cannot, so only the checks
-        \\whose site would otherwise be unrecoverable write a line to stderr.
-    );
-    subheading(19, "Integer overflow");
+    table_row(14, "integer arithmetic   |   overflow in `+`, `-`, `*`, prefix `-`, and division; a zero divisor for `/`, `//`, `%`   |   `runtime check failed: arithmetic.overflow`, `divide.by.zero`, or `divide.overflow`");
+    table_row(15, "array bounds   |   indexing a value that carries a count   |   `<path>:<line>:<column>: runtime check failed: array.bounds` when the site is known; otherwise the category alone");
+    table_row(16, "slice bounds   |   `a[start..end]` on a value that carries a count   |   `runtime check failed: slice.bounds`");
+    table_row(17, "null address   |   `cast(*const T)`, `cast([*]const T)` and `cast(#fn_ptr)` of an integer or enum   |   for example, `cast to *const s64 of an address that is zero`");
+    table_row(18, "union tag   |   a payload read under `#enable(allow_union_unwrap)`   |   names the wanted variant and the ones the type has");
+    table_row(19, "formatting base   |   `value.format_int` given a base outside 2..=16   |   `integer formatting base is outside 2..=16`");
     paragraph(20, #string,oneline
+        \\All six write a line to stderr before terminating. Array bounds and
+        \\union-tag failures include the source site when available; the arithmetic and slice
+        \\labels identify the failed operation but carry no source position.
+        \\Null-address and formatting-base failures use explanatory prose.
+    );
+    subheading(21, "Integer overflow");
+    paragraph(22, #string,oneline
         \\Addition, subtraction and multiplication on an integer or enum operand
         \\lower to the LLVM checked-arithmetic intrinsics, and prefix negation
         \\lowers to a checked subtraction from zero. Update assignment goes
-        \\through the same operators and is checked with them. Division,
-        \\remainder, the shifts and every floating-point operation are not in
-        \\the family.
+        \\through the same operators and is checked with them. Integer `/`, `//`
+        \\and `%` also check a zero divisor, and signed division checks
+        \\`T.MIN / -1`; `T.MIN % -1` is the defined value zero. The shifts and
+        \\every floating-point operation are outside the check family. A
+        \\float-to-integer cast truncates toward zero, saturates out-of-range
+        \\values, and maps NaN to zero at every optimization level; it does not
+        \\become unchecked merely because the build uses `-O2`.
     );
-    code_block(21, "glosso", #string
+    code_block(23, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
@@ -65,103 +69,105 @@ render_section_128 :: () {
         \\    b: s32 = 1;
         \\    print("before\n");
         \\    sum := a + b;
-        \\    print("sum = %\n", sum);
+        \\    print("sum = {}\n", sum);
         \\    print("survived\n");
         \\}
     );
-    code_block(22, "text", #string
+    code_block(24, "text", #string
         \\before
+        \\runtime check failed: arithmetic.overflow
     );
-    paragraph(23, #string,oneline
+    paragraph(25, #string,oneline
         \\That is the whole output at `-O1`: the second `print` never runs and
-        \\the process exits with status 134. At `-O2` the check is not emitted,
+        \\on Windows the process exits with status 134. WASI uses 125; targets
+        \\that call `abort()` expose that platform's abort status. At `-O2` the check is not emitted,
         \\the addition wraps, and the same program prints
         \\`sum = -2147483648` followed by `survived` and exits 0.
     );
-    paragraph(24, #string,oneline
+    paragraph(26, #string,oneline
         \\The wrapping and saturating operators are different operators, not a
         \\mode, and they are never checked at any level. `+%`, `-%`, `*%` and
         \\prefix `-%` wrap; `+|`, `-|` and `*|` clamp.
     );
-    code_block(25, "glosso", #string
+    code_block(27, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
         \\    a: s32 = 2147483647;
         \\    b: s32 = 1;
-        \\    print("wrapping    = %\n", a +% b);
-        \\    print("saturating  = %\n", a +| b);
+        \\    print("wrapping    = {}\n", a +% b);
+        \\    print("saturating  = {}\n", a +| b);
         \\    n: s32 = -2147483648;
-        \\    print("negate wrap = %\n", -% n);
+        \\    print("negate wrap = {}\n", -% n);
         \\    print("survived\n");
         \\}
     );
-    code_block(26, "text", #string
+    code_block(28, "text", #string
         \\wrapping    = -2147483648
         \\saturating  = 2147483647
         \\negate wrap = -2147483648
         \\survived
     );
-    subheading(27, "Array bounds");
-    paragraph(28, #string,oneline
+    subheading(29, "Array bounds");
+    paragraph(30, #string,oneline
         \\An index is checked whenever a count travels with the value being
-        \\indexed: a fixed array `[N]T`, a view `[]T`, a dynamic array `[..]T`,
-        \\and a pointer to a fixed array. The comparison is unsigned, so a
-        \\negative index fails the same test as one past the end.
+        \\indexed: a fixed array `[N]T`, a view `[]const T`, a dynamic array `[..]T`,
+        \\a pointer to a fixed array, and a `string` or `string16`. The
+        \\comparison is unsigned, so a negative index fails the same test as one
+        \\past the end. A compile-time known invalid index is rejected during
+        \\checking, including an index computed by a folded helper call.
     );
-    code_block(29, "glosso", #string
+    code_block(31, "glosso", #string
         \\#import "Io";
         \\
-        \\which :: (n: s64) -> s64 { return n; }
+        \\which :: (n: ssize) -> ssize { return n; }
         \\
         \\main :: () {
         \\    storage: [3]s64;
         \\    storage[0] = 10; storage[1] = 20; storage[2] = 30;
-        \\    print("in range: %\n", storage[which(1)]);
-        \\    print("out of range: %\n", storage[which(7)]);
+        \\    print("in range: {}\n", storage[which(1)]);
+        \\    outside: ssize = 7;
+        \\    print("out of range: {}\n", storage[which(outside)]);
         \\    print("survived\n");
         \\}
     );
-    code_block(30, "text", #string
+    code_block(32, "text", #string
         \\in range: 20
+        \\<path>:<line>:<column>: runtime check failed: array.bounds
     );
-    paragraph(31, #string,oneline
-        \\The index is routed through `which` only to keep it out of the
-        \\optimizer's reach; a literal `storage[7]` is not rejected during
-        \\checking either, and reaches the same runtime check. At `-O2` the
-        \\program above prints `out of range: 0` and `survived`; under `-Os`,
-        \\`-Oz` and `-Ozz` it prints whatever bytes follow the array.
+    paragraph(33, #string,oneline
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
-    bullet(32, #string,oneline
-        \\A many-pointer `[*]T` carries no count, so indexing one is never
+    bullet(34, #string,oneline
+        \\A many-pointer `[*]const T` carries no count, so indexing one is never
         \\checked at any level. Reading far past the end of the storage it
         \\points at is a plain hardware fault: on Windows the process ends with
         \\status `0xc0000005`.
     );
-    bullet(33, #string,oneline
-        \\`string` is not in the family either. Its descriptor holds a count,
-        \\but the bounds check is emitted only for array-kinded values, so
-        \\`text[1000000000]` on a three-byte literal also faults with
-        \\`0xc0000005` rather than aborting with 134.
+    bullet(35, #string,oneline
+        \\`cstring` and `cstring16` are outside the family. They are terminated
+        \\rather than counted, so they carry no bound in their representation.
+        \\Indexing does not scan for a terminator to check the index; `text[5]` on a
+        \\three-byte `cstring` reads past the end and the program survives.
     );
-    subheading(34, "The two checks that print");
-    paragraph(35, #string,oneline
-        \\Casting an integer or enum to `*T`, `[*]T` or `#fn_ptr` asserts that
+    subheading(36, "The checks that print");
+    paragraph(37, #string,oneline
+        \\Casting an integer or enum to `*const T`, `[*]const T` or `#fn_ptr` asserts that
         \\the address is not zero, because those three types exclude zero so
-        \\that `?*T`, `?[*]T` and `?#fn_ptr` can use it as the `.None` niche. A
-        \\zero the checker can fold never reaches run time: `cast(*s64) 0` is
-        \\`error: cast to *int of an address that is zero at compile time`. A
+        \\that `?*const T`, `?[*]const T` and `?#fn_ptr` can use it as the `.None` niche. A
+        \\zero the checker can fold never reaches run time: `cast(*const s64) 0` is
+        \\`error: cast to *const s64 of an address that is zero at compile time`. A
         \\zero that only appears at run time reaches the check, which writes
-        \\`cast to *int of an address that is zero` and aborts. The type in both
-        \\messages is the target type as the compiler prints it.
+        \\`cast to *const s64 of an address that is zero` and aborts. The type in both
+        \\messages is the destination type as the compiler prints it.
     );
-    paragraph(36, #string,oneline
+    paragraph(38, #string,oneline
         \\The union check exists only because of the escape hatch. A tagged
         \\union normally yields its payload through a pattern match; under
         \\`#enable(allow_union_unwrap)` a direct payload read is allowed and the
         \\backend inserts a tag comparison in its place.
     );
-    code_block(37, "glosso", #string
+    code_block(39, "glosso", #string
         \\#import "Io";
         \\#enable(allow_union_unwrap);
         \\
@@ -172,30 +178,31 @@ render_section_128 :: () {
         \\
         \\main :: () {
         \\    good := lookup(true);
-        \\    print("good = %\n", good.Ok);
+        \\    print("good = {}\n", good.Ok);
         \\    bad := lookup(false);
-        \\    print("bad = %\n", bad.Ok);
+        \\    print("bad = {}\n", bad.Ok);
         \\}
     );
-    code_block(38, "text", #string
+    code_block(40, "text", #string
         \\good = 7
         \\...\unwrap.glo:13:28: union access: expected .Ok, but the value holds one of .Ok | .Err
     );
-    paragraph(39, #string,oneline
+    paragraph(41, #string,oneline
         \\The report is a fixed string built when the access is lowered, which
-        \\is why it carries a source position even though nothing else at run
-        \\time does. At `-O2` the check disappears and the program reads the
+        \\is why it carries a source position. The array-bounds check now does
+        \\the same; the other checks report a category without a site. At `-O2`
+        \\the check disappears and the program reads the
         \\wrong payload silently: the same build prints `bad = 7` and exits 0.
         \\The gate itself is described in the chapter on feature gates.
     );
-    subheading(40, "`#assert` is not one of them");
-    paragraph(41, #string,oneline
-        \\`#assert` is a separate mechanism and survives every optimization
-        \\level, including the size modes. A condition the checker can decide is
+    subheading(42, "`#assert` is not one of them");
+    paragraph(43, #string,oneline
+        \\`#assert` is a separate mechanism and survives every working
+        \\optimization level. A condition the checker can decide is
         \\decided at compile time and emits no code at all; a condition it
         \\cannot decide becomes a branch that stays in the program.
     );
-    code_block(42, "glosso", #string
+    code_block(44, "glosso", #string
         \\#import "Io";
         \\
         \\scale :: (n: s64) -> s64 {
@@ -204,66 +211,74 @@ render_section_128 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("100/4 = %\n", scale(4));
-        \\    print("100/0 = %\n", scale(0));
+        \\    print("100/4 = {}\n", scale(4));
+        \\    print("100/0 = {}\n", scale(0));
         \\}
     );
-    code_block(43, "text", #string
+    code_block(45, "text", #string
         \\100/4 = 25
         \\...\guard.glo:4:5: assertion failed: n must not be zero
     );
-    paragraph(44, #string,oneline
-        \\That output and the status 134 are identical at `-O1`, `-O3` and
-        \\`-Ozz`. Without a message the line ends after
+    paragraph(46, #string,oneline
+        \\That output is identical at `-O1` and `-O3`; on Windows the status is
+        \\134 at both levels.
+        \\Without a message the line ends after
         \\`assertion failed`. When the condition folds to false the assertion
         \\becomes a compile error instead: `#assert 1 > 2, "arithmetic is
         \\broken";` is `error: assertion failed: arithmetic is broken`, framed
         \\at the `#assert` token. The directive's other uses are covered in the
         \\chapter on `#assert` and `#compile_error`.
     );
-    subheading(45, "What nothing checks");
-    bullet(46, #string,oneline
-        \\Integer division and remainder by zero. There is no check, so the
-        \\hardware trap is what ends the process: on Windows the status is
-        \\`0xc0000094`.
-    );
-    bullet(47, #string,oneline
-        \\Shift counts. Shifting an `s32` by more bits than it has is whatever
-        \\the target does with an oversized count; on x86-64 the count is masked
-        \\to five bits, so shifting `1` left by a runtime `99` produces `8`.
-    );
+    subheading(47, "What nothing checks");
     bullet(48, #string,oneline
+        \\Optimized integer division. At `-O2` and `-O3` the zero-divisor and
+        \\division-overflow guards are omitted with the other runtime checks, so
+        \\a bad operation reaches target/LLVM behavior. In a checked build both
+        \\fail through Glosso's checked-failure path. `T.MIN % -1` remains zero at
+        \\every level because that remainder is representable.
+    );
+    bullet(49, #string,oneline
+        \\Non-literal shift counts at or beyond the operand width have a defined
+        \\result on every backend. Left and logical-right shifts produce zero;
+        \\an arithmetic-right shift produces the sign (`0` or `-1`). A literal
+        \\overshift is rejected earlier because the checker can see it directly.
+    );
+    bullet(50, #string,oneline
         \\Allocator faults. Leaks, double frees and use after free are found by
-        \\the `-O0` debug allocator, which reports and keeps running rather than
-        \\aborting, and by the compile-time memory analysis. Both are covered in
-        \\their own chapters.
+        \\the debug allocator when `GLOSSO_DEBUG_ALLOCATOR` is nonzero. It
+        \\reports and keeps running rather than aborting. The compile-time memory
+        \\analysis covers a related static set; both have their own chapters.
     );
-    subheading(49, "How a failing check ends the process");
-    paragraph(50, #string,oneline
-        \\Every check funnels into one termination sequence: write the report
-        \\line if the site has one, run the debug allocator's report if it is
-        \\enabled, then leave with status 134. The status is a constant in the
-        \\backend, not a signal, so it is the same number on every platform even
-        \\where the mechanism differs.
+    subheading(51, "How a failing check ends the process");
+    paragraph(52, #string,oneline
+        \\Every check funnels into one termination sequence: write its report
+        \\line, then take the target's abort path. The debug
+        \\allocator's report is not part of it, which is why a build that fails
+        \\a check says nothing about what it was holding even when the debug
+        \\allocator is enabled; `#assert` and `process_abort` ask an enabled
+        \\debug allocator to report first. Windows and Linux x86-64 spell out
+        \\134, WASI deliberately uses 125, and the remaining targets call the
+        \\platform `abort()`.
     );
-    table_header(51, "Target family   —   How the process stops");
-    table_row(52, "Windows and UEFI   |   `ExitProcess(134)`");
-    table_row(53, "`wasm32-wasi`, `wasm64-wasi`   |   `__wasi_proc_exit(134)`");
-    table_row(54, "Linux on `x86_64`   |   the `exit_group` syscall with 134");
-    table_row(55, "everything else   |   `abort()`");
-    note(56, #string,oneline
+    table_header(53, "Target family   —   How the process stops");
+    table_row(54, "hosted Windows   |   `ExitProcess(134)`");
+    table_row(55, "`wasm32-wasi`, `wasm64-wasi`   |   `__wasi_proc_exit(125)`");
+    table_row(56, "Linux on `x86_64`   |   the `exit_group` syscall with 134");
+    table_row(57, "everything else   |   `abort()`");
+    note(58, #string,oneline
         \\134 is `128 + 6`, the status a POSIX shell reports for a process
         \\killed by `SIGABRT`. Picking that number keeps a Glosso panic
-        \\indistinguishable from a C `abort()` in a build script, which is why
-        \\the Windows and wasm paths spell it out explicitly instead of raising
-        \\a platform fault.
+        \\indistinguishable from a C `abort()` in a build script. Windows spells
+        \\that value out explicitly. WASI reserves statuses above 125, so its
+        \\explicit path uses 125 rather than turning the failure into an
+        \\indistinguishable guest trap.
     );
-    paragraph(57, #string,oneline
-        \\`process_abort()` from `Process` uses the same sequence and therefore
-        \\the same status. `exit(status)` does not: it takes the ordinary exit
+    paragraph(59, #string,oneline
+        \\`process_abort()` from `Process` uses the same target-dependent
+        \\sequence. `exit(status)` does not: it takes the ordinary exit
         \\path and the status reaches the shell unchanged. Under `--run` the
-        \\compiler prints
-        \\`glosso: program exited with status exit code: 134` and returns 1 of
+        \\compiler prints the target's status — for example,
+        \\`glosso: program exited with status exit code: 134` on Windows — and returns 1 of
         \\its own; the program's status is not propagated, which is covered in
         \\the chapter on environment, toolchain, and exit codes.
     );
@@ -354,16 +369,6 @@ render_section_129 :: () {
         \\thread. It needs the program to actually execute the interleaving, so
         \\it reports what a run did, not what a run could do.
     );
-    paragraph(22, #string,oneline
-        \\None of them replaces the compiler's own work. The runtime checks
-        \\described in the chapter on runtime safety checks and panics catch
-        \\overflow, bounds and null addresses at `-O0` and `-O1` with no runtime
-        \\library at all, and the memory analysis described in the chapter on
-        \\what the compiler checks about memory catches leaks and double frees
-        \\before the program is built. A sanitizer is the tool for the faults
-        \\that survive both: races, uninitialized reads, and mistakes inside C
-        \\code reached through `#foreign`.
-    );
     subheading(23, "Practical caveats");
     paragraph(24, #string,oneline
         \\A sanitized build does not use the bundled LLD plan. It shells out to
@@ -443,45 +448,51 @@ render_section_130 :: () {
     table_row(8, "`GLOSSO_NO_PRUNE`   |   lowers every declaration instead of only the reachable ones");
     table_row(9, "`GLOSSO_TIMINGS`   |   per-phase compiler timings on stderr");
     table_row(10, "`GLOSSO_LLVM_TIMING`   |   LLVM pass and emit timings, and the active pipeline");
-    table_row(11, "`GLOSSO_LLVM_OBJECT_PIPELINE`   |   replaces the default LLVM pass pipeline; `none` disables it");
+    table_row(11, "`GLOSSO_LLVM_OBJECT_PIPELINE`, `GLOSSO_LLVM_VERIFY`   |   the first replaces the default LLVM pass pipeline (`none` disables it); the second enables LLVM module verification when present with a value other than `0`");
     table_row(12, "`GLOSSO_COMPILER_EXE`   |   the path treated as the compiler when deriving discovery roots");
-    table_row(13, "`NO_COLOR`   |   forces color off, beating `--color always`");
-    paragraph(14, #string,oneline
+    table_row(13, "`GLOSSO_JIT`   |   compiles top-level `#comptime` with the LLVM JIT, falling back to the interpreter per entry");
+    table_row(14, "`GLOSSO_JIT_REPORT`, `GLOSSO_JIT_DUMP`   |   with `GLOSSO_JIT`, the first prints the per-entry compilability report and the second writes each compiled entry as `<directory>/<entry>.ll`");
+    table_row(15, "`GLOSSO_EMBEDDED_LLD`   |   `0`, `off`, `no` or `false` spawns the LLD drivers instead of linking in process");
+    table_row(16, "`NO_COLOR`   |   forces color off, beating `--color always`");
+    table_row(81, "`GLOSSO_COMPTIME_STEP_LIMIT`   |   maximum interpreter steps or VM instructions per compile-time entry; defaults to 2^28, and 0 removes the limit");
+    table_row(80, "`GLOSSO_DEBUG_ALLOCATOR`   |   a value other than `0` installs the instrumented allocator as `context.allocator`; absent or `0` keeps the heap allocator, independently of `-O`");
+    paragraph(17, #string,oneline
         \\The two timing switches are independent and can be set together. The
         \\phase names are the compiler's own pipeline stages, and the LLVM line
         \\reports the pipeline string in force, which is what makes
-        \\`GLOSSO_LLVM_OBJECT_PIPELINE` observable.
+        \\`GLOSSO_LLVM_OBJECT_PIPELINE` observable. A `GLOSSO_JIT_DUMP`
+        \\directory must already exist; a failed write is reported as
+        \\`glosso: could not dump <path>: <error>` and does not stop the build.
     );
-    code_block(15, "text", #string
+    code_block(18, "text", #string
         \\$ GLOSSO_TIMINGS=1 GLOSSO_LLVM_TIMING=1 glosso --backend object -o status.obj status.glo
         \\glosso: compile status.glo (target=x86_64-pc-windows-msvc)
         \\glosso: timing prepare 227.548 ms
         \\glosso: timing check 616.655 ms
-        \\glosso: timing memory 38.490 ms
         \\glosso: timing lower 54.163 ms
         \\glosso: llvm object passes=0.025s emit=0.062s pipeline=function(mem2reg,instcombine<no-verify-fixpoint>,early-cse,simplifycfg,adce)
         \\glosso: wrote status.obj  (backend=object, target=x86_64-pc-windows-msvc, -O1)
         \\glosso: timing consume 102.922 ms
     );
-    note(16, #string,oneline
+    note(19, #string,oneline
         \\A warm artifact cache hides both switches, because a restored build
         \\never reaches the phases they measure. Set
         \\`GLOSSO_DISABLE_ARTIFACT_CACHE=1` alongside them when the numbers
         \\matter.
     );
-    bullet(17, #string,oneline
+    bullet(20, #string,oneline
         \\`GLOSSO_NO_PRUNE` is a debugging escape hatch, not a switch with a
         \\visible effect: the pruned and unpruned modules are byte-identical for
         \\the same program.
     );
-    bullet(18, #string,oneline
+    bullet(21, #string,oneline
         \\`NO_COLOR` is honoured for any value, including the empty string, and
         \\it is checked before `--color`, so `--color always` cannot override
         \\it. The reverse is not true: `--color never` is honoured regardless of
         \\`NO_COLOR`.
     );
-    subheading(19, "Finding the standard library");
-    paragraph(20, #string,oneline
+    subheading(22, "Finding the standard library");
+    paragraph(23, #string,oneline
         \\`--std <dir>` settles the question outright. The directory must
         \\contain either `Prelude.glo` or a `Prelude/` subdirectory, and the
         \\path is canonicalized. An empty value is
@@ -490,17 +501,17 @@ render_section_130 :: () {
         \\`glosso: --std directory must contain Prelude.glo or Prelude/`; both
         \\exit 2, because they are rejected while the command line is parsed.
     );
-    paragraph(21, #string,oneline
+    paragraph(24, #string,oneline
         \\Without `--std` the compiler walks a candidate list and takes the
         \\first entry that is a directory holding a prelude. Duplicates are
         \\skipped, so the same directory reached two ways is tried once.
     );
-    table_header(22, "Order   —   Candidate");
-    table_row(23, "1   |   `$GLOSSO_STD`");
-    table_row(24, "2   |   `<cwd>/std`");
-    table_row(25, "3   |   `<compiler dir>/std`, then `../std`, then `../../std`");
-    table_row(26, "4   |   Windows: `%APPDATA%/glosso/std`, then `%USERPROFILE%/.local/glosso/std`. Elsewhere: `/usr/local/glosso/std`, then `$HOME/.local/glosso/std`");
-    paragraph(27, #string,oneline
+    table_header(25, "Order   —   Candidate");
+    table_row(26, "1   |   `$GLOSSO_STD`");
+    table_row(27, "2   |   `<cwd>/std`");
+    table_row(28, "3   |   `<compiler dir>/std`, then `../std`, then `../../std`");
+    table_row(29, "4   |   Windows: `%APPDATA%/glosso/std`, then `%USERPROFILE%/.local/glosso/std`. Elsewhere: `/usr/local/glosso/std`, then `$HOME/.local/glosso/std`");
+    paragraph(30, #string,oneline
         \\Step 3 is why a compiler at `<repo>/build/bin/glosso.exe` finds
         \\`<repo>/std` from any working directory: `build/bin` walks up to
         \\`build` and then to `<repo>`. `GLOSSO_COMPILER_EXE` replaces the
@@ -511,23 +522,23 @@ render_section_130 :: () {
         \\`glosso: could not find the project-local or installed Glosso standard
         \\library` and exits 1.
     );
-    subheading(28, "Resource, library and toolchain roots");
-    paragraph(29, #string,oneline
+    subheading(31, "Resource, library and toolchain roots");
+    paragraph(32, #string,oneline
         \\Resources are the non-Glosso material a build may need: the bundled
         \\musl sources, the mingw-w64 import libraries, the Clang resource
-        \\directory, the third-party C sources behind `Lua` and `Gui`. They are
+        \\directory, and the third-party C sources behind `Lua`. They are
         \\looked up under a list of roots rather than a single prefix.
     );
-    table_header(30, "Variable   —   What it supplies");
-    table_row(31, "`GLOSSO_RESOURCE_DIR`   |   the project or installed resource root; validated, and a value that is neither is an error");
-    table_row(32, "`GLOSSO_LIB_DIR`   |   the library root searched as `lib/` and `lib/glosso/`");
-    table_row(33, "`GLOSSO_MUSL_SOURCE_DIR`, `GLOSSO_MUSL_LIB_DIR`   |   the musl source tree and a prebuilt musl runtime bundle");
-    table_row(34, "`GLOSSO_MUSL_LIBRARY_PATH`   |   extra static system-library directories, path-separated");
-    table_row(35, "`GLOSSO_WINDOWS_GNU_LIB_DIR`, `GLOSSO_WINDOWS_GNU_INCLUDE_DIR`   |   the mingw-w64 bundle for `*-windows-gnu` targets");
-    table_row(36, "`GLOSSO_CLANG_RESOURCE_DIR`   |   the Clang resource directory holding the compiler builtins");
-    table_row(37, "`GLOSSO_INHERITED_NIX_LDFLAGS`   |   `-L` flags harvested from a Nix environment");
-    table_row(38, "`GLOSSO_LLVM_ROOT`, `LLVM_ROOT`   |   the LLVM install root searched for tools");
-    paragraph(39, #string,oneline
+    table_header(33, "Variable   —   What it supplies");
+    table_row(34, "`GLOSSO_RESOURCE_DIR`   |   the project or installed resource root; validated, and a value that is neither is an error");
+    table_row(35, "`GLOSSO_LIB_DIR`   |   the library root searched as `lib/` and `lib/glosso/`");
+    table_row(36, "`GLOSSO_MUSL_SOURCE_DIR`, `GLOSSO_MUSL_LIB_DIR`   |   the musl source tree and a prebuilt musl runtime bundle");
+    table_row(37, "`GLOSSO_MUSL_LIBRARY_PATH`   |   extra static system-library directories, path-separated");
+    table_row(38, "`GLOSSO_WINDOWS_GNU_LIB_DIR`, `GLOSSO_WINDOWS_GNU_INCLUDE_DIR`   |   the mingw-w64 bundle for `*-windows-gnu` targets");
+    table_row(39, "`GLOSSO_CLANG_RESOURCE_DIR`   |   the Clang resource directory holding the compiler builtins");
+    table_row(40, "`GLOSSO_INHERITED_NIX_LDFLAGS`   |   `-L` flags harvested from a Nix environment");
+    table_row(41, "`GLOSSO_LLVM_ROOT`, `LLVM_ROOT`   |   the LLVM install root searched for tools");
+    paragraph(42, #string,oneline
         \\The roots are tried in this order: `GLOSSO_RESOURCE_DIR`,
         \\`GLOSSO_LIB_DIR`, the parent of `GLOSSO_MUSL_SOURCE_DIR`, the current
         \\directory, the compiler's directory, and that directory's parent and
@@ -537,8 +548,18 @@ render_section_130 :: () {
         \\(`src/lib.rs` and `data/UnicodeData.txt`) or an installed tree (a
         \\`lib/` directory next to a `std/` with a prelude).
     );
-    subheading(40, "Choosing the LLVM tools");
-    paragraph(41, #string,oneline
+    paragraph(79, #string,oneline
+        \\Library lookup has one development-only candidate ahead of those
+        \\general roots. When the effective compiler executable (including a
+        \\`GLOSSO_COMPILER_EXE` override) belongs to a Glosso checkout, that
+        \\checkout's `build/lib` is searched for staged Clang headers,
+        \\compiler-rt archives, and other target libraries. The candidate is
+        \\derived from the compiler path, not the current directory: an installed
+        \\compiler launched inside an unrelated checkout will not borrow that
+        \\checkout's possibly stale `build/lib`.
+    );
+    subheading(43, "Choosing the LLVM tools");
+    paragraph(44, #string,oneline
         \\Every external tool is resolved the same way. The tool's own
         \\environment names are consulted in order and the first non-empty one
         \\wins outright. Failing that, an LLVM root is derived from
@@ -549,47 +570,43 @@ render_section_130 :: () {
         \\child directory in name order. If none of that finds it, the bare name
         \\is used and `PATH` decides.
     );
-    table_header(42, "Tool   —   Environment chain, first match wins");
-    table_row(43, "`clang`   |   `GLOSSO_CLANG`, `CLANG`, `CC`");
-    table_row(44, "`ld.lld`   |   `GLOSSO_LD_LLD`, `LD_LLD`");
-    table_row(45, "`lld-link`   |   `GLOSSO_LLD_LINK`, `LLD_LINK`");
-    table_row(46, "`wasm-ld`   |   `GLOSSO_WASM_LD`, `WASM_LD`");
-    table_row(47, "`ld64.lld`   |   `GLOSSO_LD64_LLD`, `LD64_LLD`");
-    table_row(48, "`llvm-ar`   |   `GLOSSO_LLVM_AR`, `LLVM_AR`, `AR`");
-    table_row(49, "`llvm-lib`   |   `GLOSSO_LLVM_LIB`, `LLVM_LIB`");
-    table_row(50, "`rust-lld` (Windows)   |   `GLOSSO_RUST_LLD`, `RUST_LLD`, then a rustup toolchain");
-    table_row(51, "bindgen's `clang`   |   `GLOSSO_BINDGEN_CLANG`, `GLOSSO_CLANG`, `CLANG`, `CC`");
-    paragraph(52, #string,oneline
+    table_header(45, "Tool   —   Environment chain, first match wins");
+    table_row(46, "`clang`   |   `GLOSSO_CLANG`, `CLANG`, `CC`");
+    table_row(47, "`ld.lld`   |   `GLOSSO_LD_LLD`, `LD_LLD`");
+    table_row(48, "`lld-link`   |   `GLOSSO_LLD_LINK`, `LLD_LINK`");
+    table_row(49, "`wasm-ld`   |   `GLOSSO_WASM_LD`, `WASM_LD`");
+    table_row(50, "`ld64.lld`   |   `GLOSSO_LD64_LLD`, `LD64_LLD`");
+    table_row(51, "`llvm-ar`   |   `GLOSSO_LLVM_AR`, `LLVM_AR`, `AR`");
+    table_row(52, "`llvm-lib`   |   `GLOSSO_LLVM_LIB`, `LLVM_LIB`");
+    table_row(53, "`rust-lld` (Windows)   |   `GLOSSO_RUST_LLD`, `RUST_LLD`, then a rustup toolchain");
+    table_row(54, "the `#header` verifier's C compiler   |   `GLOSSO_CLANG`, `CLANG`, `CC`, then `cl`, `clang-cl` and `cc`; `#bindgen` itself has no override and runs the in-process Clang");
+    paragraph(55, #string,oneline
         \\`rust-lld` is the one entry with its own search. When neither variable
         \\names an existing file, the compiler looks under `$RUSTUP_HOME` (or
         \\`%USERPROFILE%/.rustup`), preferring `$RUSTUP_TOOLCHAIN` if it is set.
-        \\That is why linker diagnostics on Windows are prefixed `rust-lld:`
-        \\even though the flag spellings are LLD's.
+        \\It is reached only by a compiler built without the embedded LLD; an
+        \\ordinary build links COFF in process, which is why linker diagnostics
+        \\on Windows are prefixed `lld-link:`.
     );
-    subheading(53, "The compiler's exit codes");
-    paragraph(54, #string,oneline
+    subheading(56, "The compiler's exit codes");
+    paragraph(57, #string,oneline
         \\The driver uses three statuses of its own, and one borrowed. 2 means
         \\the command line was rejected and nothing was compiled; 1 means the
         \\compilation or the link failed; 0 means the requested work was done.
         \\The borrowed one is compile-time `exit`.
     );
-    table_header(55, "Situation   —   Exit code");
-    table_row(56, "a successful build   |   `0`");
-    table_row(57, "`--help`, `--print-targets`, `--print-cache-dir`   |   `0`");
-    table_row(58, "a compile, type, memory-contract or link error   |   `1`");
-    table_row(59, "an unreadable source file   |   `1`");
-    table_row(60, "`--run` on a non-host target, or where the built program exits nonzero   |   `1`");
-    table_row(61, "`--print-cache-dir` with an unusable `GLOSSO_CACHE_DIR`   |   `1`");
-    table_row(62, "an unknown option, or a bad value for one   |   `2`");
-    table_row(63, "no source file operand   |   `2`");
-    table_row(64, "top-level `#comptime` that called `exit(n)`   |   `n`");
-    paragraph(65, #string,oneline
-        \\Warnings never change the status. A default build that reports a
-        \\borrow-check warning still exits 0; `--borrow-check error` promotes
-        \\those diagnostics and the status becomes 1 with them.
-    );
-    subheading(66, "The program's exit code");
-    paragraph(67, #string,oneline
+    table_header(58, "Situation   —   Exit code");
+    table_row(59, "a successful build   |   `0`");
+    table_row(60, "`--help`, `--print-targets`/`--targets`, `--print-cache-dir`   |   `0`");
+    table_row(61, "a compile, type, memory-contract or link error   |   `1`");
+    table_row(62, "an unreadable source file   |   `1`");
+    table_row(63, "`--run` on a non-host target, or where the built program exits nonzero   |   `1`");
+    table_row(64, "`--print-cache-dir` with an unusable `GLOSSO_CACHE_DIR`   |   `1`");
+    table_row(65, "an unknown option, or a bad value for one   |   `2`");
+    table_row(66, "no source file operand   |   `2`");
+    table_row(67, "top-level `#comptime` that called `exit(n)`   |   `n`");
+    subheading(69, "The program's exit code");
+    paragraph(70, #string,oneline
         \\A built program's status is its own and is not related to the
         \\compiler's. It comes from what `main` returns, through the
         \\`Termination` protocol described in the chapter on `Error`,
@@ -597,21 +614,21 @@ render_section_130 :: () {
         \\used directly, a `void` result is 0, and `exit(status)` leaves
         \\immediately with the value given.
     );
-    paragraph(68, #string,oneline
+    paragraph(71, #string,oneline
         \\`--run` does not pass that status on. It prints what the program
         \\exited with and then returns 1 for any nonzero value, so `--run`
         \\cannot be used to observe an exact exit code. Build the executable and
         \\run it to see one.
     );
-    code_block(69, "glosso", #string
+    code_block(72, "glosso", #string
         \\#import "Io";
         \\
-        \\main :: () -> int {
+        \\main :: () -> ssize {
         \\    print("finishing\n");
         \\    return 5;
         \\}
     );
-    code_block(70, "text", #string
+    code_block(73, "text", #string
         \\$ glosso --run status.glo
         \\glosso: compile status.glo (target=x86_64-pc-windows-msvc)
         \\glosso: link status.exe (target=x86_64-pc-windows-msvc, -O1)
@@ -619,12 +636,12 @@ render_section_130 :: () {
         \\finishing
         \\glosso: program exited with status exit code: 5
     );
-    paragraph(71, #string,oneline
+    paragraph(74, #string,oneline
         \\Compile-time `exit` is the one path by which an arbitrary status
         \\reaches the shell from the compiler. A top-level `#comptime` that
         \\calls it stops the build at that point, and no artifact is written.
     );
-    code_block(72, "glosso", #string
+    code_block(75, "glosso", #string
         \\#import "Io";
         \\
         \\stop :: () {
@@ -636,20 +653,28 @@ render_section_130 :: () {
         \\
         \\main :: () { print("never built\n"); }
     );
-    code_block(73, "text", #string
+    code_block(76, "text", #string
         \\$ glosso --run ctexit.glo
         \\glosso: compile ctexit.glo (target=x86_64-pc-windows-msvc)
         \\[comptime] stopping the build
     );
-    paragraph(74, #string,oneline
+    paragraph(77, #string,oneline
         \\There is no `link` line and no `ctexit.exe`, and the compiler's own
         \\exit status is 7.
     );
-    note(75, #string,oneline
+    note(78, #string,oneline
         \\Driver messages go to stderr, prefixed `glosso: `. Program output and
         \\the output of compile-time execution go to stdout. Redirecting one
         \\stream therefore separates the build log from what the program
         \\produced, which is what makes a `#comptime` build script usable in a
         \\pipeline.
     );
+    subheading(82, #string
+        \\Memory analysis options
+    );
+    paragraph(83, #string,oneline
+        \\--borrow-check=warning is the default. Use --borrow-check=error to reject temporal memory findings, --borrow-check=off to disable body analysis, and --borrow-check-std to include standard-library bodies. --memory-signatures prints inferred body contracts, --memory-axioms prints external contracts, and --memory-report prints the module inventory. #enable(memory_strict); requires written contracts at exported and external memory boundaries. See Memory Contracts and Storage Lifetimes for the effect vocabulary.
+    );
+}
+
 }

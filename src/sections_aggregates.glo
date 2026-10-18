@@ -1,3 +1,5 @@
+#public(unit) {
+
 // Sections 37-48: structs, unions, and enums.
 
 render_section_37 :: () {
@@ -22,11 +24,12 @@ render_section_37 :: () {
         \\same wording.
     );
     paragraph(3, #string,oneline
-        \\The closing brace ends the declaration and nothing may follow it: a trailing
-        \\semicolon at file scope is `error: bad decl name ';'`. A struct may be
-        \\declared at file scope or inside a procedure body, and a procedure-local
-        \\declaration keeps its plain name, so `type_name` on a local `Local` reports
-        \\`Local`.
+        \\The closing brace ends the declaration and nothing may follow it. A
+        \\trailing semicolon at file scope is `error: expected a declaration,
+        \\found ';'`, with help to remove it because a declaration whose body is
+        \\braced ends at `}`. A struct may be declared at file scope or inside a
+        \\procedure body, and a procedure-local declaration keeps its plain name,
+        \\so `type_name` on a local `Local` reports `Local`.
     );
     subheading(4, "Field defaults");
     paragraph(5, #string,oneline
@@ -51,19 +54,19 @@ render_section_37 :: () {
         \\main :: () {
         \\    a: Entry;
         \\    b: Entry;
-        \\    print("fresh defaults: % %\n", a.id, b.id);
-        \\    print("string default: %\n", a.name);
+        \\    print("fresh defaults: {} {}\n", a.id, b.id);
+        \\    print("string default: {}\n", a.name);
         \\
         \\    s: Slot;
-        \\    print("declared: % %\n", s.x, s.y);
+        \\    print("declared: {} {}\n", s.x, s.y);
         \\
         \\    u: Slot = #undefined;
         \\    u.x = 1;
         \\    u.y = 2;
-        \\    print("undefined then set: % %\n", u.x, u.y);
+        \\    print("undefined then set: {} {}\n", u.x, u.y);
         \\
         \\    row: [2]Slot;
-        \\    print("array element: % %\n", row[0].x, row[0].y);
+        \\    print("array element: {} {}\n", row[0].x, row[0].y);
         \\}
     );
     code_block(7, "text", #string
@@ -90,10 +93,11 @@ render_section_37 :: () {
         \\A field annotation containing `$T` introduces an inferred type parameter
         \\for the whole struct. Later fields spell it as plain `T`. The struct is
         \\then instantiated by applying it to type arguments, and each instantiation
-        \\is a separate type with its own mangled name.
+        \\is a separate type. Reflection writes its arguments as Pair(s64).
     );
     code_block(12, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Pair :: struct {
         \\    first:  $T;
@@ -104,25 +108,23 @@ render_section_37 :: () {
         \\main :: () {
         \\    p: Pair(s64) = .{ .first = 1, .second = 2 };
         \\    q: Pair(f64) = .{ 1.5, 2.5 };
-        \\    print("% % %\n", p.first, p.second, p.label);
-        \\    print("% %\n", q.first, q.second);
-        \\    print("%\n", type_name(type_of(p)));
-        \\    print("%\n", type_name(type_of(q)));
+        \\    print("{} {} {}\n", p.first, p.second, p.label);
+        \\    print("{} {}\n", q.first, q.second);
+        \\    print("{}\n", type_name(type_of(p)));
+        \\    print("{}\n", type_name(type_of(q)));
         \\}
     );
     code_block(13, "text", #string
         \\1 2 pair
         \\1.5 2.5
-        \\Pair_int
-        \\Pair_f64
+        \\Pair(s64)
+        \\Pair(f64)
     );
     paragraph(14, #string,oneline
-        \\`Pair_int` and `Pair_f64` are unrelated types: `q: Pair(f64) = p;` is
-        \\`error: got Pair_int, expected Pair_f64`. An applied generic cannot carry a
-        \\qualified literal, because the qualified form only accepts a bare
-        \\identifier: `Pair(f64).{ 1.5, 2.5 }` is
-        \\`error: struct literal needs a type`. Annotate the binding and use the
-        \\inferred form instead.
+        \\`Pair(s64)` and `Pair(f64)` are unrelated types: `q: Pair(f64) = p;`
+        \\reports `error: got Pair(s64), expected Pair(f64)`. A concrete generic
+        \\struct type can qualify a literal: `Pair(f64).{ 1.5, 2.5 }` constructs
+        \\the same type as an annotated binding initialized with `.{ 1.5, 2.5 }`.
     );
     subheading(15, "The two literal forms");
     paragraph(16, #string,oneline
@@ -133,9 +135,9 @@ render_section_37 :: () {
         \\remaining fields take their defaults.
     );
     table_header(17, "Form   —   Type comes from   —   Restriction");
-    table_row(18, "`T.{ ... }`   |   The written name `T`.   |   `T` must be a bare identifier.");
+    table_row(18, "`T.{ ... }`   |   The written name `T`.   |   `T` must resolve to a struct type.");
     table_row(19, "`.{ ... }`   |   The expected type at that position.   |   There must be one.");
-    table_row(20, "`T(A).{ ... }`   |   Nothing; rejected.   |   `error: struct literal needs a type`");
+    table_row(20, "`T(A).{ ... }`   |   The concrete generic struct type.   |   Type arguments must resolve.");
     code_block(21, "glosso", #string
         \\#import "Io";
         \\
@@ -149,18 +151,18 @@ render_section_37 :: () {
         \\    u := Vec2.{ .y = 7 };
         \\    m := Vec2.{ 3, .y = 4 };
         \\    z: Vec2 = .{ .x = 5, .y = 6 };
-        \\    print("qualified positional: % %\n", w.x, w.y);
-        \\    print("qualified named:      % %\n", u.x, u.y);
-        \\    print("mixed:                % %\n", m.x, m.y);
-        \\    print("inferred:             % %\n", z.x, z.y);
+        \\    print("qualified positional: {} {}\n", w.x, w.y);
+        \\    print("qualified named:      {} {}\n", u.x, u.y);
+        \\    print("mixed:                {} {}\n", m.x, m.y);
+        \\    print("inferred:             {} {}\n", z.x, z.y);
         \\
         \\    z = .{ 8, 9 };
-        \\    print("assigned:  % %\n", z.x, z.y);
-        \\    print("argument:  %\n", take(.{ 3, 4 }));
+        \\    print("assigned:  {} {}\n", z.x, z.y);
+        \\    print("argument:  {}\n", take(.{ 3, 4 }));
         \\    r := make();
-        \\    print("returned:  % %\n", r.x, r.y);
+        \\    print("returned:  {} {}\n", r.x, r.y);
         \\    grid: [2]Vec2 = .[ .{ 1, 1 }, .{ 2, 2 } ];
-        \\    print("in array:  % %\n", grid[0].x, grid[1].y);
+        \\    print("in array:  {} {}\n", grid[0].x, grid[1].y);
         \\}
     );
     code_block(22, "text", #string
@@ -198,9 +200,9 @@ render_section_37 :: () {
         \\
         \\main :: () {
         \\    p := Plain.{ 1, 2, 3 };
-        \\    print("positional: a=% b=% c=%\n", p.a, p.b, p.c);
-        \\    print("offsets:     a=% b=% c=%\n",
-        \\          offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
+        \\    print("positional: a={} b={} c={}\n", p.a, p.b, p.c);
+        \\    print("offsets:     a={} b={} c={}\n",
+        \\          offset(&p, &p.a), offset(&p, &p.b), offset(&p, &p.c));
         \\}
     );
     code_block(26, "text", #string
@@ -220,11 +222,12 @@ render_section_37 :: () {
     paragraph(29, #string,oneline
         \\A struct is a value, so it cannot contain itself by value: the size would
         \\not be finite. Recursion goes through an indirection whose size does not
-        \\depend on the pointee, which means `*T`, `?*T`, `[*]T`, a view, or a
+        \\depend on the pointee, which means `*const T`, `?*const T`, `[*]const T`, a view, or a
         \\dynamic array.
     );
     code_block(30, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Node :: struct {
         \\    value: s64;
@@ -233,10 +236,10 @@ render_section_37 :: () {
         \\
         \\main :: () {
         \\    tail: Node = .{ .value = 2, .next = .None };
-        \\    head: Node = .{ .value = 1, .next = *tail };
+        \\    head: Node = .{ .value = 1, .next = &tail };
         \\    #pattern .Some(p) := head.next else { print("end\n"); return; };
-        \\    print("% %\n", head.value, p.*.value);
-        \\    print("size_of(Node)=%\n", size_of(Node));
+        \\    print("{} {}\n", head.value, p.*.value);
+        \\    print("size_of(Node)={}\n", size_of(Node));
         \\}
     );
     code_block(31, "text", #string
@@ -244,13 +247,12 @@ render_section_37 :: () {
         \\size_of(Node)=16
     );
     note(32, #string,oneline
-        \\Direct by-value recursion is not diagnosed. `Node :: struct { next: Node; }`
-        \\type-checks and then overflows the compiler's own stack while the layout is
-        \\computed, reporting only `thread 'main' has overflowed its stack`. Read a
-        \\crash with no `error:` line in a file that declares a self-containing
-        \\aggregate as this case.
+        \\Direct or indirect by-value recursion has no finite layout and is
+        \\rejected. For `Node :: struct { next: Node; }`, the diagnostic identifies
+        \\the self-containing struct and its field path. A pointer breaks the
+        \\layout cycle, which is why the linked-node example is valid.
     );
-    subheading(33, "What a struct body may not contain");
+    subheading(33, "Field restrictions and zero-sized values");
     bullet(34, #string,oneline
         \\A nested named type declaration. `Inner :: struct { ... }` written inside a
         \\struct body is `error: unexpected token '::'`. An anonymous aggregate
@@ -258,10 +260,9 @@ render_section_37 :: () {
         \\on inline aggregate field types.
     );
     bullet(35, #string,oneline
-        \\A `void` field. `V :: struct { a: s64; b: void; }` is `error: a zero-sized
-        \\'void' member inside a struct, tuple, or array is not supported yet; remove
-        \\the member, or wrap it in a single-field struct`, because erasing the member
-        \\would renumber the declaration-order field indices that reflection reports.
+        \\A `void` field is allowed and occupies zero bytes. It remains a member
+        \\for reflection and declaration-order indexing, so a later field keeps
+        \\its index. The default value of that field is `.()`.
     );
     bullet(36, #string,oneline
         \\Nothing at all is fine: `Empty :: struct { }` is a legal type of size `0`.
@@ -296,6 +297,7 @@ render_section_38 :: () {
     table_row(5, "Declaration index   |   Ascending, as the tiebreak.");
     code_block(6, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Bytes :: struct { a: u8; b: [3]u8; c: u8; }
         \\Tie   :: struct { a: u32; b: u32; }
@@ -307,13 +309,13 @@ render_section_38 :: () {
         \\
         \\main :: () {
         \\    x: Bytes; y: Tie; m: Mixed;
-        \\    print("Bytes size=% a=% b=% c=%\n", size_of(Bytes),
-        \\          offset(*x, *x.a), offset(*x, *x.b), offset(*x, *x.c));
-        \\    print("Tie   size=% a=% b=%\n", size_of(Tie),
-        \\          offset(*y, *y.a), offset(*y, *y.b));
-        \\    print("Mixed size=% id=% ratio=% code=% flag=%\n", size_of(Mixed),
-        \\          offset(*m, *m.id), offset(*m, *m.ratio),
-        \\          offset(*m, *m.code), offset(*m, *m.flag));
+        \\    print("Bytes size={} a={} b={} c={}\n", size_of(Bytes),
+        \\          offset(&x, &x.a), offset(&x, &x.b), offset(&x, &x.c));
+        \\    print("Tie   size={} a={} b={}\n", size_of(Tie),
+        \\          offset(&y, &y.a), offset(&y, &y.b));
+        \\    print("Mixed size={} id={} ratio={} code={} flag={}\n", size_of(Mixed),
+        \\          offset(&m, &m.id), offset(&m, &m.ratio),
+        \\          offset(&m, &m.code), offset(&m, &m.flag));
         \\}
     );
     code_block(7, "text", #string
@@ -330,7 +332,7 @@ render_section_38 :: () {
         \\`24` bytes the declared order would have needed.
     );
     paragraph(9, #string,oneline
-        \\The record's alignment is the largest field alignment, and its size is the
+        \\Without #align, the record's alignment is the largest field alignment, and its size is the
         \\end of the last field rounded up to that alignment. A struct with no fields
         \\has size `0`.
     );
@@ -351,11 +353,14 @@ render_section_38 :: () {
     table_row(15, "`type_info(T).alignment`   |   The record alignment in bytes.");
     table_row(16, "`align_of(T)`   |   `error: unknown function align_of`");
     table_row(17, "`offset_of(T, \"b\")`   |   `error: unknown function offset_of`");
-    table_row(18, "`struct #align(16) { ... }`   |   `error: unexpected token 'align'`");
+    table_row(18, "`struct #align(16) { ... }`   |   Raises record alignment to at least 16 bytes.");
     paragraph(19, #string,oneline
-        \\A declaration therefore cannot raise a record's alignment: it is always the
-        \\maximum of the field alignments, or `1`. The two directives below are the
-        \\whole layout vocabulary, and neither of them adds alignment.
+        \\#align(N) requests an explicit record alignment. N must be a literal
+        \\positive power of two no greater than 268435456. Ordinary structs keep
+        \\at least their natural field alignment. The record size rounds up to
+        \\its alignment, including when it has no fields. #packed removes internal
+        \\field padding; with #align(N), its record alignment is N and its size
+        \\still rounds up to N. Match any corresponding C declaration exactly.
     );
     subheading(20, "`#c_call`: declaration order and the C ABI");
     paragraph(21, #string,oneline
@@ -371,15 +376,16 @@ render_section_38 :: () {
         \\the check recurses into nested aggregates. The rest of the boundary is
         \\covered in the chapter on C data across the boundary.
     );
-    subheading(23, "`#packed`: no padding");
+    subheading(23, "`#packed`: no field padding");
     paragraph(24, #string,oneline
         \\`struct #packed { ... }` also suppresses the sort, and additionally removes
-        \\all padding: the size is the plain sum of the field sizes and the record
+        \\internal padding: without #align, the size is the sum of the field sizes and the record
         \\alignment is `1`. Writing both directives is accepted, and `#packed` wins,
         \\because it is the stronger constraint.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Plain  :: struct         { a: u8; b: u64; c: u8; }
         \\C_Aln  :: struct #c_call { a: u8; b: u64; c: u8; }
@@ -391,15 +397,15 @@ render_section_38 :: () {
         \\
         \\main :: () {
         \\    p: Plain; q: C_Aln; r: Packed;
-        \\    print("Plain  size=% align=% a=% b=% c=%\n", size_of(Plain),
+        \\    print("Plain  size={} align={} a={} b={} c={}\n", size_of(Plain),
         \\          type_info(Plain).alignment,
-        \\          offset(*p, *p.a), offset(*p, *p.b), offset(*p, *p.c));
-        \\    print("C_Aln  size=% align=% a=% b=% c=%\n", size_of(C_Aln),
+        \\          offset(&p, &p.a), offset(&p, &p.b), offset(&p, &p.c));
+        \\    print("C_Aln  size={} align={} a={} b={} c={}\n", size_of(C_Aln),
         \\          type_info(C_Aln).alignment,
-        \\          offset(*q, *q.a), offset(*q, *q.b), offset(*q, *q.c));
-        \\    print("Packed size=% align=% a=% b=% c=%\n", size_of(Packed),
+        \\          offset(&q, &q.a), offset(&q, &q.b), offset(&q, &q.c));
+        \\    print("Packed size={} align={} a={} b={} c={}\n", size_of(Packed),
         \\          type_info(Packed).alignment,
-        \\          offset(*r, *r.a), offset(*r, *r.b), offset(*r, *r.c));
+        \\          offset(&r, &r.a), offset(&r, &r.b), offset(&r, &r.c));
         \\}
     );
     code_block(26, "text", #string
@@ -418,6 +424,7 @@ render_section_38 :: () {
     );
     code_block(28, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Header :: struct #packed {
         \\    magic:   u32;
@@ -434,11 +441,11 @@ render_section_38 :: () {
         \\
         \\main :: () {
         \\    h: Header;
-        \\    print("Header size=% magic=% version=% length=%\n", size_of(Header),
-        \\          offset(*h, *h.magic), offset(*h, *h.version), offset(*h, *h.length));
+        \\    print("Header size={} magic={} version={} length={}\n", size_of(Header),
+        \\          offset(&h, &h.magic), offset(&h, &h.version), offset(&h, &h.length));
         \\    h.magic = 1; h.version = 2; h.length = 3;
-        \\    print("read back: % % %\n", h.magic, h.version, h.length);
-        \\    print("Inner=% Nested=%\n", size_of(Inner), size_of(Nested));
+        \\    print("read back: {} {} {}\n", h.magic, h.version, h.length);
+        \\    print("Inner={} Nested={}\n", size_of(Inner), size_of(Nested));
         \\}
     );
     code_block(29, "text", #string
@@ -456,14 +463,15 @@ render_section_38 :: () {
     subheading(31, "Reflection reports declaration order");
     code_block(32, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Plain :: struct { a: u8; b: u64; c: u8; }
         \\
         \\main :: () {
-        \\    print("fields: % % %\n",
+        \\    print("fields: {} {} {}\n",
         \\          field_name(Plain, 0), field_name(Plain, 1), field_name(Plain, 2));
-        \\    print("count=%\n", field_count(Plain));
-        \\    print("types: % %\n",
+        \\    print("count={}\n", field_count(Plain));
+        \\    print("types: {} {}\n",
         \\          type_name(field_type(Plain, 0)), type_name(field_type(Plain, 1)));
         \\}
     );
@@ -482,22 +490,44 @@ render_section_38 :: () {
         \\`#comptime`.
     );
     code_block(35, "glosso", #string
+        \\#import "Format";
         \\#import "Io";
+        \\#import "Meta";
+        \\#import "String_Builder";
         \\
         \\Plain :: struct { a: u8; b: u64; c: u8; }
         \\
-        \\names :: (T: type, i: s64) -> string {
-        \\    if i >= field_count(T) return "";
-        \\    return str_cat(str_cat(field_name(T, i), " "), names(T, i + 1));
+        \\names :: (#comptime T: type, #comptime i: ssize) -> string {
+        \\    #if i >= field_count(T) { return ""; } else {
+        \\        return tprint("{} {}", field_name(T, i), names(T, i + 1));
+        \\    }
         \\}
         \\
         \\PLAIN_FIELDS :: #comptime names(Plain, 0);
         \\
-        \\main :: () { print("%\n", PLAIN_FIELDS); }
+        \\main :: () { print("{}\n", PLAIN_FIELDS); }
     );
     code_block(36, "text", #string
         \\a b c
     );
+    subheading(37, "Explicit record alignment");
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Aligned :: struct #align(32) { value: s32; }
+        \\Packed :: struct #packed #align(2) { tag: u8; value: s32; }
+        \\
+        \\main :: () {
+        \\    print("Aligned size={} alignment={}\n", size_of(Aligned), type_info(Aligned).alignment);
+        \\    print("Packed size={} alignment={}\n", size_of(Packed), type_info(Packed).alignment);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\Aligned size=32 alignment=32
+        \\Packed size=6 alignment=2
+    );
+
 }
 
 render_section_39 :: () {
@@ -519,14 +549,15 @@ render_section_39 :: () {
     );
     code_block(7, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Base    :: struct { x: s64 = 1; y: s64 = 2; }
         \\Derived :: struct { using base: Base; z: s64 = 3; }
         \\
         \\main :: () {
         \\    d: Derived;
-        \\    print("through the field: % % %\n", d.base.x, d.base.y, d.z);
-        \\    print("size=% field_count=% names=% %\n", size_of(Derived),
+        \\    print("through the field: {} {} {}\n", d.base.x, d.base.y, d.z);
+        \\    print("size={} field_count={} names={} {}\n", size_of(Derived),
         \\          field_count(Derived), field_name(Derived, 0), field_name(Derived, 1));
         \\}
     );
@@ -555,13 +586,13 @@ render_section_39 :: () {
         \\sum :: (using b: Base) -> s64 { return x + y; }
         \\
         \\main :: () {
-        \\    print("parameter: %\n", sum(Base.{ 4, 5 }));
+        \\    print("parameter: {}\n", sum(Base.{ 4, 5 }));
         \\
         \\    local := Base.{ 10, 20 };
         \\    using local;
-        \\    print("promoted:  % %\n", x, y);
+        \\    print("promoted:  {} {}\n", x, y);
         \\    local.x = 99;
-        \\    print("re-read:   %\n", x);
+        \\    print("re-read:   {}\n", x);
         \\}
     );
     code_block(13, "text", #string
@@ -583,7 +614,7 @@ render_section_39 :: () {
     );
     paragraph(16, #string,oneline
         \\The operand must be a struct value. A pointer is
-        \\`error: using expects a struct, got *Base`, and there is no automatic
+        \\`error: using expects a struct, got *const Base`, and there is no automatic
         \\dereference. It must also be a plain name, not a path: `using d.base;` stops
         \\at the identifier and the remaining `.base` is read as a variant shorthand,
         \\giving `error: enum shorthand needs an enum context`.
@@ -606,6 +637,7 @@ render_section_39 :: () {
     );
     code_block(20, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Phantom :: struct { #empty: $T; raw: s64; }
         \\Marker  :: struct { #empty: u8, u16; v: s64 = 9; }
@@ -614,16 +646,16 @@ render_section_39 :: () {
         \\    p: Phantom(f64) = .{ .raw = 5 };
         \\    q: Phantom(s8)  = .{ .raw = 6 };
         \\    m: Marker;
-        \\    print("phantom size=% fields=% raw=% name=%\n", size_of(type_of(p)),
+        \\    print("phantom size={} fields={} raw={} name={}\n", size_of(type_of(p)),
         \\          field_count(type_of(p)), p.raw, type_name(type_of(p)));
-        \\    print("other instance name=%\n", type_name(type_of(q)));
-        \\    print("marker size=% fields=% first=% v=%\n", size_of(Marker),
+        \\    print("other instance name={}\n", type_name(type_of(q)));
+        \\    print("marker size={} fields={} first={} v={}\n", size_of(Marker),
         \\          field_count(Marker), field_name(Marker, 0), m.v);
         \\}
     );
     code_block(21, "text", #string
-        \\phantom size=8 fields=1 raw=5 name=Phantom_f64
-        \\other instance name=Phantom_s8
+        \\phantom size=8 fields=1 raw=5 name=Phantom(f64)
+        \\other instance name=Phantom(s8)
         \\marker size=8 fields=1 first=v v=9
     );
     paragraph(22, #string,oneline
@@ -631,7 +663,7 @@ render_section_39 :: () {
         \\still walks the annotation of an `#empty` field, so `#empty: $T;` makes the
         \\struct generic over a type it does not store. `Phantom(f64)` and
         \\`Phantom(s8)` are then distinct types of eight bytes each, and assigning one
-        \\to the other is `error: got Phantom_f64, expected Phantom_s8`. The standard
+        \\to the other is `error: got Phantom(f64), expected Phantom(s8)`. The standard
         \\library uses this for containers that keep their elements behind an
         \\indirection, such as `LinkedList` in `std/Container/LinkedList.glo` and
         \\`RangeFull` in the prelude.
@@ -662,10 +694,10 @@ render_section_39 :: () {
         \\    n: s64 = i;
         \\    m: s64;
         \\    m = i;
-        \\    print("declaration: %\n", n);
-        \\    print("assignment:  %\n", m);
-        \\    print("argument:    %\n", double(i));
-        \\    print("return:      %\n", give(i));
+        \\    print("declaration: {}\n", n);
+        \\    print("assignment:  {}\n", m);
+        \\    print("argument:    {}\n", double(i));
+        \\    print("return:      {}\n", give(i));
         \\}
     );
     code_block(27, "text", #string
@@ -677,49 +709,62 @@ render_section_39 :: () {
     paragraph(28, #string,oneline
         \\The conversion is outward only. There is no route from the field's type back
         \\into the struct: with `f :: (i: Id)`, the call `f(5)` is
-        \\`error: arg type int != Id in call f`. The struct is still a distinct type;
+        \\`error: arg type ssize != Id in call f`. The struct is still a distinct type;
         \\`#as` only widens where it may be spent.
     );
     paragraph(29, #string,oneline
         \\It fires only where a concrete expected type already exists, which is the
         \\same set of positions the inferred literal `.{ ... }` works in. Operator
         \\resolution is not one of them: with the `Id` above, `i + 1` is
-        \\`error: no operator '+' for Id, int`. Operators are chosen by the operand
+        \\`error: no operator '+' for Id, ssize`. Operators are chosen by the operand
         \\types, before any coercion is attempted.
     );
     paragraph(30, #string,oneline
         \\The conversion is one step deep. If `Outer` has `#as i: Inner` and `Inner`
-        \\has `#as v: s64`, then `n: s64 = o;` is `error: got Outer, expected int`;
+        \\has `#as v: s64`, then `n: s64 = o;` is `error: got Outer, expected s64`;
         \\the compiler tests the marked field's type against the expectation and does
         \\not recur.
     );
     paragraph(31, #string,oneline
-        \\Two further details. Writing `#as` on more than one field is accepted and
-        \\the last marker wins, since the record keeps a single field name. `#as` and
+        \\A struct can mark only one field with `#as`; a second marker is rejected
+        \\and the diagnostic names the existing conversion field. `#as` and
         \\`using` combine on one field in either order, `#as using inner: Base;` or
         \\`using #as inner: Base;`, though the `using` half still does nothing. `#as`
         \\is a struct-only directive: on a union variant it is
         \\`error: unexpected token 'as'`.
     );
     paragraph(32, #string,oneline
-        \\`Path` in `std/File_System/Path.glo` is the standard library's use of it.
-        \\The struct carries a style and an allocator alongside the text, and marks
-        \\the text as the conversion field, so a `Path` can be handed to any procedure
-        \\that takes a `string`.
+        \\`Path` in `std/File_System/Path.glo` is deliberately not an example of
+        \\`#as` any more. It owns a root anchor and separator-free components,
+        \\has no `.value` text field, and does not convert implicitly to `string`.
+        \\Path-taking APIs instead accept a generic `P` constrained by
+        \\`AsView(P, Path_View)`. The standard library supplies that zero-copy
+        \\view for `string`, pointers to `Path`, and `Path_View`. An owning
+        \\path's `as_view()` method borrows its components without moving it.
     );
     code_block(33, "glosso", #string
         \\#import "Io";
-        \\#import "File_System";
+        \\#import "File_System/Path";
         \\
-        \\length_of :: (s: string) -> s64 { return s.count; }
+        \\is_component_path :: (value: $P) -> bool
+        \\     where AsView(P, Path_View) {
+        \\    return path_like_view(value).kind == Path_View_Kind.Components;
+        \\}
         \\
         \\main :: () {
-        \\    p: Path = .{ .value = "src/main.glo" };
-        \\    print("as string: % (%)\n", length_of(p), p.value);
+        \\    path := Path.from_string("src/./manual/../main.glo", Path_Style.Posix);
+        \\    // Path is a managed owner; scope exit releases its storage.
+        \\
+        \\    text := path.to_string(Path_Style.Posix, context.temp_allocator);
+        \\    print("path={} components={}\n", text, path.components.count);
+        \\    print("views: text={} components={}\n",
+        \\        path_like_view("src/main.glo").kind == Path_View_Kind.Text,
+        \\        is_component_path(path.as_view()));
         \\}
     );
     code_block(34, "text", #string
-        \\as string: 12 (src/main.glo)
+        \\path=src/main.glo components=2
+        \\views: text=1 components=1
     );
 }
 
@@ -740,6 +785,7 @@ render_section_40 :: () {
     table_row(5, "`enum_flags u8 { ... }`   |   A flag enum; the backing type stays mandatory.");
     code_block(6, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Outer :: struct {
         \\    inner: struct { a: s64; b: s64; };
@@ -756,17 +802,17 @@ render_section_40 :: () {
         \\    o.kind  = .Two;
         \\    o.perm  = .Write;
         \\    o.tag.L = 5;
-        \\    print("values: % % % %\n", o.inner.a, o.inner.b, o.kind, o.perm);
-        \\    print("inner name: %\n", type_name(type_of(o.inner)));
-        \\    print("kind name:  %\n", type_name(type_of(o.kind)));
-        \\    print("perm name:  %\n", type_name(type_of(o.perm)));
-        \\    print("tag name:   %\n", type_name(type_of(o.tag)));
+        \\    print("values: {} {} {} {}\n", o.inner.a, o.inner.b, o.kind, o.perm);
+        \\    print("inner name: {}\n", type_name(type_of(o.inner)));
+        \\    print("kind name:  {}\n", type_name(type_of(o.kind)));
+        \\    print("perm name:  {}\n", type_name(type_of(o.perm)));
+        \\    print("tag name:   {}\n", type_name(type_of(o.tag)));
         \\    if o.tag == {
-        \\        case .L(v); print("tag L %\n", v);
-        \\        case .R(b); print("tag R %\n", b);
+        \\        case .L(v); print("tag L {}\n", v);
+        \\        case .R(b); print("tag R {}\n", b);
         \\    }
         \\    standalone: Outer.inner = .{ 3, 4 };
-        \\    print("named annotation: % %\n", sum(o.inner), sum(standalone));
+        \\    print("named annotation: {} {}\n", sum(o.inner), sum(standalone));
         \\}
     );
     code_block(7, "text", #string
@@ -790,7 +836,7 @@ render_section_40 :: () {
         \\The dotted spelling is annotation syntax only. In expression position the
         \\dot is member access, so `size_of(Outer.inner)` is
         \\`error: member of non-struct`. Where a type value is needed, take it from a
-        \\binding with `type_of`.
+        \\binding with `type_of(value)`.
     );
     subheading(10, "Nesting and composition");
     paragraph(11, #string,oneline
@@ -802,14 +848,15 @@ render_section_40 :: () {
     );
     code_block(12, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Outer :: struct {
         \\    inner: struct {
         \\        deep: struct { n: s64; };
         \\        m: s64;
         \\    };
-        \\    items: []struct { v: s64; };
-        \\    slot:  ?*struct { w: s64; };
+        \\    items: []const struct { v: s64; };
+        \\    slot:  ?*const struct { w: s64; };
         \\}
         \\
         \\Msg :: union {
@@ -820,12 +867,12 @@ render_section_40 :: () {
         \\main :: () {
         \\    o: Outer;
         \\    o.inner.deep.n = 3;
-        \\    print("deep=% name=%\n", o.inner.deep.n, type_name(type_of(o.inner.deep)));
-        \\    print("items elem name=%\n", type_name(type_of(o.items)));
-        \\    print("slot name=%\n", type_name(type_of(o.slot)));
+        \\    print("deep={} name={}\n", o.inner.deep.n, type_name(type_of(o.inner.deep)));
+        \\    print("items elem name={}\n", type_name(type_of(o.items)));
+        \\    print("slot name={}\n", type_name(type_of(o.slot)));
         \\    m := Msg.Header(.{ .id = 1, .len = 2 });
         \\    if m == {
-        \\        case .Header(h); print("header % %  name=%\n", h.id, h.len,
+        \\        case .Header(h); print("header {} {}  name={}\n", h.id, h.len,
         \\                               type_name(type_of(h)));
         \\        case .Eof;       print("eof\n");
         \\    }
@@ -833,16 +880,16 @@ render_section_40 :: () {
     );
     code_block(13, "text", #string
         \\deep=3 name=Outer.inner.deep
-        \\items elem name=glo_Arr_Outer.items
-        \\slot name=Option__Outer_slot
+        \\items elem name=[]const Outer.items
+        \\slot name=?*const Outer.slot
         \\header 1 2  name=Msg.Header
     );
     paragraph(14, #string,oneline
         \\A nested inline aggregate composes its name from the path it was reached
         \\by, giving `Outer.inner.deep`. Under a type constructor the element name is
-        \\still `Outer.items`, and the constructor's own mangled name wraps it, which
-        \\is why the view prints as `glo_Arr_Outer.items` and the option as
-        \\`Option__Outer_slot`.
+        \\still `Outer.items`, and the constructor's own spelling wraps it, which is
+        \\why the view prints as `[]const Outer.items` and the option as
+        \\`?*const Outer.slot`.
     );
     note(15, #string,oneline
         \\One inline aggregate per field. The name is derived from the field alone, so
@@ -860,11 +907,12 @@ render_section_40 :: () {
     );
     code_block(18, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Outer :: struct {
         \\    head:  struct #packed { a: u8; b: u64; };
         \\    body:  struct #c_call { a: u8; b: u64; };
-        \\    shown: struct #derive(Show) { n: s64; };
+        \\    shown: struct { n: s64; };
         \\    small: enum u8 { A; B; };
         \\    bits:  union #raw { i: s64; f: f64; };
         \\}
@@ -874,17 +922,17 @@ render_section_40 :: () {
         \\    o.shown.n = 4;
         \\    o.small = .B;
         \\    o.bits.f = 1.0;
-        \\    print("head=% body=% small=% bits=%\n", size_of(type_of(o.head)),
+        \\    print("head={} body={} small={} bits={}\n", size_of(type_of(o.head)),
         \\          size_of(type_of(o.body)), size_of(type_of(o.small)),
         \\          size_of(type_of(o.bits)));
-        \\    print("shown=%\n", o.shown);
-        \\    print("raw read: %\n", o.bits.i);
-        \\    print("Outer=%\n", size_of(Outer));
+        \\    print("shown.n={}\n", o.shown.n);
+        \\    print("raw read: {}\n", o.bits.i);
+        \\    print("Outer={}\n", size_of(Outer));
         \\}
     );
     code_block(19, "text", #string
         \\head=9 body=16 small=1 bits=8
-        \\shown={4}
+        \\shown.n=4
         \\raw read: 4607182418800017408
         \\Outer=48
     );
@@ -929,7 +977,7 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    t: (s64, string, bool) = .(7, "hi", true);
-        \\    print("% % %\n", t.0, t.1, t.2);
+        \\    print("{} {} {}\n", t.0, t.1, t.2);
         \\}
     );
     code_block(3, "text", #string
@@ -963,9 +1011,9 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    q, r := divmod(17, 5);
-        \\    print("% remainder %\n", q, r);
+        \\    print("{} remainder {}\n", q, r);
         \\    _, only := divmod(9, 2);
-        \\    print("%\n", only);
+        \\    print("{}\n", only);
         \\}
     );
     code_block(14, "text", #string
@@ -1005,7 +1053,7 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    t: (u8, s64, u8);
-        \\    print("struct % tuple %\n", size_of(Record), size_of(type_of(t)));
+        \\    print("struct {} tuple {}\n", size_of(Record), size_of(type_of(t)));
         \\}
     );
     code_block(22, "text", #string
@@ -1030,22 +1078,22 @@ render_section_41 :: () {
         \\
         \\main :: () {
         \\    e := .();
-        \\    print("% %\n", type_name(type_of(e)), size_of(type_of(e)));
+        \\    print("{} {}\n", type_name(type_of(e)), size_of(type_of(e)));
         \\}
     );
     code_block(27, "text", #string
         \\void 0
     );
     bullet(28, #string,oneline
-        \\A `void` element inside a larger tuple is rejected:
-        \\`error: a zero-sized 'void' member inside a struct, tuple, or array is not supported yet; remove the member, or wrap it in a single-field struct`.
-        \\Erasing it would renumber the elements after it.
+        \\A `void` element is allowed inside a larger tuple. It occupies no
+        \\storage but remains an element for `.count` and indexing, so
+        \\`pair: (void, s64) = .(.(), 7);` has two elements and `pair.1` is 7.
     );
     subheading(29, "Current limits");
     bullet(30, #string,oneline
-        \\Tuples have no `Show` instance. Passing one to `print` is rejected
-        \\with error: variadic arg type `tuple` does not implement `Show` in
-        \\call `print`. Print the elements individually.
+        \\Tuples have no `Show` instance, so the default `{}` has no matching
+        \\`Formatter` for a tuple. Print the elements individually or provide
+        \\a custom rendering.
     );
     bullet(31, #string,oneline
         \\An element cannot be assigned. On a `(s64, s64)` value, `t.0 = 10;`
@@ -1054,18 +1102,30 @@ render_section_41 :: () {
         \\Build a replacement tuple instead.
     );
     bullet(32, #string,oneline
-        \\`n.0.0` does not lex: `0.0` is a float literal, and the compiler
-        \\reports `error: unexpected token '0.0'`. Bind the inner tuple to a
-        \\name first, then index it.
+        \\Nested tuple indexing composes directly: `n.0.0` means `(n.0).0`.
+        \\After a member-access dot the digits are a tuple index, so the lexer
+        \\does not combine successive indexes into a floating-point literal.
     );
     bullet(33, #string,oneline
         \\`(T)` in type position is the parenthesized type `T`, not a
         \\one-element tuple: `one: (s64) = .(5);` is
-        \\`error: got tuple, expected int`.
+        \\`error: got tuple, expected s64`.
     );
     bullet(34, #string,oneline
         \\There is no tuple pattern. `#pattern .(a, b) = t` is
         \\`error: unexpected token '('`; destructure with `a, b := t;`.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    nested := .(.(1, 2), 3);
+        \\    pair: (void, s64) = .(.(), 7);
+        \\    print("nested {}; void {}; members {}\n", nested.0.1, pair.0, pair.count);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\nested 2; void .(); members 2
     );
 }
 
@@ -1091,8 +1151,8 @@ render_section_42 :: () {
         \\Color :: enum { Red; Green :: 5; Blue; }
         \\
         \\main :: () {
-        \\    print("% % %\n", cast(s64)Color.Red, cast(s64)Color.Green, cast(s64)Color.Blue);
-        \\    print("size % count %\n", size_of(Color), enum_count(Color));
+        \\    print("{} {} {}\n", cast(s64)Color.Red, cast(s64)Color.Green, cast(s64)Color.Blue);
+        \\    print("size {} count {}\n", size_of(Color), enum_count(Color));
         \\}
     );
     code_block(3, "text", #string
@@ -1103,16 +1163,17 @@ render_section_42 :: () {
         \\Numbering starts at zero and each member takes one more than the
         \\member before it. An explicit value resets that counter, so `Blue`
         \\above is 6 and not 2. The value after `::` is a single integer literal
-        \\token, not an expression: naming a constant, `Red :: K;`, is
-        \\`error: unexpected token 'K'`, and a negative literal, `Low :: -1;`,
-        \\is `error: unexpected token '-'`. Hexadecimal literals such as `16#1`
-        \\are accepted, and two members may carry the same value.
+        \\token, optionally preceded by `-`, not an expression: naming a constant,
+        \\`Red :: K;`, is rejected. Negative values such as `Low :: -1;` require
+        \\a signed backing type. Hexadecimal literals such as `16#1` are accepted,
+        \\and two members may carry the same value.
     );
     subheading(5, "Backing type and size");
     paragraph(6, #string,oneline
         \\The backing type is written between `enum` and the brace. It fixes
-        \\the size and the alignment of the type; with no backing type an enum
-        \\is 8 bytes.
+        \\the size and the alignment of the type and must resolve to an integer
+        \\type. With no backing type an enum uses `ssize`, so its size follows
+        \\the target's native word rather than always being eight bytes.
     );
     code_block(7, "glosso", #string
         \\#import "Io";
@@ -1120,25 +1181,29 @@ render_section_42 :: () {
         \\
         \\Byte_Code :: enum u8  { Push; Pop; Halt; }
         \\Wide_Code :: enum s32 { Push; Pop; Halt; }
+        \\Signed_Code :: enum s8 { Negative :: -1; Zero; Positive; }
         \\
         \\main :: () {
-        \\    print("u8 % s32 %\n", size_of(Byte_Code), size_of(Wide_Code));
+        \\    print("u8 {} s32 {}\n", size_of(Byte_Code), size_of(Wide_Code));
+        \\    print("signed {} {} {}\n", cast(s64)Signed_Code.Negative,
+        \\        cast(s64)Signed_Code.Zero, cast(s64)Signed_Code.Positive);
         \\}
     );
     code_block(8, "text", #string
         \\u8 1 s32 4
+        \\signed -1 0 1
     );
     table_header(9, "Form   —   Meaning");
-    table_row(10, "`Name :: enum { A; B; }`   |   Default backing type, 8 bytes.");
+    table_row(10, "`Name :: enum { A; B; }`   |   Default `ssize` backing type, one native word.");
     table_row(11, "`Name :: enum u8 { A; B; }`   |   Size and alignment follow the named backing type.");
     table_row(12, "`Name :: enum_flags u32 { ... }`   |   Flag enum. The backing type is mandatory here.");
     table_row(13, "`A :: 5;` in the body   |   Explicit value; the next member continues from 6.");
     paragraph(14, #string,oneline
-        \\Neither the declared value nor a conversion is range-checked against
-        \\the backing type. `enum u8 { Red :: 300; }` compiles and `Red` reads
-        \\back as 44, and `cast(Color)9` produces 9 on a three-member enum. An
-        \\enum is a typed integer, not a proof that the integer is one of the
-        \\declared members.
+        \\Explicit variant values and automatically incremented values must fit
+        \\the backing type. `enum u8 { Red :: 300; }` is rejected, as is a member
+        \\following value 255 in a `u8` enum. A cast can still produce an integer
+        \\that is not a declared member, such as `cast(Color)9` for a three-member
+        \\enum; the type alone does not prove membership in the declared set.
     );
     subheading(15, "Naming a member");
     paragraph(16, #string,oneline
@@ -1156,12 +1221,13 @@ render_section_42 :: () {
         \\
         \\main :: () {
         \\    c: Color = .Green;
-        \\    print("annotation: %\n", cast(s64)c);
-        \\    print("argument: %\n", cast(s64)pick(.Red));
-        \\    print("comparison: %\n", c == .Green);
+        \\    print("annotation: {}\n", cast(s64)c);
+        \\    print("argument: {}\n", cast(s64)pick(.Red));
+        \\    print("comparison: {}\n", c == .Green);
         \\    if c == {
         \\        case .Green; print("case: green\n");
         \\        case .Red;   print("case: red\n");
+        \\        case .Blue;  print("case: blue\n");
         \\    }
         \\}
     );
@@ -1177,12 +1243,13 @@ render_section_42 :: () {
         \\is `error: no enum variant Color.Purple`.
     );
     bullet(20, #string,oneline
-        \\A plain `if x == { ... }` switch over an enum is not
-        \\exhaustiveness-checked; the example above compiles with `Blue`
-        \\uncovered. `if #pattern x == { ... }` is checked, and reports
-        \\`error: non-exhaustive #pattern switch` with
-        \\`note: missing case: Color.Blue`. The chapter on exhaustiveness,
-        \\guards, and reachability has the whole rule.
+        \\A plain `if x == { ... }` switch over an enum is
+        \\exhaustiveness-checked, which is why the example above lists `Blue`.
+        \\Dropping that arm is `error: non-exhaustive switch` with
+        \\`note: missing case: Color.Blue` and
+        \\`note: cover them, or add 'else' or '#partial'`; `if #partial x == {
+        \\... }` opts out. The chapter on exhaustiveness, guards, and
+        \\reachability has the whole rule.
     );
     subheading(21, "Reflection");
     paragraph(22, #string,oneline
@@ -1208,9 +1275,9 @@ render_section_42 :: () {
         \\
         \\main :: () {
         \\    c: Color = .Blue;
-        \\    print("% is %\n", name_of(c), cast(s64)c);
-        \\    print("% raw prints as %\n", enum_name(Color, 2), c);
-        \\    print("declared: % = %, % = %, % = %\n",
+        \\    print("{} is {}\n", name_of(c), cast(s64)c);
+        \\    print("{} raw prints as {}\n", enum_name(Color, 2), c);
+        \\    print("declared: {} = {}, {} = {}, {} = {}\n",
         \\          enum_name(Color, 0), enum_value(Color, 0),
         \\          enum_name(Color, 1), enum_value(Color, 1),
         \\          enum_name(Color, 2), enum_value(Color, 2));
@@ -1222,7 +1289,7 @@ render_section_42 :: () {
         \\declared: Red = 0, Green = 5, Blue = 6
     );
     note(25, #string,oneline
-        \\The `Show` instance for enums is the integer one, so `print("%", c)`
+        \\The `Show` instance for enums is the integer one, so `print("{}", c)`
         \\prints the numeric value and never the member name. Printing a name
         \\means either a switch, as in `name_of` above, or `enum_name` with a
         \\literal index.
@@ -1247,9 +1314,9 @@ render_section_42 :: () {
         \\Perm :: enum_flags u32 { Read; Write; Exec; }
         \\
         \\main :: () {
-        \\    print("Read=% Write=% Exec=%\n", cast(u32)Perm.Read, cast(u32)Perm.Write, cast(u32)Perm.Exec);
+        \\    print("Read={} Write={} Exec={}\n", cast(u32)Perm.Read, cast(u32)Perm.Write, cast(u32)Perm.Exec);
         \\    p := Perm.Read | Perm.Exec;
-        \\    print("Read|Exec raw=% holds Write=%\n", cast(u32)p, (p & Perm.Write) == Perm.Write);
+        \\    print("Read|Exec raw={} holds Write={}\n", cast(u32)p, (p & Perm.Write) == Perm.Write);
         \\}
     );
     code_block(30, "text", #string
@@ -1275,12 +1342,12 @@ render_section_42 :: () {
         \\
         \\main :: () {
         \\    p := Perm.Read | Perm.Exec;
-        \\    print("raw=%\n", cast(u32)p);
-        \\    print("read=% write=% exec=%\n", holds(p, Perm.Read), holds(p, Perm.Write), holds(p, Perm.Exec));
+        \\    print("raw={}\n", cast(u32)p);
+        \\    print("read={} write={} exec={}\n", holds(p, Perm.Read), holds(p, Perm.Write), holds(p, Perm.Exec));
         \\    p = p | Perm.Write;
-        \\    print("after add write: raw=%\n", cast(u32)p);
+        \\    print("after add write: raw={}\n", cast(u32)p);
         \\    p = p ^ Perm.Exec;
-        \\    print("after clear exec: raw=%\n", cast(u32)p);
+        \\    print("after clear exec: raw={}\n", cast(u32)p);
         \\}
     );
     code_block(33, "text", #string
@@ -1302,7 +1369,7 @@ render_section_42 :: () {
     table_row(39, "`~a`   |   Complement over the backing type's width.");
     bullet(40, #string,oneline
         \\Both operands must be the same enum type. `Perm.Read | 4` is
-        \\`error: no operator '|' for Perm, int`; convert the enum with `cast`
+        \\`error: no operator '|' for Perm, ssize`; convert the enum with `cast`
         \\if raw bits are wanted.
     );
     bullet(41, #string,oneline
@@ -1351,7 +1418,7 @@ render_section_43 :: () {
         \\
         \\main :: () {
         \\    s := Shape.Circle(5);
-        \\    print("% %\n", area(s), size_of(Shape));
+        \\    print("{} {}\n", area(s), size_of(Shape));
         \\}
     );
     code_block(2, "text", #string
@@ -1361,18 +1428,21 @@ render_section_43 :: () {
         \\Variant names are capitalised by convention and nothing enforces it.
         \\A payload is never read by writing `s.Circle`; the only way in is a
         \\pattern capture, which the chapter on reading a union payload covers
-        \\in full. Unlike an enum, a union subject makes a plain
+        \\in full. Like an enum, a union subject makes a plain
         \\`if x == { ... }` switch exhaustiveness-checked, so a missing arm is
-        \\`error: switch is exhaustive by default; add else or #partial`; the
-        \\chapter on exhaustiveness, guards, and reachability has the details.
+        \\`error: non-exhaustive switch` with one `note: missing case:` line per
+        \\uncovered variant; the chapter on exhaustiveness, guards, and
+        \\reachability has the details.
     );
     subheading(4, "The tag, the size, and the alignment");
     paragraph(5, #string,oneline
-        \\A tagged union is laid out as an 8-byte tag followed by the largest
+        \\A tagged union is laid out as a target-width `ssize` tag followed by the largest
         \\payload, and the record takes the larger of the tag's alignment and
         \\the largest payload alignment. `void` variants contribute nothing to
-        \\either figure. The tag is 8 bytes whatever the variant count, so the
-        \\two-variant `union { A: u8; B: u8; }` is 16 bytes.
+        \\either figure. The tag is independent of the variant count: it is
+        \\eight bytes on a 64-bit target and four on a 32-bit target. The
+        \\two-variant `union { A: u8; B: u8; }` is therefore 16 bytes on
+        \\x86-64 Windows, but 8 bytes on `x86-linux-musl` or `wasm32`.
     );
     code_block(6, "glosso", #string
         \\#import "Io";
@@ -1383,9 +1453,9 @@ render_section_43 :: () {
         \\Wide :: union { A: Simd(f32, 4); B: u8; }
         \\
         \\main :: () {
-        \\    print("Tiny % / %\n", size_of(Tiny), type_info(Tiny).alignment);
-        \\    print("Big  % / %\n", size_of(Big),  type_info(Big).alignment);
-        \\    print("Wide % / %\n", size_of(Wide), type_info(Wide).alignment);
+        \\    print("Tiny {} / {}\n", size_of(Tiny), type_info(Tiny).alignment);
+        \\    print("Big  {} / {}\n", size_of(Big),  type_info(Big).alignment);
+        \\    print("Wide {} / {}\n", size_of(Wide), type_info(Wide).alignment);
         \\}
     );
     code_block(7, "text", #string
@@ -1393,14 +1463,23 @@ render_section_43 :: () {
         \\Big  32 / 8
         \\Wide 32 / 16
     );
+    note(42, #string,oneline
+        \\That output is for x86-64 Windows. On `x86-linux-musl` and
+        \\`wasm32-freestanding`, `Tiny` is 8 / 4 and `Big` is 28 / 4.
+        \\The payload offset is the tag size rounded up to the payload
+        \\alignment, not an unconditional eight-byte prefix. A union holding
+        \\`string` or `s64` has offset 4 on `x86-linux-musl` but offset 8 on
+        \\`wasm32`, whose `s64` alignment is 8. Compile-time execution uses the
+        \\output target's layout too.
+    );
     bullet(8, #string,oneline
         \\`Wide` shows the alignment rule: a 16-byte SIMD payload raises the
         \\record's alignment to 16, so the payload starts at offset 16 and the
         \\whole union is 32 bytes rather than 24.
     );
     bullet(9, #string,oneline
-        \\A union declared in a program never gets a niche. `union { A: void; B: *u8; }`
-        \\is 16 bytes even though the pointer has a spare null representation.
+        \\A union declared in a program never gets a niche. `union { A: void; B: *const u8; }`
+        \\is 16 bytes on x86-64 even though the pointer has a spare null representation.
         \\Only the compiler's own `?T` and `E!T` are laid out that way; see the
         \\chapters on the option and result types.
     );
@@ -1437,7 +1516,7 @@ render_section_43 :: () {
         \\    d: Shape;  d.Empty;            // bare variant statement
         \\    e := Shape.Empty();            // qualified void variant, parentheses required
         \\    f: Shape = .Empty;             // dotted void variant, no parentheses
-        \\    print("% % % % % %\n", tag_of(a), tag_of(b), tag_of(c), tag_of(d), tag_of(e), tag_of(f));
+        \\    print("{} {} {} {} {} {}\n", tag_of(a), tag_of(b), tag_of(c), tag_of(d), tag_of(e), tag_of(f));
         \\}
     );
     code_block(15, "text", #string
@@ -1472,7 +1551,7 @@ render_section_43 :: () {
     );
     bullet(26, #string,oneline
         \\A `void` variant has no payload to assign: `s.Empty = 1;` is
-        \\`error: assign int to void`. Use the bare statement `s.Empty;`.
+        \\`error: assign ssize to void`. Use the bare statement `s.Empty;`.
     );
     subheading(27, "Generic unions");
     paragraph(28, #string,oneline
@@ -1494,17 +1573,17 @@ render_section_43 :: () {
         \\    t: Tree(s64) = .Leaf(4);
         \\    n := 0;
         \\    if t == { case .Leaf(v); n = v; case .Pair(p); n = -1; }
-        \\    print("% %\n", type_name(type_of(t)), n);
+        \\    print("{} {}\n", type_name(type_of(t)), n);
         \\}
     );
     code_block(30, "text", #string
-        \\Tree_int 4
+        \\Tree(s64) 4
     );
     bullet(31, #string,oneline
         \\A parameter is introduced once with `$` and spelled as plain `T`
         \\everywhere after that, including in the union's own name. The
-        \\instantiated type is named by mangling the arguments onto the
-        \\declaration name, which is why `Tree(s64)` reports as `Tree_int`.
+        \\instantiated type is displayed with its arguments after the
+        \\declaration name, so `type_name(Tree(s64))` returns `Tree(s64)`.
     );
     subheading(32, "Variant reflection");
     paragraph(33, #string,oneline
@@ -1512,7 +1591,7 @@ render_section_43 :: () {
         \\order.
     );
     table_header(34, "Call   —   Result");
-    table_row(35, "`variant_count(T)`   |   Number of variants, as an `s64`.");
+    table_row(35, "`variant_count(T)`   |   Number of variants, as an `ssize`.");
     table_row(36, "`variant_name(T, i)`   |   The variant's name, as a `string`.");
     table_row(37, "`variant_type(T, i)`   |   The payload type; `void` for a payload-less variant.");
     code_block(38, "glosso", #string
@@ -1524,15 +1603,15 @@ render_section_43 :: () {
         \\Shape :: union { Circle: s64; Box: Vec; Empty: void; }
         \\
         \\main :: () {
-        \\    print("count %\n", variant_count(Shape));
-        \\    print("0: % %\n", variant_name(Shape, 0), type_name(variant_type(Shape, 0)));
-        \\    print("1: % %\n", variant_name(Shape, 1), type_name(variant_type(Shape, 1)));
-        \\    print("2: % %\n", variant_name(Shape, 2), type_name(variant_type(Shape, 2)));
+        \\    print("count {}\n", variant_count(Shape));
+        \\    print("0: {} {}\n", variant_name(Shape, 0), type_name(variant_type(Shape, 0)));
+        \\    print("1: {} {}\n", variant_name(Shape, 1), type_name(variant_type(Shape, 1)));
+        \\    print("2: {} {}\n", variant_name(Shape, 2), type_name(variant_type(Shape, 2)));
         \\}
     );
     code_block(39, "text", #string
         \\count 3
-        \\0: Circle int
+        \\0: Circle s64
         \\1: Box Vec
         \\2: Empty void
     );
@@ -1561,7 +1640,7 @@ render_section_44 :: () {
         \\
         \\main :: () {
         \\    s := Shape.Circle(5);
-        \\    print("%\n", s.Circle);
+        \\    print("{}\n", s.Circle);
         \\}
     );
     code_block(2, "text", #string
@@ -1607,14 +1686,14 @@ render_section_44 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% % %\n", area(Shape.Circle(5)), is_unit(Shape.Circle(1)), radius(Shape.Box(9)));
+        \\    print("{} {} {}\n", area(Shape.Circle(5)), is_unit(Shape.Circle(1)), radius(Shape.Box(9)));
         \\}
     );
     code_block(7, "text", #string
         \\75 1 -1
     );
     table_header(8, "Reader   —   Shape");
-    table_row(9, "Switch arm   |   `case .Circle(r);` inside `if s == { ... }`, or the `if #pattern s == { ... }` and `ifx` forms.");
+    table_row(9, "Switch arm   |   `case .Circle(r);` inside `if s == { ... }` or `ifx`; adding `#pattern` before the subject is optional.");
     table_row(10, "Pattern test   |   `if #pattern .Circle(r) = s`, binding `r` for the branch taken.");
     table_row(11, "Bind or diverge   |   `#pattern .Circle(r) := s else { ... };`, binding `r` for the rest of the block.");
     bullet(12, #string,oneline
@@ -1633,7 +1712,8 @@ render_section_44 :: () {
         \\The `else` of a `:=` binding must not fall through. Ending it without
         \\a jump is
         \\`error: the 'else' of a '#pattern ... :=' binding must not return normally`
-        \\with `note: it has to be #noreturn - end it with 'return', 'break', 'continue', or a call to a #noreturn function`.
+        \\The failure path must end with `return`, `break`, `continue`, or a call
+        \\that returns `#Never`.
     );
     paragraph(15, #string,oneline
         \\The rule is a property of tagged unions, not of user declarations, so
@@ -1661,13 +1741,13 @@ render_section_44 :: () {
         \\main :: () {
         \\    s: Shape;
         \\    s.Circle = 7;        // write: selects the variant and stores the payload
-        \\    print("%\n", tag_of(s));
+        \\    print("{}\n", tag_of(s));
         \\    s.Empty;             // bare statement: stores the tag
-        \\    print("%\n", tag_of(s));
+        \\    print("{}\n", tag_of(s));
         \\
         \\    w: Word;
         \\    w.i = 1;
-        \\    print("% %\n", w.i, w.bytes[0]);   // raw union: reads are unrestricted
+        \\    print("{} {}\n", w.i, w.bytes[0]);   // raw union: reads are unrestricted
         \\}
     );
     code_block(19, "text", #string
@@ -1718,8 +1798,8 @@ render_section_44 :: () {
         \\#disable(allow_union_unwrap);
         \\
         \\main :: () {
-        \\    print("%\n", peek(Shape.Circle(5)));
-        \\    print("wrong tag read: %\n", peek(Shape.Box(9)));
+        \\    print("{}\n", peek(Shape.Circle(5)));
+        \\    print("wrong tag read: {}\n", peek(Shape.Box(9)));
         \\}
     );
     paragraph(28, #string,oneline
@@ -1727,7 +1807,8 @@ render_section_44 :: () {
         \\`-O0` and `-O1` the read lowers to a tag test; the program above
         \\prints `5`, then prints the source position of the read followed by
         \\`union access: expected .Circle, but the value holds one of .Circle | .Box | .Empty`,
-        \\and aborts with exit status 134.
+        \\and aborts. Hosted Windows and Linux x86-64 use exit status 134; WASI
+        \\uses 125.
     );
     paragraph(29, #string,oneline
         \\At `-O2` and above the check and its message are omitted. The same
@@ -1769,7 +1850,7 @@ render_section_44 :: () {
         \\A :: Shape.Circle(5);
         \\
         \\#enable(allow_union_unwrap);
-        \\main :: () { print("%\n", A.Box); }
+        \\main :: () { print("{}\n", A.Box); }
         \\#disable(allow_union_unwrap);
     );
     code_block(37, "text", #string
@@ -1793,7 +1874,7 @@ render_section_45 :: () {
     );
     paragraph(1, #string,oneline
         \\The instance exists for `?`. When `?` breaks out of a function whose
-        \\carrier residual differs from the operand's, the compiler inserts a
+        \\carrier residual differs from the operand's, the inherited operator makes a
         \\`propagate` call between the two residual types, and the Prelude
         \\lifts a `Propagate` between two error types to a `Propagate` between
         \\the matching `Result_Residual` types. `#from` is therefore what lets
@@ -1818,7 +1899,7 @@ render_section_45 :: () {
         \\variant. The union above generates the equivalent of this, twice:
     );
     code_block(4, "glosso", #string
-        \\(Disk_Error, App_Error) :: instance Propagate {
+        \\(Disk_Error, App_Error) ::: instance Propagate {
         \\    propagate :: (#empty: App_Error, value: Disk_Error) -> App_Error {
         \\        out: App_Error;
         \\        out.disk = value;
@@ -1874,9 +1955,9 @@ render_section_45 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("% %\n", describe(load(true)), describe(load(false)));
+        \\    print("{} {}\n", describe(load(true)), describe(load(false)));
         \\    widened := propagate(App_Error, Disk_Error.{ .code = 9 });
-        \\    print("%\n", describe((App_Error!s64).Err(widened)));
+        \\    print("{}\n", describe((App_Error!s64).Err(widened)));
         \\}
     );
     code_block(8, "text", #string
@@ -1898,17 +1979,12 @@ render_section_45 :: () {
     );
     subheading(11, "Without the directive");
     paragraph(12, #string,oneline
-        \\Dropping `#from` from the declaration leaves the variants intact and
-        \\removes the conversion. The `?` in `load` then has nothing to convert
-        \\the residual with, and the diagnostic lists the two `Propagate`
-        \\candidates the Prelude supplies:
+        \\Dropping `#from` leaves the variants intact and removes the
+        \\conversion. The `?` in `load` then fails its residual-conversion
+        \\constraint, so no inherited operator overload accepts the call:
     );
     code_block(13, "text", #string
-        \\error: no overload 'propagate' accepts these arguments
-        \\note: constraint failed for propagate
-        \\note: possible candidates for 'propagate':
-        \\candidate: propagate :: (__empty0: Result_Residual(To), value: Result_Residual(From)) -> Result_Residual(To)
-        \\candidate: propagate :: (__empty0: To, value: From) -> To
+        \\error: no overload '?' accepts these arguments
     );
     subheading(14, "What a source type may be");
     paragraph(15, #string,oneline
@@ -1976,15 +2052,12 @@ render_section_45 :: () {
     subheading(27, "Propagation is one hop");
     paragraph(28, #string,oneline
         \\`Propagate` is not transitive. A union whose `#from` variant carries
-        \\another `#from` union gets an instance for that one step only, and a
-        \\`?` that would need both steps fails. The candidate list in the
-        \\diagnostic shows both generated instances sitting there unused:
+        \\another `#from` union gets an instance for that one step only. A
+        \\`?` that would need both conversions fails its operator constraint:
+        \\the two generated instances cannot substitute for a direct one.
     );
     code_block(29, "text", #string
-        \\error: no overload 'propagate' accepts these arguments
-        \\note: possible candidates for 'propagate':
-        \\candidate: propagate :: (__empty0: High, value: Mid) -> High
-        \\candidate: propagate :: (__empty0: Mid, value: Leaf) -> Mid
+        \\error: no overload '?' accepts these arguments
     );
     note(30, #string,oneline
         \\Chaining requires a hand-written `Propagate` instance for the pair
@@ -2010,9 +2083,9 @@ render_section_45 :: () {
         \\main :: () -> App_Error!void {
         \\    text := read_config(true)?;
         \\    n := parse(text)?;
-        \\    print("n = %\n", n);
+        \\    print("n = {}\n", n);
         \\    bad := parse("nope")?;
-        \\    print("unreachable %\n", bad);
+        \\    print("unreachable {}\n", bad);
         \\    return .Ok();
         \\}
     );
@@ -2053,17 +2126,17 @@ render_section_46 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("size=% align=%\n", size_of(Word), type_info(Word).alignment);
+        \\    print("size={} align={}\n", size_of(Word), type_info(Word).alignment);
         \\
         \\    w: Word;
         \\    w.f = 1.0;
-        \\    print("f=% i=%\n", w.f, w.i);
-        \\    print("bytes=% % % % % % % %\n",
+        \\    print("f={} i={}\n", w.f, w.i);
+        \\    print("bytes={} {} {} {} {} {} {} {}\n",
         \\        w.bytes[0], w.bytes[1], w.bytes[2], w.bytes[3],
         \\        w.bytes[4], w.bytes[5], w.bytes[6], w.bytes[7]);
         \\
         \\    q := Word.i(258);
-        \\    print("q.i=% q.bytes[0]=% q.bytes[1]=%\n", q.i, q.bytes[0], q.bytes[1]);
+        \\    print("q.i={} q.bytes[0]={} q.bytes[1]={}\n", q.i, q.bytes[0], q.bytes[1]);
         \\}
     );
     code_block(3, "text", #string
@@ -2083,18 +2156,19 @@ render_section_46 :: () {
         \\The size of a raw union is the size of its largest member, rounded up
         \\to the union's alignment; the alignment is the largest member
         \\alignment. A `void` member contributes nothing. The tagged union with
-        \\the same members costs an extra eight-byte tag and takes that tag's
+        \\the same members costs an extra target-width tag and takes that tag's
         \\alignment.
     );
     code_block(7, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Mixed  :: union #raw { a: u8; b: [3]u16; c: u32; }
         \\Tagged :: union      { a: u8; b: [3]u16; c: u32; }
         \\
         \\main :: () {
-        \\    print("raw    size=% align=%\n", size_of(Mixed), type_info(Mixed).alignment);
-        \\    print("tagged size=% align=%\n", size_of(Tagged), type_info(Tagged).alignment);
+        \\    print("raw    size={} align={}\n", size_of(Mixed), type_info(Mixed).alignment);
+        \\    print("tagged size={} align={}\n", size_of(Tagged), type_info(Tagged).alignment);
         \\}
     );
     code_block(8, "text", #string
@@ -2175,6 +2249,8 @@ render_section_46 :: () {
     );
     code_block(32, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
+        \\#import "Format";
         \\
         \\Kind :: enum u8 { As_Int; As_Float; }
         \\
@@ -2190,8 +2266,8 @@ render_section_46 :: () {
         \\
         \\render :: (c: Cell) -> string {
         \\    if c.kind == {
-        \\        case .As_Int;   return tprint("int %", c.value.i);
-        \\        case .As_Float; return tprint("float %", c.value.f);
+        \\        case .As_Int;   return tprint("int {}", c.value.i);
+        \\        case .As_Float; return tprint("float {}", c.value.f);
         \\    }
         \\    return "?";
         \\}
@@ -2205,8 +2281,8 @@ render_section_46 :: () {
         \\    b.kind = .As_Float;
         \\    b.value.f = 2.5;
         \\
-        \\    print("% / %\n", render(a), render(b));
-        \\    print("size=%\n", size_of(Cell));
+        \\    print("{} / {}\n", render(a), render(b));
+        \\    print("size={}\n", size_of(Cell));
         \\}
     );
     code_block(33, "text", #string
@@ -2248,7 +2324,7 @@ render_section_47 :: () {
     paragraph(4, #string,oneline
         \\The compiler owns the declaration for two reasons. The
         \\`#magic "option"` marker is what buys the niche layout described
-        \\below, which is the guarantee that non-null `*T` rests on. And the
+        \\below, which is the guarantee that non-null `*const T` rests on. And the
         \\parser rewrites `?T` into this name, so a program able to redeclare
         \\or shadow the union would leave the syntax pointing at nothing.
     );
@@ -2262,6 +2338,7 @@ render_section_47 :: () {
     );
     code_block(7, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\E1 :: struct { code: s64; }
         \\
@@ -2270,30 +2347,27 @@ render_section_47 :: () {
         \\    b: ??s64;
         \\    c: ?*s64;
         \\    d: ?E1!s64;
-        \\    print("?s64   = %\n", type_name(type_of(a)));
-        \\    print("??s64  = %\n", type_name(type_of(b)));
-        \\    print("?*s64  = %\n", type_name(type_of(c)));
-        \\    print("?E1!s64 = %\n", type_name(type_of(d)));
-        \\    print("size_of(?s64) = %\n", size_of(?s64));
+        \\    print("?s64   = {}\n", type_name(type_of(a)));
+        \\    print("??s64  = {}\n", type_name(type_of(b)));
+        \\    print("?*s64  = {}\n", type_name(type_of(c)));
+        \\    print("?E1!s64 = {}\n", type_name(type_of(d)));
+        \\    print("size_of(?s64) = {}\n", size_of(?s64));
         \\}
     );
     code_block(8, "text", #string
-        \\?s64   = Option_int
-        \\??s64  = Option_Option_int
-        \\?*s64  = Option__int
-        \\?E1!s64 = Result_int_Option_E1
+        \\?s64   = ?s64
+        \\??s64  = ??s64
+        \\?*s64  = ?*s64
+        \\?E1!s64 = ?E1!s64
         \\size_of(?s64) = 16
     );
     paragraph(9, #string,oneline
-        \\The mangled names show the tree directly. `Option_Option_int` is
-        \\`?(?s64)`, and `Result_int_Option_E1` is a result whose payload is
-        \\`s64` and whose error is `?E1`. Operator precedence generally is
-        \\covered in Operator Precedence and the 0-20 Scale. One further
-        \\property of `?` is that it parses where an expression is expected, so
-        \\`size_of(?s64)` works; that does not extend to type syntax in
-        \\general, since bracket types are not expressions and
-        \\`size_of(?[*]s64)` is `error: unexpected token '['`. Annotate a
-        \\variable and use `size_of(type_of(v))` for those.
+        \\Reflection preserves source spellings. `??s64` is `?(?s64)`, and
+        \\`?E1!s64` is a result whose payload is `s64` and whose error is `?E1`.
+        \\Operator precedence is covered in Operator Precedence and the 0-20 Scale.
+        \\The `?` modifier also parses where a type value is expected, so
+        \\`size_of(?s64)` and `size_of(?[*]const s64)` work. Bracket types such as
+        \\`[]const u8`, `[4]s64`, `[*]const u8`, and `[..]u8` are type values too.
     );
     subheading(10, "`.Some` and `.None`");
     paragraph(11, #string,oneline
@@ -2346,15 +2420,15 @@ render_section_47 :: () {
         \\    c := (?s64).Some(7);
         \\
         \\    if a == {
-        \\        case .Some(v); print("switch captured %\n", v);
+        \\        case .Some(v); print("switch captured {}\n", v);
         \\        case .None;    print("switch saw none\n");
         \\    }
-        \\    if #pattern .Some(v) = c print("pattern captured %\n", v);
+        \\    if #pattern .Some(v) = c print("pattern captured {}\n", v);
         \\
-        \\    print("not: % %\n", !a, !(?s64).None());
-        \\    print("propagated: % %\n",
-        \\        option_unwrap_or(doubled(1), -1), option_unwrap_or(doubled(2), -1));
-        \\    print("bind or diverge: % %\n", strict(1), strict(2));
+        \\    print("not: {} {}\n", !a, !(?s64).None());
+        \\    print("propagated: {} {}\n",
+        \\        (doubled(1)).unwrap_or(-1), (doubled(2)).unwrap_or(-1));
+        \\    print("bind or diverge: {} {}\n", strict(1), strict(2));
         \\}
     );
     code_block(21, "text", #string
@@ -2378,12 +2452,13 @@ render_section_47 :: () {
         \\tag word is dropped
         \\and the empty variant is represented by the null bit pattern. A valid
         \\pointer is never zero, so zero is a spare pattern the payload can
-        \\never occupy, and dropping the tag stays sound. `?*T` is therefore
-        \\exactly a `*T` in memory and crosses a C ABI boundary as an ordinary
+        \\never occupy, and dropping the tag stays sound. `?*const T` is therefore
+        \\exactly a `*const T` in memory and crosses a C ABI boundary as an ordinary
         \\pointer.
     );
     code_block(25, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Bits :: union #raw {
         \\    opt: ?*s64;
@@ -2395,17 +2470,17 @@ render_section_47 :: () {
         \\    b: Bits;
         \\
         \\    b.opt = .None;
-        \\    print("None bits = %\n", b.raw);
+        \\    print("None bits = {}\n", b.raw);
         \\
-        \\    b.opt = *n;
-        \\    print("Some bits = zero? %\n", b.raw == 0);
+        \\    b.opt = &n;
+        \\    print("Some bits = zero? {}\n", b.raw == 0);
         \\
-        \\    print("sizes: ?*s64=% *s64=% ?s64=% s64=%\n",
+        \\    print("sizes: ?*s64={} *s64={} ?s64={} s64={}\n",
         \\        size_of(?*s64), size_of(*s64), size_of(?s64), size_of(s64));
         \\
-        \\    p: ?*s64 = *n;
+        \\    p: ?*s64 = &n;
         \\    q: ?*s64 = .None;
-        \\    print("null test: % %\n", p == null, q == null);
+        \\    print("null test: {} {}\n", p == null, q == null);
         \\}
     );
     code_block(26, "text", #string
@@ -2420,45 +2495,47 @@ render_section_47 :: () {
         \\for a tag follows entirely from the pointer-like rule:
     );
     table_header(28, "Type   —   Size   —   Layout");
-    table_row(29, "`?*T`, `?[*]T`, `?#fn_ptr(...)`   |   8   |   Niche; `.None` is address 0.");
+    table_row(29, "`?*const T`, `?[*]const T`, `?#fn_ptr(...)`   |   8   |   Niche; `.None` is address 0.");
     table_row(30, "`?bool`, `?u8`, `?enum`   |   16   |   Tag plus payload.");
-    table_row(31, "`?[]T`   |   24   |   Tag plus a 16-byte view.");
-    table_row(32, "`?string`   |   32   |   Tag plus a 24-byte string descriptor.");
-    table_row(33, "`??*T`   |   16   |   The inner takes the niche; the outer's payload is a union.");
+    table_row(31, "`?[]const T`   |   24   |   Tag plus a 16-byte view.");
+    table_row(32, "`?string`   |   24   |   Tag plus a 16-byte counted string view.");
+    table_row(33, "`??*const T`   |   16   |   The inner takes the niche; the outer's payload is a union.");
     paragraph(34, #string,oneline
         \\A user-written union never gets a niche, however its variants are
         \\shaped: only the compiler's `#magic "option"` and `#magic "result"`
-        \\unions qualify. `union { A: void; B: *u8; }` is sixteen bytes.
+        \\unions qualify. `union { A: void; B: *const u8; }` is sixteen bytes.
     );
     subheading(35, "Widening, and `null`");
     paragraph(36, #string,oneline
-        \\`*T` widens to `?*T` implicitly, in an assignment and at a call site,
+        \\`*const T` widens to `?*const T` implicitly, in an assignment and at a call site,
         \\because the niche makes the conversion a no-op. Nothing else widens:
-        \\`o: ?s64 = 5;` is `error: got int, expected Option_int`, and the
+        \\`o: ?s64 = 5;` is `error: got ssize, expected ?s64`, and the
         \\payload must be written `.Some(5)`. In the other direction `null` no
-        \\longer reaches a plain pointer at all, and the diagnostic names `?*T`
+        \\longer reaches a plain pointer at all, and the diagnostic names `?*const T`
         \\as the replacement. Pointers themselves are covered in Pointers and
         \\in Many-Pointers and Null.
     );
     code_block(37, "text", #string
-        \\error: 'null' is not a value of *int
-        \\note: a plain pointer excludes zero - write ?*int for a pointer that may be absent
+        \\error: 'null' is not a value of *const ssize
+        \\note: a plain pointer excludes zero - write ?*const ssize for a pointer that may be absent
         \\note: its absent value is spelled '.None'
     );
     bullet(38, #string,oneline
-        \\`p == null` and `p != null` compile on a `?*T` and test for absence.
+        \\`p == null` and `p != null` compile on a `?*const T` and test for absence.
         \\On an option with a non-pointer payload there is no such operator:
-        \\`error: no operator '==' for Option_int, null`.
+        \\`error: no operator '==' for ?s64, null`.
     );
     bullet(39, #string,oneline
         \\Testing does not refine the type. After `if p != null`, `p.*` is
-        \\`error: operator '.*' expects a typed pointer, got Option__int`. A
+        \\`error: operator '.*' expects a typed pointer, got ?*const s64`. A
         \\capture is the only route to the pointer.
     );
     bullet(40, #string,oneline
-        \\A declaration cannot use `null` as an option initializer even where
-        \\the niche applies: `op: ?[*]s64 = null;` is
-        \\`error: null is not a valid Option____int`. Write `.None`.
+        \\An optional pointer accepts `null` as its absent value:
+        \\`op: ?[*]const s64 = null;` is equivalent to `.None`. Non-pointer
+        \\optionals still require their explicit `.None` or `.Some(value)` variants.
+        \\Prefer `.None` in compile-time code: the current VM cannot reliably evaluate
+        \\a null-initialized optional many-pointer.
     );
     subheading(41, "The library surface");
     paragraph(42, #string,oneline
@@ -2466,10 +2543,10 @@ render_section_47 :: () {
         \\`std/Prelude/Option.glo`, and needs no import.
     );
     table_header(43, "Declaration   —   Purpose");
-    table_row(44, "`option_none(T: type) -> ?T`   |   The empty value for an explicit type.");
-    table_row(45, "`option_some(value: $T) -> ?T`   |   Wraps a value.");
-    table_row(46, "`option_is_some(value: ?$T) -> bool`   |   Tag test; `option_is_none` is its negation.");
-    table_row(47, "`option_unwrap_or(value: ?$T, fallback: T) -> T`   |   Payload or fallback.");
+    table_row(44, "`(?T).make_none()`, `option_none(T)`   |   The empty value for an explicit type.");
+    table_row(45, "`(?T).make_some(value)`, `value.option_some()`   |   Wraps a value.");
+    table_row(46, "`value.is_some()`, `value.is_none()`   |   Inspect the current variant through a borrowed receiver.");
+    table_row(47, "`value.unwrap_or(fallback)`   |   Payload or eagerly evaluated fallback.");
     paragraph(48, #string,oneline
         \\The instances are `LogicalNot`, `Try`, a hand-written `PartialEq`
         \\(`?T` is `#magic`, so it cannot carry `#derive`), and `Show` for any
@@ -2477,11 +2554,16 @@ render_section_47 :: () {
         \\`.None` or both hold equal payloads.
     );
     note(49, #string,oneline
-        \\`Show` for `?T` is a generic instance, and `print` finds a generic
-        \\instance's formatter only when some call site has already demanded
-        \\that monomorphization. `print("%\n", o)` on its own prints
-        \\`{Option_int}`; `print("%\n", show(o))` prints `Some(3)`. The general
-        \\rule is in `Show`, `FromString`, and `print` Formatting.
+        \\The default `Formatter` instantiates `Show` for `?T` directly.
+        \\`print("{}\n", o)` therefore prints `Some(3)` for an option holding
+        \\`3`, or `None` for an empty option. An earlier direct `show` call is
+        \\unnecessary. See `Show`, `FromString`, and `print` Formatting.
+    );
+    paragraph(50, #string,oneline
+        \\Options also support `map`, `map_or`, `and_then`, `or_else`, `filter`,
+        \\`ok_or`, and `ok_or_else`. `unwrap_or_else` and the other `_else` forms
+        \\call their fallback only when needed. `unwrap_or`, `map_or`, and `ok_or`
+        \\evaluate the supplied fallback argument eagerly.
     );
 }
 
@@ -2503,7 +2585,7 @@ render_section_48 :: () {
         \\carries and the right is what `.Ok` carries, so `Disk_Error!s64` is a
         \\fallible `s64`. The union's own parameters stay payload-first, as
         \\written above; the sugar is what swaps, not the declaration, which is
-        \\why `type_name(Disk_Error!s64)` is `Result_int_Disk_Error`.
+        \\why its `Ok` payload is `s64`. `type_name` returns `Disk_Error!s64`.
     );
     paragraph(3, #string,oneline
         \\Error-first is the order that reads. A signature ends on the type its
@@ -2529,6 +2611,7 @@ render_section_48 :: () {
     );
     code_block(8, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\E1 :: struct { a: s64; }
         \\E2 :: struct { b: s64; }
@@ -2541,23 +2624,23 @@ render_section_48 :: () {
         \\    s: E1![]u8;
         \\    t: []u8!E1;
         \\
-        \\    print("E1!?*User  = %\n", type_name(type_of(p)));
-        \\    print("?E1!User   = %\n", type_name(type_of(q)));
-        \\    print("E1!E2!User = %\n", type_name(type_of(r)));
-        \\    print("E1![]u8    = %\n", type_name(type_of(s)));
-        \\    print("[]u8!E1    = %\n", type_name(type_of(t)));
+        \\    print("E1!?*User  = {}\n", type_name(type_of(p)));
+        \\    print("?E1!User   = {}\n", type_name(type_of(q)));
+        \\    print("E1!E2!User = {}\n", type_name(type_of(r)));
+        \\    print("E1![]u8    = {}\n", type_name(type_of(s)));
+        \\    print("[]u8!E1    = {}\n", type_name(type_of(t)));
         \\}
     );
     code_block(9, "text", #string
-        \\E1!?*User  = Result_Option__User_E1
-        \\?E1!User   = Result_User_Option_E1
-        \\E1!E2!User = Result_Result_User_E2_E1
-        \\E1![]u8    = Result___u8_E1
-        \\[]u8!E1    = Result_E1___u8
+        \\E1!?*User  = E1!?*User
+        \\?E1!User   = ?E1!User
+        \\E1!E2!User = E1!E2!User
+        \\E1![]u8    = E1![]u8
+        \\[]u8!E1    = []u8!E1
     );
     paragraph(10, #string,oneline
-        \\The mangled name is `Result_<payload>_<error>`, so each line can be
-        \\read straight off:
+        \\The source spellings preserve the error-first order, so each line can be
+        \\read directly:
     );
     table_header(11, "Written   —   Reading");
     table_row(12, "`E1!?*User`   |   A fallible optional pointer: error `E1`, payload `?*User`.");
@@ -2566,10 +2649,10 @@ render_section_48 :: () {
     table_row(15, "`E1![]u8`   |   Error `E1`, payload `[]u8`.");
     table_row(16, "`[]u8!E1`   |   Error `[]u8`, payload `E1`; the slice modifier stayed on the left.");
     note(17, #string,oneline
-        \\`!*` lexes as a single operator token, so `E1!*User` is
+        \\`!*` lexes as a single operator token, so `E1!*const User` is
         \\`error: unexpected token '!*'` and `E1!**User` is
         \\`error: unexpected token '!**'`. Separate them with a space, as
-        \\`E1! *User`, or write the pointer through a named alias. `!?` and
+        \\`E1! *const User`, or write the pointer through a named alias. `!?` and
         \\`![` do not have this problem, because `?` is emitted alone and `[`
         \\is not an operator character.
     );
@@ -2591,15 +2674,15 @@ render_section_48 :: () {
         \\    d := (Bad!s64).Err(Bad.{ .text = "x" });
         \\
         \\    if a == {
-        \\        case .Ok(n);  print("switch ok %\n", n);
-        \\        case .Err(e); print("switch err %\n", e.text);
+        \\        case .Ok(n);  print("switch ok {}\n", n);
+        \\        case .Err(e); print("switch err {}\n", e.text);
         \\    }
-        \\    if #pattern .Err(e) = b print("pattern err %\n", e.text);
+        \\    if #pattern .Err(e) = b print("pattern err {}\n", e.text);
         \\
-        \\    print("is_ok: % % % %\n", result_is_ok(a), result_is_ok(b),
-        \\        result_is_ok(c), result_is_ok(d));
-        \\    print("not: % %\n", !a, !b);
-        \\    print("unwrap_or: % %\n", result_unwrap_or(a, -1), result_unwrap_or(b, -1));
+        \\    print("is_ok: {} {} {} {}\n", a.is_ok(), b.is_ok(),
+        \\        c.is_ok(), d.is_ok());
+        \\    print("not: {} {}\n", !a, !b);
+        \\    print("unwrap_or: {} {}\n", a.unwrap_or(-1), b.unwrap_or(-1));
         \\}
     );
     code_block(21, "text", #string
@@ -2628,6 +2711,7 @@ render_section_48 :: () {
     );
     code_block(25, "glosso", #string
         \\#import "Io";
+        \\#import "Format";
         \\
         \\Bad_Number :: struct { text: string; }
         \\
@@ -2647,16 +2731,16 @@ render_section_48 :: () {
         \\
         \\report :: (r: Bad_Number!s64) -> string {
         \\    if r == {
-        \\        case .Ok(n);  return tprint("ok %", n);
-        \\        case .Err(e); return tprint("bad %", e.text);
+        \\        case .Ok(n);  return tprint("ok {}", n);
+        \\        case .Err(e); return tprint("bad {}", e.text);
         \\    }
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", report(sum_two("12", "30")));
-        \\    print("%\n", report(sum_two("12", "3x")));
+        \\    print("{}\n", report(sum_two("12", "30")));
+        \\    print("{}\n", report(sum_two("12", "3x")));
         \\    inner := #try { number("4")? + number("5")? };
-        \\    print("try block: %\n", report(inner));
+        \\    print("try block: {}\n", report(inner));
         \\}
     );
     code_block(26, "text", #string
@@ -2673,7 +2757,7 @@ render_section_48 :: () {
     );
     paragraph(28, #string,oneline
         \\When the propagated error type differs from the enclosing function's,
-        \\the compiler inserts a `propagate` call between the two residuals.
+        \\the inherited `?` body calls `propagate` between the two residuals.
         \\The Prelude lifts any `Propagate(From, To)` between error types to
         \\the corresponding `Result_Residual` pair, and `#from` variants on a
         \\union generate those instances; see `#from` Variants and `Propagate`
@@ -2681,21 +2765,22 @@ render_section_48 :: () {
     );
     subheading(29, "A result-returning `main`");
     paragraph(30, #string,oneline
-        \\`$E!void :: instance Termination where Error(E)` is what lets `main`
+        \\`$E!void ::: instance Termination where Error(E)` is what lets `main`
         \\return a result: `.Ok` becomes status 0, and `.Err` reports the error
         \\through its `Error` instance and becomes status 1. The constraint is
         \\real, so an `E` with no `Error` instance gives
-        \\`error: main return type Result_void_E does not implement Termination`.
+        \\`error: main return type E!void does not implement Termination`.
         \\Only `E!void` qualifies; a general `E!T` and `?T` do not.
     );
     code_block(31, "glosso", #string
         \\#import "Io";
+        \\#import "Typeclass/Error";
         \\
         \\Missing :: struct { path: string; }
         \\
-        \\Missing :: instance Error {
+        \\Missing ::: instance Error {
         \\    report_error :: (e: Missing) -> void {
-        \\        error_report_line("missing", e.path);
+        \\        ("missing").error_report_line(e.path);
         \\    }
         \\}
         \\
@@ -2706,9 +2791,9 @@ render_section_48 :: () {
         \\
         \\main :: () -> Missing!void {
         \\    n := load_setting(true)?;
-        \\    print("n = %\n", n);
+        \\    print("n = {}\n", n);
         \\    m := load_setting(false)?;
-        \\    print("unreachable %\n", m);
+        \\    print("unreachable {}\n", m);
         \\    return .Ok();
         \\}
     );
@@ -2721,25 +2806,26 @@ render_section_48 :: () {
     paragraph(34, #string,oneline
         \\A result is a tag word plus the larger of its two payloads. With
         \\`Small :: struct { c: s64; }`, `size_of(Small!s64)` is 16; with
-        \\`Bad :: struct { text: string; }`, whose `string` descriptor is 24
-        \\bytes, `size_of(Bad!s64)` is 32. A result takes the niche under the
+        \\`Bad :: struct { text: string; }`, whose `string` view is 16
+        \\bytes, `size_of(Bad!s64)` is 24. A result takes the niche under the
         \\same rule as an option, and either side may be the zero-sized one.
     );
     code_block(35, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Nil :: struct { }
         \\
         \\main :: () {
         \\    a: *s64!Nil;
         \\    b: []u8!Nil;
-        \\    print("% %\n", size_of(type_of(a)), size_of(type_of(b)));
-        \\    print("% %\n", type_name(type_of(a)), type_name(type_of(b)));
+        \\    print("{} {}\n", size_of(type_of(a)), size_of(type_of(b)));
+        \\    print("{} {}\n", type_name(type_of(a)), type_name(type_of(b)));
         \\}
     );
     code_block(36, "text", #string
         \\8 24
-        \\Result_Nil__int Result_Nil___u8
+        \\*s64!Nil []u8!Nil
     );
     paragraph(37, #string,oneline
         \\`*s64!Nil` has a zero-sized `.Ok` payload and a pointer `.Err`
@@ -2748,9 +2834,9 @@ render_section_48 :: () {
         \\pays the tag.
     );
     bullet(38, #string,oneline
-        \\`E!T` has no `Show` instance at all. Passing a result to `print` is
-        \\rejected with: variadic arg type `Result_int_Bad` does not implement
-        \\`Show` in call `print`. Match on the result and format the arms.
+        \\`E!T` has no `Show` instance, so a default `{}` has no matching
+        \\`Formatter` for the result. Match on the result and format the arms,
+        \\or implement a selector for that result type.
     );
     bullet(39, #string,oneline
         \\`E!T` has no `PartialEq` either, and unlike `Show` the omission is
@@ -2760,22 +2846,23 @@ render_section_48 :: () {
     );
     subheading(40, "The library surface");
     paragraph(41, #string,oneline
-        \\As with the option, everything but the union itself is ordinary
-        \\Glosso in `std/Prelude/Result.glo`, available with no import. The
-        \\three `*_error` functions map, apply, and bind over the error side
-        \\rather than the payload, which is what a program rewriting one error
-        \\type into another needs.
+        \\The Prelude provides result constructors and inherent methods without an
+        \\import. `map` transforms a success payload; `map_error`, `bind_error`,
+        \\and `ap_error` operate on the error side. `and_then` chains a fallible
+        \\success callback. `ok()` and `err()` select one side as an option.
     );
     table_header(42, "Declaration   —   Purpose");
-    table_row(43, "`result_ok(E: type, value: $T) -> E!T`   |   Success, with the error type named.");
-    table_row(44, "`result_err(T: type, error: $E) -> E!T`   |   Failure, with the payload type named.");
-    table_row(45, "`result_is_ok(value: $E!$T) -> bool`   |   Tag test; `result_is_err` is its negation.");
-    table_row(46, "`result_unwrap_or(value: $E!$T, fallback: T) -> T`   |   Payload or fallback.");
-    table_row(47, "`map_error(value: $E1!$T, f: (E1) -> $E2) -> E2!T`   |   Rewrites the error type.");
+    table_row(43, "`(E!T).make_ok(value)`, `result_ok(E, value)`   |   Success with an explicit result or error type.");
+    table_row(44, "`(E!T).make_err(error)`, `result_err(T, error)`   |   Failure with an explicit result or payload type.");
+    table_row(45, "`value.is_ok()`, `value.is_err()`   |   Inspect the current variant through a borrowed receiver.");
+    table_row(46, "`value.unwrap_or(fallback)`   |   Payload or eagerly evaluated fallback.");
+    table_row(47, "`value.map_error(f)`   |   Rewrites the error type while preserving a success.");
     paragraph(48, #string,oneline
-        \\`ap_error` and `bind_error` complete that group, and
-        \\`Result_Residual :: struct { error: $E; }` is a real, writable type,
-        \\which is what makes a hand-written `Propagate` between two residuals
-        \\possible.
+        \\`unwrap_or_else` and `map_or_else` defer fallback work until it is needed.
+        \\`unwrap_or` and `map_or` evaluate their fallback eagerly.
+        \\`Result_Residual :: struct { error: $E; }` remains an ordinary type,
+        \\so a hand-written `Propagate` instance can convert between residuals.
     );
+}
+
 }

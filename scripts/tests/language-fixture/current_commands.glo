@@ -1,0 +1,101 @@
+#import "Compiler";
+#import "Io";
+#import "Process";
+#import "Process/Command";
+#import "File_System/File";
+#import "File_System/System";
+#import "File_System/Temporary";
+#import "Time";
+
+check :: (condition: bool, code: ssize) {
+    if !condition process_exit(code);
+}
+
+write_bytes :: (file: *File, bytes: []const u8) {
+    offset: ssize = 0;
+    while offset < bytes.count {
+        if file.write_from(bytes[offset..]) == {
+            case .Ok(count); check(count > 0, 90); offset += count;
+            case .Err; process_exit(91);
+        }
+    }
+}
+
+child_main :: (args: []const string) {
+    if args[1] == "--argv" {
+        check(args.count == 6, 70);
+        check(args[2] == "argument with spaces" && args[3] == "", 71);
+        check(args[4] == "literal ; $HOME & | < > * ? %PATH% ^", 72);
+        check(args[5] == "달빛-Ω-🙂", 73);
+        process_exit(7);
+    }
+    if args[1] == "--cwd" {
+        if current_directory() == {
+            case .Ok(directory); check(directory.value == args[2], 74);
+            case .Err; process_exit(75);
+        }
+        return;
+    }
+    if args[1] == "--sleep" {
+        _ := sleep_ns(10_000_000_000);
+        return;
+    }
+    output := File.stdout();
+    error := File.stderr();
+    out_bytes: [4]u8 = .[65, 0, 255, 10];
+    err_bytes: [3]u8 = .[66, 254, 10];
+    write_bytes(&output, out_bytes[..]);
+    write_bytes(&error, err_bytes[..]);
+    process_exit(9);
+}
+
+main :: () -> Command_Run_Error!void {
+    args := process_arguments();
+    if args.count >= 2 {
+        child_main(args);
+        return .Ok;
+    }
+    if run_command("unused", .timeout_ms = -2) == {
+        case .Err(error); check(error.process.kind == .Invalid_Argument && !error.child.valid, 1);
+        case .Ok; check(false, 2);
+    }
+    #if OUT.os == Target_OS.Linux || OUT.os == Target_OS.Windows {
+        executable := current_executable_path();
+        defer executable.free();
+        {
+            result := run_command(executable, "--argv", "argument with spaces", "",
+                "literal ; $HOME & | < > * ? %PATH% ^", "달빛-Ω-🙂")?;
+            check(result.status.exited && result.status.code == 7, 3);
+            check(result.output_string.count == 0 && result.error_string.count == 0, 4);
+            check(!result.timeout_reached, 5);
+        }
+        {
+            argv: [2]string = .[executable, "--output"];
+            captured := run_command(argv[..]..., .capture_and_return_output = true)?;
+            moved := captured;
+            check(moved.status.exited && moved.status.code == 9, 6);
+            check(moved.output_string.count == 4 && moved.error_string.count == 3, 7);
+            check(moved.output_string[0] == 65 && moved.output_string[1] == 0 &&
+                moved.output_string[2] == 255 && moved.output_string[3] == 10, 8);
+            check(moved.error_string[0] == 66 && moved.error_string[1] == 254 &&
+                moved.error_string[2] == 10, 9);
+        } // Command_Output drops the captured buffers, including after a move.
+        {
+            result := run_command(executable, "--sleep", .timeout_ms = 50)?;
+            check(result.timeout_reached, 10);
+            check(result.status.signalled || result.status.code != 0, 11);
+        }
+        if Temporary_Directory.create_temporary_directory("", "glosso-manual-command-") == {
+            case .Ok(directory);
+                defer _ := directory.close();
+                result := run_command(executable, "--cwd", directory.path,
+                    .working_directory = directory.path)?;
+                check(result.status.exited && result.status.code == 0, 12);
+            case .Err; check(false, 13);
+        }
+        shell := run_shell_command("exit 7")?;
+        check(shell.status.exited && shell.status.code == 7, 14);
+    }
+    print("current command APIs passed\n");
+    return .Ok;
+}

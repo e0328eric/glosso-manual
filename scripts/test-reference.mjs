@@ -1,0 +1,215 @@
+// Run after gen-reference builds the extractor, or pass its executable path:
+// node scripts/test-reference.mjs [path/to/generate-reference-source]
+import assert from "node:assert/strict";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const executable = process.argv[2]
+  ? resolve(process.argv[2])
+  : join(root, "build", `generate-reference-source${process.platform === "win32" ? ".exe" : ""}`);
+const output = join(root, "build", "reference-test-source.json");
+mkdirSync(dirname(output), { recursive: true });
+const extraction = spawnSync(executable, [
+  join(root, "scripts", "tests", "reference-fixture"), output,
+], { cwd: root, encoding: "utf8" });
+assert.ifError(extraction.error);
+assert.equal(extraction.status, 0, `${extraction.stdout}\n${extraction.stderr}`);
+
+const { modules, instances } = JSON.parse(readFileSync(output, "utf8"));
+assert.equal(modules.length, 3);
+const fixture = modules.find(module => module.name === "Fixture");
+assert.ok(fixture);
+const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
+assert.equal(symbols.size, 30, "include embedded public declarations, excluding private and unit declarations");
+assert.equal(fixture.source_path, "std/Fixture.glo");
+assert(!fixture.summary.includes("Fragment documentation"));
+assert.equal(symbols.get("Embedded_Output").source_path, "std/A_Embedded.glo");
+assert.deepEqual(symbols.get("Embedded_Output").type_info.fields.map(field => field.name), ["status"]);
+assert.equal(symbols.get("embedded_run").function_info.return_type, "Embedded_Output");
+assert.deepEqual(symbols.get("embedded_run").function_info.parameters.map(parameter => parameter.default_value), ["", "false"]);
+assert.equal(symbols.get("embedded_nested").source_path, "std/parts/Nested.glo");
+assert.equal(symbols.get("embedded_nested").summary, "Documentation remains attached to the nested source location.");
+for (const name of ["hidden_fragment", "unit_fragment", "hidden_nested"])
+  assert(!symbols.has(name), `Private embedded declaration leaked: ${name}`);
+assert.equal(symbols.get("grouped").summary, "A public function inside a visibility group.");
+assert.ok(symbols.has("after_nested"), "nested private groups must restore public visibility");
+for (const name of ["Box.make", "Box.get", "Box.set"]) {
+  assert.equal(symbols.get(name).kind, "method");
+  assert.equal(symbols.get(name).owner_typeclass, "");
+}
+assert.equal(symbols.get("Box.get").display_signature, "#memory { reads(#self), noescape(#self) }\nBox.get :: (#self) -> ssize");
+assert.equal(symbols.get("Box.make").display_signature, 'Box.make :: (value: ssize, label: string = "#Self_Type") -> Box');
+assert.equal(symbols.get("Box.make").function_info.return_type, "Box");
+assert.equal(symbols.get("Box.copy_from").function_info.return_type, "Fs_Error!Box");
+assert.equal(symbols.get("Box.copy_from").function_info.parameters[1].value_type, "*const Box");
+assert.equal(symbols.get("Box.copy_from").searchable_signature, "(*Box, *const Box) -> Fs_Error!Box");
+assert.equal(symbols.get("Box.set").display_signature, "Box.set :: (*#self, value: ssize)");
+assert.equal(symbols.get("Box.peek").function_info.parameters[0].value_type, "*const Box");
+assert.deepEqual(symbols.get("Box.set").function_info.parameters[0], {
+  name: "#self", value_type: "*Box", default_value: "", modifiers: ["receiver"], constraints: [],
+});
+assert.deepEqual(symbols.get("Box").type_info.fields.map(field => field.name), ["value", "exposed"]);
+assert.equal(symbols.get("$T.inspect").kind, "method");
+assert.deepEqual(symbols.get("$T.inspect").function_info.where_clauses, ["Show(T)"]);
+assert.deepEqual(symbols.get("$T.inspect").function_info.parameters[0].constraints, ["Show(T)"]);
+assert.equal(symbols.get("abort").function_info.return_type, "#Never");
+assert.equal(symbols.get("abort").searchable_signature, "() -> #Never");
+assert.equal(symbols.get("GROUPED").kind, "constant");
+assert.equal(symbols.get("GROUPED_SIMPLE").kind, "constant");
+assert.equal(symbols.get("Signed").type_info.variants[0].value, "-1");
+assert.equal(symbols.get("C_TEXT").signature, 'C_TEXT :: c"// { ; }"');
+assert.equal(symbols.get("BYTE_TEXT").signature, 'BYTE_TEXT :: b"\\xFF; // }"');
+assert.deepEqual(symbols.get("literal_defaults").function_info.parameters.map(parameter => parameter.default_value), [
+  'c"// { ; }"', 'b"\\xFF;"',
+]);
+assert.equal(symbols.get("literal_defaults").function_info.return_type, "*const u8");
+
+const open = symbols.get("open");
+assert.equal(open.display_signature,
+  "open :: (path: $P, access: File_Access = File_Access.Read, " +
+  "disposition: Open_Disposition = Open_Disposition.Open_Existing, " +
+  "permissions: File_Permissions = File_Permissions.Default_File, " +
+  "flags: Open_Flags = .None) -> Fs_Error!File");
+assert.equal(open.function_info.parameters.length, 5);
+assert.deepEqual(open.function_info.parameters[0].constraints, ["AsView(P, Path_View)"]);
+assert.deepEqual(open.function_info.parameters.slice(1).map(parameter => parameter.default_value), [
+  "File_Access.Read", "Open_Disposition.Open_Existing", "File_Permissions.Default_File", ".None",
+]);
+
+
+const flags = symbols.get("Open_Flags").type_info;
+assert.equal(flags.kind, "enum_flags");
+assert.deepEqual(flags.variants.map(variant => [variant.name, variant.value]), [
+  ["None", "0"], ["Append", "1"], ["Sync", "32"], ["Default", "Append | Sync"],
+]);
+
+const lazy = symbols.get("lazy").function_info.parameters;
+assert.deepEqual(lazy.slice(0, 2).map(parameter => parameter.name), ["value", "other"]);
+assert.deepEqual(lazy.slice(0, 2).map(parameter => parameter.modifiers), [
+  ["lazy", "comptime"], ["comptime", "lazy"],
+]);
+assert.equal(lazy[2].name, "size");
+assert.equal(lazy[2].value_type, "");
+assert.equal(lazy[2].default_value, "42");
+assert.equal(lazy[3].value_type, "[]const string");
+assert.equal(lazy[3].default_value, ".[]");
+
+for (const name of ["legacy", "bare", "Callback"]) {
+  const symbol = symbols.get(name);
+  assert.deepEqual(symbol.function_info.parameters[0].constraints, ["AsView(P, Path_View)"]);
+  assert.doesNotMatch(symbol.display_signature, /\bwhere\b/);
+  assert.match(symbol.display_signature, /#memory/);
+}
+// Structured effects drive the contract table, independently of the signature text.
+const effects = name => symbols.get(name).function_info.memory_contracts;
+assert.deepEqual(effects("bare"), [
+  { effect: "reads", arguments: ["path"] },
+  { effect: "noescape", arguments: ["path"] },
+  { effect: "returns_borrow", arguments: ["path"] },
+]);
+assert.deepEqual(effects("legacy"), [{ effect: "returns_borrow", arguments: ["path"] }]);
+assert.deepEqual(effects("Callback"), [
+  { effect: "returns_borrow", arguments: ["path"] },
+  { effect: "noescape", arguments: ["path"] },
+]);
+assert.deepEqual(effects("Box.get"), [
+  { effect: "reads", arguments: ["#self"] },
+  { effect: "noescape", arguments: ["#self"] },
+]);
+assert.equal(symbols.get("grouped").function_info.memory_declared, true);
+assert.deepEqual(effects("grouped"), []);
+assert.equal(open.function_info.memory_declared, false);
+assert.deepEqual(effects("open"), []);
+assert.deepEqual(effects("acquire_pair"), [
+  { effect: "returns_fresh", arguments: ["returned.0", "returned.1"] },
+  { effect: "released_by", arguments: ["place: returned.0", "by: release", "instance: allocator"] },
+  { effect: "released_by", arguments: ["place: returned.1", "by: release", "instance: allocator"] },
+  { effect: "unknown", arguments: ["arg: arg(0).data", 'reason: "external, { opaque } API"'] },
+]);
+assert.deepEqual(effects("old_parentheses"), [
+  { effect: "reads", arguments: ["value"] },
+  { effect: "noescape", arguments: ["value"] },
+]);
+assert.deepEqual(effects("typed_acquire"), [
+  { effect: "returns_fresh", arguments: [] },
+  { effect: "released_by", arguments: ["place: returned", "by: (?*void).mem_free", "instance: allocator"] },
+]);
+assert.equal(symbols.get("Callback").type_info.kind, "function-pointer");
+assert.equal(symbols.get("Callback").display_signature, "#memory { returns_borrow(path), noescape(path) }\nCallback :: #fn_ptr(path: $P) -> string");
+
+assert.equal(symbols.get("bare").summary, "A borrowed path view with a leading contract.");
+assert.equal(symbols.get("Callback").summary, "A callback retains the contract of its function-pointer type.");
+assert.match(symbols.get("grouped").display_signature, /^#memory \{\}\ngrouped/);
+assert.equal(symbols.get("inline_contract").summary, "Visibility before an inline contract.");
+assert.equal(symbols.get("after_contract").summary, "Visibility after a multiline contract.");
+assert.match(symbols.get("after_contract").signature, /^#memory \{ reads\(value\), noescape\(value\), \}\n/);
+assert(!symbols.has("hidden_unit_contract") && !symbols.has("hidden_contract"));
+const fixtureLines = readFileSync(join(root, "scripts/tests/reference-fixture/Fixture.glo"), "utf8").split(/\r?\n/);
+assert.equal(symbols.get("after_contract").source_line,
+  fixtureLines.findIndex(line => line.includes("#public after_contract ::")) + 1);
+
+const locationModule = modules.find(module => module.name === "Source_Location");
+assert.ok(locationModule);
+const locations = new Map(locationModule.symbols.map(symbol => [symbol.name, symbol]));
+assert.equal(locations.size, 3, "instance implementations must not become public functions");
+assert.equal(locations.get("Source_Location").type_info.kind, "struct");
+assert.deepEqual(locations.get("Source_Location").type_info.fields.map(field => [field.name, field.value_type]), [
+  ["filename", "string"], ["line", "ssize"], ["column", "ssize"],
+]);
+assert.equal(locations.get("HERE").kind, "constant");
+assert.equal(locations.get("HERE").signature, "HERE :: #source_location");
+
+const diagnostic = locations.get("diagnostic");
+assert.equal(diagnostic.display_signature,
+  "diagnostic :: (message: string, location: Source_Location = #source_location, " +
+  "line := #source_location.line, fallback: Source_Location = " +
+  ".{ .filename = \"generated.glo\", .line = 1, .column = 1 }) -> string");
+assert.deepEqual(diagnostic.function_info.parameters.map(parameter => [parameter.name, parameter.value_type, parameter.default_value]), [
+  ["message", "string", ""],
+  ["location", "Source_Location", "#source_location"],
+  ["line", "", "#source_location.line"],
+  ["fallback", "Source_Location", ".{ .filename = \"generated.glo\", .line = 1, .column = 1 }"],
+]);
+
+assert.doesNotMatch(diagnostic.display_signature, /#memory|\bwhere\b/);
+assert.equal(instances.length, 1);
+assert.equal(instances[0].class_name, "Show");
+assert.equal(instances[0].head, "Source_Location");
+assert.equal(instances[0].module, "Source_Location");
+
+const tryModule = modules.find(module => module.name === "Try");
+assert.ok(tryModule);
+const trySymbols = new Map(tryModule.symbols.map(symbol => [symbol.name, symbol]));
+assert.equal(trySymbols.size, 5);
+const propagation = trySymbols.get("?");
+assert.equal(propagation.kind, "method");
+assert.equal(propagation.summary, "Propagates with the current boundary witness.");
+assert.equal(propagation.owner_typeclass, "Try");
+assert.equal(propagation.has_default, true);
+assert.equal(propagation.display_signature,
+  "#memory { reads(value), noescape(value) }\n'?' :: (#empty: $Target, value: Carrier) -> Try_Branch(Output, Target) #operator(suffix, try(Target))");
+assert.equal(propagation.searchable_signature, "(Carrier) -> Try_Branch(Output, Target)");
+assert.deepEqual(propagation.function_info.parameters.map(parameter => [parameter.name, parameter.value_type, parameter.modifiers]), [
+  ["#empty", "$Target", ["empty type witness"]], ["value", "Carrier", []],
+]);
+assert.deepEqual(propagation.function_info.parameters[0].constraints, [
+  "Try(Target)",
+  "(Try(Carrier).Residual == Try(Target).Residual || Propagate(Try(Carrier).Residual, Try(Target).Residual))",
+]);
+const propagationEffects = [
+  { effect: "reads", arguments: ["value"] },
+  { effect: "noescape", arguments: ["value"] },
+];
+assert.deepEqual(propagation.function_info.memory_contracts, propagationEffects);
+const nestedPropagation = trySymbols.get("Try").class_info.members.find(member => member.name === "?");
+assert.equal(nestedPropagation.function_info.memory_declared, true);
+assert.deepEqual(nestedPropagation.function_info.memory_contracts, propagationEffects);
+assert.equal(trySymbols.get("Try").class_info.minimal, "from_output, from_residual, branch");
+assert.deepEqual(trySymbols.get("Try").class_info.members.map(member => member.name), [
+  "Output", "Residual", "from_output", "from_residual", "branch", "?",
+]);
+
+console.log("Reference extraction checks passed: nested embedded sources grouped under their owner with original source links, leading/trailing memory contracts, documentation across prefixes, visibility groups, C-string and byte-array literals, inherent methods, defaults, constraints, read-only and writable pointers, typed flags, function pointers, source locations, and try(Target) operators.");

@@ -1,5 +1,7 @@
 // Sections 138-141: targets and build.
 
+#public(unit) {
+
 render_section_138 :: () {
     paragraph(0, #string,oneline
         \\One compiler binary emits code for every target it supports, and
@@ -77,7 +79,7 @@ render_section_138 :: () {
     );
     subheading(11, "The supported set");
     paragraph(12, #string,oneline
-        \\`--print-targets` prints each supported target with the triple it
+        \\`--print-targets` (also accepted as `--targets`) prints each supported target with the triple it
         \\expands to and the artifact it produces, then a second list headed
         \\`Available LLVM codegen targets:`. That second list is the set of
         \\architectures the linked LLVM was built with; it is not the set of
@@ -195,9 +197,9 @@ render_section_138 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("building for %\n", os_name());
-        \\    print("OUT.abi is Msvc: %\n", OUT.abi == Target_ABI.Msvc);
-        \\    print("host is the target: %\n", OUT.os == HOST.os && OUT.cpu == HOST.cpu);
+        \\    print("building for {}\n", os_name());
+        \\    print("OUT.abi is Msvc: {}\n", OUT.abi == Target_ABI.Msvc);
+        \\    print("host is the target: {}\n", OUT.os == HOST.os && OUT.cpu == HOST.cpu);
         \\}
     );
     code_block(49, "text", #string
@@ -206,7 +208,7 @@ render_section_138 :: () {
         \\host is the target: 1
     );
     paragraph(50, #string,oneline
-        \\`%` prints an enum member as its integer value, which is why the
+        \\`{}` prints an enum member as its integer value, which is why the
         \\example maps the tag to a string rather than printing `OUT.os`
         \\directly. Both the bare `OUT.os == .Windows` and the qualified
         \\`OUT.os == Target_OS.Windows` are accepted.
@@ -248,6 +250,40 @@ render_section_138 :: () {
         \\anything but the host: `glosso: --run can only execute the host target
         \\(got x86_64-pc-linux-musl)`, exit status 1. Using the Compiler covers
         \\the remaining driver options.
+    );
+    subheading(56, "Target-width integers and descriptors");
+    paragraph(57, #string,oneline
+        \\`ssize` and `usize` follow the target's pointer width, not the host's:
+        \\32 bits on targets such as `x86`, Arm, and `wasm32`, and 64 bits on
+        \\targets such as `x86_64`, `aarch64`, and `wasm64`. Counts, indices, and
+        \\the counts inside `string`, `string16`, slices and dynamic arrays use
+        \\that same width. Only dynamic arrays carry a capacity word; counted
+        \\strings store a pointer followed by a count, while `cstring` and
+        \\`cstring16` store one pointer. Consequently a cross-compiled
+        \\descriptor has the target layout even when the compiler itself is a
+        \\64-bit process. Tagged unions use a target-width tag as well, with
+        \\padding before a more strongly aligned payload. The compile-time VM
+        \\uses those target offsets when copying or matching unions; the host's
+        \\word size does not determine a cross-compiled result layout.
+    );
+    subheading(58, "Wide floats and target runtimes");
+    paragraph(59, #string,oneline
+        \\A target's scalar alignment and calling convention matter separately
+        \\from its pointer width. On 32-bit x86 musl, `f64` and `f80` have
+        \\alignment 4; their complex counterparts inherit that alignment.
+        \\`f80` keeps sixteen-byte storage but uses x87 on x86 and a binary128
+        \\carrier elsewhere. Query `type_info(T).alignment` for the actual output
+        \\target before designing an ABI or serialized layout.
+    );
+    paragraph(60, #string,oneline
+        \\The driver builds target-keyed compiler-runtime archives for wide
+        \\floating operations. On PowerPC64 musl it builds the helper archive
+        \\with IEEE binary128 support and the `kf` helper names expected by LLVM;
+        \\that private archive setting does not change musl's `long double` ABI.
+        \\On 32-bit Arm, MIPS, and PowerPC musl, conversion to `f64` uses an
+        \\integer-word helper instead of assuming a C binary128 type exists.
+        \\When linking an emitted Glosso object yourself, you must also supply
+        \\the runtime helpers used by that object's target.
     );
 }
 
@@ -305,11 +341,7 @@ render_section_139 :: () {
         \\>>>               C:\Users\…\Temp\glosso-33852-bare.o:(glo_kernel_add)
     );
     note(8, #string,oneline
-        \\The rule that governs this is that runtime checks are emitted when the
-        \\optimization level is 1 or less. The three size modes raise the
-        \\internal level to 2 or 3, so `-Os`, `-Oz` and `-Ozz` also produce a
-        \\linkable bare-metal image, and `-Ozz` is the usual choice. Overflow,
-        \\Traps, and the `-O` Level covers the checks themselves.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     bullet(9, #string,oneline
         \\No host entry is emitted: the module defines `glo_main` and no `main`
@@ -333,8 +365,10 @@ render_section_139 :: () {
         \\`x86_64-pc-windows-msvc`, which selects PE/COFF and the Microsoft x64
         \\C ABI. `OUT.abi` is `Uefi`, and that field is the only way a program
         \\can tell a UEFI build from an ordinary Windows one.
-        \\`x86_64-freestanding-msvc` is the legacy spelling and behaves
-        \\identically.
+        \\`x86_64-freestanding-msvc` is the legacy spelling; it produces the same
+        \\triple and the same calling convention but leaves `OUT.abi` at `Msvc`,
+        \\so a program that gates on `Target_ABI.Uefi` needs the `-uefi`
+        \\spelling.
     );
     paragraph(14, #string,oneline
         \\The executable backend cannot finish this target, because the COFF
@@ -346,7 +380,7 @@ render_section_139 :: () {
         \\$ glosso -O2 --no-main --target x86_64-freestanding-uefi -o efi.exe efi.glo
         \\glosso: compile efi.glo (target=x86_64-pc-windows-msvc)
         \\glosso: link efi.exe (target=x86_64-pc-windows-msvc, -O2)
-        \\error: rust-lld: error: undefined symbol: wmain
+        \\error: lld-link: error: undefined symbol: wmain
     );
     code_block(16, "glosso", #string
         \\efi_main :: (image: *void, system_table: *void) -> u64 #c_call {
@@ -471,26 +505,23 @@ render_section_139 :: () {
         \\    .abi = Target_ABI.Freestanding,
         \\};
         \\
-        \\options: Compile_Options;
-        \\set_target(*options, wasm_target);
-        \\set_optimization_level(*options, .Optimized_Tiny);
-        \\set_borrow_check(*options, Compiler_Borrow_Check.Error);
-        \\set_temp_allocator_size(*options, 1024 * 1024);
-        \\add_linker_arg(*options, "--export=glo_manual_set_view");
-        \\add_linker_arg(*options, "--export=glo_manual_select_section");
-        \\add_linker_arg(*options, "--allow-undefined");
-        \\add_linker_arg(*options, "--initial-memory=134217728");
-        \\built := compile("main.glo", "dist/manual.wasm", options);
+        \\workspace := Workspace.create("manual");
+        \\options := workspace.get_build_options();
+        \\options.output_type = Build_Output_Type.Executable;
+        \\options.output_path = "dist";
+        \\options.output_executable_name = "manual.wasm";
+        \\options.set_target(wasm_target);
+        \\options.set_optimization(.Optimized);
+        \\options.set_temp_allocator_size(1024 * 1024);
+        \\options.add_linker_arg("--export=glo_manual_set_view");
+        \\options.add_linker_arg("--export=glo_manual_select_section");
+        \\options.add_linker_arg("--allow-undefined");
+        \\options.add_linker_arg("--initial-memory=134217728");
+        \\options.set_build_options(workspace);
+        \\built := add_build_file("main.glo", workspace);
     );
     paragraph(39, #string,oneline
-        \\Every element of that configuration is forced by the target.
-        \\`Optimized_Tiny` is `-Ozz`, chosen because the module is downloaded: a
-        \\one-line program built for `wasm32-wasi` measures 84443 bytes at `-O1`
-        \\and 23961 bytes at `-Ozz`. The explicit `--export=` arguments exist because only
-        \\`glo_main` is exported by default. `--allow-undefined` admits the
-        \\symbols the browser host supplies. And the manual's `main` is a
-        \\`#c_call` procedure taking the viewport size and pointer state, which
-        \\only this target permits.
+        \\The size modes -Os, -Oz, and -Ozz produce runnable artifacts. They combine LLVM optimization with optsize/minsize attributes and target-specific linker size policies. Runtime checks are disabled in these modes; use -O0 or -O1 for checked builds. -Ozz also strips symbols and metadata.
     );
     paragraph(40, #string,oneline
         \\The C dependency is built through the same target descriptor. The
@@ -523,7 +554,6 @@ render_section_140 :: () {
         \\help: did you mean 'tprint'?
     );
     table_header(3, "Line   —   Content");
-    table_row(4, "headline   |   the level, a colon, and the message");
     table_row(5, "location   |   ` --> ` then the file path, line and column");
     table_row(6, "blank gutter   |   a bare `|` aligned with the line-number column");
     table_row(7, "source   |   the line number, ` | `, and the source line verbatim");
@@ -542,18 +572,6 @@ render_section_140 :: () {
         \\`note` for everything else. A note may carry its own location frame,
         \\which is how a diagnostic points at a second place in the program.
     );
-    code_block(12, "text", #string
-        \\warning: resource must be released by 'array_free' before leaving scope
-        \\  --> …\diag2.glo:4:5
-        \\  |
-        \\4 |     values: [..]s64;
-        \\  |     ^^^^^^
-        \\note: release obligation was created here
-        \\  --> …\diag2.glo:4:5
-        \\  |
-        \\4 |     values: [..]s64;
-        \\  |     ^^^^^^
-    );
     paragraph(13, #string,oneline
         \\A note with no span prints as a bare label and message, with no frame
         \\under it. That form carries advice rather than a second location.
@@ -562,7 +580,7 @@ render_section_140 :: () {
         \\error: tagged-union payload '.Ok' may only be bound by a pattern match
         \\  --> …\diag3.glo:7:20
         \\  |
-        \\7 |     print("%\n", r.Ok);
+        \\7 |     print("{}\n", r.Ok);
         \\  |                    ^^
         \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
     );
@@ -591,31 +609,6 @@ render_section_140 :: () {
         \\  |            ^
         \\
         \\error: aborting due to 2 previous errors
-    );
-    paragraph(19, #string,oneline
-        \\One family of warnings is configurable. `--borrow-check` takes `off`,
-        \\`warning` or `error`, defaults to `warning`, and governs the temporal
-        \\memory analysis: leaks, double releases, stale references and escaping
-        \\pointers. `--borrow-check error` reprints exactly the same diagnostics
-        \\with `error:` in the headline and stops the build. The `--borrow-check`
-        \\Flag covers the analysis it controls.
-    );
-    note(20, #string,oneline
-        \\`--borrow-check error` does not promote everything that looks like a
-        \\warning. Checker lints, such as an unreachable pattern arm, are merged
-        \\into the output after the promotion decision and stay warnings at every
-        \\setting. `--borrow-check off` likewise silences the analysis but never
-        \\a malformed `#memory` contract, which is always a hard error.
-    );
-    code_block(21, "text", #string
-        \\$ glosso --borrow-check error --backend llvm-ir -o d6.ll diag6.glo
-        \\glosso: compile diag6.glo (target=x86_64-pc-windows-msvc)
-        \\warning: unreachable pattern - already covered by an earlier case
-        \\  --> …\diag6.glo:7:10
-        \\  |
-        \\7 |     case 1;   return "one again";
-        \\  |          ^
-        \\glosso: wrote d6.ll  (backend=llvm-ir, target=x86_64-pc-windows-msvc, -O1)
     );
     paragraph(22, #string,oneline
         \\Driver messages are a separate category and are not diagnostics. They
@@ -677,7 +670,7 @@ render_section_140 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", helper());
+        \\    print("{}\n", helper());
         \\}
     );
     code_block(36, "text", #string
@@ -748,19 +741,16 @@ render_section_141 :: () {
         \\list that yields an absolute path.
     );
     table_header(3, "Source   —   Value");
-    table_row(4, "`--cache-dir <dir>`   |   the given directory, which must be absolute");
+    table_row(4, "`--cache-dir <dir>`   |   the given directory; relative paths resolve against the working directory");
     table_row(5, "`GLOSSO_CACHE_DIR`   |   the given directory, which must be absolute");
     table_row(6, "Windows default   |   the known LocalAppData folder, then `glosso/cache`");
     table_row(7, "macOS default   |   `$HOME/Library/Caches/glosso`");
     table_row(8, "other POSIX default   |   `$XDG_CACHE_HOME/glosso`, else `$HOME/.cache/glosso`");
     paragraph(9, #string,oneline
-        \\A relative path is rejected rather than resolved against the working
-        \\directory, and the two spellings fail differently because one is a
-        \\command-line error and the other is an environment error. `--cache-dir`
-        \\prints `glosso: --cache-dir: cache directory override must be an
-        \\absolute path` and exits 2; `GLOSSO_CACHE_DIR` prints `glosso: cache
-        \\directory unavailable: GLOSSO_CACHE_DIR must contain an absolute path`
-        \\and exits 1.
+        \\--cache-dir accepts relative paths and resolves them against the working
+        \\directory. GLOSSO_CACHE_DIR must contain an absolute path. The command-line
+        \\override takes precedence over the environment. Use --print-cache-dir to
+        \\inspect the resolved root.
     );
     code_block(10, "text", #string
         \\$ glosso --cache-dir "C:/temp/glosso-cache-probe" --print-cache-dir
@@ -773,13 +763,13 @@ render_section_141 :: () {
     subheading(11, "The subtrees");
     table_header(12, "Path under the root   —   Contents");
     table_row(13, "`generated/insert/v1/<sha256>.glo`   |   materialized string-valued `#insert` sources");
-    table_row(14, "`native/artifacts/v1/<key>.artifact` and `.manifest`   |   the final-artifact cache");
-    table_row(15, "`native/v6/<name>/<target>/<key>/`   |   static archives built from C sources for a target");
+    table_row(14, "`native/artifacts/v1/<key>.artifact`, `.manifest`, `.stdout`, and `.stderr`   |   the final-artifact cache");
+    table_row(15, "`native/v9/<name>/<target>/<key>/`   |   static archives built from C sources for a target");
     paragraph(16, #string,oneline
-        \\The `v1` and `v6` components are format versions: a compiler that
+        \\The `v1` and `v9` components are format versions: a compiler that
         \\changes an entry's meaning changes the version and stops reading the
         \\old tree rather than misinterpreting it. `GLOSSO_NATIVE_CACHE_DIR`
-        \\relocates the `native/v6` subtree alone, leaving the other two under
+        \\relocates the `native/v9` subtree alone, leaving the other two under
         \\the resolved root, so the C archives can be kept apart from the rest.
     );
     subheading(17, "The artifact cache");
@@ -811,21 +801,19 @@ render_section_141 :: () {
         \\could change the output.
     );
     bullet(22, #string,oneline
-        \\The canonical path of the source file and the standard-library
-        \\directory in use.
+        \\The canonical paths of the source file and compiler executable,
+        \\the standard-library directory, and the working directory.
     );
     bullet(23, #string,oneline
         \\The LLVM triple, and separately every field of `OUT`, because the
         \\triple collapses distinct targets.
     );
-    bullet(24, #string,oneline
-        \\The backend name, the optimization level, the size mode, the sanitizer,
-        \\the borrow-check mode, the temporary-allocator size, and the `--no-main`
-        \\flag.
-    );
     bullet(25, #string,oneline
-        \\Every `--linker-arg` in command-line order, and every compile-time
-        \\argument written after `--`.
+        \\Every `--linker-arg` in command-line order, every compile-time argument
+        \\written after `--`, every `--module-path` directory, and all explicit
+        \\`--unit-source` ownership mappings. Backend, optimization, sanitizer,
+        \\color, temporary-arena size, debug-allocator selection, `--no-main`, and
+        \\`--use-std` also participate in the identity.
     );
     paragraph(26, #string,oneline
         \\The `OUT` fields in that list are load-bearing. Compiling the same
@@ -851,7 +839,8 @@ render_section_141 :: () {
         \\modification time of every source file the build read, of the compiler
         \\executable itself, and of any `--linker-arg` value that names an
         \\existing file. Touching any one of them turns the next build back into
-        \\a full compile.
+        \\a full compile. A hit also replays saved checker output and diagnostics;
+        \\entries missing either output sidecar are treated as misses.
     );
     note(29, #string,oneline
         \\A program with a top-level `#comptime` is never stored. Compile-time
@@ -885,7 +874,7 @@ render_section_141 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("%\n", helper());
+        \\    print("{}\n", helper());
         \\}
     );
     code_block(34, "text", #string
@@ -930,17 +919,20 @@ render_section_141 :: () {
     );
     paragraph(40, #string,oneline
         \\The third subtree is filled by the compile-time C archive builder.
-        \\Importing a module that builds native code compiles its C sources once
-        \\for the output target and caches the archive under
-        \\`native/v6/<name>/<target>/<key>/`, which is why the first such import
-        \\is slow and every later one is not. Embedding Lua and Generating
-        \\Bindings with Bindgen cover the modules that use it.
+        \\Importing a module that builds native code compiles its C sources for
+        \\the output target. Verified inputs allow archive reuse under
+        \\`native/v9/<name>/<target>/<key>/`; changed sources or headers rebuild it.
+        \\When dependencies cannot be verified, each build uses a fresh
+        \\`uncached-...` directory. Embedding Lua and Generating Bindings with
+        \\Bindgen cover the modules that use this service.
     );
     code_block(41, "text", #string
-        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\lua55
-        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_rgfw
-        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins
-        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins\wasm32-wasm-freestanding
-        \\C:\Users\almag\AppData\Local\glosso\cache\native\v6\glosso_wasm_compiler_rt_builtins\wasm32-wasm-wasi
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v9\lua55
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v9\glosso_rgfw
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v9\glosso_wasm_compiler_rt_builtins
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v9\glosso_wasm_compiler_rt_builtins\wasm32-wasm-freestanding
+        \\C:\Users\almag\AppData\Local\glosso\cache\native\v9\glosso_wasm_compiler_rt_builtins\wasm32-wasm-wasi
     );
+}
+
 }

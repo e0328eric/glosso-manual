@@ -1,7 +1,10 @@
+// Shared by the embedded files in the manual ownership unit.
+#public(unit) {
 // Section dispatch, navigation, document layout, and Wasm entry point.
 
-render_section_case :: (index: s64) -> Code {
-    renderer_call := tprint("render_section_%();", format_int(index, 10));
+render_section_case :: (index: ssize) -> Code {
+    // Formatting is evaluated while #insert generates the section dispatch.
+    renderer_call := tprint("render_section_{}();", index);
     return #code {
         case ``index;
             #insert renderer_call;
@@ -20,35 +23,40 @@ render_selected_section :: () {
 }
 
 
-render_navigation_row :: (index: s32) {
-    id := Clay_GetElementIdWithIndex(clay_string("nav-row"), cast(u32)index);
-    row := column_box();
-    row.layout.padding = padding(12, 9);
-    if index == selected_section {
-        row.backgroundColor = color(255, 253, 248);
-        row.border.color = color(36, 73, 216);
-        row.border.width.left = 2;
-    } else if Clay_PointerOver(id) {
-        row.backgroundColor = color(255, 253, 248);
-    }
-    open_id(id, row);
-    if index == selected_section {
-        emit_text(section_title(index), text_style(13, color(36, 73, 216), FONT_SANS_BOLD, 20));
-    } else {
-        emit_text(section_title(index), text_style(13, color(109, 107, 102), FONT_SANS, 20));
+render_manual_index :: () {
+    emit_text("Language manual", heading_text_style(26, true));
+    paragraph(9300, "The Glosso language manual describes the language from a first program to its type system, compile-time programming, memory contracts, and compiler tools.");
+    subheading(9301, "How to read this manual");
+    paragraph(9302, "Start with Hello World and Program Entry, then follow the chapters in order. For a particular language feature, browse the chapter list or search by name. The Standard library section documents modules and their public APIs.");
+    render_section_heading(9303, "Chapters", SECTION_COUNT);
+    list := column_box();
+    open_element("manual-index-list", list);
+    for index: 0..SECTION_COUNT {
+        row := column_box(12);
+        row.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
+        row.layout.padding = padding(0, 5);
+        open_indexed("manual-index-row", cast(s32)index, row);
+        number := column_box();
+        number.layout.sizing.width = fixed_axis(36);
+        open_indexed("manual-index-number", cast(s32)index, number);
+        emit_text(tprint("{}", index + 1), text_style(13, color(109, 107, 102), FONT_MONO, 24));
+        close_element();
+        emit_text(section_title(cast(s32)index), route_text_style(APP_VIEW_MANUAL, cast(s32)index));
+        close_element();
     }
     close_element();
 }
 
-navigation_start :: () -> s32 {
-    start := selected_section - 4;
-    if start < 0 start = 0;
-    if start > SECTION_COUNT - 9 start = SECTION_COUNT - 9;
-    if start < 0 start = 0;
-    return start;
-}
-
 handle_manual_navigation :: () {
+    if selected_section < 0 {
+        for index: 0..SECTION_COUNT {
+            if Clay_PointerOver(Clay_GetElementIdWithIndex(clay_string("manual-index-row"), cast(u32)index)) {
+                manual_select_section(cast(s32)index);
+                return;
+            }
+        }
+        return;
+    }
     i: s32 = 0;
     while i < SECTION_COUNT {
         id := Clay_GetElementIdWithIndex(clay_string("nav-row"), cast(u32)i);
@@ -68,12 +76,15 @@ handle_manual_navigation :: () {
 handle_navigation :: () {
     pointer := Clay_GetPointerState();
     if pointer.state != CLAY_POINTER_DATA_RELEASED_THIS_FRAME return;
+    // The first frame starts in the released state too. A browser route may
+    // already have selected an item; retain its pending scroll target.
+    if scroll_request != SCROLL_REQUEST_NONE return;
     clear_scroll_target();
     previous_view := app_view;
     previous_section := selected_section;
     previous_module := selected_module;
-    previous_module_page := module_page;
-    previous_symbol_page := symbol_page;
+    previous_symbol := selected_symbol;
+    previous_type := selected_type;
     previous_search_page := search_page;
     if app_view == APP_VIEW_MANUAL {
         handle_manual_navigation();
@@ -88,29 +99,18 @@ handle_navigation :: () {
     if app_view != previous_view ||
        selected_section != previous_section ||
        selected_module != previous_module ||
-       module_page != previous_module_page ||
-       symbol_page != previous_symbol_page ||
+       selected_symbol != previous_symbol ||
+       selected_type != previous_type ||
        search_page != previous_search_page {
         scroll_request = SCROLL_REQUEST_TOP;
     }
 }
 
-render_manual_sidebar :: (height: f32) {
-    // Navigation is rendered as a native DOM sidebar by app.js. Clay keeps
-    // this lightweight placeholder so the article retains the same grid.
-    sidebar := column_box();
-    sidebar.layout.sizing.width = grow_axis();
-    sidebar.layout.sizing.height = fixed_axis(height);
-    sidebar.backgroundColor = color(238, 233, 223);
-    open_element("manual-sidebar", sidebar);
-    close_element();
-}
-
 render_pager_button :: (name: string, label: string, enabled: bool) {
     button := column_box();
     button.layout.sizing.width = grow_axis();
-    button.layout.padding = padding(16, 13);
-    button.backgroundColor = color(244, 240, 232);
+    button.layout.padding = padding(12, 9);
+    button.backgroundColor = color(255, 253, 248);
     button.cornerRadius = radius(0);
     button.border.color = color(216, 209, 197);
     button.border.width.left = 1;
@@ -119,27 +119,27 @@ render_pager_button :: (name: string, label: string, enabled: bool) {
     button.border.width.bottom = 1;
     open_element(name, button);
     if enabled {
-        emit_text(label, text_style(13, color(36, 73, 216), FONT_SANS_BOLD, 21));
+        emit_text(label, action_text_style(text_style(13, color(36, 73, 216), FONT_SANS_BOLD, 21)));
     } else {
-        emit_text(label, text_style(13, color(169, 166, 159), FONT_SANS_BOLD, 21));
+        emit_text(label, action_text_style(text_style(13, color(169, 166, 159), FONT_SANS_BOLD, 21), false));
     }
     close_element();
 }
 
 render_article :: () {
-    article := column_box(24);
-    article.layout.padding = padding(52, 42);
+    article := column_box(16);
+    article.layout.padding = padding(32, 12);
+    if document_viewport_width < 860.0 article.layout.padding = padding(16, 12);
+    article.layout.sizing.width = fixed_axis(article_content_width() + 64);
+    if document_viewport_width < 860.0 article.layout.sizing.width = fixed_axis(article_content_width() + 32);
     article.backgroundColor = color(255, 253, 248);
     open_element("manual-article", article);
 
-    if app_view == APP_VIEW_MANUAL {
-        emit_text(#string,oneline
-            \\GLOSSO LANGUAGE MANUAL
-        , text_style(11, color(36, 73, 216), FONT_MONO_BOLD, 18));
-        emit_text(
-            section_title(selected_section),
-            text_style(48, color(23, 26, 31), FONT_SERIF_BOLD, 52),
-        );
+    if app_view == APP_VIEW_MANUAL && selected_section < 0 {
+        render_manual_index();
+    } else if app_view == APP_VIEW_MANUAL {
+        emit_text("Language manual", route_text_style(APP_VIEW_MANUAL, -1, 13));
+        emit_text(section_title(selected_section), heading_text_style(26, true));
         render_selected_section();
         finish_content_table();
 
@@ -165,84 +165,30 @@ render_article :: () {
     close_element();
 }
 
-current_view_label :: () -> string {
-    if app_view == APP_VIEW_STANDARD_LIBRARY return "Standard library reference";
-    if app_view == APP_VIEW_SEARCH return "Documentation search";
-    return "Language manual";
-}
-
-render_status_rail :: () {
-    rail := column_box(22);
-    rail.layout.sizing.width = grow_axis();
-    rail.layout.padding = padding(28, 42);
-    rail.backgroundColor = color(244, 240, 232);
-    rail.border.color = color(216, 209, 197);
-    rail.border.width.left = 1;
-    open_element("reference-rail", rail);
-    emit_text("REFERENCE STATUS", text_style(11, color(109, 107, 102), FONT_SANS_BOLD, 18));
-    emit_text("Glosso + Clay", text_style(14, color(23, 26, 31), FONT_SANS_BOLD, 22));
-    emit_text("Freestanding WebAssembly", text_style(13, color(109, 107, 102), FONT_SANS, 21));
-    emit_text("Source links", text_style(14, color(23, 26, 31), FONT_SANS_BOLD, 22));
-    emit_text("Private repository", text_style(13, color(109, 107, 102), FONT_SANS, 21));
-    emit_text("Search corpus", text_style(14, color(23, 26, 31), FONT_SANS_BOLD, 22));
-    emit_text(tprint("% symbols", STD_SYMBOL_COUNT), text_style(13, color(109, 107, 102), FONT_SANS, 21));
-    close_element();
-}
-
 render_document :: (width: f32, height: f32) {
     reference_viewport_width = width;
+    document_viewport_width = width;
     root := column_box();
     root.layout.sizing.width = fixed_axis(width);
-    root.backgroundColor = color(244, 240, 232);
+    root.backgroundColor = color(255, 253, 248);
     open_element("manual-root", root);
 
-    body: Clay_ElementDeclaration;
-    body.layout.sizing.width = grow_axis();
-    body.layout.sizing.height = fit_axis();
-    body.layout.childGap = 0;
-    if width < 860.0 {
-        body.layout.layoutDirection = CLAY_TOP_TO_BOTTOM;
-    } else {
-        body.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
-    }
+    body := column_box();
+    body.layout.layoutDirection = CLAY_LEFT_TO_RIGHT;
     open_element("manual-body", body);
-
-    if app_view != APP_VIEW_SEARCH {
-        sidebar_wrap := column_box();
-        if width < 860.0 {
-            sidebar_wrap.layout.sizing.width = grow_axis();
-        } else {
-            sidebar_wrap.layout.sizing.width = fixed_axis(270);
-        }
-        open_element("sidebar-wrap", sidebar_wrap);
-        sidebar_height := height;
-        if width < 860.0 sidebar_height = 320;
-        if app_view == APP_VIEW_MANUAL {
-            render_manual_sidebar(sidebar_height);
-        } else {
-            render_standard_sidebar(sidebar_height);
-        }
+    // The fixed native sidebar occupies this column in every desktop view.
+    // Mobile navigation overlays the document and reserves no article height.
+    if width >= 860.0 {
+        sidebar := column_box();
+        sidebar.layout.sizing.width = fixed_axis(200);
+        open_element("sidebar-wrap", sidebar);
         close_element();
     }
-
     article_wrap := column_box();
-    if app_view == APP_VIEW_SEARCH {
-        article_wrap.layout.sizing.width = grow_axis(320, 1100);
-    } else {
-        article_wrap.layout.sizing.width = grow_axis(320, 880);
-    }
+    article_wrap.layout.sizing.width = grow_axis(0, 1100);
     open_element("article-wrap", article_wrap);
     render_article();
     close_element();
-
-    if width >= 1400.0 && app_view != APP_VIEW_SEARCH {
-        rail_wrap := column_box();
-        rail_wrap.layout.sizing.width = grow_axis(180, 250);
-        open_element("rail-wrap", rail_wrap);
-        render_status_rail();
-        close_element();
-    }
-
     close_element();
     close_element();
 }
@@ -276,9 +222,15 @@ main :: (
     // The HTML renderer uses the browser document as the scroll container.
     // Emit off-screen commands so the host can size #scene to the full chapter.
     Clay_SetCullingEnabled(false);
+    // Each layout reuses the frame text buffer for different chapter or
+    // reference content. Retire cached words before reusing that storage;
+    // retaining them across navigation can corrupt subsequent wrapped lines.
+    Clay_ResetMeasureTextCache();
     reset_frame_text_storage();
     content_table_open = false;
     Clay_BeginLayout();
     render_document(width, height);
     return Clay_EndLayout(delta_time);
+}
+
 }

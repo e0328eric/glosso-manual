@@ -1,0 +1,36 @@
+#import "Io";
+#import "Format";
+#import "String_Builder";
+
+Token :: struct { value: u8; }
+(Token, "token", $W) ::: instance Formatter where Writer(W) {
+    format_to :: (writer: *W, value: Token) -> Io_Error!ssize {
+        return writer.write_format("<{X}>", value.value);
+    }
+}
+
+FOLDED :: #comptime tprint("{{{1:c}}} {0:} {1:x} 100%", "text", cast(u8)65);
+calls: ssize;
+next_byte :: () -> u8 { calls += 1; return 65; }
+forward :: (#comptime fmt: string, args: ...any) -> string {
+    return tprint(fmt, args...);
+}
+
+main :: () {
+    #assert FOLDED == "{A} text 41 100%";
+    #assert tprint("{}c {c}", 65, cast(u8)65) == "65c A";
+    #assert tprint("{1:c} {} {0} {x}", "first", cast(u8)65) == "A first first 41";
+    #assert tprint("{:c} {:x} {:}", cast(u8)65, 255, "done") == "A ff done";
+    #assert tprint("% %c %% %x \\%") == "% %c %% %x \\%";
+    #assert tprint("{0:c}{0:x}{0:}", next_byte()) == "A4165";
+    #assert calls == 1;
+    token: Token = .{ .value = 16#ab };
+    #assert forward("{0:token} {0:token}", token) == "<AB> <AB>";
+    builder := String_Builder.builder_from_string("text");
+    builder.writef("{0:c}{0:c}?{0:c}", #char "/");
+    #assert builder.to_string() == "text//?/";
+    // The argument borrows the destination; writef stages it before growth.
+    builder.writef("={0}:{0}", builder.to_string());
+    #assert builder.to_string() == "text//?/=text//?/:text//?/";
+    print("brace formatting passed\n");
+}

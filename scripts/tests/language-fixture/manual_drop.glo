@@ -1,0 +1,81 @@
+#import "Io";
+#import "Context";
+#import "Memory/ManuallyDrop";
+#import "String_Builder";
+#import "Meta";
+
+events: s64;
+allocations: ssize;
+releases: ssize;
+
+Owner :: struct { digit: s64; }
+Owner ::: instance Drop {
+    Error :: #Never;
+    drop :: (value: *#Self_Type) -> #Never!void {
+        events = events * 10 + value.*.digit;
+        return .Ok;
+    }
+}
+Pair :: struct { first: Owner; second: Owner; }
+Pair ::: instance Drop {
+    Error :: #Never;
+    drop :: (value: *#Self_Type) -> #Never!void {
+        events = events * 10 + 1;
+        return .Ok;
+    }
+}
+
+tracking_allocator :: (
+    data: ?*void, mode: Allocator_Mode, size: ssize, alignment: ssize,
+    old_memory: ?*void, old_size: ssize,
+) -> ?*void {
+    if mode == .Free && old_memory.is_some() releases += 1;
+    heap_data: ?*void = .None;
+    result := heap_allocator_proc(heap_data, mode, size, alignment, old_memory, old_size);
+    if (mode == .Alloc || mode == .Alloc_Non_Zeroed ||
+        mode == .Resize || mode == .Resize_Non_Zeroed) &&
+        old_memory.is_none() && result.is_some() allocations += 1;
+    return result;
+}
+
+main :: () {
+    #assert size_of(ManuallyDrop(Owner)) == size_of(Owner);
+    {
+        suppressed := ManuallyDrop(Owner).new(Owner.{ .digit = 9 });
+        #assert suppressed.get().*.digit == 9;
+    }
+    #assert events == 0;
+    {
+        wrapped := ManuallyDrop(Pair).new(Pair.{
+            .first = Owner.{ .digit = 2 }, .second = Owner.{ .digit = 3 },
+        });
+        #assert wrapped.drop().is_ok();
+        #assert events == 123;
+    }
+    #assert events == 123;
+    {
+        wrapped := ManuallyDrop(Owner).new(Owner.{ .digit = 4 });
+        wrapped.get_mut().*.digit = 5;
+        extracted := wrapped.take();
+        #assert extracted.digit == 5 && events == 123;
+    }
+    #assert events == 1235;
+
+    allocator := Allocator.{ .procedure = tracking_allocator };
+    {
+        builder := String_Builder.make_len_cap(.cap = 32, .allocator = allocator);
+        builder.write_string("automatic cleanup");
+        #assert allocations == 1 && releases == 0;
+    }
+    #assert allocations == 1 && releases == 1;
+    {
+        wrapped := ManuallyDrop(String_Builder).new(
+            String_Builder.make_len_cap(.cap = 32, .allocator = allocator));
+        wrapped.get_mut().write_string("resumed cleanup");
+        builder := wrapped.into_inner();
+        #assert builder.to_string() == "resumed cleanup";
+        #assert allocations == 2 && releases == 1;
+    }
+    #assert allocations == 2 && releases == 2;
+    print("manual and automatic Drop passed\n");
+}

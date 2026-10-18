@@ -1,5 +1,7 @@
 // Sections 131-137: interop and low-level code.
 
+#public(unit) {
+
 render_section_131 :: () {
     paragraph(0, #string,oneline
         \\Glosso calls C directly. There is no wrapper layer, no generated shim,
@@ -12,16 +14,18 @@ render_section_131 :: () {
         \\artifact the symbols live in, and each `#foreign` function declaration
         \\binds one symbol. The library declaration is a compile-time constant like
         \\any other, so it is named, scoped, and importable in the usual way.
+        \\Match the target's C types exactly: `strlen` returns `size_t`, so its
+        \\Glosso result is `usize`, not a fixed `u64` on 32-bit targets.
     );
     code_block(2, "glosso", #string
         \\#import "Io";
         \\
         \\libc     :: #library "c";
-        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\c_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\c_puts   :: (s: *const s8) -> s32 #foreign libc "puts";
         \\
         \\main :: () {
-        \\    print("strlen = %\n", c_strlen("glosso"));
+        \\    print("strlen = {}\n", c_strlen("glosso"));
         \\    c_puts("printed by C puts");
         \\}
     );
@@ -49,7 +53,7 @@ render_section_131 :: () {
     paragraph(11, #string,oneline
         \\`static` and `system` currently reach the linker through the same path:
         \\`#library "yyyprobe"` and `#library,system "yyyprobe"` both fail with
-        \\`error: rust-lld: error: could not open 'yyyprobe.lib'`. The distinction
+        \\`error: lld-link: error: could not open 'yyyprobe.lib'`. The distinction
         \\records intent, that a `system` library is expected to be found in the
         \\platform's own search path rather than shipped with the program.
     );
@@ -82,26 +86,27 @@ render_section_131 :: () {
         \\libc :: #library "c";
         \\
         \\// (a) reference a #library declaration, then name the C symbol
-        \\a_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\a_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\
         \\// (b) name the library file inline; no #library declaration needed
-        \\b_strlen :: (s: *const s8) -> u64 #foreign "c" "strlen";
+        \\b_strlen :: (s: *const s8) -> usize #foreign "c" "strlen";
         \\
         \\// (c) omit the symbol string when the Glosso name is already the C name
-        \\strlen :: (s: *const s8) -> u64 #foreign libc;
+        \\strlen :: (s: *const s8) -> usize #foreign libc;
         \\
         \\main :: () {
-        \\    print("% % %\n", a_strlen("aa"), b_strlen("bbb"), strlen("cccc"));
+        \\    print("{} {} {}\n", a_strlen("aa"), b_strlen("bbb"), strlen("cccc"));
         \\}
     );
     code_block(17, "text", #string
         \\2 3 4
     );
     paragraph(18, #string,oneline
-        \\`#foreign` makes the declaration bodyless: parsing stops after the
-        \\optional `;`, and attaching a block is
-        \\`error: bad decl name '{'` pointing at the brace. Naming a library that
-        \\was never declared is
+        \\`#foreign` makes the declaration bodyless. At file scope its `;` is
+        \\required; omitting it, including by attaching a block directly, first
+        \\reports `error: declaration must end with ';'`. If the terminator is
+        \\written before that block, the declaration ends and the now-stray brace
+        \\is `error: bad decl name '{'`. Naming a library that was never declared is
         \\`error: #foreign refers to unknown library 'nosuchlib' (declare it with #library)`.
     );
 
@@ -125,7 +130,7 @@ render_section_131 :: () {
     code_block(26, "text", #string
         \\# the program declares  zzz :: #library "zzzprobe";
         \\$ glosso -o p08.exe p08_libnames.glo
-        \\error: rust-lld: error: could not open 'zzzprobe.lib': no such file or directory
+        \\error: lld-link: error: could not open 'zzzprobe.lib': no such file or directory
         \\
         \\$ glosso --target x86_64-linux-musl -o p08l p08_libnames.glo
         \\error: ld.lld: error: unable to find library -lzzzprobe
@@ -165,7 +170,7 @@ render_section_131 :: () {
     paragraph(33, #string,oneline
         \\Adding one call to `never_called` changes the link, and the library that
         \\was invisible a moment ago becomes a hard requirement:
-        \\`error: rust-lld: error: could not open 'no_such_library_at_all.lib': no such file or directory`.
+        \\`error: lld-link: error: could not open 'no_such_library_at_all.lib': no such file or directory`.
     );
     note(34, #string,oneline
         \\The reachability rule is measured after pruning, not after type checking.
@@ -187,7 +192,7 @@ render_section_131 :: () {
         \\$ glosso -o usegreet.exe usegreet.glo
         \\glosso: compile usegreet.glo (target=x86_64-pc-windows-msvc)
         \\glosso: link usegreet.exe (target=x86_64-pc-windows-msvc, -O1)
-        \\error: rust-lld: error: could not open 'greet.lib': no such file or directory
+        \\error: lld-link: error: could not open 'greet.lib': no such file or directory
         \\
         \\$ glosso --linker-arg /libpath:vendor -o usegreet.exe usegreet.glo
         \\glosso: compile usegreet.glo (target=x86_64-pc-windows-msvc)
@@ -200,7 +205,7 @@ render_section_131 :: () {
     paragraph(38, #string,oneline
         \\The value is not translated between linker flavours. On
         \\`x86_64-pc-windows-msvc` the linker is `lld-link`, so a POSIX spelling is
-        \\dropped with `rust-lld: warning: ignoring unknown argument '-L.'`. That
+        \\dropped with `lld-link: warning: ignoring unknown argument '-L.'`. That
         \\warning is only visible when the link fails; a successful link does not
         \\surface the linker's own output.
     );
@@ -225,8 +230,8 @@ render_section_131 :: () {
         \\SM_CYSCREEN :: 1;
         \\
         \\main :: () {
-        \\    print("tick count nonzero: %\n", GetTickCount() > 0);
-        \\    print("screen: % x %\n",
+        \\    print("tick count nonzero: {}\n", GetTickCount() > 0);
+        \\    print("screen: {} x {}\n",
         \\        GetSystemMetrics(SM_CXSCREEN),
         \\        GetSystemMetrics(SM_CYSCREEN));
         \\}
@@ -292,7 +297,7 @@ render_section_132 :: () {
         \\
         \\libc    :: #library "c";
         \\c_qsort :: (base: *void, count: u64, size: u64, compare: Compare)
-        \\    #foreign libc "qsort";
+        \\    #foreign libc "qsort" ;
         \\
         \\compare_s32 :: (a: *const void, b: *const void) -> s32 #c_call {
         \\    left  := (cast(*const s32)a).*;
@@ -306,7 +311,7 @@ render_section_132 :: () {
         \\    values: [5]s32;
         \\    values[0] = 5; values[1] = 1; values[2] = 4; values[3] = 2; values[4] = 3;
         \\    c_qsort(cast(*void)values.data, 5, 4, compare_s32);
-        \\    for i: 0..5 print("% ", values[i]);
+        \\    for i: 0..5 print("{} ", values[i]);
         \\    print("\n");
         \\}
     );
@@ -324,6 +329,7 @@ render_section_132 :: () {
     );
     code_block(14, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\Plain :: struct {
         \\    a: u8;
@@ -338,13 +344,22 @@ render_section_132 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("Plain    size = %\n", size_of(Plain));
-        \\    print("C_Layout size = %\n", size_of(C_Layout));
+        \\    print("Plain    size = {}\n", size_of(Plain));
+        \\    print("C_Layout size = {}\n", size_of(C_Layout));
         \\}
     );
     code_block(15, "text", #string
         \\Plain    size = 8
         \\C_Layout size = 12
+    );
+    note(70, #string,oneline
+        \\Stable compiler-service records need the same discipline. The
+        \\`Compiler` and `Bindgen` modules now declare their private service
+        \\result records with `#c_call`, preserving the service field order on
+        \\32-bit output targets as well as the host. Application code should
+        \\call `Native_Compile_Output.compile_c_archive` and `generate_source` and match their public
+        \\`Result` values, not copy the private records or redeclare their raw
+        \\`#magic` entry points.
     );
 
     subheading(16, "The implicit context");
@@ -374,10 +389,10 @@ render_section_132 :: () {
         \\exported :: (a: s32) -> s32 #c_call { return a + 1; }
         \\plain    :: (a: s32) -> s32 { return a + 2; }
         \\libc     :: #library "c";
-        \\c_strlen :: (s: *const s8) -> u64 #foreign libc "strlen";
+        \\c_strlen :: (s: *const s8) -> usize #foreign libc "strlen";
         \\main     :: () { x := exported(1) + plain(2); y := c_strlen("ab"); }
         \\
-        \\$ glosso --backend llvm-ir -o symbols.ll symbols.glo
+        \\$ glosso --target x86_64-windows-msvc --backend llvm-ir -o symbols.ll symbols.glo
         \\$ grep -E "glo_exported|glo_plain|glo_main|@strlen|@wmain" symbols.ll
         \\define i32 @glo_exported(i32 %0) {
         \\define i32 @glo_plain(i32 %0) {
@@ -466,7 +481,7 @@ render_section_132 :: () {
     note(36, #string,oneline
         \\Linking two separately compiled Glosso objects or archives into one image
         \\collides on the floating-point marker symbol:
-        \\`error: rust-lld: error: duplicate symbol: _fltused`, reported against
+        \\`error: lld-link: error: duplicate symbol: _fltused`, reported against
         \\both objects. `--linker-arg /FORCE:MULTIPLE` gets past it, and the shared
         \\library route avoids it entirely. Linking one Glosso archive into a C
         \\program, as above, does not hit this.
@@ -475,17 +490,21 @@ render_section_132 :: () {
 
 render_section_133 :: () {
     paragraph(0, #string,oneline
-        \\Nothing is converted at a C boundary. The argument's machine image is
-        \\handed to the callee as it stands, so a type crosses correctly exactly
-        \\when its Glosso lowering is bit-for-bit the C type the header declares.
-        \\The checker does not verify this; it verifies the Glosso signature that
-        \\was written down, and a wrong signature becomes a wrong call.
+        \\For fixed C parameters and results, the declared type selects the ABI
+        \\image; the compiler does not repair a mismatched declaration with an
+        \\implicit numeric conversion. Apart from the string-to-byte-pointer
+        \\adaptation below and C's default promotions in a variadic tail, the
+        \\argument is handed to the callee as that image. The checker verifies the
+        \\Glosso signature that was written down, so a wrong signature becomes a
+        \\wrong call.
     );
     paragraph(1, #string,oneline
-        \\Every scalar, every pointer shape, an enum with an explicit backing type,
-        \\a `distinct` type, a fixed array, and a `#c_call` struct all have exactly
-        \\one machine image, and it is the C one. Compiling `#c_call` signatures to
-        \\textual IR shows the lowering directly.
+        \\The fixed-width integers, `f32`/`f64`, pointers, an enum with an
+        \\explicit backing type, and a compatible `#c_call` struct can describe
+        \\C data directly. A `distinct` type keeps its underlying representation.
+        \\This is not a promise that every Glosso primitive has a C ABI: complex,
+        \\SIMD, and matrix values require an explicit boundary representation.
+        \\Compiling `#c_call` signatures to textual IR shows the lowering directly.
     );
     code_block(2, "glosso", #string
         \\Color :: enum u8 { Red; Green; Blue; }
@@ -502,8 +521,8 @@ render_section_133 :: () {
         \\f_dist   :: (a: Meters) -> Meters #c_call { return a; }
         \\f_array  :: (a: [4]s32) -> s64 #c_call { return 0; }
         \\
-        \\f_string :: (a: string) -> s64 #c_call { return a.count; }
-        \\f_view   :: (a: []u8) -> s64 #c_call { return a.count; }
+        \\f_string :: (a: string) -> ssize #c_call { return a.count; }
+        \\f_view   :: (a: []u8) -> ssize #c_call { return a.count; }
         \\f_option :: (a: ?s32) -> s64 #c_call { return 0; }
     );
     code_block(3, "text", #string
@@ -523,54 +542,71 @@ render_section_133 :: () {
     table_header(4, "Glosso type   —   Machine image   —   C spelling");
     table_row(5, "`s8` `s16` `s32` `s64`   |   `i8` `i16` `i32` `i64`   |   `int8_t` through `int64_t`");
     table_row(6, "`u8` `u16` `u32` `u64`   |   `i8` `i16` `i32` `i64`   |   `uint8_t` through `uint64_t`");
+    table_row(44, "`ssize`, `usize`   |   the target pointer width (`i32` or `i64`)   |   `intptr_t`, `uintptr_t`");
+    table_row(45, "`rune`   |   `i32`   |   `uint32_t`; a Unicode scalar, not an integer alias");
     table_row(7, "`f32` `f64`   |   `float` `double`   |   `float`, `double`");
     table_row(8, "`bool`   |   `i1 zeroext`   |   `_Bool`");
     table_row(9, "`enum u8`, `enum_flags u32`   |   the backing integer   |   the enum's underlying type");
-    table_row(10, "`*T`, `*const T`, `[*]T`, `*void`   |   `ptr`   |   `T *`, `const T *`, `void *`");
-    table_row(11, "`?*T`, `?[*]T`   |   `ptr`   |   a pointer that may be null");
+    table_row(10, "`*T`, `*const T`, `[*]const T`, `*const void`   |   `ptr`   |   `T *`, `const T *`, `void *`");
+    table_row(11, "`?*const T`, `?[*]const T`   |   `ptr`   |   a pointer that may be null");
     table_row(12, "`#fn_ptr(…) #c_call`   |   `ptr`   |   a function pointer");
     table_row(13, "`struct #c_call`   |   declared field order   |   the matching `struct`");
     table_row(14, "`distinct T`   |   the image of `T`   |   whatever `T` maps to");
     table_row(15, "`[N]T`   |   `[N x T]`   |   `T[N]` in a struct field");
     paragraph(16, #string,oneline
-        \\The remaining aggregate types are Glosso descriptors with no C
-        \\counterpart. They compile in a `#c_call` signature, because the checker
-        \\has no notion of C representability, and they pass the descriptor by
-        \\value. That is almost never what the C side expects.
+        \\The remaining aggregate types are Glosso descriptors with no automatic
+        \\C counterpart. A descriptor accepted in a `#c_call` signature passes
+        \\the record, not the pointed-to data, so the other side must deliberately
+        \\match its layout. `#c_call` does not turn a `string` into `char *` or a
+        \\view into a pointer-and-length parameter pair. `word` below is the
+        \\target's `ssize` width: 32 bits on a 32-bit target and 64 on a 64-bit one.
     );
     table_header(17, "Glosso type   —   Machine image   —   Reason");
-    table_row(18, "`string`, `cstring`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
-    table_row(19, "`[]T`   |   `{ i64, ptr }`   |   count and data");
-    table_row(20, "`[..]T`   |   `{ i64, ptr, i64 }`   |   count, data, capacity");
+    table_row(18, "`string`, `string16`   |   `{ ptr, word }`   |   data followed by count; no capacity");
+    table_row(48, "`cstring`, `cstring16`   |   `ptr`   |   nullable pointer; length is found by scanning for the terminator");
+    table_row(19, "`[]const T`   |   `{ word, ptr }`   |   count and data");
+    table_row(20, "`[..]T`   |   `{ word, ptr, word }`   |   count, data, capacity");
     table_row(21, "`?T` for non-pointer `T`   |   tag plus payload   |   a tagged union, not a null value");
-    table_row(22, "`E!T`, `union`, tuples   |   tag plus payload   |   a tagged union");
+    table_row(22, "`E!T`, tagged `union`   |   tag plus aligned payload (unless a built-in niche applies)   |   a tagged union");
+    table_row(46, "tuples   |   elements in tuple order, with padding   |   a record, not a tagged union");
+    note(47, #string,oneline
+        \\The checker rejects by-value complex primitives at C boundaries,
+        \\including fields in `struct #c_call`: pass the real and imaginary
+        \\components separately. `Simd(T, N)` has no portable C ABI; pass scalar
+        \\memory and use `simd_load`/`simd_store` inside Glosso. Matrices likewise
+        \\cross through a pointer to scalar storage. `f80` and `f128` must match
+        \\the exact target's floating format and convention, not merely a C type
+        \\with the same storage size; `f80` is not a portable alias for C
+        \\`long double`.
+    );
 
     subheading(23, "`string` at a pointer parameter");
     paragraph(24, #string,oneline
-        \\When a `string` argument meets a declared `*const s8` or `[*]u8`
-        \\parameter, the compiler extracts the descriptor's `data` field and passes
-        \\that pointer alone. No terminator is added and no copy is made, so the
-        \\call is free but the C callee's idea of where the text ends comes from
-        \\the bytes themselves.
+        \\A runtime `string` is a counted view and does not implicitly convert
+        \\to a C pointer parameter. String literals and `cstring` values can pass
+        \\to a compatible character pointer. Convert a counted view with
+        \\`text.c_string()` for a temporary terminated copy, or pass its `.data`
+        \\explicitly only when the foreign API also accepts a separate length.
     );
     paragraph(25, #string,oneline
-        \\String literals are stored NUL-terminated in the image, and results
-        \\marked `returns_fresh` such as `substring` are terminated copies, so both
-        \\happen to work. A buffer assembled by hand does not: the program below
+        \\String literals are stored NUL-terminated in the image. A substring
+        \\borrows a byte range and does not add a terminator at its end. A buffer
+        \\assembled by hand may have no terminator at all: the program below
         \\prints its eight bytes and then keeps going into whatever follows them in
         \\memory.
     );
     code_block(26, "glosso", #string
         \\#import "Io";
         \\
-        \\c_puts :: (s: *const s8) -> s32 #foreign "c" "puts" #memory(reads(s), noescape(s));
+        \\c_puts :: (s: *const s8) -> s32 #foreign "c" "puts" ;
         \\
         \\main :: () {
         \\    c_puts("a string literal is NUL-terminated in the image");
         \\    buf: [8]u8;
-        \\    buf[0] = #char "A"; buf[1] = #char "B"; buf[2] = #char "C";
-        \\    buf[3] = #char "X"; buf[4] = #char "Y"; buf[5] = #char "Z";
-        \\    buf[6] = #char "!"; buf[7] = #char "?";
+        \\    buf[0] = cast(u8)(#char "A"); buf[1] = cast(u8)(#char "B");
+        \\    buf[2] = cast(u8)(#char "C"); buf[3] = cast(u8)(#char "X");
+        \\    buf[4] = cast(u8)(#char "Y"); buf[5] = cast(u8)(#char "Z");
+        \\    buf[6] = cast(u8)(#char "!"); buf[7] = cast(u8)(#char "?");
         \\    c_puts(cast(*const s8)buf.data);
         \\}
     );
@@ -582,30 +618,51 @@ render_section_133 :: () {
 
     subheading(28, "`cstring`");
     paragraph(29, #string,oneline
-        \\`cstring` is a distinct built-in string type that maintains the invariant
-        \\`data[count] == 0`; `count` and `capacity` both exclude the terminator.
-        \\It is not a pointer, it is a descriptor like `string`, and its purpose is
-        \\to own a buffer whose bytes are safe to hand to C. The conversions live in
-        \\`std/Strings/Utf8`.
+        \\`cstring` is a nullable pointer to zero-terminated bytes. Its `.count`
+        \\scans to the first zero byte, and a null value has count zero. It has no
+        \\capacity and does not record ownership. A literal or foreign pointer is
+        \\borrowed; an explicit allocating conversion carries a release obligation.
+        \\The conversions live in `std/Strings/Utf8`.
+    );
+    paragraph(200, #string,oneline
+        \\The explicit `c"hello"` literal infers `cstring` and borrows
+        \\NUL-terminated static storage, so it requires no allocating conversion
+        \\and must not be freed. An embedded zero ends its visible `.count`.
+        \\Use `b"..."` for exact byte data: it infers a fixed `u8` array,
+        \\retains embedded zeros, and adds no terminator. `\xNN` inserts one
+        \\byte, while ordinary Unicode text contributes its UTF-8 bytes.
+    );
+    code_block(201, "glosso", #string
+        \\#import "Io";
+        \\
+        \\c_puts :: (s: *const s8) -> s32 #foreign "c" "puts";
+        \\
+        \\main :: () {
+        \\    text := c"hello";
+        \\    bytes: [_]u8 = b"A\0B";
+        \\    bytes[2] = 67;
+        \\    _ := c_puts(text);
+        \\    print("C count = {}, byte count = {}\n", text.count, bytes.count);
+        \\}
     );
     table_header(30, "Call   —   Result   —   Storage");
-    table_row(31, "`cstring_from_string(text, allocator)`   |   `cstring`   |   `context.allocator` by default; release it");
-    table_row(32, "`c_string(text)`   |   `cstring`   |   the temporary allocator; no release");
-    table_row(33, "`cstring_to_string(text)`   |   `string`   |   a fresh copy");
-    table_row(34, "`cstring_free(text, allocator)`   |   nothing   |   releases a `cstring_from_string` result");
+    table_row(31, "`text.cstring_from_string(allocator)`   |   `cstring`   |   `context.allocator` by default; release it");
+    table_row(32, "`text.c_string()`   |   `cstring`   |   the temporary allocator; no release");
+    table_row(33, "`text.to_string()` on a `cstring`   |   `string`   |   a counted view borrowing the same bytes");
+    table_row(34, "`text.free(allocator)`   |   nothing   |   releases a `string.cstring_from_string` result");
     code_block(35, "glosso", #string
         \\#import "Io";
         \\#import "Strings/Utf8";
         \\
-        \\c_atoi :: (s: *const s8) -> s32 #foreign "c" "atoi" #memory(reads(s), noescape(s));
+        \\c_atoi :: (s: *const s8) -> s32 #foreign "c" "atoi" ;
         \\
         \\main :: () {
-        \\    temporary := c_string("1234");             // temp-allocator copy
-        \\    print("atoi = %\n", c_atoi(temporary));
+        \\    temporary := ("1234").c_string();             // temp-allocator copy
+        \\    print("atoi = {}\n", c_atoi(temporary));
         \\
-        \\    owned := cstring_from_string("hello");     // context.allocator copy
-        \\    defer cstring_free(owned);
-        \\    print("count = % round trip = %\n", owned.count, cstring_to_string(owned));
+        \\    owned := ("hello").cstring_from_string();     // context.allocator copy
+        \\    defer owned.free();
+        \\    print("count = {} round trip = {}\n", owned.count, owned.to_string());
         \\}
     );
     code_block(36, "text", #string
@@ -613,12 +670,10 @@ render_section_133 :: () {
         \\count = 5 round trip = hello
     );
     note(37, #string,oneline
-        \\Declare the `#foreign` parameter as a pointer and pass the `cstring` into
-        \\it, as above. Never declare the parameter as `cstring` or `string`: the
-        \\descriptor is then passed by value where C expects a pointer. With an
-        \\ordinary symbol that is a silent crash, `exit code: 0xc0000005`; with a
-        \\symbol the backend also has a builtin for, the LLVM verifier surfaces it
-        \\as `error: Call parameter type does not match function signature!`.
+        \\A `cstring` has pointer representation, so it can also appear directly
+        \\in a matching C-ABI signature. A counted `string` still passes a
+        \\pointer-and-count aggregate; declaring it where C expects `char *`
+        \\does not convert the argument. Match the actual foreign signature.
     );
 
     subheading(38, "C varargs");
@@ -639,22 +694,28 @@ render_section_133 :: () {
         \\libc   :: #library "c";
         \\printf :: (format: *const s8, ...) -> s32 #foreign libc "printf";
         \\
-        \\sum_s64 :: (count: s64, ...) -> s64 #c_call {
+        \\sum_s64 :: (count: ssize, ...) -> s64 #c_call {
         \\    ap: Va_List;
-        \\    start(*ap);
-        \\    defer end(*ap);
+        \\    ap.start();
+        \\    defer ap.end();
         \\    total: s64 = 0;
-        \\    i: s64 = 0;
+        \\    i: ssize = 0;
         \\    while i < count {
-        \\        total += arg(s64, *ap);
+        \\        total += arg(s64, &ap);
         \\        i += 1;
         \\    }
         \\    return total;
         \\}
         \\
         \\main :: () {
-        \\    printf("printf through C varargs: n=%ld flag=%d\n", 42, true);
-        \\    print("sum_s64(10, 20, 12) = %\n", sum_s64(3, 10, 20, 12));
+        \\    #if OUT.os == Target_OS.Wasm {
+        \\        print("printf through C varargs skipped on WASI\n");
+        \\    } else {
+        \\        printf("printf through C varargs: n=%lld flag=%d\n",
+        \\            cast(s64)42, cast(s32)true);
+        \\    }
+        \\    print("sum_s64(10, 20, 12) = {}\n",
+        \\        sum_s64(3, cast(s64)10, cast(s64)20, cast(s64)12));
         \\}
     );
     code_block(41, "text", #string
@@ -663,17 +724,23 @@ render_section_133 :: () {
     );
     paragraph(42, #string,oneline
         \\`std/VarArg` supplies `Va_List`, which is opaque target-ABI storage, plus
-        \\`start`, `end`, `copy`, and `arg(T, *Va_List)`. It also wraps `vprintf`,
-        \\`vfprintf`, and `vsnprintf` over an opaque `C_File`. The two lines of
-        \\output arrive in that order because Glosso's `print` and C's `printf`
-        \\buffer independently.
+        \\`start`, `end`, `copy`, and `arg(T, *const Va_List)`. It also wraps `vprintf`,
+        \\`vfprintf`, and `vsnprintf` over an opaque `C_File`. This is a native
+        \\run's output; WASI skips `printf` but still exercises `sum_s64`.
+        \\Glosso's `print` and C's `printf` buffer independently, so the output
+        \\order can vary. Each value consumed by `arg(s64, &ap)` is explicitly
+        \\`s64`: an unannotated integer otherwise defaults to target-width
+        \\`ssize`, which is only 32 bits on a 32-bit target. `%lld` matches the
+        \\64-bit C `long long`; `%ld` asks for `long`, which is 32 bits even
+        \\on 64-bit Windows.
     );
     note(43, #string,oneline
-        \\No conversion happens in the variadic tail. Arguments after the last
-        \\declared parameter are pushed exactly as their Glosso representation, so
-        \\`c_printf("%s\n", "hello")` passes a three-word descriptor where C reads a
-        \\pointer and the program dies with `exit code: 0xc0000005`. Convert with
-        \\`c_string` first.
+        \\C's default argument promotions do happen in the variadic tail: `bool`,
+        \\`s8`, `u8`, `s16`, and `u16` become `s32`, while `f16` and `f32`
+        \\become `f64`. A string literal decays to a character pointer, so
+        \\`c_printf("%s\n", "hello")` is accepted. A runtime counted `string`
+        \\is rejected in the variadic tail. Pass `text.c_string()` for `%s`,
+        \\or pass an `s32` precision and `.data` separately for `%.*s`.
     );
 }
 
@@ -688,20 +755,22 @@ render_section_134 :: () {
     );
     paragraph(1, #string,oneline
         \\There are two entry points. Both take the header path, a library
-        \\descriptor, and an optional `Bindgen_Options`, and both return
-        \\`Bindgen_Error!string`.
+        \\descriptor, and optional settings as named parameters, and both return
+        \\`Bindgen_Error!string`. The library argument must satisfy
+        \\`Bindgen_Library`: use a `Library_Spec`, a bare library string, or
+        \\`Libraries` when the header contains functions from several artifacts.
     );
     table_header(2, "Call   —   Produces   —   Used with");
-    table_row(3, "`generate(header, output, library, options)`   |   writes a `.glo` file   |   a checked-in bindings file");
-    table_row(4, "`generate_source(header, library, options)`   |   returns the source text   |   `#insert`, no file on disk");
+    table_row(3, "`generate(header, output, library)`   |   writes a `.glo` file   |   a checked-in bindings file");
+    table_row(4, "`generate_source(header, library)`   |   returns the source text   |   `#insert`, no file on disk");
     code_block(5, "glosso", #string
         \\#import "Io";
         \\#import "Bindgen";
         \\
         \\emit :: () {
-        \\    if generate("counter.h", "counter_bindings.glo", static_library("counter", "")) == {
-        \\    case .Ok(message); print("[bindgen] %\n", message);
-        \\    case .Err(error);  print("[bindgen] failed: %\n", error.message);
+        \\    if generate("counter.h", "counter_bindings.glo", Library_Spec.library_spec("counter")) == {
+        \\    case .Ok(message); print("[bindgen] {}\n", message);
+        \\    case .Err(error);  print("[bindgen] failed: {}\n", error.message);
         \\    }
         \\}
         \\
@@ -729,6 +798,7 @@ render_section_134 :: () {
         \\// Generated by Glosso's Clang C header bindgen from counter.h.
         \\counter :: #library,static "counter";
         \\
+        \\#public {
         \\Counter_Stats :: struct #c_call {
         \\    hits: s32;
         \\    misses: s32;
@@ -738,15 +808,23 @@ render_section_134 :: () {
         \\
         \\COUNTER_VERSION :: 3;
         \\
-        \\counter_open :: (start: s32) -> ?[*]Counter #foreign counter "counter_open" #memory unknown;
+        \\#memory { unknown(result: returned) }
+        \\counter_open :: (start: s32) -> ?[*]Counter #foreign counter "counter_open";
         \\
-        \\counter_close :: (counter: ?[*]Counter) #foreign counter "counter_close" #memory unknown;
+        \\#memory { writes(counter) }
+        \\counter_close :: (counter: ?[*]Counter) #foreign counter "counter_close";
         \\
-        \\counter_bump :: (counter: ?[*]Counter, by: s32) -> s32 #foreign counter "counter_bump" #memory unknown;
+        \\#memory { writes(counter) }
+        \\counter_bump :: (counter: ?[*]Counter, by: s32) -> s32 #foreign counter "counter_bump";
         \\
-        \\counter_stats :: (counter: ?[*]Counter) -> Counter_Stats #foreign counter "counter_stats" #memory unknown;
+        \\#memory { writes(counter) }
+        \\counter_stats :: (counter: ?[*]Counter) -> Counter_Stats #foreign counter "counter_stats";
         \\
+        \\}
         \\// bindgen: 2 type declarations, 0 aliases, 0 callbacks, 1 constants, 0 macros, 4 functions, 0 skipped declaration parts/macros (libclang).
+    );
+    paragraph(58, #string,oneline
+        \\Generated foreign declarations carry leading #memory blocks. C pointer constness determines reads or writes; pointer results use unknown(result: returned) because a C signature does not establish storage origin or ownership. A name such as counter_close does not prove release behavior. Supply the API's actual returns_fresh, released_by, kills, noescape, and escape rules before relying on it as a memory boundary.
     );
     paragraph(8, #string,oneline
         \\The `.Ok` payload of `generate` is a status line, not a path: the run
@@ -756,38 +834,43 @@ render_section_134 :: () {
 
     subheading(9, "Library descriptors");
     paragraph(10, #string,oneline
-        \\The third argument decides the `#library` declaration at the head of the
+        \\The library argument decides the `#library` declaration at the head of the
         \\generated file. The descriptor's name becomes the Glosso identifier every
         \\`#foreign` in the file refers to; its file or path becomes the string.
-        \\`static_library` and `system_library` default the file to the name.
+        \\`Library_Spec.library_spec(name, .file = "", .kind = .Static)` defaults an empty file
+        \\to the name for `.Static` and `.System`. `.Dynamic` requires a path.
     );
     table_header(11, "Descriptor   —   Emitted declaration");
-    table_row(12, "`static_library(\"small\", \"\")`   |   `small :: #library,static \"small\";`");
-    table_row(13, "`static_library(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
-    table_row(14, "`system_library(\"m\", \"\")`   |   `m :: #library,system \"m\";`");
-    table_row(15, "`dynamic_library(\"small\", \"libsmall.so\")`   |   `small :: #library,dyn \"libsmall.so\";`");
+    table_row(12, "`Library_Spec.library_spec(\"small\")`   |   `small :: #library,static \"small\";`");
+    table_row(13, "`Library_Spec.library_spec(\"small\", \"build/libsmall.a\")`   |   `small :: #library,static \"build/libsmall.a\";`");
+    table_row(14, "`Library_Spec.library_spec(\"m\", .kind = .System)`   |   `m :: #library,system \"m\";`");
+    table_row(15, "`Library_Spec.library_spec(\"small\", \"libsmall.so\", .Dynamic)`   |   `small :: #library,dyn \"libsmall.so\";`");
 
-    subheading(16, "`Bindgen_Options`");
+    subheading(16, "Direct generation parameters");
     code_block(17, "glosso", #string
-        \\Bindgen_Options :: struct #c_call {
-        \\    include_paths: [..]string;
-        \\    preprocessor_definitions: [..]string;
-        \\    compiler_args: [..]string;
-        \\    allow_textual_fallback: bool = false;
+        \\emit_small :: () -> Bindgen_Error!string {
+        \\    includes: [1]string = .["include"];
+        \\    definitions: [1]string = .["SMALL_EXTRA=1"];
+        \\    names: [2]string = .["small_add", "SMALL_VERSION"];
+        \\    return generate_source("small.h", Library_Spec.library_spec("small"), .include_paths = includes[..], .preprocessor_definitions = definitions[..], .allowlist = names[..]);
         \\}
     );
-    table_header(18, "Field   —   Becomes   —   Default");
+    table_header(18, "Parameter   —   Becomes   —   Default");
     table_row(19, "`include_paths`   |   `-I` arguments   |   empty");
     table_row(20, "`preprocessor_definitions`   |   `-D` arguments, `NAME` or `NAME=VALUE`   |   empty");
     table_row(21, "`compiler_args`   |   raw arguments to clang   |   empty");
     table_row(22, "`allow_textual_fallback`   |   a limited non-clang parser   |   `false`");
+    table_row(45, "`allowlist`   |   exact declaration names and their transitive dependencies   |   empty, generating all supported local declarations");
     paragraph(23, #string,oneline
-        \\Three mutators append to the arrays without naming the fields:
-        \\`add_include_path`, `add_bindgen_preprocessor_definition`, and
-        \\`add_bindgen_compiler_arg`, each taking a `*Bindgen_Options`. Definitions
-        \\reach the header exactly as clang would apply them, so
-        \\`add_bindgen_preprocessor_definition(*options, "SMALL_EXTRA=1")` selects
-        \\the other side of an `#ifdef` and changes the constants that come out.
+        \\Include paths, definitions, compiler arguments and allowlists are
+        \\ordinary `[]string` parameters, each defaulting to `.[]`. The call
+        \\borrows these slices and their text only while generating. Pass a
+        \\fixed array's `[..]` view or a slice; no option record or specialized
+        \\array mutator is needed. Definitions use `NAME` or `NAME=VALUE` without
+        \\`-D`, so `SMALL_EXTRA=1` selects the corresponding preprocessor branch.
+        \\A nonempty allowlist also reaches declarations in external SDK includes,
+        \\requires Clang even when textual fallback is enabled, and rejects
+        \\unknown names.
     );
     paragraph(24, #string,oneline
         \\`allow_textual_fallback` is `false` because a clang error is more useful
@@ -802,24 +885,11 @@ render_section_134 :: () {
         \\// broken.h begins with: #include <no_such_header_anywhere.h>
         \\
         \\emit :: (allow: bool) {
-        \\    options: Bindgen_Options;
-        \\    options.allow_textual_fallback = allow;
-        \\    if generate_source("broken.h", static_library("broken", ""), options) == {
-        \\    case .Ok(source);  print("[ok, allow=%]\n%\n", allow, source);
-        \\    case .Err(error);  print("[err, allow=%] %\n", allow, error.message);
+        \\    if generate_source("broken.h", Library_Spec.library_spec("broken"), .allow_textual_fallback = allow) == {
+        \\    case .Ok(source);  print("[ok, allow={}]\n{}\n", allow, source);
+        \\    case .Err(error);  print("[err, allow={}] {}\n", allow, error.message);
         \\    }
         \\}
-    );
-    code_block(26, "text", #string
-        \\[ok, allow=1]
-        \\// Generated by Glosso's C header bindgen from broken.h.
-        \\broken :: #library,static "broken";
-        \\
-        \\BROKEN_ANSWER :: 7;
-        \\
-        \\broken_add :: (a: s32, b: s32) -> s32 #foreign broken "broken_add" #memory unknown;
-        \\
-        \\// bindgen: 0 type declarations, 0 aliases, 0 callbacks, 1 constants, 0 macros, 1 functions, 0 skipped declaration parts/macros.
     );
     paragraph(27, #string,oneline
         \\The banner distinguishes the two parsers: libclang output says
@@ -839,7 +909,7 @@ render_section_134 :: () {
         \\
         \\typedef unsigned long long Rich_Id;
         \\
-        \\typedef int (*Rich_Callback)(int value, void *user);
+        \\typedef int (*const Rich_Callback)(int value, void *user);
         \\
         \\typedef struct Rich_Config {
         \\    Rich_Mode     mode;
@@ -860,24 +930,24 @@ render_section_134 :: () {
         \\    mode: s32;
         \\    id: u64;
         \\    name: ?[*]const s8;
-        \\    on_event: Rich_Callback;
+        \\    on_event: ?Rich_Callback;
         \\}
         \\
         \\Rich_Mode :: s32;
         \\
         \\Rich_Id :: u64;
         \\
-        \\Rich_Callback :: #fn_ptr(arg0: s32, arg1: ?[*]void) -> s32 #c_call;
+        \\Rich_Callback :: #fn_ptr(arg0: s32, arg1: ?[*]void) -> s32 #c_call ;
         \\
         \\RICH_MODE_OFF :: 0;
         \\
         \\RICH_MODE_ON :: 1;
         \\
-        \\rich_configure :: (config: ?[*]const Rich_Config) #foreign rich "rich_configure" #memory unknown;
+        \\rich_configure :: (config: ?[*]const Rich_Config) #foreign rich "rich_configure" ;
         \\
-        \\rich_describe :: (mode: s32) -> ?[*]s8 #foreign rich "rich_describe" #memory unknown;
+        \\rich_describe :: (mode: s32) -> ?[*]s8 #foreign rich "rich_describe" ;
         \\
-        \\rich_count :: () -> u64 #foreign rich "rich_count" #memory unknown;
+        \\rich_count :: () -> u64 #foreign rich "rich_count" ;
         \\
         \\// bindgen: 1 type declarations, 2 aliases, 1 callbacks, 2 constants, 0 macros, 3 functions, 0 skipped declaration parts/macros (libclang).
     );
@@ -894,93 +964,26 @@ render_section_134 :: () {
     bullet(33, #string,oneline
         \\Function-pointer typedefs become `#fn_ptr … #c_call` with positional
         \\parameter names `arg0`, `arg1`, and so on; C parameter names are not
-        \\carried across.
+        \\carried across. Uses of that typedef in parameters, fields, and return
+        \\values are optional by default, such as `?Rich_Callback`. A `_Nonnull`
+        \\annotation makes a C pointer or callback nonoptional.
     );
     bullet(34, #string,oneline
-        \\A plain C pointer parameter is spelled `?[*]T`, an optional many-pointer,
-        \\and `const` is part of that type. `?[*]Counter` and `?[*]const Counter`
-        \\are distinct and do not convert: passing one where the other is expected
-        \\is `error: arg type Option____Counter != Option____const_Counter in call counter_stats`,
-        \\and `cast` does not bridge them either.
+        \\Bindgen maps C T * to ?[*]T and const T * to ?[*]const T. These types preserve pointee mutability. Match optional pointers before use; read-only storage cannot be passed to an API that writes through its pointer.
     );
     bullet(35, #string,oneline
-        \\Object-like macros with constant values become constants; the summary
-        \\comment counts what was emitted and what was skipped.
+        \\Object-like macros with constant values become constants. Static C
+        \\functions have no exported symbol and are skipped, as are macros that
+        \\have no Glosso translation. A `bindgen skipped` note identifies the
+        \\omission, and the summary counts emitted and skipped declarations.
     );
 
-    subheading(36, "Supplying memory contracts");
+    subheading(36, "Ownership at the foreign boundary");
     paragraph(37, #string,oneline
-        \\Bindgen appends `#memory unknown` to every function it emits, and
-        \\`unknown` is operationally the same as no contract at all: it creates no
-        \\resource, tracks no ownership, and does not even silence the advisory
-        \\about an opaque call's return lifetime. A bindgen'd library therefore
-        \\enters the program uncontracted. The fix is a top-level `#memory` overlay
-        \\per function, which merges into the contract for the whole program;
-        \\overlays and the clause vocabulary are covered in Writing `#memory`
-        \\Contracts.
-    );
-    code_block(38, "glosso", #string
-        \\#import "Io";
-        \\#import "Compiler";
-        \\#import "Bindgen";
-        \\
-        \\#insert build_counter();
-        \\
-        \\build_counter :: () -> string {
-        \\    sources: [..]string;
-        \\    defer array_free(*sources);
-        \\    array_add(*sources, "counter.c");
-        \\    c_options: C_Compile_Options;
-        \\    archive: Native_Compile_Output;
-        \\    if compile_c_archive("counter", sources, c_options) == {
-        \\    case .Ok(built);  archive = built;
-        \\    case .Err(error); print("cc failed: %\n", error.message); return "";
-        \\    }
-        \\    if generate_source("counter.h", static_library("counter", archive.artifact)) == {
-        \\    case .Ok(source); return source;
-        \\    case .Err(error); print("bindgen failed: %\n", error.message); return "";
-        \\    }
-        \\}
-        \\
-        \\#memory counter_open  { returns_fresh, released_by(counter_close) };
-        \\#memory counter_close { kills(arg(0)), noescape(arg(0)) };
-        \\#memory counter_bump  { reads(arg(0)), writes(arg(0)), noescape(arg(0)) };
-        \\#memory counter_stats { returns_static, reads(arg(0)), noescape(arg(0)) };
-        \\
-        \\main :: () {
-        \\    print("COUNTER_VERSION = %\n", COUNTER_VERSION);
-        \\    c := counter_open(10);
-        \\    defer counter_close(c);
-        \\    print("bump -> %\n", counter_bump(c, 32));
-        \\    stats := counter_stats(c);
-        \\    print("hits = %\n", stats.hits);
-        \\}
-    );
-    code_block(39, "text", #string
-        \\COUNTER_VERSION = 3
-        \\bump -> 42
-        \\hits = 1
-    );
-    paragraph(40, #string,oneline
-        \\That build is clean at the default `--borrow-check warning`. The overlays
-        \\are doing real work: `arg(N)` names parameters positionally, which is what
-        \\machine-generated declarations need, and with `counter_open` marked
-        \\`returns_fresh, released_by(counter_close)` a second close is caught
-        \\before the program runs.
-    );
-    paragraph(41, #string,oneline
-        \\Replacing the `defer` with a second `counter_close(c)` and building at
-        \\`--borrow-check error` stops the build with
-        \\`error: double release of resource`, framed on the second call, followed
-        \\by `note: first release occurred here` framed on the first. Neither call
-        \\has a body the compiler can see; the overlay is the only reason it knows.
-    );
-    note(42, #string,oneline
-        \\Without the overlays the same program still compiles, and prints
-        \\`warning: lifetime of memory returned by opaque foreign call 'counter_open' is unknown`
-        \\with `note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract`.
-        \\That note is the compiler asking for the overlay; `#memory unknown`, which
-        \\bindgen already wrote, does not answer it.
+        \\Generated declarations describe C layouts and calling conventions.
+        \\They do not track allocation, retention, or release. Wrap owning
+        \\foreign handles in a type with Drop, or pair raw acquisitions with
+        \\their documented release functions using defer.
     );
 }
 
@@ -1017,7 +1020,7 @@ render_section_135 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("asm add = %\n", add_via_asm(20, 22));
+        \\    print("asm add = {}\n", add_via_asm(20, 22));
         \\}
     );
     code_block(3, "text", #string
@@ -1084,8 +1087,8 @@ render_section_135 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("rotate_left(1, 4) = %\n", rotate_left(1, 4));
-        \\    print("popcount(255)     = %\n", popcount(255));
+        \\    print("rotate_left(1, 4) = {}\n", rotate_left(1, 4));
+        \\    print("popcount(255)     = {}\n", popcount(255));
         \\}
     );
     code_block(11, "text", #string
@@ -1093,7 +1096,7 @@ render_section_135 :: () {
         \\popcount(255)     = 8
     );
     paragraph(12, #string,oneline
-        \\`rotate_left` emits `"rolq ${1:b}, $0"` with the constraint string
+        \\`u64.rotate_left` emits `"rolq ${1:b}, $0"` with the constraint string
         \\`"=r,{rcx},0,~{cc}"`: the modifier survived, the fixed register became a
         \\braced register name, and the `inout` operand became an output plus a
         \\tied input. `rolq` needs its shift count in `cl`, and `{shift:b}` is how a
@@ -1238,7 +1241,7 @@ render_section_135 :: () {
         \\}
         \\
         \\main :: () {
-        \\    print("asm add = %\n", add_via_asm(20, 22));
+        \\    print("asm add = {}\n", add_via_asm(20, 22));
         \\}
     );
     code_block(51, "text", #string
@@ -1268,7 +1271,7 @@ render_section_135 :: () {
         \\// 0xf3 0x90 is `pause`, the x86 spin-wait hint. It reads and writes nothing.
         \\PAUSE_X86 :: .[16#f3, 16#90];
         \\
-        \\spin :: (rounds: s64) {
+        \\spin :: (rounds: ssize) {
         \\    i := 0;
         \\    while i < rounds {
         \\        #if OUT.cpu == {
@@ -1326,8 +1329,8 @@ render_section_136 :: () {
         \\declaration has no body: its parameters and result type are the signature
         \\the checker sees, and the string picks the implementation out of a registry
         \\built into the compiler. This is how the standard library reaches the type
-        \\system, the host operating system, and the machine. 475 distinct intrinsic
-        \\names appear across `std`, in 575 declarations.
+        \\system, the host operating system, and the machine. The standard library
+        \\uses registered intrinsics alongside ordinary Glosso implementations.
     );
     paragraph(1, #string,oneline
         \\`#magic` exists so that these operations stay ordinary declarations. A
@@ -1338,19 +1341,20 @@ render_section_136 :: () {
     );
     code_block(2, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\// A user declaration may bind any registered intrinsic name.
-        \\byte_width :: (T: type) -> s64 #magic "size_of";
-        \\concat     :: (a: string, b: string) -> string #magic "str_concat";
+        \\byte_width :: (T: type) -> ssize #magic "size_of";
+        \\same_text  :: (a: string, b: string) -> bool #magic "str_eq";
         \\
         \\main :: () {
-        \\    print("byte_width(s32) = %\n", byte_width(s32));
-        \\    print("concat = %\n", concat("glo", "sso"));
+        \\    print("byte_width(s32) = {}\n", byte_width(s32));
+        \\    print("same_text = {}\n", same_text("glosso", "glosso"));
         \\}
     );
     code_block(3, "text", #string
         \\byte_width(s32) = 4
-        \\concat = glosso
+        \\same_text = 1
     );
     paragraph(4, #string,oneline
         \\The name is not checked when the declaration is read. An unregistered name
@@ -1364,31 +1368,35 @@ render_section_136 :: () {
     subheading(5, "The four availability classes");
     paragraph(6, #string,oneline
         \\Each registry entry carries two independent flags: whether the compile-time
-        \\VM has an implementation, and whether the checker may fold the call while
-        \\type checking. The four combinations are the availability classes, and every
-        \\refusal in this chapter follows from them.
+        \\VM has an implementation, and whether the checker may evaluate the call while
+        \\type checking. Their four combinations describe evaluator availability.
+        \\Native LLVM lowering is classified separately, so an intrinsic available to
+        \\both compile-time engines can still be deliberately forbidden in a program.
     );
     table_header(7, "Class   —   Runs where   —   Representative names");
-    table_row(8, "compile-time only   |   folded by the checker; never in the VM and never natively   |   `size_of`, `type_info`, `field_name`, `pattern_missing`");
-    table_row(9, "VM and compile time   |   both compile-time engines and compiled code   |   `str_concat`, `substring`, file and process services, `compiler_compile`");
-    table_row(10, "VM, not foldable   |   the VM and compiled code, but not folded into a constant   |   `exit`, `assert_failed`, `int_add`, `num_lt`");
-    table_row(11, "native only   |   compiled code only   |   `ptr_add`, `va_arg`, `ctx_alloc`, `jump_goto`");
+    table_row(8, "compile-time only   |   checker evaluation, not the VM; native lowering rejects these queries   |   `size_of`, `type_info`, `field_name`, `pattern_missing`");
+    table_row(9, "VM and compile time   |   both compile-time engines; native availability is decided independently   |   `str_eq`, `substring`, file services, `compiler_add_build_file`");
+    table_row(10, "VM, not foldable   |   the VM but not checker evaluation; these representatives also lower natively   |   `exit`, `assert_failed`, `int_add`, `num_lt`");
+    table_row(11, "native only   |   neither compile-time engine; compiled code only   |   `ptr_add`, `va_arg`, `ctx_alloc`, `jump_goto`");
     paragraph(12, #string,oneline
-        \\Membership follows the nature of the operation, not a policy. A query about
-        \\a type has no runtime existence, so it is compile-time only. An operation on
-        \\a raw address or on the implicit context has no meaning inside an evaluator
-        \\that has no addresses and no context, so it is native only. Everything that
-        \\is a pure computation on values, or a request to the host, works in both.
+        \\Membership follows the nature of the operation. A query about a type has no
+        \\runtime existence, so it is compile-time only. An operation on a raw address
+        \\or on the implicit context has no meaning inside an evaluator with neither,
+        \\so it is native only. Pure value operations generally work everywhere.
+        \\Host compiler and bindgen services work in the two compile-time engines but
+        \\are rejected by native lowering: they are services of a build, not of the
+        \\program that build emits.
     );
     table_header(13, "Family   —   Class   —   Note");
-    table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
-    table_row(15, "strings and string slicing   |   VM and compile time   |   `str_concat`, `str_eq`, `str_repeat`, `substring`, `byte_string`, the `show_*` formatters");
+    table_row(14, "type and pattern reflection   |   compile-time only   |   `type_of(value)`, `type_name`, `type_kind`, the `field_*`, `enum_*`, `variant_*` and `pattern_*` families, `simd_*`, `matrix_*`, the `range*_to_pattern` conversions");
+    table_row(15, "strings and string slicing   |   VM and compile time   |   `str_eq`, `str_cmp`, `substring`, `byte_string`, the `show_*` formatters");
     table_row(16, "files, filesystem, processes   |   VM and compile time   |   so a build script can read the host; the handle-relative sandbox primitives stay native only");
-    table_row(17, "compiler and bindgen services   |   VM and compile time   |   `compiler_compile`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
+    table_row(17, "compiler and bindgen services   |   VM and compile time, native forbidden   |   `compiler_add_build_file`, `compiler_add_build_string`, `compiler_compile_c_archive`, `compiler_run_command`, `bindgen_generate_source`");
     table_row(18, "complex numbers, wrapping and saturating integers, indexing, ranges   |   VM and compile time   |   `complex_*`, `int_wrap_*`, `int_sat_*`, `index_array`, the `slice*` family, `type_eq`");
     table_row(19, "arithmetic and comparison templates   |   VM, not foldable   |   `int_add`, `flt_mul`, `num_lt`, `bool_and`, `ptr_eq`");
     table_row(20, "pointer arithmetic, varargs, jumps, raw memory   |   native only   |   `ptr_add`, `ptr_diff`, `ptr_index`, `memory_copy_magic`, `va_start`, `va_arg`, `jump_context_save`, `jump_goto`, `string_from_raw_parts`");
     table_row(21, "allocation   |   native only   |   `ctx_alloc`, `ctx_free`, `temp_alloc`, `temp_free_all`, and the debug-allocator entries");
+    table_row(62, "terminal query, mode, event, and console control   |   native only   |   the `os_*_terminal_query` and `os_*_terminal_set_mode` families, plus Windows native event, clear, cursor, wrapping, and title operations");
     paragraph(22, #string,oneline
         \\One entry is special-cased against its class. `get_cmdline_args` is
         \\registered native only, but the compile-time runtime answers it anyway, so
@@ -1401,15 +1409,15 @@ render_section_136 :: () {
         \\#import "Compiler";
         \\
         \\#comptime {
-        \\    print("[ct] compiler = %\n", executable_path());
+        \\    print("[ct] compiler = {}\n", executable_path());
         \\    args := get_cmdline_args();
-        \\    print("[ct] %  compile-time argument(s)\n", args.count);
-        \\    for args print("[ct] arg: %\n", it);
+        \\    print("[ct] {}  compile-time argument(s)\n", args.count);
+        \\    for args print("[ct] arg: {}\n", it);
         \\}
         \\
         \\main :: () {
         \\    args := get_cmdline_args();
-        \\    print("[rt] % argument(s)\n", args.count);
+        \\    print("[rt] {} argument(s)\n", args.count);
         \\}
     );
     code_block(24, "text", #string
@@ -1441,13 +1449,13 @@ render_section_136 :: () {
         \\
         \\make :: () -> s64 {
         \\    p := alloc(8);
-        \\    free(p);
+        \\    p.free();
         \\    return 1;
         \\}
         \\
         \\X ::= make();
         \\
-        \\main :: () { print("%\n", X); }
+        \\main :: () { print("{}\n", X); }
     );
     code_block(35, "text", #string
         \\error: #magic intrinsic 'ctx_alloc' is not available during compile-time evaluation
@@ -1468,37 +1476,39 @@ render_section_136 :: () {
         \\names the function and the IR instruction being lowered.
     );
     table_header(39, "Classification   —   Message");
-    table_row(40, "compile-time only, so it should have been folded   |   `#magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering`");
+    table_row(40, "compile-time-only query or service   |   `#magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering`; compiler services use `compiler service or type query must be folded before native lowering`");
     table_row(41, "deliberately unlowered representation   |   `native LLVM lowering rejects #magic 'sb_new': string-builder runtime representation is not lowered`");
     table_row(42, "classified as implemented, but no lowering matched   |   `native LLVM magic coverage drift: #magic '<name>' is classified as implemented but no lowering matched`");
     table_row(43, "name not in the backend's table   |   `native LLVM lowering has no classification for #magic '<name>'`");
     paragraph(44, #string,oneline
-        \\The first of those is reachable only by writing a declaration the standard
-        \\library would not: a call to a compile-time-only intrinsic is folded during
-        \\lowering when the declaration has a `type`-valued parameter and the registry
-        \\entry is compile-time. That is the rule that lets `size_of(Vec3)` and
+        \\Type queries normally disappear before this classification: a call to a
+        \\compile-time intrinsic is folded during lowering when the declaration has a
+        \\`type`-valued parameter. That lets `size_of(Vec3)` and
         \\`field_name(Vec3, 1)` stand in a runtime body and become constants. Bind
-        \\`"size_of"` to a signature with no `type` parameter and the fold does not
-        \\happen, and the call arrives at the backend.
+        \\`"size_of"` to a signature with no `type` parameter and the call instead
+        \\arrives at the backend. Compiler and bindgen services reach the same class
+        \\when called from ordinary runtime code; use them from `#comptime`, where the
+        \\VM supplies the service.
     );
     code_block(45, "glosso", #string
         \\#import "Io";
+        \\#import "Meta";
         \\
         \\sneaky :: (a: s64) -> s64 #magic "size_of";
         \\
         \\main :: () {
-        \\    print("%\n", sneaky(1));
+        \\    print("{}\n", sneaky(1));
         \\}
     );
     code_block(46, "text", #string
         \\error: #magic 'size_of' must not reach native LLVM lowering: type introspection query must be folded before native lowering [opcode Magic] while lowering 'main' at IR instruction 2
     );
     note(47, #string,oneline
-        \\`sb_new`, `sb_append` and `sb_to_string` are the one family whose behaviour
-        \\differs between the two compile-time engines: the constant evaluator
-        \\special-cases the mutation through a pointer, and the VM does not, so a
-        \\`String_Builder` used inside a top-level `#comptime` silently produces the
-        \\empty string. Build compile-time text with `str_cat` instead.
+        \\String_Builder.new(), append(), and finish_source() support
+        \\compile-time source generation; finish_source() consumes the builder.
+        \\The ordinary make_len_cap(), write_string(), and into_string() operations
+        \\also work in compile-time code. Use a transferred allocation or clone
+        \\when the resulting text must outlive the builder.
     );
     subheading(48, "`#magic` on an aggregate");
     paragraph(49, #string,oneline
@@ -1526,19 +1536,18 @@ render_section_137 :: () {
     paragraph(1, #string,oneline
         \\Nothing about the module is Lua-specific. `std/Lua/Build.glo` holds the
         \\logic and has no top-level side effects of its own, so it can be imported
-        \\directly by a program that wants a different linkage. `std/Gui` is built the
-        \\same way.
+        \\directly by a program that wants a different linkage.
     );
     paragraph(2, #string,oneline
         \\The work `static_bindings_source` does on a supported target is: check the
         \\target against the support matrix, locate the Lua source tree, hand the 32
-        \\C files to `compile_c_archive` with `LUA_USE_POSIX` defined on the Unix
+        \\C files to `Native_Compile_Output.compile_c_archive` with `LUA_USE_POSIX` defined on the Unix
         \\family, add `-lm` to the link on Linux, macOS and FreeBSD, and return the
         \\bindgen output for `glosso_lua.h` bound to the archive it produced.
     );
     code_block(3, "text", #string
-        \\<cache>/native/v6/lua55/x86_64-windows-msvc/<key>/lua55.lib
-        \\<cache>/native/v6/lua55/x86_64-linux-musl/<key>/liblua55.a
+        \\<cache>/native/v7/lua55/x86_64-windows-msvc/<key>/lua55.lib
+        \\<cache>/native/v7/lua55/x86_64-linux-musl/<key>/liblua55.a
         \\<cache>/generated/insert/v1/<sha256>.glo
     );
     paragraph(4, #string,oneline
@@ -1585,10 +1594,10 @@ render_section_137 :: () {
         \\$ glosso --backend object --target wasm32-wasi -o lua.o lua_hello.glo
         \\glosso: compile lua_hello.glo (target=wasm32-unknown-wasi)
         \\error: bundled static Lua currently supports Windows and Linux targets
-        \\  --> …\std\Lua\module.glo:5:1
-        \\  |
-        \\5 | #insert static_bindings_source();
-        \\  | ^^^^^^^
+        \\   --> …\std\Lua\module.glo:44:1
+        \\   |
+        \\44 | #insert static_bindings_source();
+        \\   | ^^^^^^^
         \\note: generated source failed here
         \\  --> …\cache\generated\insert\v1\929f9018….glo:1:49
         \\  |
@@ -1609,27 +1618,9 @@ render_section_137 :: () {
         \\covered in Generating Bindings with Bindgen; three of them matter for
         \\everyday Lua code.
     );
-    code_block(22, "text", #string
-        \\// Generated by Glosso's Clang C header bindgen from …\thirdparty\lua\src\glosso_lua.h.
-        \\lua :: #library,static "…\\glosso\\cache\\native\\v6\\lua55\\x86_64-windows-msvc\\63843400c56d4afb\\lua55.lib";
-        \\
-        \\lua_State :: struct #c_call {}
-        \\
-        \\LUA_OK :: 0;
-        \\
-        \\lua_CFunction :: #fn_ptr(arg0: ?[*]lua_State) -> s32 #c_call;
-        \\
-        \\luaL_newstate :: () -> ?[*]lua_State #foreign lua "luaL_newstate" #memory unknown;
-        \\
-        \\lua_tolstring :: (L: ?[*]lua_State, idx: s32, len: ?[*]u64) -> ?[*]const s8 #foreign lua "lua_tolstring" #memory unknown;
-        \\
-        \\lua_tostring :: (L: $Bindgen_Macro_T0, i: $Bindgen_Macro_T1) #expand,expression {
-        \\    return lua_tolstring ( L , cast(s32)(( i )) , null );
-        \\}
-    );
     bullet(23, #string,oneline
         \\`lua_State` is an empty `struct #c_call`, so it is an opaque handle. Every C
-        \\pointer becomes `?[*]T`, which is why `luaL_newstate` returns an option and
+        \\pointer becomes `?[*]const T`, which is why `luaL_newstate` returns an option and
         \\the result of `lua_tostring` is matched rather than null-tested.
     );
     bullet(24, #string,oneline
@@ -1637,27 +1628,6 @@ render_section_137 :: () {
         \\macro with inferred `Bindgen_Macro_T<N>` parameters. `lua_pop`,
         \\`lua_pcall`, `lua_tointeger`, `lua_pushcfunction`, `lua_register`,
         \\`luaL_openlibs` and `luaL_dostring` are all macros, not foreign functions.
-    );
-    bullet(25, #string,oneline
-        \\Every function carries `#memory unknown`, because a C header says nothing
-        \\about lifetimes. `#memory` contracts are covered in Writing `#memory`
-        \\Contracts.
-    );
-    paragraph(26, #string,oneline
-        \\That last point has a visible consequence: calls whose result is memory
-        \\produce a borrow-check warning on every build. It is a warning by default,
-        \\an error under `--borrow-check error`, and silent under `--borrow-check off`;
-        \\the flag is described in The `--borrow-check` Flag. The durable fix is an
-        \\overlay that gives the foreign declaration a real contract, as in Overlays
-        \\and Foreign Bindings.
-    );
-    code_block(27, "text", #string
-        \\warning: lifetime of memory returned by opaque foreign call 'luaL_newstate' is unknown
-        \\  --> …\lua_read.glo:8:14
-        \\  |
-        \\8 |     state := luaL_newstate();
-        \\  |              ^^^^^^^^^^^^^
-        \\note: add returns_fresh, returns_borrow(...), or returns_static to its #memory contract
     );
     subheading(28, "Calling Lua from Glosso");
     paragraph(29, #string,oneline
@@ -1690,7 +1660,7 @@ render_section_137 :: () {
         \\    }
         \\
         \\    lua_getglobal(state, "answer");
-        \\    print("Lua computed %\n", lua_tointeger(state, -1));
+        \\    print("Lua computed {}\n", lua_tointeger(state, -1));
         \\    lua_pop(state, 1);
         \\}
     );
@@ -1732,7 +1702,9 @@ render_section_137 :: () {
         \\    }
         \\    luaL_openlibs(state);
         \\
-        \\    lua_register(state, "triple", glosso_triple);
+        \\    callback: lua_CFunction = glosso_triple;
+        \\    optional_callback: ?lua_CFunction = .Some(callback);
+        \\    lua_register(state, "triple", optional_callback);
         \\
         \\    if luaL_dostring(state, "answer = triple(14)") != LUA_OK {
         \\        print("lua error\n");
@@ -1741,7 +1713,7 @@ render_section_137 :: () {
         \\    }
         \\
         \\    lua_getglobal(state, "answer");
-        \\    print("Lua called back into Glosso: %\n", lua_tointeger(state, -1));
+        \\    print("Lua called back into Glosso: {}\n", lua_tointeger(state, -1));
         \\    lua_pop(state, 1);
         \\    lua_close(state);
         \\}
@@ -1786,4 +1758,6 @@ render_section_137 :: () {
         \\different Lua version will link and then misbehave, because nothing in the
         \\build checks the library against the header it was described by.
     );
+}
+
 }

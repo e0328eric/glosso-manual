@@ -13,6 +13,11 @@
   "enum_flags"
   "using"
   "noalias"
+  "mut"
+  "const"
+  "raw"
+  "raw_mut"
+  "volatile"
   "defer"
   "where"
   "cast"
@@ -22,12 +27,15 @@
   "distinct"
 ] @keyword
 
+(caller_return_statement "`return" @keyword)
+(caller_defer_statement "`defer" @keyword)
+
 [
   "#comptime"
   "#lazy"
   "#import"
   "#load"
-  "#private_section"
+  "#export"
   "#thread_local"
   "#library"
   "#fn_ptr"
@@ -37,19 +45,17 @@
   "#aos"
   "#soa"
   "#operator"
-  "#precedence"
   "#modify"
   "#expand"
   "#magic"
   "#foreign"
-  "#memory"
   "#c_call"
   "#packed"
+  "#align"
   "#no_context"
   "#dump"
-  "#fallback"
   "#must"
-  "#noreturn"
+  "#on_drop_error"
   "#returns_twice"
   "#inline"
   "#bytes"
@@ -67,10 +73,17 @@
   "#code"
   "#string"
   "#simd"
+  "#matrix"
   "#enable"
   "#disable"
   "#derive"
+  "#lifetimes"
+  "#memory"
+  "#fresh_result"
+  "#unchecked_transfer"
   "#assert"
+  "#public"
+  "#private"
 ] @attribute
 
 (from_directive) @attribute
@@ -78,6 +91,8 @@
 
 (comment) @comment
 (string_literal) @string
+(c_string_literal) @string
+(byte_string_literal) @string
 (multiline_string_line) @string
 (char_literal) @character
 (integer_literal) @number
@@ -86,7 +101,11 @@
 (null_literal) @constant.builtin
 (label_none_literal) @constant.builtin
 (context_expression) @constant.builtin
+(source_location_expression) @constant.builtin
 (context_type) @type.builtin
+(self_type) @type.builtin
+(never_type) @type.builtin
+(self_expression) @variable.builtin
 
 ; Give every identifier a baseline capture first. Context-specific captures below
 ; must come later so clients that resolve overlapping captures by query order do
@@ -95,14 +114,20 @@
 (code_splice_identifier) @variable
 (non_hygienic_identifier) @variable
 (label) @label
+(lifetime) @label
+(lifetimes_directive (identifier) @label)
 (quoted_operator) @operator
 (operator) @operator
 (prefix_operator) @operator
+(for_pointer_binder) @operator
 (suffix_operator) @operator
 (range_operator) @operator
 (binding_operator) @operator
 (constant_pattern_operator) @operator
 (try_operator) @operator
+(postfix_expression [".*" ".&"] @operator)
+(expression_statement [".*" ".&"] @operator)
+(enum_variant "-" @operator)
 
 ; Types
 (named_type [
@@ -133,6 +158,24 @@
 (instance_declaration
   class: (identifier) @type)
 
+; Keep this list aligned with `parser_builtin_type_name` in ../glosso.
+(
+  [
+    (named_type (identifier) @type.builtin)
+    (generic_type name: (identifier) @type.builtin)
+    (type_constructor_pattern (identifier) @type.builtin)
+    (generic_type_constructor_pattern name: (identifier) @type.builtin)
+  ]
+  (#any-of? @type.builtin
+    "ssize" "usize" "rune" "bool"
+    "string" "cstring" "string16" "cstring16"
+    "type" "void" "any" "label"
+    "Code" "Pattern" "Namespace" "Library" "Typeclass" "Macro"
+    "s8" "s16" "s32" "s64" "s128"
+    "u8" "u16" "u32" "u64" "u128"
+    "f16" "f32" "f64" "f80" "f128"
+    "c32" "c64" "c128" "c160" "c256"))
+
 (named_declaration
   name: (declaration_name [
     (identifier)
@@ -153,6 +196,7 @@
     (code_splice_identifier)
   ] @type.definition)
   [
+    (function_pointer_type_declaration)
     (struct_declaration)
     (enum_declaration)
     (union_declaration)
@@ -172,6 +216,7 @@
 (named_argument name: (identifier) @variable.parameter)
 (typeclass_parameter name: (identifier) @variable.parameter)
 (lambda_parameter name: (identifier) @variable.parameter)
+(on_drop_error_statement error: (identifier) @variable.parameter)
 (parameter
   name: (binding_list [
     (identifier)
@@ -205,6 +250,7 @@
 (shorthand_member_expression field: (identifier) @property)
 (shorthand_member_pattern field: (identifier) @property)
 (postfix_expression field: (identifier) @property)
+(expression_statement field: (identifier) @property)
 (pattern_postfix_expression field: (identifier) @property)
 
 ; Functions
@@ -234,6 +280,8 @@
     (code_splice_identifier)
     (quoted_operator)
   ] @function))
+(inherent_method
+  name: (identifier) @function)
 (postfix_expression
   function: [
     (identifier)
@@ -246,8 +294,12 @@
       (identifier)
       (code_splice_identifier)
     ] @function.method.call))
-(memory_argument_reference
-  function: (identifier) @function.call)
+(expression_statement
+  field: [
+    (identifier)
+    (code_splice_identifier)
+  ] @function.method.call
+  . (argument_list))
 
 (library_modifier) @attribute
 (inline_modifier) @attribute
@@ -258,15 +310,34 @@
 (simd_type "Simd" @type.builtin)
 (variadic_constraint (identifier) @type)
 (minimal_method (identifier) @function)
-(memory_simple_effect) @attribute
-(memory_parameter_effect_kind) @attribute
-(memory_borrow_place_effect "returns_borrow" @attribute)
-(memory_release_effect "released_by" @attribute)
-(memory_resource_effect ["resource" "released_by"] @attribute)
 (asm_operand_direction) @keyword
 (structured_asm_constraint_kind) @constant.builtin
 (structured_asm_operand_flag) @attribute
 (structured_asm_clobber_kind) @constant.builtin
 (import_selector mode: _ @attribute)
+(load_modifier "embed" @attribute)
 (expand_directive mode: (identifier) @attribute)
-(distinct_derive_directive mode: _ @attribute)
+(insert_scope "scope" @attribute)
+(visibility_modifier "unit" @attribute)
+(operator_try_modifier "try" @attribute)
+(operator_try_modifier target: (identifier) @type)
+
+; Memory contracts use effect names and labels only within the directive.
+(memory_effect (identifier) @attribute)
+(memory_release_argument name: (identifier) @attribute)
+(memory_typed_releaser method: (identifier) @function)
+(memory_unknown_argument name: (identifier) @attribute)
+(memory_trusted_statement "trusted" @attribute)
+(memory_place . (identifier) @variable.parameter)
+(memory_place field: (identifier) @property)
+((memory_place . (identifier) @variable.builtin)
+  (#eq? @variable.builtin "returned"))
+(memory_qualified_name field: (identifier) @property)
+((memory_qualified_name . (identifier) @variable.builtin)
+  (#eq? @variable.builtin "returned"))
+(memory_overlay target: (memory_qualified_name (identifier) @function .))
+(memory_release_argument (memory_qualified_name (identifier) @function .))
+((memory_effect
+  kind: (identifier) @_memory_effect
+  (memory_qualified_name (identifier) @function .))
+  (#any-of? @_memory_effect "released_by" "gives" "maybe_gives"))

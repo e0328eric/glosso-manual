@@ -1,77 +1,73 @@
 // Extract public standard-library declarations into the compact reference
 // generator's JSON transport. This is intentionally implemented in Glosso.
 
-#import "File_System";
-#import "Format";
-#import "Io";
-#import "Os";
-#import "Serialization/Json";
-#import "Sort";
-#import "String_Builder";
-#import "Strings/Utf8";
-
-Reference_Parameter :: struct #derive(Serialize) {
+Reference_Parameter :: struct {
     name: string;
     value_type: string;
     default_value: string;
     modifiers: [..]string;
+    constraints: [..]string;
 }
 
-Reference_Memory_Contract :: struct #derive(Serialize) {
+Reference_Memory_Contract :: struct {
     effect: string;
     arguments: [..]string;
 }
 
-Reference_Function :: struct #derive(Serialize) {
+Reference_Function :: struct {
     parameters: [..]Reference_Parameter;
     return_type: string;
+    memory_declared: bool;
     memory_contracts: [..]Reference_Memory_Contract;
+    where_clauses: [..]string;
 }
 
-Reference_Type_Field :: struct #derive(Serialize) {
+Reference_Type_Field :: struct {
     name: string;
     value_type: string;
     default_value: string;
     modifiers: [..]string;
 }
 
-Reference_Type_Variant :: struct #derive(Serialize) {
+Reference_Type_Variant :: struct {
     name: string;
     variant_type: string;
     value: string;
 }
 
-Reference_Type_Info :: struct #derive(Serialize) {
+Reference_Type_Info :: struct {
     kind: string;
     fields: [..]Reference_Type_Field;
     variants: [..]Reference_Type_Variant;
 }
 
-Reference_Member :: struct #derive(Serialize) {
+Reference_Member :: struct {
     name: string;
     kind: string;
     signature: string;
+    display_signature: string;
     summary: string;
     source_path: string;
-    source_line: s64;
+    source_line: ssize;
     has_default: bool;
     function_info: Reference_Function;
 }
 
-Reference_Class_Info :: struct #derive(Serialize) {
+Reference_Class_Info :: struct {
     minimal: string;
     minimal_explicit: bool;
     members: [..]Reference_Member;
 }
 
-Reference_Symbol :: struct #derive(Serialize) {
+Reference_Symbol :: struct {
     name: string;
     kind: string;
     signature: string;
+    display_signature: string;
     searchable_signature: string;
     summary: string;
     source_path: string;
-    source_line: s64;
+    source_line: ssize;
     owner_typeclass: string;
     has_default: bool;
     function_info: Reference_Function;
@@ -86,11 +82,11 @@ Reference_Instance :: struct {
     signature: string;
     summary: string;
     source_path: string;
-    source_line: s64;
+    source_line: ssize;
     negative: bool;
 }
 
-Reference_Module :: struct #derive(Serialize) {
+Reference_Module :: struct {
     name: string;
     summary: string;
     source_path: string;
@@ -100,27 +96,270 @@ Reference_Module :: struct #derive(Serialize) {
 Reference_Header :: struct {
     text: string;
     terminator: u8;
-    terminator_index: s64;
+    terminator_index: ssize;
+}
+
+// Explicit transport serializers keep extraction independent of compile-time
+// formatting used by the standard Serialize derive.
+// Serialization borrows records; their dynamic fields remain owned by the scanner.
+reference_serialize_strings :: (values: []const string) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for value: values out.push(serialize(value));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_parameters :: (values: []Reference_Parameter) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_fields :: (values: []Reference_Type_Field) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_variants :: (values: []Reference_Type_Variant) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_members :: (values: []Reference_Member) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_serialize_symbols :: (values: []Reference_Symbol) -> Serialization_Value {
+    out: [..]Serialization_Value;
+    for i: 0..values.count out.push(serialize(&values[i]));
+    return Serialization_Value.serialization_sequence(out);
+}
+
+reference_set_function :: (out: *Reference_Function, value: Reference_Function) {
+    out.*.return_type = value.return_type;
+    out.*.memory_declared = value.memory_declared;
+    _ := out.*.memory_contracts.replace(value.memory_contracts.take());
+    _ := out.*.parameters.replace(value.parameters.take());
+    _ := out.*.where_clauses.replace(value.where_clauses.take());
+}
+
+reference_set_type_info :: (out: *Reference_Type_Info, value: Reference_Type_Info) {
+    out.*.kind = value.kind;
+    _ := out.*.fields.replace(value.fields.take());
+    _ := out.*.variants.replace(value.variants.take());
+}
+
+reference_clone_function :: (value: *const Reference_Function) -> Reference_Function {
+    out: Reference_Function;
+    out.return_type = value.*.return_type;
+    out.memory_declared = value.*.memory_declared;
+    for i: 0..value.*.memory_contracts.count {
+        contract := &value.*.memory_contracts[i];
+        copy: Reference_Memory_Contract = .{ .effect = contract.*.effect };
+        for argument: contract.*.arguments copy.arguments.push(argument);
+        out.memory_contracts.push(copy);
+    }
+    for clause: value.*.where_clauses out.where_clauses.push(clause);
+    for parameter_index: 0..value.*.parameters.count {
+        parameter := &value.*.parameters[parameter_index];
+        copy: Reference_Parameter = .{
+            .name = parameter.*.name, .value_type = parameter.*.value_type,
+            .default_value = parameter.*.default_value,
+        };
+        for modifier: parameter.*.modifiers copy.modifiers.push(modifier);
+        for constraint: parameter.*.constraints copy.constraints.push(constraint);
+        out.parameters.push(copy);
+    }
+    return out;
+}
+
+*Reference_Parameter ::: instance Serialize {
+    serialize :: (value: *Reference_Parameter) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "value_type", .value = serialize(value.*.value_type) });
+        fields.push(.{ .name = "default_value", .value = serialize(value.*.default_value) });
+        fields.push(.{ .name = "modifiers", .value = reference_serialize_strings(value.*.modifiers.view()) });
+        fields.push(.{ .name = "constraints", .value = reference_serialize_strings(value.*.constraints.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Parameter", fields);
+    }
+}
+
+*Reference_Function ::: instance Serialize {
+    serialize :: (value: *Reference_Function) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "parameters", .value = reference_serialize_parameters(value.*.parameters.view()) });
+        fields.push(.{ .name = "return_type", .value = serialize(value.*.return_type) });
+        fields.push(.{ .name = "memory_declared", .value = serialize(value.*.memory_declared) });
+        contracts: [..]Serialization_Value;
+        for i: 0..value.*.memory_contracts.count {
+            contract := &value.*.memory_contracts[i];
+            contract_fields: [..]Serialization_Field;
+            contract_fields.push(.{ .name = "effect", .value = serialize(contract.*.effect) });
+            contract_fields.push(.{ .name = "arguments", .value = reference_serialize_strings(contract.*.arguments.view()) });
+            contracts.push(Serialization_Value.serialization_structure_value("Reference_Memory_Contract", contract_fields));
+        }
+        fields.push(.{ .name = "memory_contracts", .value = Serialization_Value.serialization_sequence(contracts) });
+        fields.push(.{ .name = "where_clauses", .value = reference_serialize_strings(value.*.where_clauses.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Function", fields);
+    }
+}
+
+*Reference_Type_Field ::: instance Serialize {
+    serialize :: (value: *Reference_Type_Field) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "value_type", .value = serialize(value.*.value_type) });
+        fields.push(.{ .name = "default_value", .value = serialize(value.*.default_value) });
+        fields.push(.{ .name = "modifiers", .value = reference_serialize_strings(value.*.modifiers.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Type_Field", fields);
+    }
+}
+
+*Reference_Type_Variant ::: instance Serialize {
+    serialize :: (value: *Reference_Type_Variant) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "variant_type", .value = serialize(value.*.variant_type) });
+        fields.push(.{ .name = "value", .value = serialize(value.*.value) });
+        return Serialization_Value.serialization_structure_value("Reference_Type_Variant", fields);
+    }
+}
+
+*Reference_Type_Info ::: instance Serialize {
+    serialize :: (value: *Reference_Type_Info) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "fields", .value = reference_serialize_fields(value.*.fields.view()) });
+        fields.push(.{ .name = "variants", .value = reference_serialize_variants(value.*.variants.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Type_Info", fields);
+    }
+}
+
+*Reference_Member ::: instance Serialize {
+    serialize :: (value: *Reference_Member) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "signature", .value = serialize(value.*.signature) });
+        fields.push(.{ .name = "display_signature", .value = serialize(value.*.display_signature) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "source_line", .value = serialize(value.*.source_line) });
+        fields.push(.{ .name = "has_default", .value = serialize(value.*.has_default) });
+        fields.push(.{ .name = "function_info", .value = serialize(&value.*.function_info) });
+        return Serialization_Value.serialization_structure_value("Reference_Member", fields);
+    }
+}
+
+*Reference_Class_Info ::: instance Serialize {
+    serialize :: (value: *Reference_Class_Info) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "minimal", .value = serialize(value.*.minimal) });
+        fields.push(.{ .name = "minimal_explicit", .value = serialize(value.*.minimal_explicit) });
+        fields.push(.{ .name = "members", .value = reference_serialize_members(value.*.members.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Class_Info", fields);
+    }
+}
+
+*Reference_Symbol ::: instance Serialize {
+    serialize :: (value: *Reference_Symbol) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "kind", .value = serialize(value.*.kind) });
+        fields.push(.{ .name = "signature", .value = serialize(value.*.signature) });
+        fields.push(.{ .name = "display_signature", .value = serialize(value.*.display_signature) });
+        fields.push(.{ .name = "searchable_signature", .value = serialize(value.*.searchable_signature) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "source_line", .value = serialize(value.*.source_line) });
+        fields.push(.{ .name = "owner_typeclass", .value = serialize(value.*.owner_typeclass) });
+        fields.push(.{ .name = "has_default", .value = serialize(value.*.has_default) });
+        fields.push(.{ .name = "function_info", .value = serialize(&value.*.function_info) });
+        fields.push(.{ .name = "type_info", .value = serialize(&value.*.type_info) });
+        fields.push(.{ .name = "class_info", .value = serialize(&value.*.class_info) });
+        return Serialization_Value.serialization_structure_value("Reference_Symbol", fields);
+    }
+}
+
+*Reference_Module ::: instance Serialize {
+    serialize :: (value: *Reference_Module) -> Serialization_Value {
+        fields: [..]Serialization_Field;
+        fields.push(.{ .name = "name", .value = serialize(value.*.name) });
+        fields.push(.{ .name = "summary", .value = serialize(value.*.summary) });
+        fields.push(.{ .name = "source_path", .value = serialize(value.*.source_path) });
+        fields.push(.{ .name = "symbols", .value = reference_serialize_symbols(value.*.symbols.view()) });
+        return Serialization_Value.serialization_structure_value("Reference_Module", fields);
+    }
 }
 
 reference_copy_string :: (value: string) -> string {
-    return clone(value);
+    return value.clone();
 }
 
 reference_is_space :: (byte: u8) -> bool {
-    return byte == #char " " || byte == #char "\t" ||
-        byte == #char "\r" || byte == #char "\n" ||
+    return byte == cast(u8)(#char " ") || byte == cast(u8)(#char "\t") ||
+        byte == cast(u8)(#char "\r") || byte == cast(u8)(#char "\n") ||
         byte == 11 || byte == 12;
 }
 
 reference_is_identifier_start :: (byte: u8) -> bool {
-    return byte == #char "_" ||
-        (byte >= #char "A" && byte <= #char "Z") ||
-        (byte >= #char "a" && byte <= #char "z") || byte >= 128;
+    return byte == cast(u8)(#char "_") ||
+        (byte >= cast(u8)(#char "A") && byte <= cast(u8)(#char "Z")) ||
+        (byte >= cast(u8)(#char "a") && byte <= cast(u8)(#char "z")) || byte >= 128;
+}
+
+reference_is_identifier_continue :: (byte: u8) -> bool {
+    return reference_is_identifier_start(byte) ||
+        (byte >= cast(u8)(#char "0") && byte <= cast(u8)(#char "9"));
+}
+
+// The public UTF-8 search API now returns `?ssize` and character-oriented
+// searches accept `u8`/`rune`. Reference extraction deliberately works in
+// byte offsets because every slice below indexes the original source text.
+// Keep the old sentinel-shaped operation local instead of repeatedly
+// unpacking an option at every scanner call site.
+reference_index_of_byte_from :: (
+    value: string,
+    needle: u8,
+    start: ssize,
+) -> ssize {
+    i := start;
+    if i < 0 i = 0;
+    while i < value.count {
+        if value[i] == needle return i;
+        i += 1;
+    }
+    return -1;
+}
+
+reference_index_of_byte :: (value: string, needle: u8) -> ssize {
+    return reference_index_of_byte_from(value, needle, 0);
+}
+
+reference_index_of :: (
+    value: string,
+    needle: string,
+    start: ssize = 0,
+) -> ssize {
+    if needle.count == 0 return 0;
+    i := start;
+    if i < 0 i = 0;
+    last := value.count - needle.count;
+    while i <= last {
+        j: ssize = 0;
+        while j < needle.count && value[i + j] == needle[j] j += 1;
+        if j == needle.count return i;
+        i += 1;
+    }
+    return -1;
 }
 
 reference_normalize_space :: (value: string) -> string {
-    out := builder_make_len_cap(0, value.count);
+    out := String_Builder.make_len_cap(0, value.count);
     pending := false;
     wrote := false;
     for i: 0..value.count {
@@ -130,23 +369,23 @@ reference_normalize_space :: (value: string) -> string {
             continue;
         }
         if pending {
-            builder_write_byte(*out, #char " ");
+            out.write_byte(cast(u8)(#char " "));
             pending = false;
         }
-        builder_write_byte(*out, byte);
+        out.write_byte(byte);
         wrote = true;
     }
-    return builder_into_string(out);
+    return out.into_string();
 }
 
 reference_replace_slashes :: (value: string) -> string {
-    out := builder_make_len_cap(0, value.count);
+    out := String_Builder.make_len_cap(0, value.count);
     for i: 0..value.count {
         byte := value[i];
-        if byte == #char "\\" byte = #char "/";
-        builder_write_byte(*out, byte);
+        if byte == cast(u8)(#char "\\") byte = cast(u8)(#char "/");
+        out.write_byte(byte);
     }
-    return builder_into_string(out);
+    return out.into_string();
 }
 
 reference_compare_paths :: (left: string, right: string) -> Ordering {
@@ -161,30 +400,30 @@ reference_compare_paths :: (left: string, right: string) -> Ordering {
 reference_collect_paths :: (
     directory_path: string,
     paths: *[..]string,
-) -> Fs_Error!s64 {
+) -> Fs_Error!ssize {
     entries := os_fs_directory_entries(directory_path);
     for child: entries {
         if os_fs_is_directory(child) {
             _ := reference_collect_paths(child, paths)?;
-        } else if os_fs_is_regular_file(child) && ends_with(child, ".glo") {
-            array_add(paths, reference_copy_string(child));
+        } else if os_fs_is_regular_file(child) && child.ends_with(".glo") {
+            paths.push(reference_copy_string(child));
         }
     }
-    return .Ok(cast(s64)0);
+    return .Ok(cast(ssize)0);
 }
 
 reference_module_name :: (std_directory: string, path: string) -> string {
     root := reference_replace_slashes(std_directory);
     normalized := reference_replace_slashes(path);
     start := 0;
-    if starts_with(normalized, root) {
+    if normalized.starts_with(root) {
         start = root.count;
-        while start < normalized.count && normalized[start] == #char "/" start += 1;
+        while start < normalized.count && normalized[start] == cast(u8)(#char "/") start += 1;
     }
     end := normalized.count;
     if end >= 4 && normalized[end - 4..end] == ".glo" end -= 4;
     name := normalized[start..end];
-    if ends_with(name, "/module") name = name[0..name.count - 7];
+    if name.ends_with("/module") name = name[0..name.count - 7];
     return reference_copy_string(name);
 }
 
@@ -192,33 +431,33 @@ reference_source_path :: (std_directory: string, path: string) -> string {
     normalized := reference_replace_slashes(path);
     root := reference_replace_slashes(std_directory);
     start := 0;
-    if starts_with(normalized, root) {
+    if normalized.starts_with(root) {
         start = root.count;
-        while start < normalized.count && normalized[start] == #char "/" start += 1;
+        while start < normalized.count && normalized[start] == cast(u8)(#char "/") start += 1;
     }
-    out := builder_make_len_cap(0, normalized.count - start + 4);
-    write_string(*out, "std/");
-    write_string(*out, normalized[start..normalized.count]);
-    return builder_into_string(out);
+    out := String_Builder.make_len_cap(0, normalized.count - start + 4);
+    out.write_string("std/");
+    out.write_string(normalized[start..normalized.count]);
+    return out.into_string();
 }
 
-reference_line_end :: (source: string, start: s64) -> s64 {
-    end := index_of_byte_from(source, #char "\n", start);
+reference_line_end :: (source: string, start: ssize) -> ssize {
+    end := reference_index_of_byte_from(source, cast(u8)(#char "\n"), start);
     if end < 0 return source.count;
     return end;
 }
 
-reference_line_comment_start :: (line: string) -> s64 {
+reference_line_comment_start :: (line: string) -> ssize {
     quote: u8 = 0;
     i := 0;
     while i + 1 < line.count {
         byte := line[i];
         if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "\"" || byte == #char "'" {
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") {
             quote = byte;
-        } else if byte == #char "/" && line[i + 1] == #char "/" {
+        } else if byte == cast(u8)(#char "/") && line[i + 1] == cast(u8)(#char "/") {
             return i;
         }
         i += 1;
@@ -232,19 +471,19 @@ reference_code_line :: (line: string) -> string {
     return line;
 }
 
-reference_brace_delta :: (line: string) -> s64 {
+reference_brace_delta :: (line: string) -> ssize {
     code := reference_code_line(line);
     quote: u8 = 0;
-    delta: s64 = 0;
+    delta: ssize = 0;
     i := 0;
     while i < code.count {
         byte := code[i];
         if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "\"" || byte == #char "'" quote = byte;
-        else if byte == #char "{" delta += 1;
-        else if byte == #char "}" delta -= 1;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "{") delta += 1;
+        else if byte == cast(u8)(#char "}") delta -= 1;
         i += 1;
     }
     return delta;
@@ -259,13 +498,13 @@ REFERENCE_DOC_MARKER :: "///";
 REFERENCE_MODULE_DOC_MARKER :: "//!";
 
 reference_is_doc_line :: (line: string, marker: string) -> bool {
-    if !starts_with(line, marker) return false;
-    if line.count > marker.count && line[marker.count] == #char "/" return false;
+    if !line.starts_with(marker) return false;
+    if line.count > marker.count && line[marker.count] == cast(u8)(#char "/") return false;
     return true;
 }
 
 reference_doc_line_text :: (line: string, marker: string) -> string {
-    return trim(line[marker.count..line.count]);
+    return line[marker.count..line.count].trim();
 }
 
 // The comment block above a declaration is read upwards for its `///` lines.
@@ -273,33 +512,33 @@ reference_doc_line_text :: (line: string, marker: string) -> string {
 // declaration keeps its documentation however its author interleaves the two.
 // A blank line ends the block: prose that far from a declaration belongs to
 // whatever stands above the gap, not to the declaration under it.
-reference_previous_summary :: (source: string, declaration_start: s64) -> string {
+reference_previous_summary :: (source: string, declaration_start: ssize) -> string {
     cursor := declaration_start;
-    while cursor > 0 && (source[cursor - 1] == #char " " || source[cursor - 1] == #char "\t")
+    while cursor > 0 && (source[cursor - 1] == cast(u8)(#char " ") || source[cursor - 1] == cast(u8)(#char "\t"))
         cursor -= 1;
-    if cursor > 0 && source[cursor - 1] == #char "\n" cursor -= 1;
+    if cursor > 0 && source[cursor - 1] == cast(u8)(#char "\n") cursor -= 1;
     pieces: [..]string;
     while cursor > 0 {
         end := cursor;
-        if end > 0 && source[end - 1] == #char "\r" end -= 1;
+        if end > 0 && source[end - 1] == cast(u8)(#char "\r") end -= 1;
         start := end;
-        while start > 0 && source[start - 1] != #char "\n" start -= 1;
-        line := trim(source[start..end]);
-        if !starts_with(line, "//") break;
+        while start > 0 && source[start - 1] != cast(u8)(#char "\n") start -= 1;
+        line := source[start..end].trim();
+        if !line.starts_with("//") break;
         if reference_is_doc_line(line, REFERENCE_DOC_MARKER)
-            array_add(*pieces, reference_doc_line_text(line, REFERENCE_DOC_MARKER));
+            pieces.push(reference_doc_line_text(line, REFERENCE_DOC_MARKER));
         cursor = start;
         if cursor > 0 cursor -= 1;
     }
-    out := builder_make_len_cap(0, pieces.count * 32);
+    out := String_Builder.make_len_cap(0, pieces.count * 32);
     i := pieces.count;
     while i > 0 {
         i -= 1;
-        if builder_len(out) > 0 builder_write_byte(*out, #char " ");
-        write_string(*out, pieces[i]);
+        if out.len() > 0 out.write_byte(cast(u8)(#char " "));
+        out.write_string(pieces[i]);
     }
-    array_free(*pieces);
-    return reference_normalize_space(builder_into_string(out));
+    pieces.free();
+    return reference_normalize_space(out.into_string());
 }
 
 // `//!` writes the intro of a std file: the summary of the module itself rather
@@ -307,36 +546,49 @@ reference_previous_summary :: (source: string, declaration_start: s64) -> string
 // with, so reading stops at the first line of code. A licence header or a plain
 // note may share the block without changing what the summary says.
 reference_module_summary :: (source: string) -> string {
-    out := builder_make_len_cap(0, 128);
-    cursor: s64 = 0;
+    out := String_Builder.make_len_cap(0, 128);
+    cursor: ssize = 0;
     while cursor < source.count {
         end := reference_line_end(source, cursor);
-        line := trim(source[cursor..end]);
-        if line.count > 0 && !starts_with(line, "//") break;
+        line := source[cursor..end].trim();
+        if line.count > 0 && !line.starts_with("//") break;
         if reference_is_doc_line(line, REFERENCE_MODULE_DOC_MARKER) {
             text := reference_doc_line_text(line, REFERENCE_MODULE_DOC_MARKER);
             if text.count > 0 {
-                if builder_len(out) > 0 builder_write_byte(*out, #char " ");
-                write_string(*out, text);
+                if out.len() > 0 out.write_byte(cast(u8)(#char " "));
+                out.write_string(text);
             }
         }
         cursor = end + 1;
     }
-    return reference_normalize_space(builder_into_string(out));
+    return reference_normalize_space(out.into_string());
 }
 
-reference_header_needs_space :: (out: String_Builder, byte: u8) -> bool {
-    if out.buf.count == 0 return false;
-    previous := out.buf[out.buf.count - 1];
-    if previous == #char "(" || previous == #char "[" return false;
-    if byte == #char ")" || byte == #char "]" return false;
+reference_header_needs_space :: (out: *String_Builder, byte: u8) -> bool {
+    if out.*.buf.count == 0 return false;
+    previous := out.*.buf[out.*.buf.count - 1];
+    if previous == cast(u8)(#char "(") || previous == cast(u8)(#char "[") return false;
+    if byte == cast(u8)(#char ")") || byte == cast(u8)(#char "]") return false;
     return true;
 }
 
-reference_header :: (source: string, start: s64) -> Reference_Header {
-    out := builder_make_len_cap(0, 256);
-    round: s64 = 0;
-    square: s64 = 0;
+reference_header_ends_with :: (out: *String_Builder, suffix: string) -> bool {
+    if suffix.count > out.*.buf.count return false;
+    start := out.*.buf.count - suffix.count;
+    for i: 0..suffix.count if out.*.buf[start + i] != suffix[i] return false;
+    return true;
+}
+
+reference_header_starts_braced_directive :: (out: *String_Builder) -> bool {
+    return reference_header_ends_with(out, "#modify") ||
+        reference_header_ends_with(out, "#memory");
+}
+
+reference_header :: (source: string, start: ssize) -> Reference_Header {
+    out := String_Builder.make_len_cap(0, 256);
+    round: ssize = 0;
+    square: ssize = 0;
+    directive_brace: ssize = 0;
     quote: u8 = 0;
     line_comment := false;
     block_comment := false;
@@ -347,7 +599,7 @@ reference_header :: (source: string, start: s64) -> Reference_Header {
         next: u8 = 0;
         if i + 1 < source.count next = source[i + 1];
         if line_comment {
-            if byte == #char "\n" {
+            if byte == cast(u8)(#char "\n") {
                 line_comment = false;
                 pending_space = true;
             }
@@ -355,7 +607,7 @@ reference_header :: (source: string, start: s64) -> Reference_Header {
             continue;
         }
         if block_comment {
-            if byte == #char "*" && next == #char "/" {
+            if byte == cast(u8)(#char "*") && next == cast(u8)(#char "/") {
                 block_comment = false;
                 i += 2;
             } else i += 1;
@@ -363,95 +615,110 @@ reference_header :: (source: string, start: s64) -> Reference_Header {
             continue;
         }
         if quote != 0 {
-            builder_write_byte(*out, byte);
-            if byte == #char "\\" && i + 1 < source.count {
+            out.write_byte(byte);
+            if byte == cast(u8)(#char "\\") && i + 1 < source.count {
                 i += 1;
-                builder_write_byte(*out, source[i]);
+                out.write_byte(source[i]);
             } else if byte == quote quote = 0;
             i += 1;
             continue;
         }
-        if byte == #char "/" && next == #char "/" {
+        if byte == cast(u8)(#char "/") && next == cast(u8)(#char "/") {
             line_comment = true;
             i += 2;
             continue;
         }
-        if byte == #char "/" && next == #char "*" {
+        if byte == cast(u8)(#char "/") && next == cast(u8)(#char "*") {
             block_comment = true;
             i += 2;
             continue;
         }
-        if byte == #char "\"" || byte == #char "'" {
-            if pending_space && reference_header_needs_space(out, byte)
-                builder_write_byte(*out, #char " ");
+        if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") {
+            if pending_space && reference_header_needs_space(&out, byte)
+                out.write_byte(cast(u8)(#char " "));
             pending_space = false;
             quote = byte;
-            builder_write_byte(*out, byte);
+            out.write_byte(byte);
             i += 1;
             continue;
         }
-        if byte == #char "(" round += 1;
-        else if byte == #char ")" round -= 1;
-        else if byte == #char "[" square += 1;
-        else if byte == #char "]" square -= 1;
-        if round == 0 && square == 0 && (byte == #char ";" || byte == #char "{") {
+        if byte == cast(u8)(#char "(") round += 1;
+        else if byte == cast(u8)(#char ")") round -= 1;
+        else if byte == cast(u8)(#char "[") square += 1;
+        else if byte == cast(u8)(#char "]") square -= 1;
+        else if byte == cast(u8)(#char "{") && directive_brace > 0 {
+            directive_brace += 1;
+        } else if byte == cast(u8)(#char "{") && round == 0 && square == 0 {
+            if reference_header_starts_braced_directive(&out) {
+                directive_brace = 1;
+            } else {
+                return .{
+                    .text = (out.into_string()).trim(),
+                    .terminator = byte,
+                    .terminator_index = i,
+                };
+            }
+        } else if byte == cast(u8)(#char "}") && directive_brace > 0 {
+            directive_brace -= 1;
+        }
+        if round == 0 && square == 0 && directive_brace == 0 && byte == cast(u8)(#char ";") {
             return .{
-                .text = trim(builder_into_string(out)),
+                .text = (out.into_string()).trim(),
                 .terminator = byte,
                 .terminator_index = i,
             };
         }
         if reference_is_space(byte) pending_space = true;
         else {
-            if pending_space && reference_header_needs_space(out, byte)
-                builder_write_byte(*out, #char " ");
+            if pending_space && reference_header_needs_space(&out, byte)
+                out.write_byte(cast(u8)(#char " "));
             pending_space = false;
-            builder_write_byte(*out, byte);
+            out.write_byte(byte);
         }
         i += 1;
     }
     return .{
-        .text = trim(builder_into_string(out)),
+        .text = (out.into_string()).trim(),
         .terminator_index = source.count,
     };
 }
 
-reference_top_level_index :: (value: string, needle: u8) -> s64 {
-    round: s64 = 0;
-    square: s64 = 0;
-    brace: s64 = 0;
+reference_top_level_index :: (value: string, needle: u8) -> ssize {
+    round: ssize = 0;
+    square: ssize = 0;
+    brace: ssize = 0;
     quote: u8 = 0;
     i := 0;
     while i < value.count {
         byte := value[i];
         if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "\"" || byte == #char "'" quote = byte;
-        else if byte == #char "(" round += 1;
-        else if byte == #char ")" round -= 1;
-        else if byte == #char "[" square += 1;
-        else if byte == #char "]" square -= 1;
-        else if byte == #char "{" brace += 1;
-        else if byte == #char "}" brace -= 1;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "(") round += 1;
+        else if byte == cast(u8)(#char ")") round -= 1;
+        else if byte == cast(u8)(#char "[") square += 1;
+        else if byte == cast(u8)(#char "]") square -= 1;
+        else if byte == cast(u8)(#char "{") brace += 1;
+        else if byte == cast(u8)(#char "}") brace -= 1;
         else if byte == needle && round == 0 && square == 0 && brace == 0 return i;
         i += 1;
     }
     return -1;
 }
 
-reference_matching_paren :: (value: string, open: s64) -> s64 {
-    depth: s64 = 0;
+reference_matching_paren :: (value: string, open: ssize) -> ssize {
+    depth: ssize = 0;
     quote: u8 = 0;
     i := open;
     while i < value.count {
         byte := value[i];
         if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "\"" || byte == #char "'" quote = byte;
-        else if byte == #char "(" depth += 1;
-        else if byte == #char ")" {
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "(") depth += 1;
+        else if byte == cast(u8)(#char ")") {
             depth -= 1;
             if depth == 0 return i;
         }
@@ -460,8 +727,21 @@ reference_matching_paren :: (value: string, open: s64) -> s64 {
     return -1;
 }
 
-reference_matching_brace :: (value: string, open: s64) -> s64 {
-    depth: s64 = 0;
+reference_is_function_header :: (value: string, terminator: u8) -> bool {
+    if !value.starts_with("(") return false;
+    close := reference_matching_paren(value, 0);
+    if close < 0 return false;
+    tail := value[close + 1..value.count].trim();
+    if tail.starts_with("->") || tail.starts_with("#") || tail.starts_with("where ") return true;
+    if tail.count > 0 return false;
+    parameters := value[1..close].trim();
+    return terminator == cast(u8)(#char "{") || parameters.count == 0 ||
+        reference_top_level_index(parameters, cast(u8)(#char ":")) >= 0 ||
+        parameters == "#self" || parameters == "*const #self" || parameters == "*#self";
+}
+
+reference_matching_brace :: (value: string, open: ssize) -> ssize {
+    depth: ssize = 0;
     quote: u8 = 0;
     line_comment := false;
     block_comment := false;
@@ -471,24 +751,24 @@ reference_matching_brace :: (value: string, open: s64) -> s64 {
         next: u8 = 0;
         if i + 1 < value.count next = value[i + 1];
         if line_comment {
-            if byte == #char "\n" line_comment = false;
+            if byte == cast(u8)(#char "\n") line_comment = false;
         } else if block_comment {
-            if byte == #char "*" && next == #char "/" {
+            if byte == cast(u8)(#char "*") && next == cast(u8)(#char "/") {
                 block_comment = false;
                 i += 1;
             }
         } else if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "/" && next == #char "/" {
+        } else if byte == cast(u8)(#char "/") && next == cast(u8)(#char "/") {
             line_comment = true;
             i += 1;
-        } else if byte == #char "/" && next == #char "*" {
+        } else if byte == cast(u8)(#char "/") && next == cast(u8)(#char "*") {
             block_comment = true;
             i += 1;
-        } else if byte == #char "\"" || byte == #char "'" quote = byte;
-        else if byte == #char "{" depth += 1;
-        else if byte == #char "}" {
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "{") depth += 1;
+        else if byte == cast(u8)(#char "}") {
             depth -= 1;
             if depth == 0 return i;
         }
@@ -498,7 +778,7 @@ reference_matching_brace :: (value: string, open: s64) -> s64 {
 }
 
 reference_without_comments :: (value: string) -> string {
-    out := builder_make_len_cap(0, value.count);
+    out := String_Builder.make_len_cap(0, value.count);
     quote: u8 = 0;
     line_comment := false;
     block_comment := false;
@@ -508,86 +788,123 @@ reference_without_comments :: (value: string) -> string {
         next: u8 = 0;
         if i + 1 < value.count next = value[i + 1];
         if line_comment {
-            if byte == #char "\n" {
+            if byte == cast(u8)(#char "\n") {
                 line_comment = false;
-                builder_write_byte(*out, byte);
+                out.write_byte(byte);
             }
         } else if block_comment {
-            if byte == #char "*" && next == #char "/" {
+            if byte == cast(u8)(#char "*") && next == cast(u8)(#char "/") {
                 block_comment = false;
                 i += 1;
-            } else if byte == #char "\n" builder_write_byte(*out, byte);
+            } else if byte == cast(u8)(#char "\n") out.write_byte(byte);
         } else if quote != 0 {
-            builder_write_byte(*out, byte);
-            if byte == #char "\\" && i + 1 < value.count {
+            out.write_byte(byte);
+            if byte == cast(u8)(#char "\\") && i + 1 < value.count {
                 i += 1;
-                builder_write_byte(*out, value[i]);
+                out.write_byte(value[i]);
             } else if byte == quote quote = 0;
-        } else if byte == #char "/" && next == #char "/" {
+        } else if byte == cast(u8)(#char "/") && next == cast(u8)(#char "/") {
             line_comment = true;
             i += 1;
-        } else if byte == #char "/" && next == #char "*" {
+        } else if byte == cast(u8)(#char "/") && next == cast(u8)(#char "*") {
             block_comment = true;
             i += 1;
         } else {
-            if byte == #char "\"" || byte == #char "'" quote = byte;
-            builder_write_byte(*out, byte);
+            if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+            out.write_byte(byte);
         }
         i += 1;
     }
-    return builder_into_string(out);
+    return out.into_string();
 }
 
 reference_aggregate_body_open :: (
     source: string,
-    declaration_start: s64,
-    first_open: s64,
-) -> s64 {
+    declaration_start: ssize,
+    first_open: ssize,
+) -> ssize {
     open := first_open;
     while open >= 0 && open < source.count {
-        prefix := trim(source[declaration_start..open]);
-        if !ends_with(prefix, "#modify") return open;
+        prefix := source[declaration_start..open].trim();
+        if !prefix.ends_with("#modify") return open;
         close := reference_matching_brace(source, open);
         if close < 0 return -1;
-        open = index_of_byte_from(source, #char "{", close + 1);
+        open = reference_index_of_byte_from(source, cast(u8)(#char "{"), close + 1);
     }
     return -1;
 }
 
+// Aggregate members default to public, with the same nested visibility groups
+// as declarations. Preserve initializer braces while flattening visible groups.
+reference_public_members :: (body: string, default_public: bool = true) -> string {
+    out := String_Builder.make_len_cap(0, body.count);
+    cursor: ssize = 0;
+    while cursor < body.count {
+        while cursor < body.count && reference_is_space(body[cursor]) cursor += 1;
+        if cursor >= body.count break;
+        tail := body[cursor..body.count];
+        visible := default_public;
+        prefix: ssize = 0;
+        if tail.starts_with("#public(unit)") { visible = false; prefix = 13; }
+        else if tail.starts_with("#private ") { visible = false; prefix = 9; }
+        else if tail.starts_with("#public ") { visible = true; prefix = 8; }
+        if prefix > 0 {
+            cursor += prefix;
+            while cursor < body.count && reference_is_space(body[cursor]) cursor += 1;
+            if cursor < body.count && body[cursor] == cast(u8)(#char "{") {
+                close := reference_matching_brace(body, cursor);
+                if close < 0 break;
+                out.write_string(reference_public_members(body[cursor + 1..close], visible));
+                cursor = close + 1;
+                continue;
+            }
+            tail = body[cursor..body.count];
+        }
+        end := reference_top_level_index(tail, cast(u8)(#char ";"));
+        if end < 0 end = tail.count;
+        if visible {
+            out.write_string(tail[0..end]);
+            out.write_string(";");
+        }
+        cursor += end + 1;
+    }
+    return out.into_string();
+}
+
 reference_parse_struct_fields :: (body: string, info: *Reference_Type_Info) {
-    parts := reference_split_top_level(body, #char ";");
+    parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         value := reference_normalize_space(part);
         if value.count == 0 continue;
-        if starts_with(value, "#empty") {
-            colon := reference_top_level_index(value, #char ":");
+        if value.starts_with("#empty") {
+            colon := reference_top_level_index(value, cast(u8)(#char ":"));
             if colon < 0 continue;
             types := reference_split_top_level(value[colon + 1..value.count]);
             for raw_type: types {
                 field: Reference_Type_Field = .{
                     .name = "#empty",
-                    .value_type = reference_copy_string(trim(raw_type)),
+                    .value_type = reference_copy_string(raw_type.trim()),
                 };
-                array_add(*field.modifiers, "empty type witness");
-                array_add(*info.*.fields, field);
+                field.modifiers.push("empty type witness");
+                info.*.fields.push(field);
             }
             continue;
         }
         modifiers: [..]string;
-        while starts_with(value, "using ") || starts_with(value, "#as ") {
-            space := index_of_byte(value, #char " ");
-            array_add(*modifiers, reference_copy_string(value[0..space]));
-            value = reference_copy_string(trim(value[space + 1..value.count]));
+        while value.starts_with("using ") || value.starts_with("#as ") {
+            space := reference_index_of_byte(value, cast(u8)(#char " "));
+            modifiers.push(reference_copy_string(value[0..space]));
+            value = reference_copy_string(value[space + 1..value.count].trim());
         }
-        colon := reference_top_level_index(value, #char ":");
+        colon := reference_top_level_index(value, cast(u8)(#char ":"));
         if colon < 0 continue;
-        name := trim(value[0..colon]);
-        value_type := trim(value[colon + 1..value.count]);
+        name := value[0..colon].trim();
+        value_type := value[colon + 1..value.count].trim();
         default_value := "";
-        equal := reference_top_level_index(value_type, #char "=");
+        equal := reference_top_level_index(value_type, cast(u8)(#char "="));
         if equal >= 0 {
-            default_value = trim(value_type[equal + 1..value_type.count]);
-            value_type = trim(value_type[0..equal]);
+            default_value = value_type[equal + 1..value_type.count].trim();
+            value_type = value_type[0..equal].trim();
         }
         if name.count > 0 && value_type.count > 0 {
             field: Reference_Type_Field = .{
@@ -596,21 +913,21 @@ reference_parse_struct_fields :: (body: string, info: *Reference_Type_Info) {
                 .default_value = reference_copy_string(default_value),
                 .modifiers = modifiers,
             };
-            array_add(*info.*.fields, field);
+            info.*.fields.push(field);
         }
     }
 }
 
 reference_parse_union_variants :: (body: string, info: *Reference_Type_Info) {
-    parts := reference_split_top_level(body, #char ";");
+    parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         value := reference_normalize_space(part);
-        colon := reference_top_level_index(value, #char ":");
+        colon := reference_top_level_index(value, cast(u8)(#char ":"));
         if colon < 0 continue;
-        name := trim(value[0..colon]);
-        variant_type := trim(value[colon + 1..value.count]);
+        name := value[0..colon].trim();
+        variant_type := value[colon + 1..value.count].trim();
         if name.count > 0 && variant_type.count > 0 {
-            array_add(*info.*.variants, Reference_Type_Variant.{
+            info.*.variants.push(Reference_Type_Variant.{
                 .name = reference_copy_string(name),
                 .variant_type = reference_copy_string(variant_type),
             });
@@ -619,19 +936,19 @@ reference_parse_union_variants :: (body: string, info: *Reference_Type_Info) {
 }
 
 reference_parse_enum_variants :: (body: string, info: *Reference_Type_Info) {
-    parts := reference_split_top_level(body, #char ";");
+    parts := reference_split_top_level(body, cast(u8)(#char ";"));
     for part: parts {
         variant := reference_normalize_space(part);
         if variant.count == 0 continue;
-        separator := index_of(variant, "::");
+        separator := reference_index_of(variant, "::");
         name := variant;
         value := "";
         if separator >= 0 {
-            name = trim(variant[0..separator]);
-            value = trim(variant[separator + 2..variant.count]);
+            name = variant[0..separator].trim();
+            value = variant[separator + 2..variant.count].trim();
         }
         if name.count > 0 {
-            array_add(*info.*.variants, Reference_Type_Variant.{
+            info.*.variants.push(Reference_Type_Variant.{
                 .name = reference_copy_string(name),
                 .value = reference_copy_string(value),
             });
@@ -642,118 +959,343 @@ reference_parse_enum_variants :: (body: string, info: *Reference_Type_Info) {
 reference_type_info :: (
     definition: string,
     source: string,
-    declaration_start: s64,
-    first_open: s64,
+    declaration_start: ssize,
+    first_open: ssize,
 ) -> Reference_Type_Info {
     info: Reference_Type_Info;
-    if starts_with(definition, "struct") info.kind = "struct";
-    else if starts_with(definition, "union") info.kind = "union";
-    else if starts_with(definition, "enum") info.kind = "enum";
+    if definition.starts_with("struct") info.kind = "struct";
+    else if definition.starts_with("union") info.kind = "union";
+    else if definition.starts_with("enum_flags") info.kind = "enum_flags";
+    else if definition.starts_with("enum") info.kind = "enum";
+    else if definition.starts_with("#fn_ptr") {
+        info.kind = "function-pointer";
+        return info;
+    }
     else return info;
     open := reference_aggregate_body_open(source, declaration_start, first_open);
     if open < 0 return info;
     close := reference_matching_brace(source, open);
     if close < 0 return info;
-    body := reference_without_comments(source[open + 1..close]);
-    if info.kind == "struct" reference_parse_struct_fields(body, *info);
-    else if info.kind == "union" reference_parse_union_variants(body, *info);
-    else reference_parse_enum_variants(body, *info);
+    body := reference_public_members(reference_without_comments(source[open + 1..close]));
+    if info.kind == "struct" reference_parse_struct_fields(body, &info);
+    else if info.kind == "union" reference_parse_union_variants(body, &info);
+    else reference_parse_enum_variants(body, &info);
     return info;
 }
 
-reference_split_top_level :: (value: string, delimiter: u8 = #char ",") -> [..]string {
+reference_split_top_level :: (value: string, delimiter: u8 = cast(u8)(#char ",")) -> [..]string {
     parts: [..]string;
-    start: s64 = 0;
-    round: s64 = 0;
-    square: s64 = 0;
-    brace: s64 = 0;
+    start: ssize = 0;
+    round: ssize = 0;
+    square: ssize = 0;
+    brace: ssize = 0;
     quote: u8 = 0;
     i := 0;
     while i < value.count {
         byte := value[i];
         if quote != 0 {
-            if byte == #char "\\" i += 1;
+            if byte == cast(u8)(#char "\\") i += 1;
             else if byte == quote quote = 0;
-        } else if byte == #char "\"" || byte == #char "'" quote = byte;
-        else if byte == #char "(" round += 1;
-        else if byte == #char ")" round -= 1;
-        else if byte == #char "[" square += 1;
-        else if byte == #char "]" square -= 1;
-        else if byte == #char "{" brace += 1;
-        else if byte == #char "}" brace -= 1;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "(") round += 1;
+        else if byte == cast(u8)(#char ")") round -= 1;
+        else if byte == cast(u8)(#char "[") square += 1;
+        else if byte == cast(u8)(#char "]") square -= 1;
+        else if byte == cast(u8)(#char "{") brace += 1;
+        else if byte == cast(u8)(#char "}") brace -= 1;
         else if byte == delimiter && round == 0 && square == 0 && brace == 0 {
-            part := trim(value[start..i]);
-            if part.count > 0 array_add(*parts, part);
+            part := value[start..i].trim();
+            if part.count > 0 parts.push(part);
             start = i + 1;
         }
         i += 1;
     }
-    part := trim(value[start..value.count]);
-    if part.count > 0 array_add(*parts, part);
+    part := value[start..value.count].trim();
+    if part.count > 0 parts.push(part);
     return parts;
 }
 
 reference_parse_parameter :: (raw: string) -> Reference_Parameter {
     parameter: Reference_Parameter;
-    value := trim(raw);
-    while starts_with(value, "using ") || starts_with(value, "noalias ") {
-        space := index_of_byte(value, #char " ");
-        array_add(*parameter.modifiers, value[0..space]);
-        value = trim(value[space + 1..value.count]);
+    value := raw.trim();
+    while value.starts_with("using ") || value.starts_with("noalias ") ||
+          value.starts_with("#comptime ") || value.starts_with("#lazy ") {
+        space := reference_index_of_byte(value, cast(u8)(#char " "));
+        modifier := value[0..space];
+        if modifier.starts_with("#") modifier = modifier[1..modifier.count];
+        parameter.modifiers.push(reference_copy_string(modifier));
+        value = value[space + 1..value.count].trim();
     }
-    if starts_with(value, "#comptime ") {
-        array_add(*parameter.modifiers, "comptime");
-        value = trim(value[10..value.count]);
-    }
-    equal := reference_top_level_index(value, #char "=");
+    equal := reference_top_level_index(value, cast(u8)(#char "="));
     if equal >= 0 {
-        parameter.default_value = reference_copy_string(trim(value[equal + 1..value.count]));
-        value = trim(value[0..equal]);
+        parameter.default_value = reference_copy_string(value[equal + 1..value.count].trim());
+        value = value[0..equal].trim();
     }
-    colon := reference_top_level_index(value, #char ":");
+    colon := reference_top_level_index(value, cast(u8)(#char ":"));
     if colon >= 0 {
-        parameter.name = reference_copy_string(trim(value[0..colon]));
-        parameter.value_type = reference_copy_string(trim(value[colon + 1..value.count]));
+        parameter.name = reference_copy_string(value[0..colon].trim());
+        parameter.value_type = reference_copy_string(value[colon + 1..value.count].trim());
     } else {
         parameter.name = reference_copy_string(value);
         parameter.value_type = reference_copy_string("any");
     }
     if parameter.name == "#comptime"
-        array_add(*parameter.modifiers, "comptime");
+        parameter.modifiers.push("comptime");
     else if parameter.name == "#empty"
-        array_add(*parameter.modifiers, "empty type witness");
-    if starts_with(parameter.value_type, "...") {
-        array_add(*parameter.modifiers, "variadic");
-        parameter.value_type = reference_copy_string(trim(parameter.value_type[3..parameter.value_type.count]));
+        parameter.modifiers.push("empty type witness");
+    if parameter.value_type.starts_with("...") {
+        parameter.modifiers.push("variadic");
+        parameter.value_type = reference_copy_string(parameter.value_type[3..parameter.value_type.count].trim());
     }
     return parameter;
 }
 
+reference_matches_at :: (value: string, offset: ssize, needle: string) -> bool {
+    if offset < 0 || offset + needle.count > value.count return false;
+    for i: 0..needle.count if value[offset + i] != needle[i] return false;
+    return true;
+}
+
+// Factory signatures use #Self_Type for their enclosing inherent type. Resolve
+// the type in the displayed/searchable signature, but retain the original
+// source signature. Quoted defaults must stay literal.
+reference_resolve_self_type :: (value: string, owner: string) -> string {
+    if reference_index_of(value, "#Self_Type") < 0 return value;
+    out := String_Builder.make_len_cap(0, value.count + owner.count);
+    quote: u8 = 0;
+    i: ssize = 0;
+    while i < value.count {
+        byte := value[i];
+        if quote != 0 {
+            out.write_byte(byte);
+            if byte == cast(u8)(#char "\\") && i + 1 < value.count {
+                i += 1;
+                out.write_byte(value[i]);
+            } else if byte == quote quote = 0;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") {
+            quote = byte;
+            out.write_byte(byte);
+        } else if reference_matches_at(value, i, "#Self_Type") &&
+                  (i + 10 == value.count || !reference_is_identifier_continue(value[i + 10])) {
+            out.write_string(owner);
+            i += 9;
+        } else out.write_byte(byte);
+        i += 1;
+    }
+    return out.into_string();
+}
+
+// Context's checked-in docs still describe the former -O0 allocator default.
+// Correct only those exact fragments while the implementation uses the
+// GLOSSO_DEBUG_ALLOCATOR switch.  Once upstream wording changes, none of the
+// needles match and this becomes an output-preserving no-op.
+reference_correct_context_docs :: (module_name: string, value: string) -> string {
+    if module_name != "Context" || value.count == 0 return value;
+    needles: [5]string = .[
+        "`context.allocator` defaults to the debug allocator at -O0 and to the heap allocator otherwise",
+        "`context.allocator` set to the debug allocator at -O0 and heap otherwise",
+        "`context.allocator` already holds it at -O0, so installing it by hand is only needed to keep tracking at higher optimization levels",
+        "automatic report the runtime emits at exit under -O0",
+        "compiler's built-in heap, which is the tracking debug allocator in debug builds",
+    ];
+    replacements: [5]string = .[
+        "`context.allocator` defaults to the heap allocator; the `GLOSSO_DEBUG_ALLOCATOR` environment variable selects the debug allocator when set to a nonzero value",
+        "`context.allocator` set to the heap allocator unless `GLOSSO_DEBUG_ALLOCATOR` is nonzero",
+        "`context.allocator` holds it automatically only when `GLOSSO_DEBUG_ALLOCATOR` is nonzero; otherwise install it explicitly to enable leak tracking",
+        "automatic report the runtime emits at exit when `GLOSSO_DEBUG_ALLOCATOR` is nonzero",
+        "compiler's built-in allocator, which is the tracking debug allocator only when `GLOSSO_DEBUG_ALLOCATOR` is nonzero and the ordinary heap otherwise",
+    ];
+    out := String_Builder.make_len_cap(0, value.count + 128);
+    cursor: ssize = 0;
+    while cursor < value.count {
+        matched := false;
+        for i: 0..needles.count {
+            if !reference_matches_at(value, cursor, needles[i]) continue;
+            out.write_string(replacements[i]);
+            cursor += needles[i].count;
+            matched = true;
+            break;
+        }
+        if matched continue;
+        out.write_byte(value[cursor]);
+        cursor += 1;
+    }
+    return out.into_string();
+}
+
+reference_find_top_level_word :: (
+    value: string,
+    word: string,
+    start: ssize = 0,
+) -> ssize {
+    round: ssize = 0;
+    square: ssize = 0;
+    brace: ssize = 0;
+    quote: u8 = 0;
+    i := start;
+    while i < value.count {
+        byte := value[i];
+        if quote != 0 {
+            if byte == cast(u8)(#char "\\") i += 1;
+            else if byte == quote quote = 0;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "(") round += 1;
+        else if byte == cast(u8)(#char ")") round -= 1;
+        else if byte == cast(u8)(#char "[") square += 1;
+        else if byte == cast(u8)(#char "]") square -= 1;
+        else if byte == cast(u8)(#char "{") brace += 1;
+        else if byte == cast(u8)(#char "}") brace -= 1;
+        else if round == 0 && square == 0 && brace == 0 &&
+                reference_matches_at(value, i, word) {
+            before_ok := i == 0 || !reference_is_identifier_continue(value[i - 1]);
+            after := i + word.count;
+            after_ok := after == value.count || !reference_is_identifier_continue(value[after]);
+            if before_ok && after_ok return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+reference_split_top_level_and :: (value: string) -> [..]string {
+    parts: [..]string;
+    start: ssize = 0;
+    round: ssize = 0;
+    square: ssize = 0;
+    brace: ssize = 0;
+    quote: u8 = 0;
+    i := 0;
+    while i < value.count {
+        byte := value[i];
+        if quote != 0 {
+            if byte == cast(u8)(#char "\\") i += 1;
+            else if byte == quote quote = 0;
+        } else if byte == cast(u8)(#char "\"") || byte == cast(u8)(#char "'") quote = byte;
+        else if byte == cast(u8)(#char "(") round += 1;
+        else if byte == cast(u8)(#char ")") round -= 1;
+        else if byte == cast(u8)(#char "[") square += 1;
+        else if byte == cast(u8)(#char "]") square -= 1;
+        else if byte == cast(u8)(#char "{") brace += 1;
+        else if byte == cast(u8)(#char "}") brace -= 1;
+        else if byte == cast(u8)(#char "&") && i + 1 < value.count &&
+                value[i + 1] == cast(u8)(#char "&") &&
+                round == 0 && square == 0 && brace == 0 {
+            part := value[start..i].trim();
+            if part.count > 0 parts.push(part);
+            i += 1;
+            start = i + 1;
+        }
+        i += 1;
+    }
+    part := value[start..value.count].trim();
+    if part.count > 0 parts.push(part);
+    return parts;
+}
+
+reference_contains_identifier :: (value: string, identifier: string) -> bool {
+    if identifier.count == 0 return false;
+    i: ssize = 0;
+    while i + identifier.count <= value.count {
+        if reference_matches_at(value, i, identifier) {
+            before_ok := i == 0 || !reference_is_identifier_continue(value[i - 1]);
+            after := i + identifier.count;
+            after_ok := after == value.count || !reference_is_identifier_continue(value[after]);
+            if before_ok && after_ok return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+reference_parameter_introduces_constraint_type :: (
+    parameter: *const Reference_Parameter,
+    constraint: string,
+) -> bool {
+    value_type := parameter.*.value_type;
+    i: ssize = 0;
+    while i + 1 < value_type.count {
+        if value_type[i] == cast(u8)(#char "$") && reference_is_identifier_start(value_type[i + 1]) {
+            end := i + 2;
+            while end < value_type.count && reference_is_identifier_continue(value_type[end])
+                end += 1;
+            if reference_contains_identifier(constraint, value_type[i + 1..end]) return true;
+            i = end;
+        } else i += 1;
+    }
+    return value_type == "type" &&
+        reference_contains_identifier(constraint, parameter.*.name);
+}
+
+reference_attach_parameter_constraint :: (
+    function: *Reference_Function,
+    constraint: string,
+) {
+    for i: 0..function.*.parameters.count {
+        if reference_parameter_introduces_constraint_type(
+            &function.*.parameters[i], constraint,
+        ) function.*.parameters[i].constraints.push(reference_copy_string(constraint),);
+    }
+}
+
+reference_parse_where_clauses :: (
+    tail: string,
+    function: *Reference_Function,
+) {
+    marker := reference_find_top_level_word(tail, "where");
+    while marker >= 0 {
+        clause_start := marker + 5;
+        next := reference_find_top_level_word(tail, "where", clause_start);
+        clause_end := tail.count;
+        if next >= 0 clause_end = next;
+        clause := tail[clause_start..clause_end].trim();
+        if clause.count > 0 {
+            function.*.where_clauses.push(reference_copy_string(clause));
+            constraints := reference_split_top_level_and(clause);
+            for constraint: constraints
+                reference_attach_parameter_constraint(function, constraint);
+            constraints.free();
+        }
+        if next < 0 break;
+        marker = next;
+    }
+}
+
 reference_return_type :: (tail: string) -> string {
-    arrow := index_of(tail, "->");
+    arrow := reference_index_of(tail, "->");
     if arrow < 0 return "void";
-    value := trim(tail[arrow + 2..tail.count]);
-    directive := reference_top_level_index(value, #char "#");
-    if directive >= 0 value = trim(value[0..directive]);
-    where_index := index_of(value, " where ");
-    if where_index >= 0 value = trim(value[0..where_index]);
+    value := tail[arrow + 2..tail.count].trim();
+    directive := reference_top_level_index(value, cast(u8)(#char "#"));
+    while directive >= 0 {
+        end := directive + 1;
+        while end < value.count && reference_is_identifier_continue(value[end]) end += 1;
+        marker := value[directive..end];
+        if marker != "#Never" && marker != "#Self_Type" && marker != "#soa" &&
+           marker != "#aos" && marker != "#simd" break;
+        next := reference_top_level_index(value[end..value.count], cast(u8)(#char "#"));
+        if next < 0 { directive = -1; break; }
+        directive = end + next;
+    }
+    if directive >= 0 value = value[0..directive].trim();
+    where_index := reference_index_of(value, " where ");
+    if where_index >= 0 value = value[0..where_index].trim();
     if value.count == 0 return "void";
     return reference_copy_string(value);
 }
 
+// Preserve source effects, including named arguments and nested result places.
 reference_memory_contract :: (raw: string) -> Reference_Memory_Contract {
     contract: Reference_Memory_Contract;
-    value := trim(raw);
+    value := raw.trim();
     if value.count == 0 return contract;
-    open := index_of_byte(value, #char "(");
-    if open < 0 || !ends_with(value, ")") {
+    open := reference_index_of_byte(value, cast(u8)(#char "("));
+    if open < 0 || !value.ends_with(")") {
         contract.effect = reference_copy_string(value);
         return contract;
     }
-    contract.effect = reference_copy_string(trim(value[0..open]));
+    contract.effect = reference_copy_string(value[0..open].trim());
     arguments := reference_split_top_level(value[open + 1..value.count - 1]);
     for argument: arguments
-        array_add(*contract.arguments, reference_copy_string(trim(argument)));
+        contract.arguments.push(reference_copy_string(argument.trim()));
     return contract;
 }
 
@@ -761,83 +1303,161 @@ reference_parse_memory_contracts :: (
     tail: string,
     function: *Reference_Function,
 ) {
-    offset: s64 = 0;
+    offset: ssize = 0;
     while offset < tail.count {
-        marker := index_of_from(tail, "#memory", offset);
+        marker := reference_find_top_level_word(tail, "#memory", offset);
         if marker < 0 break;
         cursor := marker + 7;
         while cursor < tail.count && reference_is_space(tail[cursor]) cursor += 1;
         raw := "";
-        if cursor < tail.count && tail[cursor] == #char "(" {
+        if cursor < tail.count && tail[cursor] == cast(u8)(#char "(") {
             close := reference_matching_paren(tail, cursor);
+            if close < 0 break;
+            raw = tail[cursor + 1..close];
+            offset = close + 1;
+        } else if cursor < tail.count && tail[cursor] == cast(u8)(#char "{") {
+            close := reference_matching_brace(tail, cursor);
             if close < 0 break;
             raw = tail[cursor + 1..close];
             offset = close + 1;
         } else {
             end := cursor;
-            while end < tail.count && !reference_is_space(tail[end]) &&
-                  tail[end] != #char ";" && tail[end] != #char "{" end += 1;
-            raw = tail[cursor..end];
-            offset = end;
+            while end < tail.count && reference_is_identifier_continue(tail[end]) end += 1;
+            if end == cursor break;
+            argument_open := end;
+            while argument_open < tail.count && reference_is_space(tail[argument_open])
+                argument_open += 1;
+            if argument_open < tail.count && tail[argument_open] == cast(u8)(#char "(") {
+                close := reference_matching_paren(tail, argument_open);
+                if close < 0 break;
+                raw = tail[cursor..close + 1];
+                offset = close + 1;
+            } else {
+                raw = tail[cursor..end];
+                offset = end;
+            }
         }
+        function.*.memory_declared = true;
         parts := reference_split_top_level(raw);
         for part: parts {
             contract := reference_memory_contract(part);
             if contract.effect.count > 0
-                array_add(*function.*.memory_contracts, contract);
+                function.*.memory_contracts.push(contract);
         }
-        if raw.count == 0 break;
+        parts.free();
     }
+}
+
+reference_display_decorations :: (value: string) -> string {
+    // Keep directives such as #operator, but elide the modifier's code body.
+    marker := reference_find_top_level_word(value, "#modify");
+    if marker < 0 return reference_normalize_space(value);
+    after := marker + 7;
+    while after < value.count && reference_is_space(value[after]) after += 1;
+    if after < value.count && value[after] == cast(u8)(#char "{") {
+        close := reference_matching_brace(value, after);
+        if close >= 0 return reference_normalize_space(
+            tprint("{}{}", value[0..after], value[close + 1..value.count]));
+    }
+    return reference_normalize_space(value);
 }
 
 reference_function_info :: (right: string) -> Reference_Function {
     function: Reference_Function;
-    open := index_of_byte(right, #char "(");
+    open := reference_index_of_byte(right, cast(u8)(#char "("));
     if open < 0 return function;
     close := reference_matching_paren(right, open);
     if close < 0 return function;
     parts := reference_split_top_level(right[open + 1..close]);
-    for part: parts array_add(*function.parameters, reference_parse_parameter(part));
-    array_free(*parts);
+    for part: parts function.parameters.push(reference_parse_parameter(part));
+    parts.free();
     tail := right[close + 1..right.count];
     function.return_type = reference_return_type(tail);
-    reference_parse_memory_contracts(tail, *function);
+    reference_parse_memory_contracts(tail, &function);
+    reference_parse_where_clauses(tail, &function);
     return function;
 }
 
-reference_searchable_signature :: (function: Reference_Function) -> string {
-    out := builder_make_len_cap(0, 64);
-    builder_write_byte(*out, #char "(");
+reference_display_signature :: (
+    name: string,
+    right: string,
+    function: *Reference_Function,
+) -> string {
+    open := reference_index_of_byte(right, cast(u8)(#char "("));
+    if open < 0 return "";
+    close := reference_matching_paren(right, open);
+    if close < 0 return "";
+    out := String_Builder.make_len_cap(0, name.count + close + 24);
+    out.write_string(name);
+    if right.starts_with("#fn_ptr") out.write_string(" :: #fn_ptr(");
+    else out.write_string(" :: (");
+    parts := reference_split_top_level(right[open + 1..close]);
+    for i: 0..parts.count {
+        if i > 0 out.write_string(", ");
+        out.write_string(parts[i]);
+    }
+    parts.free();
+    out.write_byte(cast(u8)(#char ")"));
+    tail := right[close + 1..right.count];
+    arrow := reference_index_of(tail, "->");
+    decoration_start: ssize = 0;
+    if arrow >= 0 {
+        out.write_string(" -> ");
+        out.write_string(function.*.return_type);
+        return_start := arrow + 2;
+        while return_start < tail.count && reference_is_space(tail[return_start])
+            return_start += 1;
+        decoration_start = return_start + function.*.return_type.count;
+    }
+    decoration_end := tail.count;
+    where_marker := reference_find_top_level_word(tail, "where");
+    if where_marker >= 0 decoration_end = where_marker;
+    if decoration_start < decoration_end {
+        decorations := reference_display_decorations(
+            tail[decoration_start..decoration_end],
+        );
+        if decorations.count > 0 {
+            out.write_byte(cast(u8)(#char " "));
+            out.write_string(decorations);
+        }
+    }
+    return out.into_string();
+}
+
+reference_searchable_signature :: (function: *Reference_Function) -> string {
+    out := String_Builder.make_len_cap(0, 64);
+    out.write_byte(cast(u8)(#char "("));
     wrote := false;
-    for parameter: function.parameters {
+    for parameter_index: 0..function.*.parameters.count {
+        parameter := &function.*.parameters[parameter_index];
         skip := false;
         variadic := false;
-        for modifier: parameter.modifiers {
+        for modifier: parameter.*.modifiers {
             if modifier == "comptime" || modifier == "empty type witness" skip = true;
             if modifier == "variadic" variadic = true;
         }
         if skip continue;
-        if wrote write_string(*out, ", ");
-        if variadic write_string(*out, "...");
-        value_type := parameter.value_type;
+        if wrote out.write_string(", ");
+        if variadic out.write_string("...");
+        value_type := parameter.*.value_type;
         if value_type.count == 0 value_type = "any";
-        write_string(*out, value_type);
+        out.write_string(value_type);
         wrote = true;
     }
-    write_string(*out, ") -> ");
-    write_string(*out, function.return_type);
-    return builder_into_string(out);
+    out.write_string(") -> ");
+    out.write_string(function.*.return_type);
+    return out.into_string();
 }
 
-reference_find_module :: (modules: *[..]Reference_Module, name: string) -> s64 {
+reference_find_module :: (modules: *[..]Reference_Module, name: string) -> ssize {
     for i: 0..modules.*.count if modules.*[i].name == name return i;
     return -1;
 }
 
-reference_find_typeclass :: (module: *Reference_Module, name: string) -> s64 {
+reference_find_typeclass :: (module: *Reference_Module, name: string) -> ssize {
     for i: 0..module.*.symbols.count {
-        symbol := module.*.symbols[i];
-        if symbol.kind == "typeclass" && symbol.name == name return i;
+        symbol := &module.*.symbols[i];
+        if symbol.*.kind == "typeclass" && symbol.*.name == name return i;
     }
     return -1;
 }
@@ -845,21 +1465,22 @@ reference_find_typeclass :: (module: *Reference_Module, name: string) -> s64 {
 reference_add_typeclass_member :: (
     module: *Reference_Module,
     owner: string,
-    symbol: Reference_Symbol,
+    symbol: *const Reference_Symbol,
 ) {
     index := reference_find_typeclass(module, owner);
     if index < 0 return;
     member: Reference_Member = .{
-        .name = reference_copy_string(symbol.name),
+        .name = reference_copy_string(symbol.*.name),
         .kind = "method",
-        .signature = reference_copy_string(symbol.signature),
-        .summary = reference_copy_string(symbol.summary),
-        .source_path = reference_copy_string(symbol.source_path),
-        .source_line = symbol.source_line,
-        .has_default = symbol.has_default,
-        .function_info = symbol.function_info,
+        .signature = reference_copy_string(symbol.*.signature),
+        .display_signature = reference_copy_string(symbol.*.display_signature),
+        .summary = reference_copy_string(symbol.*.summary),
+        .source_path = reference_copy_string(symbol.*.source_path),
+        .source_line = symbol.*.source_line,
+        .has_default = symbol.*.has_default,
+        .function_info = reference_clone_function(&symbol.*.function_info),
     };
-    array_add(*module.*.symbols[index].class_info.members, member);
+    module.*.symbols[index].class_info.members.push(member);
 }
 
 reference_add_associated_member :: (
@@ -869,53 +1490,142 @@ reference_add_associated_member :: (
     annotation: string,
     summary: string,
     source_path: string,
-    source_line: s64,
+    source_line: ssize,
 ) {
     index := reference_find_typeclass(module, owner);
     if index < 0 return;
-    signature_builder := builder_make_len_cap(0, name.count + annotation.count + 4);
-    write_string(*signature_builder, name);
-    write_string(*signature_builder, " :: ");
-    write_string(*signature_builder, annotation);
+    signature_builder := String_Builder.make_len_cap(0, name.count + annotation.count + 4);
+    signature_builder.write_string(name);
+    signature_builder.write_string(" :: ");
+    signature_builder.write_string(annotation);
     member: Reference_Member = .{
         .name = reference_copy_string(name),
         .kind = "associated-type",
-        .signature = reference_copy_string(builder_into_string(signature_builder)),
+        .signature = reference_copy_string(signature_builder.into_string()),
         .summary = reference_copy_string(summary),
         .source_path = reference_copy_string(source_path),
         .source_line = source_line,
     };
-    array_add(*module.*.symbols[index].class_info.members, member);
+    module.*.symbols[index].class_info.members.push(member);
 }
 
 reference_finalize_typeclasses :: (module: *Reference_Module) {
     for i: 0..module.*.symbols.count {
-        symbol := module.*.symbols[i];
-        if symbol.kind != "typeclass" || symbol.class_info.minimal_explicit continue;
-        out := builder_make_len_cap(0, 64);
+        symbol := &module.*.symbols[i];
+        if symbol.*.kind != "typeclass" || symbol.*.class_info.minimal_explicit continue;
+        out := String_Builder.make_len_cap(0, 64);
         wrote := false;
-        for member: symbol.class_info.members {
-            if member.kind != "method" || member.has_default continue;
-            if wrote write_string(*out, ", ");
-            if starts_with(member.signature, "'") {
-                builder_write_byte(*out, #char "'");
-                write_string(*out, member.name);
-                builder_write_byte(*out, #char "'");
-            } else write_string(*out, member.name);
+        for member_index: 0..symbol.*.class_info.members.count {
+        member := &symbol.*.class_info.members[member_index];
+            if member.*.kind != "method" || member.*.has_default continue;
+            if wrote out.write_string(", ");
+            if member.*.signature.starts_with("'") {
+                out.write_byte(cast(u8)(#char "'"));
+                out.write_string(member.*.name);
+                out.write_byte(cast(u8)(#char "'"));
+            } else out.write_string(member.*.name);
             wrote = true;
         }
-        symbol.class_info.minimal = builder_into_string(out);
-        module.*.symbols[i] = symbol;
+        symbol.*.class_info.minimal = out.into_string();
+
+    }
+}
+
+reference_builtin_type_alias :: (name: string) -> bool {
+    return name == "any" || name == "bool" ||
+        name == "rune" || name == "ssize" || name == "usize" ||
+        name == "s8" || name == "s16" || name == "s32" ||
+        name == "s64" || name == "s128" || name == "u8" ||
+        name == "u16" || name == "u32" || name == "u64" ||
+        name == "u128" || name == "f16" || name == "f32" ||
+        name == "f64" || name == "f80" || name == "f128" ||
+        name == "c32" || name == "c64" || name == "c128" ||
+        name == "c160" || name == "c256" || name == "string" ||
+        name == "cstring" || name == "string16" ||
+        name == "cstring16" || name == "type" || name == "void" ||
+        name == "Code" || name == "label" || name == "Namespace" ||
+        name == "Library" || name == "Macro" || name == "Typeclass";
+}
+
+reference_alias_target :: (signature: string) -> string {
+    separator := reference_index_of(signature, "::");
+    if separator < 0 return "";
+    target := signature[separator + 2..signature.count].trim();
+    if target.count == 0 || !reference_is_identifier_start(target[0])
+        return "";
+    for i: 1..target.count
+        if !reference_is_identifier_continue(target[i]) return "";
+    return target;
+}
+
+// A declaration such as `render_fast :: render` is a procedure alias,
+// while `Process_Id :: s64` is a type alias.  They have no syntactic body of
+// their own, so resolve their category and callable details after every module
+// has been scanned.  This keeps aliases beside what they denote in the
+// reference and carries the target's parameter, constraint rows.
+reference_resolve_aliases :: (modules: *[..]Reference_Module) {
+    changed := true;
+    passes: ssize = 0;
+    while changed && passes < 16 {
+        changed = false;
+        passes += 1;
+        for module_index: 0..modules.*.count {
+            module := &modules.*[module_index];
+            for symbol_index: 0..module.*.symbols.count {
+                symbol := &module.*.symbols[symbol_index];
+                if symbol.*.kind != "constant" continue;
+                target_name := reference_alias_target(symbol.*.signature);
+                if target_name.count == 0 continue;
+                if reference_builtin_type_alias(target_name) {
+                    symbol.*.kind = "type";
+
+                    changed = true;
+                    continue;
+                }
+                found := false;
+                target: *const Reference_Symbol;
+                ambiguous := false;
+                for candidate_module_index: 0..modules.*.count {
+        candidate_module := &modules.*[candidate_module_index];
+                    for candidate_index: 0..candidate_module.*.symbols.count {
+        candidate := &candidate_module.*.symbols[candidate_index];
+                        if candidate.*.name != target_name ||
+                           candidate.*.kind == "constant" continue;
+                        if found {
+                            ambiguous = true;
+                        } else {
+                            target = candidate;
+                            found = true;
+                        }
+                    }
+                }
+                if !found || ambiguous continue;
+                if target.*.kind == "function" || target.*.kind == "method" {
+                    symbol.*.kind = "function";
+                    reference_set_function(&symbol.*.function_info, reference_clone_function(&target.*.function_info));
+                    symbol.*.searchable_signature = reference_copy_string(
+                        target.*.searchable_signature,
+                    );
+                } else if target.*.kind == "type" || target.*.kind == "typeclass" {
+                    symbol.*.kind = "type";
+                } else continue;
+
+                changed = true;
+            }
+        }
     }
 }
 
 reference_parse_file :: (
     std_directory: string,
     path: string,
+    module_path: string,
     modules: *[..]Reference_Module,
     all_instances: *[..]Reference_Instance,
-    symbol_count: *s64,
+    symbol_count: *ssize,
 ) -> bool {
+    // Filesystem byte counts are fixed-width metadata; convert only after the
+    // value has been checked, because `read_file` indexes host memory.
     size: s64;
     if file_size(path) == {
         case .Ok(measured); size = measured;
@@ -925,92 +1635,190 @@ reference_parse_file :: (
     }
 
     if size < 0 {
-        print("could not determine file size for %\n", path);
+        print("could not determine file size for {}\n", path);
         return false;
     }
     source: string;
-    if read_file(path, size + 1) == {
+    if read_file_up_to(path, cast(ssize)(size + 1)) == {
         case .Err(reason);
-            print("could not read %: ", path);
+            print("could not read {}: ", path);
             report_error(reason);
             return false;
         case .Ok(text); source = text;
     }
-    module_name := reference_module_name(std_directory, path);
+    module_name := reference_module_name(std_directory, module_path);
     source_path := reference_source_path(std_directory, path);
     module_index := reference_find_module(modules, module_name);
     if module_index < 0 {
+        module_summary := reference_correct_context_docs(
+            module_name,
+            reference_module_summary(source),
+        );
         module: Reference_Module = .{
             .name = module_name,
-            .summary = reference_module_summary(source),
+            .summary = module_summary,
             .source_path = source_path,
         };
         if module.summary.count == 0 {
-            summary := builder_make_len_cap(0, source_path.count + 26);
-            write_string(*summary, "Public declarations from ");
-            write_string(*summary, source_path);
-            write_string(*summary, ".");
-            module.summary = builder_into_string(summary);
+            summary := String_Builder.make_len_cap(0, source_path.count + 26);
+            summary.write_string("Public declarations from ");
+            summary.write_string(source_path);
+            summary.write_string(".");
+            module.summary = summary.into_string();
         }
-        array_add(modules, module);
+        modules.push(module);
         module_index = modules.*.count - 1;
-    } else if ends_with(source_path, "/module.glo") {
-        summary := reference_module_summary(source);
+    } else if path == module_path && source_path.ends_with("/module.glo") {
+        summary := reference_correct_context_docs(
+            module_name,
+            reference_module_summary(source),
+        );
         if summary.count > 0 modules.*[module_index].summary = summary;
         modules.*[module_index].source_path = source_path;
     }
-    module := *modules.*[module_index];
+    module := &modules.*[module_index];
 
-    cursor: s64 = 0;
-    line_number: s64 = 1;
-    depth: s64 = 0;
-    private_section := false;
-    owner_typeclass := "";
-    pending_typeclass := false;
+    cursor: ssize = 0;
+    line_number: ssize = 1;
+    depth: ssize = 0;
+    // Top-level declarations and inherent methods are private unless exported.
+    // Visibility groups nest and restore the enclosing default at their brace.
+    scope_declarations: [256]bool;
+    scope_public: [256]bool;
+    scope_class: [256]string;
+    scope_inherent: [256]string;
+    scope_constraints: [256]string;
+    scope_declarations[0] = true;
+    pending_scope := false;
+    pending_public := false;
+    pending_class := "";
+    pending_inherent := "";
+    pending_constraints := "";
+    memory_contract := "";
+    memory_summary := "";
+    memory_public: ssize = -1;
     while cursor < source.count {
         line_end := reference_line_end(source, cursor);
         line := source[cursor..line_end];
-        trimmed := trim(line);
-        if starts_with(trimmed, "#enable(private_section") {
-            private_section = true;
-        } else if starts_with(trimmed, "#disable(private_section") {
-            private_section = false;
+        code := (reference_code_line(line)).trim();
+        declaration_depth := depth < 255 && scope_declarations[depth];
+        owner_typeclass := scope_class[depth];
+        owner_inherent := scope_inherent[depth];
+        visible := scope_public[depth];
+        if memory_public >= 0 visible = memory_public == 1;
+        if code.starts_with("#public(unit)") {
+            visible = false;
+            code = code[13..code.count].trim();
+        } else if code.starts_with("#public ") {
+            visible = true;
+            code = code[8..code.count].trim();
+        } else if code.starts_with("#private ") {
+            visible = false;
+            code = code[9..code.count].trim();
         }
-        if depth == 0 && owner_typeclass.count > 0 && !pending_typeclass
-            owner_typeclass = "";
-        code := trim(reference_code_line(line));
-        declaration_depth := depth == 0 || (depth == 1 && owner_typeclass.count > 0);
-        separator := index_of(code, "::");
-        if !private_section && declaration_depth && separator > 0 {
-            left := trim(code[0..separator]);
-            code_right := trim(code[separator + 2..code.count]);
-            valid_name := left.count > 0 &&
-                (reference_is_identifier_start(left[0]) || left[0] == #char "'" ||
-                 starts_with(code_right, "instance ") || starts_with(code_right, "instance !"));
+        // A leading contract is part of the following declaration, not a scope.
+        // Read it as one balanced block so braces/comments cannot hide methods
+        // or disconnect their documentation from the declaration they describe.
+        if declaration_depth && code.starts_with("#memory") {
+            open := cursor + reference_index_of(line, "#memory") + 7;
+            while open < source.count && reference_is_space(source[open]) open += 1;
+            if open < source.count && source[open] == cast(u8)(#char "{") {
+                close := reference_matching_brace(source, open);
+                if close >= 0 {
+                    memory_contract = reference_normalize_space(
+                        reference_without_comments(source[cursor..close + 1]));
+                    marker := reference_index_of(memory_contract, "#memory");
+                    memory_contract = memory_contract[marker..memory_contract.count];
+                    memory_summary = reference_previous_summary(source, cursor);
+                    memory_public = 0;
+                    if visible memory_public = 1;
+                    for i: cursor..close + 1
+                        if source[i] == cast(u8)(#char "\n") line_number += 1;
+                    cursor = close + 1;
+                    continue;
+                }
+            }
+        }
+        child_declarations := false;
+        child_public := false;
+        child_class := "";
+        child_inherent := "";
+        child_constraints := "";
+        if declaration_depth && code.starts_with("{") {
+            child_declarations = true;
+            child_public = visible;
+            child_class = owner_typeclass;
+            child_inherent = owner_inherent;
+            child_constraints = scope_constraints[depth];
+        }
+        if pending_scope {
+            child_declarations = true;
+            child_public = pending_public;
+            child_class = pending_class;
+            child_inherent = pending_inherent;
+            child_constraints = pending_constraints;
+        }
+        instance_separator := reference_index_of(code, ":::");
+        separator := instance_separator;
+        separator_width := 3;
+        if separator < 0 {
+            separator = reference_index_of(code, "::");
+            separator_width = 2;
+        }
+        if declaration_depth && separator > 0 {
+            left := code[0..separator].trim();
+            code_right := code[separator + separator_width..code.count].trim();
+            is_instance := code_right.starts_with("instance ") || code_right.starts_with("instance !");
+            is_inherent := instance_separator > 0 && !is_instance;
+            if is_inherent {
+                child_declarations = true;
+                child_public = code_right.starts_with("#public") &&
+                    !code_right.starts_with("#public(unit)");
+                child_inherent = reference_copy_string(left);
+                inherent_header := reference_header(source, cursor + reference_index_of(line, left));
+                where_at := reference_find_top_level_word(inherent_header.text, "where");
+                if where_at >= 0
+                    child_constraints = reference_copy_string(inherent_header.text[where_at..inherent_header.text.count]);
+            }
+            valid_name := left.count > 0 && !is_inherent &&
+                (is_instance || (visible &&
+                 (reference_is_identifier_start(left[0]) || left[0] == cast(u8)(#char "'"))));
             if valid_name {
-                leading := index_of(line, left);
+                leading := reference_index_of(line, left);
                 declaration_start := cursor;
                 if leading >= 0 declaration_start += leading;
                 header := reference_header(source, declaration_start);
-                header_separator := index_of(header.text, "::");
+                header_instance_separator := reference_index_of(header.text, ":::");
+                header_separator := header_instance_separator;
+                header_separator_width := 3;
+                if header_separator < 0 {
+                    header_separator = reference_index_of(header.text, "::");
+                    header_separator_width = 2;
+                }
                 if header_separator > 0 {
-                    header_left := trim(header.text[0..header_separator]);
-                    right := trim(header.text[header_separator + 2..header.text.count]);
-                    summary := reference_previous_summary(source, declaration_start);
-                    if starts_with(right, "instance ") || starts_with(right, "instance !") {
-                        instance_tail := trim(right[8..right.count]);
+                    header_left := header.text[0..header_separator].trim();
+                    right := (header.text[
+                        header_separator + header_separator_width..header.text.count]).trim();
+                    summary := reference_correct_context_docs(
+                        module_name,
+                        reference_previous_summary(source, cursor),
+                    );
+                    if summary.count == 0 && memory_contract.count > 0
+                        summary = memory_summary;
+                    if right.starts_with("instance ") || right.starts_with("instance !") {
+                        instance_tail := right[8..right.count].trim();
                         negative := false;
-                        if starts_with(instance_tail, "!") {
+                        if instance_tail.starts_with("!") {
                             negative = true;
-                            instance_tail = trim(instance_tail[1..instance_tail.count]);
+                            instance_tail = instance_tail[1..instance_tail.count].trim();
                         }
-                        class_end := index_of_byte(instance_tail, #char " ");
-                        parameter_start := index_of_byte(instance_tail, #char "(");
+                        class_end := reference_index_of_byte(instance_tail, cast(u8)(#char " "));
+                        parameter_start := reference_index_of_byte(instance_tail, cast(u8)(#char "("));
                         if class_end < 0 || (parameter_start >= 0 && parameter_start < class_end)
                             class_end = parameter_start;
                         if class_end < 0 class_end = instance_tail.count;
                         instance: Reference_Instance = .{
-                            .class_name = reference_copy_string(trim(instance_tail[0..class_end])),
+                            .class_name = reference_copy_string(instance_tail[0..class_end].trim()),
                             .head = reference_copy_string(header_left),
                             .module = reference_copy_string(module_name),
                             .signature = reference_copy_string(header.text),
@@ -1019,16 +1827,25 @@ reference_parse_file :: (
                             .source_line = line_number,
                             .negative = negative,
                         };
-                        array_add(all_instances, instance);
-                    } else if depth == 1 && owner_typeclass.count > 0 && !starts_with(right, "(") {
+                        all_instances.push(instance);
+                    } else if owner_typeclass.count > 0 && !reference_is_function_header(right, header.terminator) {
                         reference_add_associated_member(
                             module, owner_typeclass, header_left, right,
                             summary, source_path, line_number);
                     } else {
                         symbol_name := header_left;
-                        if symbol_name.count >= 2 && symbol_name[0] == #char "'" &&
-                           symbol_name[symbol_name.count - 1] == #char "'"
+                        if symbol_name.count >= 2 && symbol_name[0] == cast(u8)(#char "'") &&
+                           symbol_name[symbol_name.count - 1] == cast(u8)(#char "'")
                             symbol_name = symbol_name[1..symbol_name.count - 1];
+                        if owner_inherent.count > 0 {
+                            qualified := String_Builder.make_len_cap(0, owner_inherent.count + symbol_name.count + 1);
+                            qualified.write_string(owner_inherent);
+                            qualified.write_string(".");
+                            qualified.write_string(symbol_name);
+                            symbol_name = qualified.into_string();
+                        }
+                        display_name := header_left;
+                        if owner_inherent.count > 0 display_name = symbol_name;
                         symbol: Reference_Symbol = .{
                             .name = reference_copy_string(symbol_name),
                             .signature = reference_copy_string(header.text),
@@ -1036,48 +1853,182 @@ reference_parse_file :: (
                             .source_path = reference_copy_string(source_path),
                             .source_line = line_number,
                             .owner_typeclass = reference_copy_string(owner_typeclass),
-                            .has_default = header.terminator == #char "{" || index_of(right, "#magic") >= 0,
+                            .has_default = header.terminator == cast(u8)(#char "{") || reference_index_of(right, "#magic") >= 0,
                         };
-                        if starts_with(right, "(") {
-                            if owner_typeclass.count > 0 symbol.kind = "method";
+                        if reference_is_function_header(right, header.terminator) {
+                            if owner_typeclass.count > 0 || owner_inherent.count > 0 symbol.kind = "method";
                             else symbol.kind = "function";
-                            symbol.function_info = reference_function_info(right);
-                            symbol.searchable_signature = reference_searchable_signature(symbol.function_info);
-                        } else if starts_with(right, "typeclass") {
+                            if owner_inherent.count > 0 right = reference_resolve_self_type(right, owner_inherent);
+                            reference_set_function(&symbol.function_info, reference_function_info(right));
+                            if owner_inherent.count > 0 {
+                                for parameter_index: 0..symbol.function_info.parameters.count {
+                                    parameter := &symbol.function_info.parameters[parameter_index];
+                                    receiver := parameter.*.name;
+                                    if receiver == "#self" || receiver == "*const #self" || receiver == "*#self" {
+                                        parameter.*.name = "#self";
+                                        receiver_type := String_Builder.make_len_cap(0, owner_inherent.count + 8);
+                                        if receiver.starts_with("*const") receiver_type.write_string("*const ");
+                                        else if receiver.starts_with("*") receiver_type.write_string("*");
+                                        receiver_type.write_string(owner_inherent);
+                                        parameter.*.value_type = receiver_type.into_string();
+                                        parameter.*.modifiers.push("receiver");
+                                    }
+                                }
+                                reference_parse_where_clauses(scope_constraints[depth], &symbol.function_info);
+                            }
+                            symbol.display_signature = reference_display_signature(
+                                display_name, right, &symbol.function_info,
+                            );
+                            symbol.searchable_signature = reference_searchable_signature(&symbol.function_info);
+                        } else if right.starts_with("typeclass") {
                             symbol.kind = "typeclass";
-                            minimal_marker := index_of(right, "#minimal(");
+                            minimal_marker := reference_index_of(right, "#minimal(");
                             if minimal_marker >= 0 {
                                 open := minimal_marker + 8;
                                 close := reference_matching_paren(right, open);
                                 if close > open {
-                                    symbol.class_info.minimal = reference_copy_string(trim(right[open + 1..close]));
+                                    symbol.class_info.minimal = reference_copy_string(right[open + 1..close].trim());
                                     symbol.class_info.minimal_explicit = true;
                                 }
                             }
-                        } else if starts_with(right, "struct") || starts_with(right, "union") ||
-                                  starts_with(right, "enum") || starts_with(right, "#fn_ptr") {
+                        } else if right.starts_with("struct") || right.starts_with("union") ||
+                                  right.starts_with("enum") || right.starts_with("#fn_ptr") {
                             symbol.kind = "type";
-                            symbol.type_info = reference_type_info(
-                                right, source, declaration_start, header.terminator_index);
+                            reference_set_type_info(&symbol.type_info, reference_type_info(
+                                right, source, declaration_start, header.terminator_index));
+                            if right.starts_with("#fn_ptr") {
+                                reference_set_function(&symbol.function_info, reference_function_info(right));
+                                symbol.display_signature = reference_display_signature(
+                                    display_name, right, &symbol.function_info,
+                                );
+                                symbol.searchable_signature = reference_searchable_signature(
+                                    &symbol.function_info,
+                                );
+                            }
                         } else symbol.kind = "constant";
-                        array_add(*module.*.symbols, symbol);
-                        symbol_count.* += 1;
-                        if symbol.kind == "typeclass" {
-                            owner_typeclass = symbol.name;
-                            pending_typeclass = index_of_byte(code, #char "{") < 0;
+                        if memory_contract.count > 0 {
+                            reference_parse_memory_contracts(memory_contract, &symbol.function_info);
+                            symbol.signature = tprint("{}\n{}", memory_contract, symbol.signature);
+                            if symbol.display_signature.count > 0
+                                symbol.display_signature = tprint("{}\n{}", memory_contract, symbol.display_signature);
                         }
-                        else if symbol.kind == "method"
-                            reference_add_typeclass_member(module, owner_typeclass, symbol);
+                        module.*.symbols.push(symbol);
+                        inserted := &module.*.symbols[module.*.symbols.count - 1];
+                        symbol_count.* += 1;
+                        if inserted.*.kind == "typeclass" {
+                            child_class = inserted.*.name;
+                            child_declarations = true;
+                            child_public = true;
+                        }
+                        else if inserted.*.kind == "method" && owner_typeclass.count > 0
+                            reference_add_typeclass_member(module, owner_typeclass, inserted);
                     }
                 }
             }
         }
-        depth += reference_brace_delta(line);
-        if pending_typeclass && index_of_byte(code, #char "{") >= 0
-            pending_typeclass = false;
+        if code.count > 0 {
+            memory_contract = "";
+            memory_summary = "";
+            memory_public = -1;
+        }
+        next_depth := depth + reference_brace_delta(line);
+        if child_declarations && next_depth == depth && reference_index_of_byte(code, cast(u8)(#char "{")) < 0 {
+            pending_scope = true;
+            pending_public = child_public;
+            pending_class = child_class;
+            pending_inherent = child_inherent;
+            pending_constraints = child_constraints;
+        }
+        if next_depth > depth && next_depth < 256 {
+            scope_declarations[next_depth] = child_declarations;
+            scope_public[next_depth] = child_public;
+            scope_class[next_depth] = child_class;
+            scope_inherent[next_depth] = child_inherent;
+            scope_constraints[next_depth] = child_constraints;
+            pending_scope = false;
+        }
+        depth = next_depth;
         if depth < 0 depth = 0;
         cursor = line_end + 1;
         line_number += 1;
+    }
+    return true;
+}
+
+// Embedded implementation files share their owner's import path. Discover
+// ownership before extracting so a fragment sorted before its owner does not
+// become a standalone module. Symbol source paths still name the physical file.
+reference_embedded_owners :: (paths: []string, owners: *[..]ssize) -> bool {
+    for _: paths owners.push(-1);
+    for parent: 0..paths.count {
+        size := file_size(paths[parent]).unwrap_or(-1);
+        if size < 0 return false;
+        source: string;
+        if read_file_up_to(paths[parent], cast(ssize)(size + 1)) == {
+            case .Ok(text); source = text;
+            case .Err(error); report_error(error); return false;
+        }
+        defer source.free();
+        uncommented := reference_without_comments(source);
+        defer uncommented.free();
+        cursor: ssize = 0;
+        while cursor < uncommented.count {
+            end := reference_line_end(uncommented, cursor);
+            code := uncommented[cursor..end].trim();
+            cursor = end + 1;
+            if !code.starts_with("#load") continue;
+            code = code[5..code.count].trim_left();
+            if !code.starts_with(",") continue;
+            code = code[1..code.count].trim_left();
+            if !code.starts_with("embed") continue;
+            code = code[5..code.count].trim_left();
+            if !code.starts_with("\"") continue;
+            quote_end: ssize = 1;
+            while quote_end < code.count {
+                if code[quote_end] == cast(u8)(#char "\"") break;
+                if code[quote_end] == cast(u8)(#char "\\") quote_end += 1;
+                quote_end += 1;
+            }
+            if quote_end >= code.count return false;
+            relative: string;
+            if json_deserialize(string, code[0..quote_end + 1]) == {
+                case .Ok(text); relative = text;
+                case .Err(error); report_error(error); return false;
+            }
+            defer relative.free();
+            embedded := path_join(path_dirname(paths[parent]), relative);
+            defer embedded.free();
+            found := false;
+            for child: 0..paths.count {
+                candidate := path_clean(paths[child]);
+                defer candidate.free();
+                if candidate != embedded continue;
+                if owners.*[child] >= 0 && owners.*[child] != parent {
+                    print("reference source has multiple embedding owners: {}\n", paths[child]);
+                    return false;
+                }
+                owners.*[child] = parent;
+                found = true;
+                break;
+            }
+            if !found {
+                print("embedded reference source is outside the scanned directory or missing: {}\n", embedded);
+                return false;
+            }
+        }
+    }
+    for start: 0..paths.count {
+        current := start;
+        steps: ssize = 0;
+        while owners.*[current] >= 0 {
+            current = owners.*[current];
+            steps += 1;
+            if steps >= paths.count {
+                print("cyclic embedded reference sources: {}\n", paths[start]);
+                return false;
+            }
+        }
+        if current != start owners.*[start] = current;
     }
     return true;
 }
@@ -1087,22 +2038,22 @@ reference_write_source :: (
     instances: []Reference_Instance,
     output_path: string,
 ) -> bool {
-    out := builder_make_len_cap(0, 4 * 1024 * 1024);
-    write_string(*out, "{\"modules\":[");
+    out := String_Builder.make_len_cap(0, 4 * 1024 * 1024);
+    out.write_string("{\"modules\":[");
     for i: 0..modules.count {
-        if i > 0 builder_write_byte(*out, #char ",");
-        if json_serialize(modules[i]) == {
-        case .Ok(encoded_module); write_string(*out, encoded_module);
+        if i > 0 out.write_byte(cast(u8)(#char ","));
+        if json_serialize(&modules[i]) == {
+        case .Ok(encoded_module); out.write_string(encoded_module);
         case .Err;
-            print("could not serialize reference module %\n", modules[i].name);
+            print("could not serialize reference module {}\n", modules[i].name);
             return false;
         }
     }
-    write_string(*out, "],\"instances\":[");
+    out.write_string("],\"instances\":[");
     for i: 0..instances.count {
         instance := instances[i];
-        if i > 0 builder_write_byte(*out, #char ",");
-        write_string(*out, "{\"class_name\":");
+        if i > 0 out.write_byte(cast(u8)(#char ","));
+        out.write_string("{\"class_name\":");
         fields: [5]string = .[
             instance.class_name,
             instance.head,
@@ -1115,65 +2066,90 @@ reference_write_source :: (
         ];
         for j: 0..fields.count {
             if j > 0 {
-                builder_write_byte(*out, #char ",");
+                out.write_byte(cast(u8)(#char ","));
                 if json_serialize(names[j]) == {
-                case .Ok(encoded_name); write_string(*out, encoded_name);
+                case .Ok(encoded_name); out.write_string(encoded_name);
                 case .Err; return false;
                 }
-                builder_write_byte(*out, #char ":");
+                out.write_byte(cast(u8)(#char ":"));
             }
             if json_serialize(fields[j]) == {
-            case .Ok(encoded); write_string(*out, encoded);
+            case .Ok(encoded); out.write_string(encoded);
             case .Err; return false;
             }
         }
-        write_string(*out, ",\"source_path\":");
+        out.write_string(",\"source_path\":");
         if json_serialize(instance.source_path) == {
-        case .Ok(encoded_path); write_string(*out, encoded_path);
+        case .Ok(encoded_path); out.write_string(encoded_path);
         case .Err; return false;
         }
-        write_string(*out, ",\"source_line\":");
-        write_string(*out, format_int(instance.source_line, 10));
-        write_string(*out, ",\"negative\":");
-        if instance.negative write_string(*out, "true");
-        else write_string(*out, "false");
-        builder_write_byte(*out, #char "}");
+        out.write_string(",\"source_line\":");
+        out.write_string(instance.source_line.format_int(10));
+        out.write_string(",\"negative\":");
+        if instance.negative out.write_string("true");
+        else out.write_string("false");
+        out.write_byte(cast(u8)(#char "}"));
     }
-    write_string(*out, "]}\n");
-    result := write_file(output_path, builder_into_string(out));
-    return result_is_ok(result);
+    out.write_string("]}\n");
+    result := write_file(output_path, out.into_string());
+    return result.is_ok();
 }
 
 main :: () {
     args := get_cmdline_args();
     if args.count < 3 {
-        print("usage: % <std-directory> <output>\n", args[0]);
+        print("usage: {} <std-directory> <output>\n", args[0]);
         exit(1);
     }
-    std_directory := trim_right(args[1]);
-    if !is_directory(std_directory) {
-        print("standard-library directory does not exist: %\n", std_directory);
+    std_directory := args[1].trim_right();
+    if !os_fs_is_directory(std_directory) {
+        print("standard-library directory does not exist: {}\n", std_directory);
         exit(1);
     }
     paths: [..]string;
-    collected := reference_collect_paths(std_directory, *paths);
-    if result_is_err(collected) {
-        print("could not walk standard-library directory: %\n", std_directory);
+    collected := reference_collect_paths(std_directory, &paths);
+    if collected.is_err() {
+        print("could not walk standard-library directory: {}\n", std_directory);
         exit(1);
     }
-    _ := sort_by(array_view(paths), reference_compare_paths);
+    _ := (paths.view()).sort_by(reference_compare_paths);
     modules: [..]Reference_Module;
     instances: [..]Reference_Instance;
-    symbol_count: s64 = 0;
-    // Reserve without adding another dependency: reset retains capacity.
-    for 0..paths.count array_add(*modules, Reference_Module.{});
-    array_reset(*modules);
-    for path: paths {
-        if !reference_parse_file(std_directory, path, *modules, *instances, *symbol_count) exit(1);
+    symbol_count: ssize = 0;
+    modules.reserve(paths.count);
+    owners: [..]ssize;
+    if !reference_embedded_owners(paths.view(), &owners) exit(1);
+    // Root files establish module documentation before their fragments add APIs.
+    for pass: 0..2 {
+        for i: 0..paths.count {
+            embedded := owners[i] >= 0;
+            if (pass == 0 && embedded) || (pass == 1 && !embedded) continue;
+            owner := i;
+            if embedded owner = owners[i];
+            if !reference_parse_file(std_directory, paths[i], paths[owner],
+                &modules, &instances, &symbol_count) exit(1);
+        }
     }
-    for i: 0..modules.count reference_finalize_typeclasses(*modules[i]);
-    if !reference_write_source(array_view(modules), array_view(instances), args[2]) exit(1);
+    reference_resolve_aliases(&modules);
+    for i: 0..modules.count reference_finalize_typeclasses(&modules[i]);
+    if !reference_write_source(modules.view(), instances.view(), args[2]) exit(1);
     print(
-        "Extracted % modules, % public symbols, and % instances from %.\n",
+        "Extracted {} modules, {} public symbols, and {} instances from {}.\n",
         modules.count, symbol_count, instances.count, std_directory);
 }
+
+#import "File_System/Directory";
+#import "File_System/Metadata";
+#import "File_System/Path";
+#import "File_System/Types";
+#import "File_System/File";
+#import "Format";
+#import "Io";
+#import "Typeclass/Error";
+#import "Os";
+#import "Serialization/Core";
+#import "Serialization/Json";
+#import "Sort";
+#import "String_Builder";
+#import "Strings/Utf8";
+

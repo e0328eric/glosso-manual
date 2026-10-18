@@ -10,53 +10,48 @@ tree_sitter_write_escaped_string :: (
     out: *String_Builder,
     value: string,
 ) {
-    builder_write_byte(out, #char "\"");
-    i: s64 = 0;
+    out.write_byte(cast(u8)(#char "\""));
+    i: ssize = 0;
     while i < value.count {
         byte := value[i];
-        if byte == #char "\"" {
-            write_string(out, "\\\"");
-        } else if byte == #char "\\" {
-            write_string(out, "\\\\");
-        } else if byte == #char "\n" {
-            write_string(out, "\\n");
-        } else if byte == #char "\r" {
-            write_string(out, "\\r");
-        } else if byte == #char "\t" {
-            write_string(out, "\\t");
+        if byte == cast(u8)(#char "\"") {
+            out.write_string("\\\"");
+        } else if byte == cast(u8)(#char "\\") {
+            out.write_string("\\\\");
+        } else if byte == cast(u8)(#char "\n") {
+            out.write_string("\\n");
+        } else if byte == cast(u8)(#char "\r") {
+            out.write_string("\\r");
+        } else if byte == cast(u8)(#char "\t") {
+            out.write_string("\\t");
         } else if byte < 32 {
-            write_string(out, " ");
+            out.write_string(" ");
         } else if i + 2 < value.count && byte == 16#e2 &&
                   value[i + 1] == 16#80 &&
                   (value[i + 2] == 16#a8 || value[i + 2] == 16#a9) {
-            if value[i + 2] == 16#a8 write_string(out, "\\u2028");
-            else write_string(out, "\\u2029");
+            if value[i + 2] == 16#a8 out.write_string("\\u2028");
+            else out.write_string("\\u2029");
             i += 2;
         } else {
-            builder_write_byte(out, byte);
+            out.write_byte(byte);
         }
         i += 1;
     }
-    builder_write_byte(out, #char "\"");
+    out.write_byte(cast(u8)(#char "\""));
 }
 
-tree_sitter_append_text :: (path: string, text: string) -> bool {
-    file: File;
-    if append_file(path) == {
-        case .Ok(opened); file = opened;
-        case .Err; return false;
-    }
-    wrote := write(file, text);
-    closed := close(*file);
+tree_sitter_append_text :: (path: string, text: string) -> Fs_Error!bool {
+    file := File.open(path, .Write, .Open_Or_Create, .flags = .Append)?;
+    wrote := file.write(text);
+    closed := file.close();
     if #pattern .Ok(written) = wrote {
-        return written == text.count && result_is_ok(closed);
+        return .Ok(written == text.count && closed.is_ok());
     }
-    return false;
+    return .Ok(false);
 }
 
-sync_tree_sitter :: () -> bool {
+#public(unit) sync_tree_sitter :: () -> bool {
     query_result := read_file("tree-sitter/highlights.scm", 1024 * 1024);
-    app_result := read_file("app.js", 4 * 1024 * 1024);
     query: string;
     app: string;
     if query_result == {
@@ -65,45 +60,58 @@ sync_tree_sitter :: () -> bool {
             return false;
         case .Ok(text); query = text;
     }
+    defer query.free();
+    app_result := read_file("app.js", 4 * 1024 * 1024);
     if app_result == {
         case .Err;
             print("could not read app.js\n");
             return false;
         case .Ok(text); app = text;
     }
+    defer app.free();
 
-    begin := index_of(app, TREE_SITTER_QUERY_BEGIN);
-    if begin < 0 {
-        print("app.js is missing the Tree-sitter query begin marker\n");
-        return false;
+    begin: ssize;
+    if app.index_of(TREE_SITTER_QUERY_BEGIN) == {
+        case .Some(found); begin = found;
+        case .None;
+            print("app.js is missing the Tree-sitter query begin marker\n");
+            return false;
     }
     content_start := begin + TREE_SITTER_QUERY_BEGIN.count;
     line_end := "\n";
-    if content_start < app.count && app[content_start] == #char "\r" {
+    if content_start < app.count && app[content_start] == cast(u8)(#char "\r") {
         line_end = "\r\n";
         content_start += 1;
     }
-    if content_start < app.count && app[content_start] == #char "\n"
+    if content_start < app.count && app[content_start] == cast(u8)(#char "\n")
         content_start += 1;
-    finish := index_of_from(app, TREE_SITTER_QUERY_END, content_start);
-    if finish < 0 {
-        print("app.js is missing the Tree-sitter query end marker\n");
-        return false;
+    finish: ssize;
+    if app.index_of(TREE_SITTER_QUERY_END, .start = content_start) == {
+        case .Some(found); finish = found;
+        case .None;
+            print("app.js is missing the Tree-sitter query end marker\n");
+            return false;
     }
 
-    replacement := builder_make_len_cap(0, query.count + 128);
-    write_string(*replacement, "const GLOSSO_HIGHLIGHTS_QUERY = ");
-    tree_sitter_write_escaped_string(*replacement, query);
-    write_string(*replacement, ";");
-    write_string(*replacement, line_end);
-    replacement_text := builder_into_temporary_string(replacement);
+    replacement := String_Builder.make_len_cap(0, query.count + 128);
+    replacement.write_string("const GLOSSO_HIGHLIGHTS_QUERY = ");
+    tree_sitter_write_escaped_string(&replacement, query);
+    replacement.write_string(";");
+    replacement.write_string(line_end);
+    replacement_text := replacement.into_string();
+    defer replacement_text.free();
     initialized := write_file("app.js", app[0..content_start]);
-    if result_is_err(initialized) ||
-       !tree_sitter_append_text("app.js", replacement_text) ||
-       !tree_sitter_append_text("app.js", app[finish..app.count]) {
+    if initialized.is_err() ||
+       !tree_sitter_append_text("app.js", replacement_text).unwrap_or(false) ||
+       !tree_sitter_append_text("app.js", app[finish..app.count]).unwrap_or(false) {
         print("could not update app.js\n");
         return false;
     }
-    print("Embedded % bytes from tree-sitter/highlights.scm into app.js.\n", query.count);
+    print("Embedded {} bytes from tree-sitter/highlights.scm into app.js.\n", query.count);
     return true;
 }
+
+#import "String_Builder";
+#import "File_System/File";
+#import "Strings/Utf8";
+#import "Io";
