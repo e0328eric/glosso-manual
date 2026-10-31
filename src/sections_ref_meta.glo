@@ -1,0 +1,2133 @@
+#import "Format";
+#import "String_Builder";
+#import "Math/Core";
+#import "clay_ui.glo";
+
+#public {
+
+// Chapters 79-83: Metaprogramming.
+
+render_section_79 :: () {
+    paragraph(0, #string,oneline
+        \\Every Glosso program runs at two times. Part of it runs while the
+        \\compiler builds the program: the values of constants, the conditions
+        \\of `#if`, the source that `#insert` adds and the build steps that a
+        \\top-level `#comptime` declares. The rest runs when the finished
+        \\program is started. Compile-time code is ordinary Glosso, executed
+        \\by an interpreter inside the compiler (see Inside a Build: Stages and
+        \\Caches), so one procedure can be called at both times. This chapter
+        \\is the reference for compile-time evaluation: the forms of
+        \\`#comptime`, which code runs at compile time and at what point of the
+        \\build, what a compile-time value may be, and what compile-time code
+        \\can and cannot reach. Code That Runs at Compile Time introduces the
+        \\subject through examples.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#comptime { print("[top-level block] TABLE is {}\n", TABLE); }
+        \\
+        \\TABLE :: #comptime build_table();
+        \\
+        \\build_table :: () -> s64 {
+        \\    print("[constant] building TABLE\n");
+        \\    return 6 * 7;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("[run time] TABLE is {}\n", TABLE);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\$ glosso --run when.glo
+        \\glosso: compile when.glo (target=x86_64-pc-linux-gnu)
+        \\[constant] building TABLE
+        \\[top-level block] TABLE is 42
+        \\glosso: link when (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done when  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\[run time] TABLE is 42
+    );
+    paragraph(3, #string,oneline
+        \\The transcript shows when each of the three `print` calls ran.
+        \\`TABLE` was computed while the program was checked. The top-level
+        \\`#comptime` block, although it comes first in the file, ran after
+        \\checking and before linking. Only the last line comes from the
+        \\program itself. Output of compile-time code goes to the compiler's
+        \\standard output; the `glosso:` progress lines around it go to
+        \\standard error.
+    );
+    subheading(4, "Where code runs at compile time");
+    table_header(5, "Written   —   Runs");
+    table_row(6, "A top-level constant `X :: value;`, or the initial value of a global variable   |   While the program is checked, once, when the value is first needed.");
+    table_row(7, "`#comptime expr`, `#comptime { ... }` or `#comptime -> T { ... }` inside a procedure   |   When the compiler processes the procedure; for a generic procedure, once per instantiation.");
+    table_row(8, "The condition of `#if` or `#assert`, the bounds of an `#inline for` or `#inline while`, a `where` clause   |   While the code around it is checked.");
+    table_row(9, "The operand of `#insert`; the argument of a `#comptime` parameter   |   While the code around it is checked.");
+    table_row(10, "A call to a procedure that takes a type, `Code` or another compile-time-only value as an ordinary parameter, or returns one   |   While the call is checked; the whole call, body included.");
+    table_row(11, "A top-level `#comptime { ... }` or `#comptime f();` declaration   |   Once per build, after checking and before code generation.");
+    paragraph(12, #string,oneline
+        \\The first five rows produce a value that the compiler uses at once: a
+        \\constant, a choice between branches, a piece of source code, a
+        \\specialized procedure. A top-level `#comptime` declaration produces
+        \\nothing. It runs for its effects, such as printing a report, checking
+        \\the build environment, writing files or compiling other programs,
+        \\which makes it a build step; Build Scripts and Compile-Time Arguments
+        \\builds whole build systems from such steps.
+    );
+    subheading(13, "The `#comptime` forms");
+    paragraph(14, #string,oneline
+        \\Written before an expression or a block that produces a value,
+        \\`#comptime` asks for that value to be computed while the program is
+        \\compiled, and the directive with its operand is replaced by the
+        \\result. Written as a declaration at the top level of a module, it is
+        \\a build step instead (see below). Constants, Variables, and Globals
+        \\describes `::` constants and `::=` compile-time variables, and
+        \\`noalias`, `#lazy`, `#comptime`, and Type Parameters the `#comptime`
+        \\parameter.
+    );
+    table_header(15, "Form   —   Result");
+    table_row(16, "`#comptime expr`   |   The value of `expr`, with the expression's own type.");
+    table_row(17, "`#comptime { ...; return value; }`   |   The value the block returns; its type comes from that value.");
+    table_row(18, "`#comptime -> T { ...; return value; }`   |   The value the block returns, of type `T`.");
+    table_row(19, "`#comptime { ... }` or `#comptime f();` at the top level   |   No value: a build step that runs once per build.");
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\AREA       :: #comptime 16 * 16;
+        \\TABLE_SIZE :: #comptime { base := 16; return base * base; };
+        \\BYTE_LIMIT :: #comptime -> u8 { return 200; };
+        \\
+        \\main :: () {
+        \\    local := #comptime 6 * 7;
+        \\    print("{} {} {} {}\n", AREA, TABLE_SIZE, BYTE_LIMIT, local);
+        \\    print("{} {} {} {}\n",
+        \\        type_of(AREA), type_of(TABLE_SIZE), type_of(BYTE_LIMIT), type_of(local));
+        \\}
+    );
+    code_block(21, "text", #string
+        \\256 256 200 42
+        \\comptime_int ssize u8 ssize
+    );
+    paragraph(22, #string,oneline
+        \\`#comptime 16 * 16` keeps the type of its expression, here a
+        \\compile-time integer, so `AREA` can initialize a `u8` or an `s64`
+        \\alike (see Literal Typing and Type Conversion). A number returned
+        \\from a block without `-> T` takes its default type, `ssize` for an
+        \\integer and `f64` for a float, even when the block returns a literal.
+        \\`-> T` states the type of the result. The returned value is checked
+        \\against that type, not converted to it, so a value that does not fit
+        \\is an error:
+    );
+    code_block(23, "text", #string
+        \\// LIMIT :: #comptime -> u8 { return 500; };
+        \\error: 500 does not fit u8, whose range is 0..=255
+    );
+    paragraph(24, #string,oneline
+        \\Give a block with more than one `return` a `-> T` as well, so that
+        \\every returned value is checked against one type. At the top level,
+        \\`#comptime` before a constant's value is optional, because a
+        \\top-level constant is computed at compile time in any case. Writing
+        \\it states the intent, and it changes the meaning only where the
+        \\value reads a global variable, as described under Reading a global's
+        \\initial value below.
+    );
+    subheading(25, "When a value is computed");
+    paragraph(26, #string,oneline
+        \\The compiler evaluates a compile-time value when it first needs it. A
+        \\top-level constant is evaluated once, however often it is used, and
+        \\constants that depend on one another are evaluated in dependency
+        \\order; a cycle among them is an error (see Constants, Variables, and
+        \\Globals). The value then replaces the expression that computed it.
+        \\The first program above contains the number 42 wherever it uses
+        \\`TABLE`, and no call of `build_table`. `#dump` (see Directives That
+        \\Modify Procedures) prints the intermediate code of a procedure, and
+        \\for `seed` below it shows a single constant where the source calls
+        \\`fib`:
+    );
+    code_block(27, "glosso", #string
+        \\fib :: (n: s64) -> s64 {
+        \\    if n < 2 return n;
+        \\    return fib(n - 1) + fib(n - 2);
+        \\}
+        \\
+        \\#public seed :: () -> s64 #dump {
+        \\    return #comptime fib(20);
+        \\}
+        \\
+        \\main :: () { _ := seed(); }
+    );
+    code_block(28, "text", #string
+        \\$ glosso seed.glo
+        \\glosso: compile seed.glo (target=x86_64-pc-linux-gnu)
+        \\; ---- #dump typed-ir seed() -> s64  [3 ins] ----
+        \\   0  const v0 =6765
+        \\   1  move v1 v0
+        \\   2  ret v1
+        \\; ---- end seed ----
+        \\glosso: link seed (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done seed  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    paragraph(29, #string,oneline
+        \\A `#comptime` inside a procedure belongs to that procedure. Its value
+        \\is computed when the compiler processes the procedure, and a generic
+        \\procedure is processed once for each set of types it is instantiated
+        \\with (see Generic Procedures and `where` Clauses), so the evaluation
+        \\is repeated for each. Whether a `#comptime` in a procedure that the
+        \\program never calls is evaluated, and how many times the effects of
+        \\one inside a procedure happen, are not specified. Use these forms for
+        \\the value they produce, and put an action that must happen once, such
+        \\as writing a file, into a top-level declaration.
+    );
+    subheading(30, "Computing tables");
+    paragraph(31, #string,oneline
+        \\A table that a program would otherwise fill when it starts can be
+        \\computed by the compiler instead. The loop below runs while the
+        \\program is compiled, and the finished table is stored in the
+        \\executable as constant data. No code runs at startup, and the table
+        \\cannot get out of step with the procedure that describes it.
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\CRC_TABLE :: #comptime -> [256]u32 {
+        \\    table: [256]u32;
+        \\    for n: 0..256 {
+        \\        c := cast(u32) n;
+        \\        for 0..8 {
+        \\            if (c & 1) != 0 c = 16#EDB88320 ^ (c >> 1);
+        \\            else c = c >> 1;
+        \\        }
+        \\        table[n] = c;
+        \\    }
+        \\    return table;
+        \\};
+        \\
+        \\crc32 :: (text: str) -> u32 {
+        \\    c: u32 = 16#FFFFFFFF;
+        \\    for i: 0..text.count {
+        \\        c = CRC_TABLE[(c ^ cast(u32) text[i]) & 16#FF] ^ (c >> 8);
+        \\    }
+        \\    return c ^ 16#FFFFFFFF;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{:x}\n", crc32("123456789"));
+        \\}
+    );
+    code_block(33, "text", #string
+        \\cbf43926
+    );
+    subheading(34, "What a compile-time value can be");
+    paragraph(35, #string,oneline
+        \\A compile-time computation may return any value the compiler can
+        \\represent: numbers, booleans, strings, arrays, structs, enums and
+        \\unions, and also the values that exist only at compile time, such as
+        \\types, `Code` and `Pattern`. Inside the computation any procedure may
+        \\be used, including ones that allocate. A string built with `tprint`
+        \\or a `String_Builder` becomes string data of the program.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\#import "Format";
+        \\#import "String_Builder";
+        \\
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\index_type :: (wide: bool) -> type {
+        \\    if wide return s64;
+        \\    return s32;
+        \\}
+        \\
+        \\midpoint :: (a: Point, b: Point) -> Point {
+        \\    return .{ .x = (a.x + b.x) / 2, .y = (a.y + b.y) / 2 };
+        \\}
+        \\
+        \\sum_of_squares :: (n: s64) -> s64 {
+        \\    values: [..]s64;
+        \\    defer values.free();
+        \\    for i: 0..n values.push(i * i);
+        \\    total := 0;
+        \\    for values total += it;
+        \\    return total;
+        \\}
+        \\
+        \\ruler :: (n: s64) -> str {
+        \\    text := String_Builder.make_len_cap();
+        \\    for i: 0..n text.write_string(tprint("{}|", i));
+        \\    return text.into_string();
+        \\}
+        \\
+        \\Index  :: #comptime index_type(size_of(*void) == 8);
+        \\MIDDLE :: #comptime midpoint(.{ .x = 0, .y = 0 }, .{ .x = 10, .y = 4 });
+        \\TOTAL  :: #comptime sum_of_squares(10);
+        \\RULER  :: #comptime ruler(5);
+        \\
+        \\main :: () {
+        \\    i: Index = 3;
+        \\    print("{} {} {} {}\n", type_name(type_of(i)), MIDDLE.x, MIDDLE.y, TOTAL);
+        \\    print("{}\n", RULER);
+        \\}
+    );
+    code_block(37, "text", #string
+        \\s64 5 2 285
+        \\0|1|2|3|4|
+    );
+    paragraph(38, #string,oneline
+        \\`index_type` returns a type, so it runs only at compile time (see
+        \\Procedures that run only at compile time below), and `Index` names
+        \\whichever type it picked for the target. Two kinds of values cannot
+        \\be the result. An owner, such as a dynamic array, holds memory that
+        \\some code must free (see `Freeable`, Copies, and Ownership Transfer),
+        \\and a constant would be a copy that nobody frees. A procedure value
+        \\cannot be a result either.
+    );
+    code_block(39, "text", #string
+        \\// squares :: (n: s64) -> [..]s64 { ... }
+        \\// SQUARES :: #comptime squares(5);
+        \\error: compile-time constants cannot hold owner values; create a scoped local and free it
+        \\// main :: () { s := #comptime squares(5); }
+        \\error: a managed owner cannot leave VM constant evaluation; return a plain value instead
+        \\// choose :: () -> (s64) -> s64 { return double; }
+        \\// F :: #comptime choose();
+        \\error: a function value cannot be the result of compile-time evaluation
+    );
+    paragraph(40, #string,oneline
+        \\`sum_of_squares` shows the way around the first restriction: use the
+        \\owner inside the computation, free it there, and return a plain value
+        \\such as a number, a fixed-size array or a string.
+    );
+    subheading(41, "Reading a global's initial value");
+    paragraph(42, #string,oneline
+        \\A global variable holds its value only while the program runs, so an
+        \\ordinary constant cannot be computed from one (see Constants,
+        \\Variables, and Globals). Under `#comptime` the computation runs in
+        \\the compiler's copy of the program, where each global holds its
+        \\initial value, and reading it is allowed. The constant keeps that
+        \\value whatever the program later stores in the global:
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\
+        \\limit: s64 = 10;
+        \\HALF :: #comptime limit / 2;
+        \\
+        \\main :: () {
+        \\    limit = 100;
+        \\    print("{} {}\n", HALF, limit);
+        \\}
+    );
+    code_block(44, "text", #string
+        \\5 100
+    );
+    subheading(45, "`#comptime` inside a procedure");
+    paragraph(46, #string,oneline
+        \\Inside a procedure, `#comptime` demands that the value be computed at
+        \\compile time. A local `::` constant is computed at compile time when
+        \\the compiler can do so, and is otherwise fixed when the declaration
+        \\is reached at run time (see Constants, Variables, and Globals). With
+        \\`#comptime`, a value that depends on a run-time value is an error
+        \\instead of a run-time constant:
+    );
+    code_block(47, "text", #string
+        \\// n := read_count();
+        \\// LIMIT :: #comptime n * 2;
+        \\error: unknown const n
+    );
+    paragraph(48, #string,oneline
+        \\`#comptime` also initializes a variable: `x := #comptime f();` starts
+        \\`x` with the value that `f()` returned at compile time, and the
+        \\program can change `x` afterwards like any other variable. As a
+        \\statement of its own inside a procedure, write the block form,
+        \\`#comptime { ... }`; the expression form belongs where a value is
+        \\expected. Such a block is a place for computing values rather than
+        \\for actions that must happen once, for the reason given under When a
+        \\value is computed.
+    );
+    subheading(49, "Procedures that run only at compile time");
+    paragraph(50, #string,oneline
+        \\Some values exist only while the program is compiled: types, `Code`,
+        \\`Pattern`, module namespaces, foreign libraries, typeclasses and
+        \\macros. A procedure that takes one of these as an ordinary
+        \\parameter, or returns one, cannot exist in the running program.
+        \\Every call to it is evaluated at compile time and replaced by its
+        \\result, so its body runs while the call is checked, once for each
+        \\call in the source, however often the surrounding code later runs:
+    );
+    code_block(51, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\describe :: (T: type) -> s64 {
+        \\    print("[compile time] describe({})\n", type_name(T));
+        \\    return size_of(T);
+        \\}
+        \\
+        \\main :: () {
+        \\    for 0..2 print("{}\n", describe(s32));
+        \\}
+    );
+    code_block(52, "text", #string
+        \\$ glosso --run describe.glo
+        \\glosso: compile describe.glo (target=x86_64-pc-linux-gnu)
+        \\[compile time] describe(s32)
+        \\glosso: link describe (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done describe  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\4
+        \\4
+    );
+    paragraph(53, #string,oneline
+        \\Because the whole call runs at compile time, every argument has to be
+        \\a compile-time value, including the arguments of its other
+        \\parameters. Whether a `T: type` parameter is such an ordinary
+        \\parameter depends on the signature. When `T` is also used as a type
+        \\in the signature, as in `(T: type, n: s64) -> T`, it is a type
+        \\parameter, and the procedure is compiled once for each type it is
+        \\called with, like a generic one; so is a `#comptime T: type`
+        \\parameter, whatever the signature says. Only a `type` parameter that
+        \\the rest of the signature does not mention makes the procedure run
+        \\at compile time. `noalias`, `#lazy`, `#comptime`, and Type Parameters
+        \\describes the parameter forms.
+    );
+    code_block(54, "text", #string
+        \\// scaled :: (T: type, count: s64) -> s64 { return size_of(T) * count; }
+        \\// k := 5;
+        \\// print("{}\n", scaled(s32, k));
+        \\error: unknown const k
+        \\// scaled :: (#comptime T: type, count: s64) -> s64 { ... }
+        \\// scaled(s32, k) runs at run time and returns 20
+    );
+    subheading(55, "Build steps: top-level `#comptime`");
+    paragraph(56, #string,oneline
+        \\A `#comptime` declaration at the top level of a module runs after the
+        \\whole program has been checked and optimized, in the `comptime` step
+        \\of the progress display, and before machine code is generated. Each
+        \\declaration runs exactly once per build. The declarations of one file
+        \\run in the order they are written. The order between modules is not
+        \\specified, so a step that needs another step's result should call it
+        \\instead of counting on the order. The backend makes no difference:
+        \\building an object file or LLVM IR runs the same steps.
+    );
+    paragraph(57, #string,oneline
+        \\The artifact cache never restores a program that has a top-level
+        \\`#comptime` declaration, so its build steps run on every build.
+        \\Build Scripts and Compile-Time Arguments describes this and the other
+        \\builds that the cache does not store.
+    );
+    subheading(58, "What compile-time code can do");
+    paragraph(59, #string,oneline
+        \\Compile-time code can call any procedure of the program and of the
+        \\standard library. It can allocate memory, fill dynamic arrays and
+        \\string builders, format text with `tprint`, read and write files,
+        \\start processes, and use the services of the `Compiler` module. A
+        \\global variable that it reads or writes is the compiler's own copy,
+        \\which starts from the global's initial value and is never seen by
+        \\the program (see Constants, Variables, and Globals).
+    );
+    paragraph(60, #string,oneline
+        \\Compile-time code runs on the machine that runs the compiler, but it
+        \\sees the target the program is compiled for. `OUT` describes the
+        \\target (see `#if`, `#assert`, and `#compile_error`), and `size_of`
+        \\and the other layout queries answer with the target's pointer size
+        \\and alignment:
+    );
+    code_block(61, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Node :: struct { next: *Node; value: s32; }
+        \\
+        \\#comptime {
+        \\    print("{} {}: a Node is {} bytes\n", OUT.os, OUT.cpu, size_of(Node));
+        \\}
+        \\
+        \\main :: () {}
+    );
+    code_block(62, "text", #string
+        \\$ glosso layout.glo 2>/dev/null
+        \\Linux X86_64: a Node is 16 bytes
+        \\$ glosso --target x86-linux-musl layout.glo 2>/dev/null
+        \\Linux X86: a Node is 8 bytes
+    );
+    subheading(63, "Stopping the build");
+    paragraph(64, #string,oneline
+        \\`exit(status)` called from compile-time code stops the build at once.
+        \\The compiler writes no artifact, runs no further compile-time code
+        \\and exits with the given status, even 0 (see Appendix E: Environment,
+        \\Toolchain, and Exit Codes). Together with `OUT`, this gives a gate
+        \\that refuses builds for targets a program does not support:
+    );
+    code_block(65, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#comptime {
+        \\    if OUT.os != .Linux {
+        \\        print("this program supports only Linux, not {}\n", OUT.os);
+        \\        exit(2);
+        \\    }
+        \\}
+        \\
+        \\main :: () { print("hello\n"); }
+    );
+    code_block(66, "text", #string
+        \\$ glosso --target x86_64-windows-msvc linux_only.glo; echo "status $?"
+        \\glosso: compile linux_only.glo (target=x86_64-pc-windows-msvc)
+        \\this program supports only Linux, not Windows
+        \\status 2
+    );
+    paragraph(67, #string,oneline
+        \\`#compile_error` and `#assert` report a problem as an ordinary
+        \\compile error instead, pointing at a line of the source (see `#if`,
+        \\`#assert`, and `#compile_error`).
+    );
+    subheading(68, "What compile-time code cannot reach");
+    paragraph(69, #string,oneline
+        \\Compile-time code cannot use what exists only in the running program.
+        \\It cannot call a `#foreign` procedure, whose machine code is in a
+        \\library that the compiler does not load, and it cannot read a
+        \\run-time value of the procedure being compiled, such as a local
+        \\variable or a parameter:
+    );
+    code_block(70, "text", #string
+        \\// c_rand :: () -> s32 #foreign libc "rand";
+        \\// SEED :: #comptime c_rand();
+        \\error: 'c_rand' is foreign, so its result is not compile-time known
+        \\// #comptime { print("{}\n", c_rand()); }
+        \\error: #comptime stopped: VM cannot call foreign/undeclared function 'c_rand'; use the LLVM backend
+        \\// n := 4;
+        \\// m := #comptime n * 2;
+        \\error: unknown const n
+    );
+    paragraph(71, #string,oneline
+        \\The two messages for `c_rand` differ because the two kinds of
+        \\compile-time code run at different points. A value computed while
+        \\checking is evaluated from the checked source, and its errors point
+        \\at the source. A top-level block runs after the program has been
+        \\translated to intermediate code, and an error stops it with a trace
+        \\of the calls it was in. The difference also shows in what each can
+        \\run: labels and `goto` (see Labels, `goto`, and Non-Local Transfers)
+        \\are refused in a value computed while checking, while a top-level
+        \\block runs the same procedure. Inline assembly runs in neither.
+    );
+    code_block(72, "text", #string
+        \\// #import "Jump";
+        \\// counted :: () -> s64 { n := 0; 'top; n += 1; if n < 3 goto('top); return n; }
+        \\// COUNT :: #comptime counted();
+        \\error: statement is not available at compile time
+    );
+    paragraph(73, #string,oneline
+        \\Compile-time execution is also bounded, so that a loop that never
+        \\ends cannot hang the build: one evaluation may run a limited number
+        \\of interpreter steps and nest a limited number of calls, and macro
+        \\expansion and `#insert` have depth limits of their own. Build
+        \\Scripts and Compile-Time Arguments lists the limits and how to raise
+        \\them.
+    );
+}
+
+render_section_80 :: () {
+    paragraph(0, #string,oneline
+        \\Three directives act on the program while it is compiled. `#if`
+        \\chooses which code is compiled, `#assert` states a condition that
+        \\must hold, and `#compile_error` stops the build with a message. This
+        \\chapter describes all three, the constants `OUT` and `HOST` that
+        \\their conditions usually test, and `#source_location`, which gives a
+        \\program the kind of location that a failed assertion reports. Code
+        \\That Runs at Compile Time shows them at work in a small program.
+    );
+    subheading(1, "`#if`");
+    paragraph(2, #string,oneline
+        \\`#if` chooses code while the program is compiled. Its condition is
+        \\evaluated by the compiler, and only the branch it selects is checked
+        \\and compiled. The other branches are parsed and then ignored, so they
+        \\may name procedures and types that do not exist for this build. That
+        \\makes `#if` the tool for code that differs between targets and for
+        \\generic code that depends on its type parameters.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    #if OUT.os == Target_OS.Windows print("built for Windows\n");
+        \\    #if OUT.os == Target_OS.Windows {
+        \\        print("windows\n");
+        \\    } else #if OUT.os == Target_OS.Linux {
+        \\        print("linux\n");
+        \\    } else {
+        \\        print("another system\n");
+        \\    }
+        \\    #if OUT.cpu == {
+        \\    case .X86_64;           print("x86-64\n");
+        \\    case .Aarch64, .Armv7;  print("arm\n");
+        \\    else;                   print("another cpu\n");
+        \\    }
+        \\}
+    );
+    code_block(4, "text", #string
+        \\$ glosso --run target.glo 2>/dev/null
+        \\linux
+        \\x86-64
+    );
+    paragraph(5, #string,oneline
+        \\Like `if`, `#if` takes a block or a single statement and an optional
+        \\`else`. A chain of static branches continues with `else #if`. Written
+        \\`else if` without the directive, the `else` branch is an ordinary
+        \\`if` that is evaluated at run time when the chain selects it.
+    );
+    subheading(6, "The condition");
+    paragraph(7, #string,oneline
+        \\The condition must be a `bool`; the truthiness rules of `if` (see
+        \\`bool` and Conditions) do not apply. It must also be known while
+        \\compiling: it may use constants declared with `::`, compile-time
+        \\parameters and variables, properties of types such as `size_of(T)`
+        \\and `Is_Integer(T)` from the `Meta` module, and the target constants
+        \\`OUT` and `HOST`. A run-time variable is reported by name:
+    );
+    code_block(8, "text", #string
+        \\// #if 1 { }
+        \\error: #if condition must be bool, got comptime_int
+        \\// i := 1; #if i == 1 { }
+        \\error: unknown const i
+    );
+    subheading(9, "Only the selected branch is checked");
+    paragraph(10, #string,oneline
+        \\A branch that is not selected must be syntactically correct, but no
+        \\name in it is looked up and no type in it is checked:
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\WIDE :: true;
+        \\
+        \\main :: () {
+        \\    #if WIDE {
+        \\        print("selected\n");
+        \\    } else {
+        \\        this_procedure_does_not_exist(1, 2, 3);
+        \\    }
+        \\}
+    );
+    code_block(12, "text", #string
+        \\selected
+    );
+    paragraph(13, #string,oneline
+        \\In a generic procedure the condition may depend on the type
+        \\parameters, so each instantiation selects its own branch, and code
+        \\that would not compile for one type can sit in a branch that type
+        \\never selects. A `#compile_error` in the branch that an unsupported
+        \\type selects turns a confusing error deep inside the body into one
+        \\message at the call, as the section on `#compile_error` below shows.
+        \\A requirement that belongs to the signature is often better written
+        \\as a `where` clause, which rejects the call before the body is
+        \\instantiated (see Generic Procedures and `where` Clauses).
+    );
+    subheading(14, "`OUT` and `HOST`");
+    paragraph(15, #string,oneline
+        \\The compiler provides two constants that describe the machines of
+        \\the build, without an import:
+    );
+    table_header(16, "Constant   —   Fields   —   Describes");
+    table_row(17, "`OUT`   |   `.os`, `.cpu`, `.abi`   |   The target the program is compiled for.");
+    table_row(18, "`HOST`   |   `.os`, `.cpu`   |   The machine that runs the compiler.");
+    paragraph(19, #string,oneline
+        \\The fields are members of the enums `Target_OS`, `Target_CPU` and
+        \\`Target_ABI`, listed in Target Triples and Cross Builds. The two
+        \\constants differ when the program is cross-compiled. Code that the
+        \\program will run tests `OUT`; compile-time code, which runs inside
+        \\the compiler, tests `HOST` when it does something on the build
+        \\machine, such as running a tool.
+    );
+    subheading(20, "Static switches");
+    paragraph(21, #string,oneline
+        \\`#if subject == { ... }` is the static form of a switch. Its labels
+        \\are compile-time values compared with the subject, not patterns, so
+        \\ranges and captures are not available, but `case A, B;` groups are.
+        \\The subject may be any constant, including a type. When no label
+        \\matches and there is no `else;`, nothing is selected; a static
+        \\switch is not checked for exhaustiveness.
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\
+        \\describe :: (x: $T) {
+        \\    #if T == {
+        \\    case ssize, s64;  print("an integer: {}\n", x);
+        \\    case str;         print("a string: {}\n", x);
+        \\    else;             print("something else\n");
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    describe(42);
+        \\    describe("hi");
+        \\    describe(true);
+        \\}
+    );
+    code_block(23, "text", #string
+        \\an integer: 42
+        \\a string: hi
+        \\something else
+    );
+    paragraph(24, #string,oneline
+        \\`#falling` works as in a run-time switch (see Switch Statements): the
+        \\selected arm continues into the body of the next arm.
+    );
+    subheading(25, "`#if` opens no scope");
+    paragraph(26, #string,oneline
+        \\The braces of a branch inside a procedure only delimit the branch;
+        \\the selected statements are placed in the enclosing block. A
+        \\variable declared in the selected branch is visible after the `#if`,
+        \\and a `defer` in it runs when the enclosing block ends, not at the
+        \\end of the branch:
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    #if OUT.os == Target_OS.Windows {
+        \\        separator := "\\";
+        \\    } else {
+        \\        separator := "/";
+        \\        defer print("end of main\n");
+        \\    }
+        \\    print("separator {}\n", separator);
+        \\}
+    );
+    code_block(28, "text", #string
+        \\separator /
+        \\end of main
+    );
+    paragraph(29, #string,oneline
+        \\Assignment, Blocks, and Name Lookup explains what this means for a
+        \\name that a branch declares again.
+    );
+    subheading(30, "`#if` at the top level");
+    paragraph(31, #string,oneline
+        \\At the top level of a file, `#if` selects declarations. Only the
+        \\selected branch's procedures, types, constants and imports become
+        \\part of the module, so the same name may be declared once in each
+        \\branch:
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#if OUT.os == Target_OS.Windows {
+        \\    Handle :: struct { raw: u64; }
+        \\    describe :: (h: Handle) { print("windows handle {}\n", h.raw); }
+        \\} else {
+        \\    Handle :: struct { fd: s32; }
+        \\    describe :: (h: Handle) { print("file descriptor {}\n", h.fd); }
+        \\}
+        \\
+        \\main :: () {
+        \\    h: Handle;
+        \\    describe(h);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\file descriptor 0
+    );
+    paragraph(34, #string,oneline
+        \\A top-level `#if` needs braces on every branch and has no switch
+        \\form. Its condition must be a compile-time `bool` as well, and a
+        \\global variable does not qualify, even one declared with `::=`:
+        \\`error: module #if condition must be a compile-time bool: global 'G'
+        \\is a runtime variable, so its value is not a compile-time constant`.
+    );
+    paragraph(35, #string,oneline
+        \\`#if` is a statement and a top-level form only. It cannot stand in
+        \\an expression (`x := #if A 1 else 2;` is `error: unexpected directive
+        \\'if'`) or among the fields of a struct; select whole declarations at
+        \\the top level instead, as above. Constant expressions choose values:
+        \\`x := ifx A 1 else 2;` with a constant `A` costs nothing at run time.
+    );
+    subheading(36, "`#assert`");
+    paragraph(37, #string,oneline
+        \\`#assert condition;` or `#assert condition, "message";` states a
+        \\`bool` condition that must hold. The compiler tries to evaluate the
+        \\condition while it checks the procedure. When it can, the assertion
+        \\is decided there and leaves no code in the program. When the
+        \\condition depends on run-time values, the assertion becomes a check
+        \\that runs each time the statement is reached.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Header :: struct { tag: u32; length: u32; }
+        \\
+        \\parse_count :: (count: s64) -> s64 {
+        \\    #assert size_of(Header) == 8, "Header must stay 8 bytes";
+        \\    #assert count >= 0, "count must not be negative";
+        \\    return count * 2;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{}\n", parse_count(4));
+        \\    print("{}\n", parse_count(-1));
+        \\}
+    );
+    code_block(39, "text", #string
+        \\$ glosso --run counts.glo 2>&1 | tail -3
+        \\8
+        \\counts.glo:8:5: assertion failed: count must not be negative
+        \\glosso: program exited with status 134
+    );
+    paragraph(40, #string,oneline
+        \\The first assertion was decided while compiling. The second became a
+        \\run-time check: when it fails, the program writes the location of
+        \\the `#assert` (the file's full path, shortened here), the words
+        \\`assertion failed` and the message to standard error, and stops with
+        \\status 134. Run-time assertions are compiled at every optimization
+        \\level (see Feature Gates and Runtime Checks). If `Header` grows, the
+        \\first assertion fails the build instead:
+    );
+    code_block(41, "text", #string
+        \\// Header :: struct { tag: u32; length: u64; }
+        \\error: assertion failed: Header must stay 8 bytes
+    );
+    table_header(42, "Condition   —   Result");
+    table_row(43, "Known at compile time and `true`   |   Nothing; no code is generated.");
+    table_row(44, "Known at compile time and `false`   |   `error: assertion failed`, followed by `: message` when one is given.");
+    table_row(45, "Known only at run time   |   A run-time check; a failure prints the location and message and ends the program with status 134.");
+    table_row(46, "Not a `bool`   |   `#assert 5;` is `error: got ssize, expected bool`.");
+    paragraph(47, #string,oneline
+        \\A compile-time assertion is checked wherever the compiler checks the
+        \\procedure that contains it. Every procedure that is not generic is
+        \\checked, so an assertion about a type's layout fires even when the
+        \\procedure is never called; write it next to the code that relies on
+        \\the property. In a generic procedure it is checked for each
+        \\instantiation, as the next section shows.
+    );
+    subheading(48, "Requiring compile time: `#assert #comptime`");
+    paragraph(49, #string,oneline
+        \\`#assert #comptime condition` insists on the compile-time check. If
+        \\the condition cannot be evaluated while compiling, that is an error
+        \\rather than a quiet switch to a run-time check. It is the form for
+        \\assertions that are meant to be static, such as a limit on the types
+        \\a generic procedure accepts. In a generic procedure the assertion is
+        \\checked for each instantiation, and the error names the call that
+        \\instantiated it:
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Big :: struct { values: [8]s64; }
+        \\
+        \\store_inline :: (value: $T) -> T {
+        \\    #assert #comptime size_of(T) <= 16, "store_inline takes values of at most 16 bytes";
+        \\    return value;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{}\n", store_inline(7));
+        \\}
+    );
+    code_block(51, "text", #string
+        \\// big: Big;
+        \\// _ := store_inline(big);
+        \\error: assertion failed: store_inline takes values of at most 16 bytes
+        \\  --> main.glo:7:5
+        \\  |
+        \\7 |     #assert #comptime size_of(T) <= 16, "store_inline takes values of at most 16 bytes";
+        \\  |     ^^^^^^^
+        \\note: in instantiation of 'store_inline'
+        \\   --> main.glo:14:10
+        \\   |
+        \\14 |     _ := store_inline(big);
+        \\   |          ^^^^^^^^^^^^
+    );
+    code_block(52, "text", #string
+        \\// n := value();
+        \\// #assert #comptime n > 0;
+        \\error: #assert #comptime condition is not compile-time evaluable
+    );
+    subheading(53, "The message");
+    paragraph(54, #string,oneline
+        \\The message has to be a string known at compile time, for run-time
+        \\assertions as well, because it is stored in the program as constant
+        \\text. It may be computed, for example with `tprint` from the `Format`
+        \\module, as long as everything it uses is a compile-time value:
+    );
+    code_block(55, "text", #string
+        \\// LIMIT :: 10;
+        \\// #assert LIMIT < 5, tprint("LIMIT is {}", LIMIT);
+        \\error: assertion failed: LIMIT is 10
+        \\// #assert n > 0, tprint("n is {}", n);
+        \\error: #assert message must be a compile-time string
+    );
+    subheading(56, "`#compile_error`");
+    paragraph(57, #string,oneline
+        \\`#compile_error message;` reports `message` as a compile error at the
+        \\statement's position. Like an assertion's message, the message is a
+        \\compile-time string and may be computed. The statement is an error
+        \\whenever the compiler checks it, so it belongs in code that is
+        \\checked only in some cases: a branch of a `#if`, usually inside a
+        \\generic procedure, where the branch is decided separately for each
+        \\instantiation.
+    );
+    code_block(58, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Meta";
+        \\
+        \\checked_half :: (value: $T) -> T {
+        \\    #if !Is_Integer(T) {
+        \\        #compile_error tprint("checked_half needs an integer, got {}", type_name(T));
+        \\    }
+        \\    return value / 2;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{}\n", checked_half(9));
+        \\    print("{}\n", checked_half(cast(u8) 200));
+        \\}
+    );
+    code_block(59, "text", #string
+        \\4
+        \\100
+    );
+    paragraph(60, #string,oneline
+        \\Adding `checked_half(2.5)` to `main` stops the build with the
+        \\computed message and a note that names the offending call:
+    );
+    code_block(61, "text", #string
+        \\error: checked_half needs an integer, got f64
+        \\  --> main.glo:7:9
+        \\  |
+        \\7 |         #compile_error tprint("checked_half needs an integer, got {}", type_name(T));
+        \\  |         ^^^^^^^^^^^^^^
+        \\note: in instantiation of 'checked_half'
+        \\   --> main.glo:15:19
+        \\   |
+        \\15 |     print("{}\n", checked_half(2.5));
+        \\   |                   ^^^^^^^^^^^^
+    );
+    paragraph(62, #string,oneline
+        \\An ordinary `if` does not hide a `#compile_error`: in a procedure
+        \\that is not generic, `if x == 2 { #compile_error "unreachable"; }`
+        \\fails the build whatever `x` is, because the statement is checked
+        \\like any other. A `where` clause is the other way to reject
+        \\unsuitable types (see Generic Procedures and `where` Clauses). It
+        \\rejects the call before an instantiation is made, so the error is
+        \\reported at the call, while `#compile_error` explains the problem
+        \\from inside the procedure.
+    );
+    paragraph(63, #string,oneline
+        \\The standard library reports misuse this way. `print` checks its
+        \\format string against its arguments at compile time, and a mistake
+        \\is reported by a `#compile_error` inside the `Format` module. The
+        \\error points at the call in the program, and a note shows where in
+        \\the standard library it was raised:
+    );
+    code_block(64, "text", #string
+        \\error: unmatched '}' in format string; use '}}' for a literal brace
+        \\  --> main.glo:2:14
+        \\  |
+        \\2 | main :: () { print("}\n"); }
+        \\  |              ^^^^^
+        \\note: raised here, in standard library code, during instantiation of 'print'
+        \\    --> std/Format.glo:190:13
+    );
+    subheading(65, "Where `#compile_error` and `#assert` can stand");
+    paragraph(66, #string,oneline
+        \\Both directives are statements. They are written in the body of a
+        \\procedure or a macro, including a `#if` inside a body, or in a
+        \\`#comptime` block. The top level of a module holds only declarations,
+        \\and so does a `#if` block at the top level; either directive there
+        \\is a syntax error. An assertion about the program as a whole goes
+        \\into a procedure, or into a top-level `#comptime` block. The block
+        \\makes the build one that the artifact cache never stores (see Build
+        \\Scripts and Compile-Time Arguments), so prefer a procedure.
+    );
+    code_block(67, "text", #string
+        \\// #assert size_of(s64) == 8;
+        \\error: bad decl name 'assert'
+        \\// #if OUT.os == .Windows { #compile_error "Windows is not supported"; }
+        \\error: bad decl name 'compile_error'
+        \\// #comptime { #if OUT.os == .Windows { #compile_error "Windows is not supported"; } }
+        \\// accepted; fails a Windows build with: error: Windows is not supported
+    );
+    subheading(68, "Reporting a source location: `#source_location`");
+    paragraph(69, #string,oneline
+        \\The run-time message of a failed assertion begins with the location
+        \\of the `#assert`. A program can produce such locations for its own
+        \\messages with `#source_location`, an expression of the prelude type
+        \\`Source_Location`, which has the fields `filename`, `line` and
+        \\`column` and prints as `filename:line:column`. The location is the
+        \\position of the `#source_location` directive itself:
+    );
+    code_block(70, "glosso", #string
+        \\#import "Io";
+        \\
+        \\expect :: (condition: bool, message: str, location: Source_Location = #source_location) {
+        \\    if !condition print("line {}: check failed: {}\n", location.line, message);
+        \\}
+        \\
+        \\expect_here :: (condition: bool, message: str) #expand {
+        \\    if !condition print("line {}: check failed: {}\n", #source_location.line, message);
+        \\}
+        \\
+        \\main :: () {
+        \\    expect(1 + 1 == 3, "explicit", #source_location);
+        \\    expect(2 + 2 == 5, "defaulted");
+        \\    expect_here(3 + 3 == 7, "macro");
+        \\}
+    );
+    code_block(71, "text", #string
+        \\line 12: check failed: explicit
+        \\line 3: check failed: defaulted
+        \\line 8: check failed: macro
+    );
+    paragraph(72, #string,oneline
+        \\Only the first call reports the line of the check. The position is
+        \\lexical: a default parameter value names the line of the procedure's
+        \\declaration, and a `#source_location` inside a macro (see `#code`,
+        \\`#insert`, and `#expand`) names the line in the macro's body. A
+        \\helper that reports its caller's location therefore takes it as an
+        \\argument, and each call passes `#source_location`. The filename is
+        \\the compiler's path of the source file, which is absolute for files
+        \\read from disk.
+    );
+}
+
+render_section_81 :: () {
+    paragraph(0, #string,oneline
+        \\A type can be used as a value. Its type is `type`: naming a type
+        \\gives such a value, which can be bound to a constant, compared,
+        \\passed to a parameter declared `T: type`, and asked questions about.
+        \\Type values exist while the program is compiled; they have no
+        \\run-time representation, and `size_of(type)` is `0`. The questions
+        \\are procedures of the `Meta` module, and the compiler answers them
+        \\with constants. This chapter covers type values, the queries about a
+        \\type as a whole, the queries that walk its fields, members and
+        \\variants, the code that reflection generates, and the one
+        \\description of a type that remains at run time.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Vec2 :: struct { x: f64; y: f64; }
+        \\Small :: s32;
+        \\
+        \\main :: () {
+        \\    print("{} {} {}\n", Small, size_of(Small), type_kind(Small));
+        \\    print("{} {} {}\n", Vec2, size_of(Vec2), type_kind(Vec2));
+        \\    x: u16 = 3;
+        \\    X :: type_of(x);
+        \\    print("{} {}\n", type_name(X), type_name(type_of(x * 2)));
+        \\    info :: type_info(f80);
+        \\    print("{} {} {} {}\n", info.name, info.size, info.alignment, info.tag);
+        \\    print("{} {} {}\n", Small == s32, ssize == s64, type_name([]const Vec2));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\s32 4 Integer
+        \\Vec2 16 Struct
+        \\u16 u16
+        \\f80 16 16 Float
+        \\true false []const Vec2
+    );
+    paragraph(3, #string,oneline
+        \\`Small :: s32` does not create a new type; it binds a second name to
+        \\the same type value, so `Small == s32` is `true`. A new type with the
+        \\same representation is made with `distinct` (see Nominal Types with
+        \\`distinct`). `print` shows a type value by its name.
+    );
+    subheading(4, "Queries about a whole type");
+    table_header(5, "Query (module `Meta`)   —   Result");
+    table_row(6, "`type_of(expr)`   |   The static type of an expression, which is not evaluated.");
+    table_row(7, "`type_name(T)`   |   The type's source spelling as a `str`, such as `\"?*const s64\"`.");
+    table_row(8, "`size_of(T)`   |   The size in bytes, as an `ssize`, including padding at the end.");
+    table_row(9, "`type_kind(T)`   |   The `Type_Info_Tag` that classifies the type.");
+    table_row(10, "`type_info(T)`   |   A `Type_Info` record with the fields `tag`, `name`, `size`, `alignment` and `shower`.");
+    paragraph(11, #string,oneline
+        \\There is no separate alignment query; read `type_info(T).alignment`.
+        \\The fields of structs, the members of enums and the variants of
+        \\unions have queries of their own, described under Fields, members,
+        \\and variants below.
+    );
+    subheading(12, "`type_of` does not evaluate");
+    paragraph(13, #string,oneline
+        \\The argument of `type_of` is type-checked but never run, so a call
+        \\inside it has no effect. It reports the static type: for an `any` it
+        \\answers `any`, not the type of the value inside.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\calls := 0;
+        \\
+        \\next :: () -> s64 {
+        \\    calls += 1;
+        \\    return 7;
+        \\}
+        \\
+        \\main :: () {
+        \\    T :: type_of(next());
+        \\    print("{} {}\n", T, calls);
+        \\}
+    );
+    code_block(15, "text", #string
+        \\s64 0
+    );
+    subheading(16, "Comparing and branching on types");
+    paragraph(17, #string,oneline
+        \\Type values have `==` and `!=`, so a switch can branch on a type.
+        \\Each type is equal only to itself: `ssize` and `s64` stay different
+        \\even where they have the same size. Inside a generic procedure, `#if`
+        \\on a type predicate keeps only the branch that applies, so the others
+        \\are never type-checked for that instantiation (see `#if`, `#assert`,
+        \\and `#compile_error`).
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\width :: (T: type) -> str {
+        \\    if #partial T == {
+        \\        case s8, u8;   return "one byte";
+        \\        case s16, u16; return "two bytes";
+        \\        case s32, u32; return "four bytes";
+        \\        case s64, u64; return "eight bytes";
+        \\    }
+        \\    return "something else";
+        \\}
+        \\
+        \\describe :: (value: $T) -> str {
+        \\    #if Is_Integer(T) return "an integer";
+        \\    else #if Is_Float(T) return "a float";
+        \\    else #if Is_String(T) return "a string";
+        \\    else return "something else";
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{} / {} / {}\n", width(u8), width(s64), width(f64));
+        \\    print("{} / {} / {} / {}\n", describe(1), describe(1.5), describe("hi"), describe(true));
+        \\    print("{} {} {}\n", Is_Numeric(u8), Is_Numeric(rune), Is_Numeric(c128));
+        \\}
+    );
+    code_block(19, "text", #string
+        \\one byte / eight bytes / something else
+        \\an integer / a float / a string / something else
+        \\true false false
+    );
+    subheading(20, "Classifying types");
+    paragraph(21, #string,oneline
+        \\`Meta` provides a predicate for each kind of type: `Is_Integer`,
+        \\`Is_Float`, `Is_Complex`, `Is_Numeric` (integer or float), `Is_Bool`,
+        \\`Is_Rune`, `Is_String`, `Is_Pointer`, `Is_Procedure`,
+        \\`Is_Addressable` (pointer or procedure), `Is_Enum`, `Is_Struct`,
+        \\`Is_Union`, `Is_Array`, `Is_Simd`, `Is_Matrix` and `Is_Label`. The
+        \\prelude's instances are declared with them, as in `($T, T) :::
+        \\instance Add where Is_Integer(T)`, and they are the usual way to
+        \\constrain generic code (see Generic Procedures and `where` Clauses).
+        \\Each one reads the tag that `type_kind` returns:
+    );
+    table_header(22, "`Type_Info_Tag`   —   Types");
+    table_row(23, "`Void`   |   `void`, and every type without a tag of its own, such as `#Never`, `Code` and `Namespace`");
+    table_row(24, "`Integer`   |   `sN`, `uN`, `ssize`, `usize`; not `rune`");
+    table_row(25, "`Float`, `Complex`, `Bool`, `Rune`   |   The types of those families");
+    table_row(26, "`String`   |   `str`, `cstr`, `string16`, `cstring16`");
+    table_row(27, "`Pointer`   |   `*T` and `[*]T`");
+    table_row(28, "`Array`   |   Fixed arrays, views and dynamic arrays");
+    table_row(29, "`Struct`, `Enum`, `Union`, `Tuple`   |   The declared aggregates, and multiple-value types");
+    table_row(30, "`Procedure`   |   Procedure and procedure-pointer types");
+    table_row(31, "`Type`, `Any`, `Label`   |   `type`, `any`, `label`");
+    table_row(32, "`Simd`, `Matrix`   |   `Simd(T, N)` and `Matrix(T, Rows, Cols)`");
+    paragraph(33, #string,oneline
+        \\A `rune` is stored like a `u32` but has its own tag, so it is not
+        \\`Is_Integer`, and integer arithmetic does not apply to it. A complex
+        \\number is not `Is_Numeric`. A `distinct` type answers with the tag of
+        \\its representation, so `Is_Float(Meters)` is true for `Meters ::
+        \\distinct f64`.
+    );
+    subheading(34, "Type values are compile-time constants");
+    paragraph(35, #string,oneline
+        \\A type value has to be known to the compiler wherever it is used.
+        \\Bind one with `::`, receive one as a `T: type` or `$T` parameter, or
+        \\write it directly. A variable of type `type` can be declared, but
+        \\not used:
+    );
+    code_block(36, "text", #string
+        \\// t: type = s64; print("{}\n", t == s64);
+        \\error: unknown const t
+    );
+    paragraph(37, #string,oneline
+        \\A procedure that receives a type is either compiled separately for
+        \\each type or run only at compile time. A `$T` parameter, a `#comptime
+        \\T: type` parameter and a `T: type` parameter that the rest of the
+        \\signature uses as a type make the procedure generic, compiled once for
+        \\each type it is called with (see `noalias`, `#lazy`, `#comptime`, and
+        \\Type Parameters). A `T: type` parameter that the rest of the signature does
+        \\not mention, as in `width` above, makes every call run at compile time
+        \\instead (see Compile-Time Evaluation).
+    );
+    subheading(38, "Fields, members, and variants");
+    paragraph(39, #string,oneline
+        \\Three families of queries walk the parts of a type: the fields of a
+        \\struct, the members of an enum and the variants of a union. Each
+        \\family has a count and queries by index:
+    );
+    table_header(40, "Procedure   —   Answer");
+    table_row(41, "`field_count(T)`   |   The number of fields of struct `T`; 0 for any other type.");
+    table_row(42, "`field_name(T, i)`, `field_type(T, i)`   |   The name (`str`) and the type of field `i`.");
+    table_row(43, "`enum_count(T)`   |   The number of members of enum `T`; 0 for any other type.");
+    table_row(44, "`enum_name(T, i)`, `enum_value(T, i)`   |   The name of member `i` and its value as an `s64`.");
+    table_row(45, "`variant_count(T)`   |   The number of variants of union `T`; 0 for any other type.");
+    table_row(46, "`variant_name(T, i)`, `variant_type(T, i)`   |   The name of variant `i` and its payload type, `void` when it has none.");
+    code_block(47, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Vec3 :: struct { x: f32; y: f32; z: f32; }
+        \\Color :: enum { Red; Green :: 5; Blue; }
+        \\Shape :: union { Circle: f64; Square: f64; Empty: void; }
+        \\
+        \\main :: () {
+        \\    #inline for i: 0..#comptime field_count(Vec3) {
+        \\        print("field {}: {} {}\n", i, field_name(Vec3, i), type_name(field_type(Vec3, i)));
+        \\    }
+        \\    #inline for i: 0..#comptime enum_count(Color) {
+        \\        print("member {} = {}\n", enum_name(Color, i), enum_value(Color, i));
+        \\    }
+        \\    #inline for i: 0..#comptime variant_count(Shape) {
+        \\        print("variant {}: {}\n", variant_name(Shape, i), type_name(variant_type(Shape, i)));
+        \\    }
+        \\    print("{} {} {}\n", field_count(Color), enum_count(Vec3), variant_count(s64));
+        \\}
+    );
+    code_block(48, "text", #string
+        \\field 0: x f32
+        \\field 1: y f32
+        \\field 2: z f32
+        \\member Red = 0
+        \\member Green = 5
+        \\member Blue = 6
+        \\variant Circle: f64
+        \\variant Square: f64
+        \\variant Empty: void
+        \\0 0 0
+    );
+    paragraph(49, #string,oneline
+        \\The index order is declaration order, which need not be the order of
+        \\the fields in memory (see Field Order, Alignment, and Packing).
+        \\`enum_value` gives the value a member has, so a member after `Green
+        \\:: 5` reports 6, not its position. `#empty` fields have no storage
+        \\and are not counted: `struct { #empty: u8; value: s64; }` has one
+        \\field, `value`.
+    );
+    subheading(50, "Indices are compile-time constants");
+    paragraph(51, #string,oneline
+        \\Each answer is a constant, so the type and the index of a query have
+        \\to be known at compile time. A run-time loop cannot walk the fields.
+        \\`#inline for` (see `while`, `for`, and Unrolled Loops) unrolls the
+        \\loop at compile time, so that `i` is a constant in each copy of the
+        \\body. The loop's bounds have to be constants as well, which is why
+        \\the examples write `#comptime field_count(T)`; a named constant,
+        \\`N :: field_count(Pair);`, serves too.
+    );
+    code_block(52, "text", #string
+        \\// #inline for i: 0..field_count(Pair) print("{}\n", field_name(Pair, i));
+        \\error: unknown const i
+        \\// i := 1; print("{}\n", field_name(Vec2, i));
+        \\error: unknown const i
+        \\// field_name(Vec2, 2)
+        \\error: field index 2 is out of range
+        \\// field_name(s64, 0)
+        \\error: s64 is not a struct
+    );
+    paragraph(53, #string,oneline
+        \\Without `#comptime`, the bound of the first loop is a call evaluated
+        \\at run time, so the loop is not unrolled and `i` is an ordinary
+        \\variable. A query of the wrong kind of type is an error for the
+        \\indexed queries, while the three counts answer 0, so a loop over
+        \\them does nothing.
+    );
+    subheading(54, "Reaching a field by its name");
+    paragraph(55, #string,oneline
+        \\A field name returned by `field_name` is a string, and a string
+        \\cannot be used as a member name directly. A `#code` quote can splice
+        \\it in as an identifier (see `#code`, `#insert`, and `#expand`), which
+        \\turns the name back into an access. This generic procedure prints any
+        \\struct, field by field:
+    );
+    code_block(56, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Vec3 :: struct { x: f32; y: f32; z: f32; }
+        \\Account :: struct { id: s64; owner: str; active: bool; }
+        \\
+        \\print_fields :: (value: $T) {
+        \\    print("{} {{\n", type_name(T));
+        \\    #inline for i: 0..#comptime field_count(T) {
+        \\        NAME :: field_name(T, i);
+        \\        print("    {}: {} = {}\n", NAME, type_name(field_type(T, i)), #insert #code value.``NAME);
+        \\    }
+        \\    print("}}\n");
+        \\}
+        \\
+        \\main :: () {
+        \\    print_fields(Vec3.{ .x = 1, .y = 2, .z = 3 });
+        \\    print_fields(Account.{ .id = 7, .owner = "ada", .active = true });
+        \\}
+    );
+    code_block(57, "text", #string
+        \\Vec3 {
+        \\    x: f32 = 1
+        \\    y: f32 = 2
+        \\    z: f32 = 3
+        \\}
+        \\Account {
+        \\    id: s64 = 7
+        \\    owner: str = ada
+        \\    active: bool = true
+        \\}
+    );
+    paragraph(58, #string,oneline
+        \\Each instantiation of `print_fields` unrolls into one `print` per
+        \\field, with the name, the type name and the member access fixed at
+        \\compile time. Nothing about the struct is looked up while the
+        \\program runs.
+    );
+    subheading(59, "Enum members by name");
+    paragraph(60, #string,oneline
+        \\The same unrolling turns a string into an enum member. `parse_enum`
+        \\compares the text with each member's name and builds the member from
+        \\its value:
+    );
+    code_block(61, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Level :: enum { Debug; Info; Warning :: 10; Error; }
+        \\
+        \\parse_enum :: (T: type, text: str) -> ?T {
+        \\    #inline for i: 0..#comptime enum_count(T) {
+        \\        if text == enum_name(T, i) return .Some(cast(T) enum_value(T, i));
+        \\    }
+        \\    return null;
+        \\}
+        \\
+        \\main :: () {
+        \\    for name: .["Info", "Error", "Fatal"] {
+        \\        if parse_enum(Level, name) == {
+        \\            case .Some(level); print("{} -> {} ({})\n", name, level, cast(s64) level);
+        \\            case null;         print("{} -> not a Level\n", name);
+        \\        }
+        \\    }
+        \\}
+    );
+    code_block(62, "text", #string
+        \\Info -> Info (1)
+        \\Error -> Error (11)
+        \\Fatal -> not a Level
+    );
+    paragraph(63, #string,oneline
+        \\`parse_enum` names `T` in its result type, `?T`, so `T` is a type
+        \\parameter and `parse_enum` an ordinary procedure, compiled once for
+        \\each enum it is used with, which accepts text known only at run
+        \\time. Without `T` in the signature, every call would run at compile
+        \\time, as described under Type values are compile-time constants.
+    );
+    subheading(64, "Generating declarations from a type");
+    paragraph(65, #string,oneline
+        \\Together, reflection and text insertion generate new declarations
+        \\from existing ones. `patch_type` reads the fields of a struct and
+        \\writes the source of a second struct with an optional field for
+        \\each, which `#insert` then adds to the module:
+    );
+    code_block(66, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\#import "Format";
+        \\#import "String_Builder";
+        \\
+        \\Account :: struct { id: s64; owner: str; active: bool; }
+        \\
+        \\// The source of `<T>_Patch`, a struct with an optional field per field of T.
+        \\patch_type :: (T: type) -> str {
+        \\    source := String_Builder.make_len_cap();
+        \\    source.write_string(tprint("{}_Patch :: struct {{\n", type_name(T)));
+        \\    #inline for i: 0..#comptime field_count(T) {
+        \\        source.write_string(tprint("    {}: ?{};\n",
+        \\            field_name(T, i), type_name(field_type(T, i))));
+        \\    }
+        \\    source.write_string("}\n");
+        \\    return source.into_string();
+        \\}
+        \\
+        \\#insert patch_type(Account);
+        \\
+        \\main :: () {
+        \\    patch: Account_Patch;
+        \\    patch.owner = .Some("grace");
+        \\    print("{} {} {}\n", patch.id == null, patch.owner.unwrap_or("?"), patch.active == null);
+        \\}
+    );
+    code_block(67, "text", #string
+        \\true grace true
+    );
+    paragraph(68, #string,oneline
+        \\`type_name` spells a type the way source code writes it, so the
+        \\generated text compiles for any field type that can be named where
+        \\it is inserted. `#derive` generates typeclass instances from a type
+        \\in a similar way, with a richer description of the type; see
+        \\`#derive`.
+    );
+    subheading(69, "Types at run time");
+    paragraph(70, #string,oneline
+        \\The queries above exist only at compile time. The one description of
+        \\a type that a running program has is the `Type_Info` record that an
+        \\`any` points at (see Catalog of Built-in Types): its `tag`, `name`,
+        \\`size` and `alignment`. A procedure that receives an `any` can branch
+        \\on the tag, compare the name, and read the value through a cast of
+        \\its pointer once it knows the type:
+    );
+    code_block(71, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Point :: struct { x: s64; y: s64; }
+        \\
+        \\summarize :: (value: any) {
+        \\    if value.type.tag == {
+        \\        case .Integer; print("integer, {} bytes: {}\n", value.type.size, value);
+        \\        case .String;  print("text: {}\n", value);
+        \\        case .Struct;  print("{}: {}\n", value.type.name, value);
+        \\        else;          print("other {}\n", value.type.name);
+        \\    }
+        \\}
+        \\
+        \\twice_if_s16 :: (value: any) -> s64 {
+        \\    if value.type.name != "s16" return 0;
+        \\    return (cast(*s16) value.value).* * 2;
+        \\}
+        \\
+        \\main :: () {
+        \\    summarize(7);
+        \\    summarize(cast(u8) 7);
+        \\    summarize("seven");
+        \\    summarize(Point.{ .x = 1, .y = 2 });
+        \\    summarize(7.5);
+        \\    small: s16 = 300;
+        \\    print("{}\n", twice_if_s16(small));
+        \\}
+    );
+    code_block(72, "text", #string
+        \\integer, 8 bytes: 7
+        \\integer, 1 bytes: 7
+        \\text: seven
+        \\Point: {1, 2}
+        \\other f64
+        \\600
+    );
+    paragraph(73, #string,oneline
+        \\The fields of a struct, the members of an enum and the variants of a
+        \\union are not recorded for run time. A program that needs them while
+        \\it runs generates a table of them at compile time, as `print_fields`
+        \\generates its `print` calls.
+    );
+}
+
+render_section_82 :: () {
+    paragraph(0, #string,oneline
+        \\A program can produce parts of its own source while it is compiled.
+        \\Three directives do this. `#code` turns a piece of Glosso syntax into
+        \\a value of the built-in type `Code`. `#insert` puts syntax into the
+        \\program where it stands, either from a `Code` value or from source
+        \\text held in a `str`. `#expand` declares a macro, a procedure whose
+        \\calls are replaced by a copy of its body. All three work at compile
+        \\time: the syntax they produce is checked and compiled as if it had
+        \\been written in place. Generic procedures and typeclasses cover most
+        \\needs for reusable code; these directives are for code whose text or
+        \\shape must itself be computed.
+    );
+    subheading(1, "Quoting code with `#code`");
+    table_header(2, "Form   —   Quotes");
+    table_row(3, "`#code { statements }`   |   A list of statements, which may include declarations.");
+    table_row(4, "`#code statement;`   |   A single statement; the `;` ends both the statement and the quote.");
+    table_row(5, "`#code expression;` or `#code (expression)`   |   An expression statement, which `#insert` can also use as an expression.");
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\GREET :: #code { print("hello from Code\n"); };
+        \\STEP  :: #code count += 1;
+        \\
+        \\main :: () {
+        \\    count := 0;
+        \\    #insert GREET;
+        \\    #insert STEP;
+        \\    #insert STEP;
+        \\    IS_TWO :: #code count == 2;
+        \\    print("count={} two={}\n", count, #insert IS_TWO);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\hello from Code
+        \\count=2 two=true
+    );
+    paragraph(8, #string,oneline
+        \\A quote is parsed where it is written, but its names are looked up
+        \\where it is inserted. `STEP` mentions `count` at the top level, where
+        \\no `count` exists; each insertion is checked in `main`, which
+        \\declares one. A quote is syntax, not a closure: the same value
+        \\inserted in two places can mean two different things, and a name
+        \\that is missing at an insertion is reported at the quote:
+    );
+    code_block(9, "text", #string
+        \\// STEP :: #code count += 1;
+        \\// main :: () { #insert STEP; }
+        \\error: unbound 'count'
+        \\  --> main.glo:1:15
+    );
+    paragraph(10, #string,oneline
+        \\`Code` needs no import and exists only at compile time. A quote is
+        \\bound with `::`, passed to a parameter, or returned from a procedure
+        \\that returns `Code`, which makes that procedure run only at compile
+        \\time (see Compile-Time Evaluation). It cannot be stored at run time:
+    );
+    code_block(11, "text", #string
+        \\// body := #code x := 1;
+        \\error: a 'Code' value is compile-time only; bind it with '::' rather than ':='
+        \\// Holder :: struct { body: Code; }
+        \\error: field 'body' has the compile-time-only type 'Code', which has no storage
+    );
+    subheading(12, "Splicing values into a quote");
+    paragraph(13, #string,oneline
+        \\Inside a quote, a name written with two backticks in front of it is
+        \\replaced by the compile-time value that the name has where the quote
+        \\is written. A `str` becomes an identifier, a type becomes that type,
+        \\and a `Code` value becomes its syntax. A name without backticks stays
+        \\a name, looked up at the insertion.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec2 :: struct { x: s32; y: s32; }
+        \\
+        \\show_field :: (v: Vec2, #comptime name: str) {
+        \\    #insert #code print("field {} = {}\n", name, v.``name);
+        \\}
+        \\
+        \\doubled :: (#comptime field: str) -> Code {
+        \\    return #code (value.``field * 2);
+        \\}
+        \\
+        \\zero_of :: (T: type) -> Code {
+        \\    return #code { result: ``T; return result; };
+        \\}
+        \\
+        \\zero_f64 :: () -> f64 {
+        \\    #insert zero_of(f64);
+        \\}
+        \\
+        \\main :: () {
+        \\    value := Vec2.{ .x = 7, .y = 9 };
+        \\    show_field(value, "x");
+        \\    show_field(value, "y");
+        \\    print("{} {}\n", #insert doubled("x"), #insert doubled("y"));
+        \\    print("{}\n", zero_f64());
+        \\}
+    );
+    code_block(15, "text", #string
+        \\field x = 7
+        \\field y = 9
+        \\14 18
+        \\0
+    );
+    paragraph(16, #string,oneline
+        \\In `show_field`, the plain `name` is the string parameter, printed as
+        \\text, while the spliced name after `v.` becomes `x` or `y` before the
+        \\member is looked up. `doubled` builds an expression that names
+        \\`value`, which exists only where the result is inserted. `zero_of`
+        \\splices the type, because a plain `T` in the quote would be looked up
+        \\in `zero_f64`, which has no `T`. A spliced value has to be known at
+        \\compile time, which is why these parameters are `#comptime` or `type`
+        \\parameters (see `noalias`, `#lazy`, `#comptime`, and Type Parameters).
+    );
+    paragraph(17, #string,oneline
+        \\A procedure can also take a quote as a `#comptime body: Code`
+        \\parameter and insert it; it is then compiled separately for each
+        \\quote it is called with. The quote is inserted into that procedure's
+        \\body and sees that procedure's names, not the caller's. To insert
+        \\code among the caller's names, write a macro instead, as described
+        \\under Code parameters below.
+    );
+    subheading(18, "Where `#insert` can stand");
+    table_header(19, "Position   —   Operand   —   Result");
+    table_row(20, "Statement in a body   |   `Code` or `str`   |   The statements, in the surrounding scope.");
+    table_row(21, "Top level of a module   |   `Code` or `str`   |   Declarations of the module.");
+    table_row(22, "Expression   |   `Code` holding exactly one expression   |   That expression, with its type.");
+    table_row(23, "Pattern   |   A `Pattern` value   |   That pattern (see Coverage, Binding Forms, and Pattern Constants).");
+    paragraph(24, #string,oneline
+        \\The operand is evaluated at compile time. Besides a name or a call,
+        \\it can be a block, `#insert { ...; return text; }`, or a block with a
+        \\stated result type, `#insert -> str { ... }`, whose returned value is
+        \\checked against that type before it is parsed. Inside a macro,
+        \\`#insert,scope() code` makes an inserted quote see the macro's own
+        \\local names, as described under Code parameters below.
+    );
+    subheading(25, "Inserting source text");
+    paragraph(26, #string,oneline
+        \\A `str` operand is lexed and parsed at the insertion, as statements
+        \\in a body or as declarations at the top level. Text is the general
+        \\way to generate code whose shape depends on data, such as a type with
+        \\a computed list of members, or a declaration whose name is computed:
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "String_Builder";
+        \\
+        \\NAMES :: .["Red", "Green", "Blue"];
+        \\
+        \\color_source :: () -> str {
+        \\    source := String_Builder.make_len_cap();
+        \\    source.write_string("Color :: enum {");
+        \\    for name: NAMES source.write_string(tprint(" {};", name));
+        \\    source.write_string(" }\n");
+        \\    source.write_string(tprint("COLOR_COUNT :: {};\n", NAMES.count));
+        \\    return source.into_string();
+        \\}
+        \\
+        \\#insert color_source();
+        \\
+        \\main :: () {
+        \\    c := Color.Blue;
+        \\    print("{} is one of {} colors\n", c, COLOR_COUNT);
+        \\    #insert -> str {
+        \\        return tprint("print(\"{} + {} = {}\\n\");", 2, 3, 2 + 3);
+        \\    }
+        \\}
+    );
+    code_block(28, "text", #string
+        \\Blue is one of 3 colors
+        \\2 + 3 = 5
+    );
+    paragraph(29, #string,oneline
+        \\An expression position accepts only `Code`. Text, or a quote with
+        \\more than one statement, is refused there rather than guessed at.
+    );
+    subheading(30, "Generated source files");
+    paragraph(31, #string,oneline
+        \\Each text insertion is saved as a file in the compiler's cache
+        \\directory, under `generated/insert/v1/`, named by a hash of the text,
+        \\so that diagnostics can point into it. `--show-generated` prints the
+        \\paths of the files a build used. A mistake in generated text is
+        \\reported at the `#insert`, with a note that shows the generated line:
+    );
+    code_block(32, "text", #string
+        \\$ glosso bad.glo
+        \\glosso: compile bad.glo (target=x86_64-pc-linux-gnu)
+        \\error: unbound 'missing_name'
+        \\  --> bad.glo:3:5
+        \\  |
+        \\3 |     #insert "print(\"{}\\n\", missing_name);";
+        \\  |     ^^^^^^^
+        \\note: generated source failed here
+        \\  --> ~/.cache/glosso/generated/insert/v1/9b50139e...f65244.glo:1:15
+        \\  |
+        \\1 | print("{}\n", missing_name);
+        \\  |               ^^^^^^^^^^^^
+    );
+    paragraph(33, #string,oneline
+        \\A `Code` insertion uses the parsed syntax directly and writes no file.
+        \\Inside a Build: Stages and Caches describes the cache directory, and
+        \\Appendix A: Diagnostic Format the notes of an error in generated
+        \\source.
+    );
+    subheading(34, "Choosing between `Code` and text");
+    paragraph(35, #string,oneline
+        \\Use `Code` when the shape of the code is fixed and only names, types
+        \\or smaller pieces of code vary: it is parsed once, where it is
+        \\written, and its errors point at real source lines. Use text when the
+        \\generator has to decide the shape itself, such as the number of
+        \\members of a type or the name of a new declaration. The two combine:
+        \\a generator can build text from what reflection reports about a type
+        \\(see `type` Values and Type Reflection), and the `macro_unit` service
+        \\of the `Compiler` module runs a separately compiled generator program
+        \\and returns the text it prints (see Build Scripts and Compile-Time
+        \\Arguments).
+    );
+    subheading(36, "Refusals and limits of `#insert`");
+    table_header(37, "Written   —   Diagnostic");
+    table_row(38, "`#insert 42;` in a body   |   `error: #insert expects Code or string source`");
+    table_row(39, "`#insert 42;` at the top level   |   `error: top-level #insert expects Code or string source`");
+    table_row(40, "`print(\"{}\\n\", #insert \"1 + 2\");`   |   `error: expression #insert expects Code`");
+    table_row(41, "An expression `#insert` of `#code { a := 1; a += 1; }`   |   `error: expression #insert expects Code containing exactly one expression`");
+    table_row(42, "`#insert` inside a struct body   |   `error: unexpected token 'insert'`");
+    paragraph(43, #string,oneline
+        \\Inserted code may itself contain `#insert`. The nesting stops at a
+        \\depth of 16, and one build performs at most 16,384 insertions; going
+        \\past either is `error: #insert expansion limit exceeded`.
+    );
+    subheading(44, "Macros: `#expand`");
+    paragraph(45, #string,oneline
+        \\A procedure declared with `#expand` is a macro. A call to it is not
+        \\compiled as a call: the compiler replaces it with a copy of the
+        \\macro's body, in which each parameter stands for the expression the
+        \\caller passed, and checks the copy where the call was written. A
+        \\macro can therefore assign to its arguments, leave the caller's loop,
+        \\return from the caller, and insert code that the caller quoted.
+    );
+    subheading(46, "Statement macros");
+    paragraph(47, #string,oneline
+        \\A macro without a return type is a statement macro, used as a
+        \\statement. Its parameters are written like a procedure's, with types
+        \\or as `$T` generics, and the call must match them. Because a
+        \\parameter stands for the argument expression itself, `swap` below
+        \\assigns to the caller's `x` and `y`.
+    );
+    code_block(48, "glosso", #string
+        \\#import "Io";
+        \\
+        \\calls := 0;
+        \\next :: () -> s64 { calls += 1; return calls; }
+        \\
+        \\swap :: (a: $T, b: T) #expand {
+        \\    tmp := a;
+        \\    a = b;
+        \\    b = tmp;
+        \\}
+        \\
+        \\twice :: (value: s64) -> s64 #expand {
+        \\    return value + value;
+        \\}
+        \\
+        \\main :: () {
+        \\    x := 1;
+        \\    y := 2;
+        \\    tmp := 99;
+        \\    swap(x, y);
+        \\    print("{} {} {}\n", x, y, tmp);
+        \\    sum := twice(next());
+        \\    print("{} after {} calls\n", sum, calls);
+        \\}
+    );
+    code_block(49, "text", #string
+        \\2 1 99
+        \\3 after 2 calls
+    );
+    paragraph(50, #string,oneline
+        \\Two rules show in the output. The macro's own `tmp` is a different
+        \\variable from the caller's `tmp`, which keeps 99: names that a macro
+        \\declares are renamed in each expansion, so they cannot collide with
+        \\the caller's. And an argument is not evaluated once before the
+        \\expansion: it is copied wherever the parameter appears, so
+        \\`twice(next())` calls `next` twice and computes 1 + 2. A macro that
+        \\uses a parameter more than once and should evaluate it once copies it
+        \\into a local first, as `clamp` below does.
+    );
+    subheading(51, "Value macros");
+    paragraph(52, #string,oneline
+        \\A macro with a return type, `-> T #expand`, produces a value and is
+        \\used as an expression. Its body may declare locals, branch and
+        \\return from several places; `return` hands the value to the
+        \\expression where the macro was called. Every path has to end in a
+        \\`return`. The shorter form `#expand,expression` takes a body of
+        \\exactly one `return expression;` and infers the type from it. A
+        \\value macro also works in a constant's initializer, which is
+        \\evaluated at compile time.
+    );
+    code_block(53, "glosso", #string
+        \\#import "Io";
+        \\
+        \\clamp :: (value: s64, low: s64, high: s64) -> s64 #expand {
+        \\    v := value;
+        \\    if v < low return low;
+        \\    if v > high return high;
+        \\    return v;
+        \\}
+        \\
+        \\square :: (value: $T) #expand,expression { return value * value; }
+        \\
+        \\AREA :: square(12);
+        \\
+        \\main :: () {
+        \\    print("{} {} {}\n", clamp(-5, 0, 10), clamp(42, 0, 10), clamp(7, 0, 10));
+        \\    print("{} {}\n", square(1.5), AREA);
+        \\}
+    );
+    code_block(54, "text", #string
+        \\0 10 7
+        \\2.25 144
+    );
+    paragraph(55, #string,oneline
+        \\A value macro whose body can end without returning is rejected at
+        \\its declaration, with the message of the one-expression form:
+    );
+    code_block(56, "text", #string
+        \\// pick :: (c: bool) -> s64 #expand { if c return 1; }
+        \\error: expression macro 'pick' must contain exactly `return <expr>;`
+    );
+    subheading(57, "Reaching into the caller");
+    paragraph(58, #string,oneline
+        \\A name written with a backtick directly in front of it refers to the
+        \\scope where the macro is expanded rather than to the macro's own
+        \\names. With it, a macro reads and assigns the caller's variables, and
+        \\a backtick on a declaration declares the name in the caller's scope.
+        \\The backtick also applies to two keywords: a backtick `return`
+        \\returns from the procedure that called the macro, and a backtick
+        \\`defer` registers its statement in the caller's scope (see Deferred
+        \\Statements). A plain `return` in a statement macro ends only the
+        \\expansion. `break` and `continue` need no backtick: the expansion
+        \\stands inside the caller's loop, so they act on it.
+    );
+    code_block(59, "glosso", #string
+        \\#import "Io";
+        \\
+        \\bump :: (amount: s64) #expand {
+        \\    `total += amount;
+        \\}
+        \\
+        \\declare_limit :: () #expand {
+        \\    `limit := 3;
+        \\}
+        \\
+        \\stop_at_limit :: () #expand {
+        \\    if `i == `limit break;
+        \\}
+        \\
+        \\first_negative :: (values: []s64) -> s64 {
+        \\    check :: (value: s64) #expand {
+        \\        if value < 0 `return value;
+        \\    }
+        \\    for values check(it);
+        \\    return 0;
+        \\}
+        \\
+        \\main :: () {
+        \\    total := 0;
+        \\    bump(5);
+        \\    bump(7);
+        \\    declare_limit();
+        \\    for i: 0..10 {
+        \\        stop_at_limit();
+        \\        print("[{}]", i);
+        \\    }
+        \\    print("\ntotal={} limit={}\n", total, limit);
+        \\    print("{}\n", first_negative(.[4, -2, -7]));
+        \\}
+    );
+    code_block(60, "text", #string
+        \\[0][1][2]
+        \\total=12 limit=3
+        \\-2
+    );
+    paragraph(61, #string,oneline
+        \\`check` is declared inside `first_negative`, so it is local to that
+        \\procedure, and its backtick `return` leaves `first_negative` with the
+        \\first negative value. Without the backtick, a local that the macro
+        \\declares is invisible to the caller:
+    );
+    code_block(62, "text", #string
+        \\// make_temp :: () #expand { temp := 5; }
+        \\// main :: () { make_temp(); print("{}\n", temp); }
+        \\error: unbound 'temp'
+    );
+    paragraph(63, #string,oneline
+        \\Write the backtick on every name that a macro means to take from its
+        \\caller. It states the dependency in the macro's source, and it keeps
+        \\the macro from picking up a different declaration of the same name.
+    );
+    subheading(64, "Code parameters");
+    paragraph(65, #string,oneline
+        \\A macro parameter of type `Code` receives a quote written at the
+        \\call, `#code ...`, and the body inserts it with `#insert`, as often
+        \\as it likes. The quote was written in the caller, and a plain
+        \\`#insert` resolves its names there, so the macro's own locals stay
+        \\hidden from it. `#insert,scope() code` resolves the quote among the
+        \\macro's locals instead, which lets a macro provide names to the code
+        \\it receives:
+    );
+    code_block(66, "glosso", #string
+        \\#import "Io";
+        \\
+        \\repeat_three :: (body: Code) #expand {
+        \\    #insert body;
+        \\    #insert body;
+        \\    #insert body;
+        \\}
+        \\
+        \\in_range :: (test: Code) -> bool #expand {
+        \\    low := 1;
+        \\    high := 10;
+        \\    return #insert,scope() test;
+        \\}
+        \\
+        \\caller_low :: (test: Code) -> bool #expand {
+        \\    low := 1;
+        \\    return #insert test;
+        \\}
+        \\
+        \\main :: () {
+        \\    total := 0;
+        \\    repeat_three(#code total += 14);
+        \\    print("total={}\n", total);
+        \\    value := 5;
+        \\    print("{}\n", in_range(#code (low <= value && value <= high)));
+        \\    low := 100;
+        \\    print("{}\n", caller_low(#code (low <= value)));
+        \\}
+    );
+    code_block(67, "text", #string
+        \\total=42
+        \\true
+        \\false
+    );
+    paragraph(68, #string,oneline
+        \\In `in_range`, `low` and `high` are the macro's locals, 1 and 10. In
+        \\`caller_low`, the quote's `low` is the caller's, 100, although the
+        \\macro declares a `low` of its own. Without `,scope()`, the quote
+        \\passed to `in_range` would be `error: unbound 'low'`, since the
+        \\caller has no `low` at that point.
+    );
+    subheading(69, "Recursive macros");
+    paragraph(70, #string,oneline
+        \\A macro may expand itself. Every expansion happens at compile time,
+        \\so recursion has to stop at compile time too: the base case is
+        \\decided with `#if` (see `#if`, `#assert`, and `#compile_error`) on a
+        \\value known while compiling, here the literal arguments that the
+        \\expansions pass down. A run-time `if` does not stop the expansion,
+        \\and the compiler gives up after 128 nested expansions:
+    );
+    code_block(71, "glosso", #string
+        \\#import "Io";
+        \\
+        \\countdown :: (n: s64) #expand {
+        \\    print("[{}]", n);
+        \\    #if n > 0 countdown(n - 1);
+        \\}
+        \\
+        \\main :: () {
+        \\    countdown(3);
+        \\    print("\n");
+        \\}
+    );
+    code_block(72, "text", #string
+        \\[3][2][1][0]
+    );
+    code_block(73, "text", #string
+        \\// if n > 0 countdown(n - 1);
+        \\error: macro expansion depth exceeded while expanding 'countdown' (limit 128)
+        \\note: in expansion of macro 'countdown'
+    );
+    paragraph(74, #string,oneline
+        \\Because the base case is decided at compile time, an argument that
+        \\is only known at run time, such as a variable, cannot drive the
+        \\recursion: `countdown(k)` with `k := 3` is `error: unknown const k`.
+    );
+    subheading(75, "Macros compared with procedures");
+    bullet(76, #string,oneline
+        \\A macro is checked only where it is expanded. A mistake in a macro
+        \\that nothing calls is not reported, as in an uninstantiated generic
+        \\procedure.
+    );
+    bullet(77, #string,oneline
+        \\A macro is not a value. It cannot be assigned to a variable or
+        \\passed as a procedure argument: `f := bump;` is `error: unbound
+        \\'bump'`.
+    );
+    bullet(78, #string,oneline
+        \\Two macros cannot share a name, whatever their parameter types:
+        \\`error: function 'describe' is already declared`.
+    );
+    bullet(79, #string,oneline
+        \\A macro takes default values and variadic parameters like a
+        \\procedure. A variadic `...any` pack is usually walked with `#inline
+        \\for` (see `while`, `for`, and Unrolled Loops), which unrolls it at
+        \\compile time.
+    );
+    bullet(80, #string,oneline
+        \\A statement macro cannot be used as a value: `x := log_line();` is
+        \\`error: no macro overload of 'log_line' matches this invocation`.
+    );
+    paragraph(81, #string,oneline
+        \\Derive macros, which generate typeclass instances from a type's
+        \\declaration, are macros of this kind with a fixed parameter list;
+        \\see `#derive`.
+    );
+}
+
+render_section_83 :: () {
+    paragraph(0, #string,oneline
+        \\A quoted pattern, `#pattern P` written without a subject, is a
+        \\compile-time value of type `Pattern`. Coverage, Binding Forms, and
+        \\Pattern Constants describes how such values are made, named and
+        \\inserted into switches. The `Meta` module can also ask questions
+        \\about them: which names a pattern binds and with what types, which
+        \\cases a list of patterns leaves unmatched, and whether a pattern
+        \\matches anything that a list does not. The compiler answers with the
+        \\analysis it uses to check that a switch is exhaustive and that its
+        \\arms are reachable, so a program can run the same checks on patterns
+        \\that are not the arms of one switch.
+    );
+    table_header(1, "Procedure   —   Answer");
+    table_row(2, "`pattern_binder_count(T, P)`   |   How many names `P` binds when matched against a `T`.");
+    table_row(3, "`pattern_binder_name(T, P, i)`, `pattern_binder_type(T, P, i)`   |   The name of binder `i` and its type.");
+    table_row(4, "`pattern_missing_count(T, Ps)`   |   How many cases of `T` no pattern of the list `Ps` matches; 0 when `Ps` is exhaustive.");
+    table_row(5, "`pattern_missing(T, Ps, i)`   |   Missing case `i`, written as pattern text, such as `Token.Eof`.");
+    table_row(6, "`pattern_is_useful(T, Ps, Q)`   |   Whether `Q` matches some value of `T` that no pattern of `Ps` matches.");
+    paragraph(7, #string,oneline
+        \\Each query takes the subject type first, because a pattern means
+        \\something only against a type: `.Some(inner)` binds an `s64` against
+        \\`?s64` and a `str` against `?str`. Every pattern is checked against
+        \\the type before the question is answered, and one that does not fit
+        \\the type is a compile error. As with the other queries of `Meta`, the
+        \\answers are constants, and an index must be a compile-time constant
+        \\within range:
+    );
+    code_block(8, "text", #string
+        \\// pattern_binder_count(s64, #pattern Shape.Circle(r))
+        \\error: union variant pattern needs a union value, got s64
+        \\// pattern_binder_name(?s64, #pattern .Some(x), 1)
+        \\error: pattern binder index out of range
+    );
+    subheading(9, "Binders");
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Span :: struct { start: s64; end: s64; }
+        \\Token :: union { Number: f64; Name: str; Range: Span; Eof: void; }
+        \\
+        \\RANGE :: #pattern Token.Range(.{ .start = first, .end = _ });
+        \\SOME  :: #pattern .Some(inner);
+        \\
+        \\main :: () {
+        \\    #inline for i: 0..#comptime pattern_binder_count(Token, RANGE) {
+        \\        print("{}: {}\n", pattern_binder_name(Token, RANGE, i),
+        \\              type_name(pattern_binder_type(Token, RANGE, i)));
+        \\    }
+        \\    print("{} / {}\n", type_name(pattern_binder_type(?s64, SOME, 0)),
+        \\                       type_name(pattern_binder_type(?str, SOME, 0)));
+        \\}
+    );
+    code_block(11, "text", #string
+        \\first: s64
+        \\s64 / str
+    );
+    paragraph(12, #string,oneline
+        \\Binders are numbered in the order they are written. A `_` binds
+        \\nothing and is not counted, and a name that every alternative of an
+        \\or-pattern binds counts once: `#pattern Shape.Circle(size) |
+        \\Shape.Square(size)` has one binder. Asking the question checks the
+        \\pattern without instantiating anything, so a query leaves no trace
+        \\in the program. The loop over the binders is unrolled with `#inline
+        \\for` because each index has to be a constant (see `type` Values and
+        \\Type Reflection).
+    );
+    subheading(13, "Coverage");
+    paragraph(14, #string,oneline
+        \\`pattern_missing_count` and `pattern_missing` report what a list of
+        \\patterns leaves uncovered, in the form the compiler uses for a
+        \\non-exhaustive switch. The cases are witnesses: each stands for a
+        \\group of values that no pattern matches, so the count is the number
+        \\of distinct witnesses, not the number of unmatched values. The list
+        \\is a view, `[]Pattern`: an array literal `.[A, B]` written in the
+        \\call converts to one, and a named constant array is passed as
+        \\`LIST[..]`.
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Token :: union { Number: f64; Name: str; Comma: void; Eof: void; }
+        \\
+        \\report_missing :: (#comptime T: type, #comptime Ps: []Pattern) {
+        \\    #inline for i: 0..#comptime pattern_missing_count(T, Ps) {
+        \\        print("not handled: {}\n", pattern_missing(T, Ps, i));
+        \\    }
+        \\}
+        \\
+        \\HANDLED :: .[#pattern Token.Number(_), #pattern Token.Name(_)];
+        \\
+        \\main :: () {
+        \\    report_missing(Token, HANDLED[..]);
+        \\    #assert #comptime pattern_missing_count(Token,
+        \\        .[#pattern Token.Number(_), #pattern Token.Name(_), #pattern .Comma | .Eof]) == 0;
+        \\}
+    );
+    code_block(16, "text", #string
+        \\not handled: Token.Comma
+        \\not handled: Token.Eof
+    );
+    paragraph(17, #string,oneline
+        \\A witness is pattern text: a variant such as `Token.Comma`, a variant
+        \\with `_` for its payload, `Token.Name(_)`, when a list covers only
+        \\some of that variant's values, `_` for a `str` or float subject that
+        \\only literals cover, and a range for an integer subject, as in
+        \\`-9223372036854775808..=-1` for an `s64` covered only by `0` and
+        \\`1`. The empty case of an optional is spelled `(?s64).None`, which is
+        \\not valid pattern syntax; a pattern writes it `null` (see `?T` and
+        \\`E!T`).
+    );
+    paragraph(18, #string,oneline
+        \\The `#assert` in `main` turns coverage into a build-time check (see
+        \\`#if`, `#assert`, and `#compile_error`): if a variant is added to
+        \\`Token` and the list is not extended, the build stops. This is
+        \\useful when the patterns are not the arms of one switch but are
+        \\spread over a table of handlers, where the compiler has no switch to
+        \\check.
+    );
+    subheading(19, "Usefulness");
+    paragraph(20, #string,oneline
+        \\`pattern_is_useful(T, Ps, Q)` answers whether adding `Q` to `Ps`
+        \\would match anything new. False means that `Ps` already covers `Q`:
+        \\an arm with pattern `Q` after arms `Ps` would never be reached. The
+        \\same question, asked both ways round, tells whether two patterns
+        \\match exactly the same values:
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Shape :: union { Circle: f64; Square: f64; Point: void; }
+        \\
+        \\equivalent :: (T: type, #comptime a: Pattern, #comptime b: Pattern) -> bool {
+        \\    return !pattern_is_useful(T, .[a], b) && !pattern_is_useful(T, .[b], a);
+        \\}
+        \\
+        \\ROUND   :: #pattern Shape.Circle(_);
+        \\RADIUS  :: #pattern .Circle(radius);
+        \\SIZED   :: #pattern Shape.Circle(_) | Shape.Square(_);
+        \\
+        \\main :: () {
+        \\    print("{} {}\n", equivalent(Shape, ROUND, RADIUS), equivalent(Shape, ROUND, SIZED));
+        \\    print("{}\n", pattern_is_useful(Shape, .[SIZED, #pattern .Point], #pattern _));
+        \\    print("{}\n", pattern_is_useful(Shape, .[ROUND], SIZED));
+        \\}
+    );
+    code_block(22, "text", #string
+        \\true false
+        \\false
+        \\true
+    );
+    paragraph(23, #string,oneline
+        \\A capture does not change what a pattern matches, so `ROUND` and
+        \\`RADIUS` are equivalent. After `SIZED` and `.Point`, a final `_`
+        \\matches nothing new, and `SIZED` is still useful after `ROUND`
+        \\because of its squares. An or-pattern is useful when any of its
+        \\alternatives is.
+    );
+    paragraph(24, #string,oneline
+        \\`equivalent` takes a `type` that the rest of its signature does not
+        \\use, so it runs only at compile time (see Compile-Time Evaluation),
+        \\which is what the `Meta` queries inside it need.
+    );
+    note(25, #string,oneline
+        \\For an integer subject, a range is not split against single values
+        \\that cover it: `pattern_is_useful(u8, .[#pattern 0, #pattern 1],
+        \\#pattern 0..=1)` answers `true`, and a switch does not report a
+        \\`case 0..=1;` after `case 0;` and `case 1;` as unreachable. The
+        \\reverse order is detected: a single value after a range that covers
+        \\it is not useful.
+    );
+}
+
+}

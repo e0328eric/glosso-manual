@@ -1,0 +1,2332 @@
+#import "Format";
+#import "String_Builder";
+#import "Math/Core";
+#import "clay_ui.glo";
+
+#public {
+
+// Chapters 15-20: Programs and Builds.
+
+render_section_15 :: () {
+    paragraph(0, #string,oneline
+        \\A Glosso program is built from one root source file, named on the
+        \\compiler's command line, together with every module that file
+        \\reaches through its imports and the prelude that every module
+        \\receives without one. This chapter is the reference for where such a
+        \\program starts and how it ends: which declaration is the entry point,
+        \\the forms `main` may take, how the value `main` returns becomes the
+        \\process exit status through the `Termination` typeclass, how `exit`
+        \\ends a program early, and how a program reads its command line. For a
+        \\first introduction, see Hello, Glosso.
+    );
+    subheading(1, "The smallest program");
+    paragraph(2, #string,oneline
+        \\The only declaration a program needs is a procedure named `main`:
+    );
+    code_block(3, "glosso", #string
+        \\main :: () {}
+    );
+    paragraph(4, #string,oneline
+        \\`main :: () {}` is an ordinary constant declaration: the name, `::`
+        \\for a compile-time constant, and a procedure with no parameters, no
+        \\result type and an empty body. Nothing marks it as special except
+        \\its name. The executable built from this file starts, calls `main`,
+        \\and exits with status 0 when `main` returns. Everything else a
+        \\program uses, from `print` in the `Io` module to the source files of
+        \\the project, arrives through `#import` (see Modules, Imports, and the
+        \\Prelude), and the compiler checks and links only what the program
+        \\reaches (see Inside a Build: Stages and Caches).
+    );
+    subheading(5, "Which `main` is the entry point");
+    paragraph(6, #string,oneline
+        \\The entry point is the procedure named `main` declared at the top
+        \\level of the root file. It needs no `#public`; visibility concerns
+        \\only the names other modules may use. The declaration may sit in one
+        \\branch of a top-level `#if`, so that each target gets its own `main`,
+        \\and it may be produced by a top-level `#insert` (see `#code`,
+        \\`#insert`, and `#expand`). A constant or variable that happens to be
+        \\named `main` is not a procedure and does not count.
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#if OUT.os == .Windows {
+        \\    main :: () { print("built for Windows\n"); }
+        \\} else {
+        \\    main :: () { print("built for {}\n", OUT.os); }
+        \\}
+    );
+    code_block(8, "text", #string
+        \\built for Linux
+    );
+    paragraph(9, #string,oneline
+        \\When the root file declares no `main`, the compiler looks for one in
+        \\the files the root file imports by path with a plain `#import
+        \\"file.glo";` or `#export "file.glo";`, without an import list or a
+        \\namespace name, and in the files those import the same way. If
+        \\exactly one `main` is found there, private or not, it is the entry
+        \\point. A short root file can therefore select a program that lives in
+        \\another file:
+    );
+    code_block(10, "glosso", #string
+        \\// tool.glo
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("the tool runs\n");
+        \\}
+    );
+    code_block(11, "glosso", #string
+        \\// run_tool.glo
+        \\#import "tool.glo";
+    );
+    code_block(12, "text", #string
+        \\$ glosso --run run_tool.glo 2>/dev/null
+        \\the tool runs
+    );
+    paragraph(13, #string,oneline
+        \\A `main` in a module found by name (a standard library module or one
+        \\under `--module-path`), or one reached through a namespace import or
+        \\an import list, is never chosen. A `main` in the root file always
+        \\wins over the others. Two candidates and no `main` in the root file
+        \\are an error, and so is a program with no candidate at all:
+    );
+    code_block(14, "text", #string
+        \\// run_tool.glo imports one.glo and two.glo, which both declare main
+        \\error: multiple program entrypoints named main are reachable through unqualified source imports; define main in the root source to select the entrypoint
+        \\note: another eligible main is declared here
+        \\// Tool :: #import "tool.glo";   and nothing else
+        \\error: program has no `main` function
+    );
+    paragraph(15, #string,oneline
+        \\Only a build that produces an executable needs `main`. A library or
+        \\object file, and an executable built with `--no-main`, take their
+        \\roots from the `#c_call` procedures instead; Compiler Options and
+        \\Output Kinds describes them.
+    );
+    subheading(16, "The forms of `main`");
+    paragraph(17, #string,oneline
+        \\`main` takes no parameters. Its result type decides how the process
+        \\exit status is computed when it returns:
+    );
+    table_header(18, "Result type of `main`   —   Exit status when `main` returns");
+    table_row(19, "none, or `void`   |   0.");
+    table_row(20, "an integer type, such as `s32`, `u8` or `ssize`   |   The returned value converted to `s32`.");
+    table_row(21, "`E!void`, where `E` implements `Error`   |   0 for `.Ok`. For `.Err` the error reports itself on standard error, and the status is 1.");
+    table_row(22, "any other type `T` with a `Termination` instance   |   Whatever the instance's `termination_status` returns.");
+    paragraph(23, #string,oneline
+        \\Command-line arguments are not parameters of `main`; the program asks
+        \\for them with `get_cmdline_args()`, described below. Declaring a
+        \\parameter is an error that names the replacement, and so is a result
+        \\type with no `Termination` instance. A `bool` is not an integer type,
+        \\and a result type `E!T` with a payload other than `void` has no
+        \\instance in the standard library:
+    );
+    code_block(24, "text", #string
+        \\// main :: (args: []const str) {}
+        \\error: main must not take parameters; use get_cmdline_args() for command-line arguments
+        \\// main :: () -> bool { return true; }
+        \\error: main return type bool does not implement Termination
+        \\// main :: () -> Config_Error!s64 { return .Ok(3); }
+        \\error: main return type Config_Error!s64 does not implement Termination
+    );
+    subheading(25, "The `Termination` typeclass");
+    paragraph(26, #string,oneline
+        \\The conversion from the value `main` returns to a status is a
+        \\typeclass of the prelude, so every program can use and extend it
+        \\without an import:
+    );
+    code_block(27, "glosso", #string
+        \\Termination :: typeclass (T: type) #minimal(termination_status) {
+        \\    termination_status :: (value: T) -> s32;
+        \\}
+    );
+    paragraph(28, #string,oneline
+        \\The compiler chooses the instance from the declared result type of
+        \\`main` while it checks `main`, and generates an entry routine that
+        \\calls `main` and then the chosen `termination_status` on the value.
+        \\That call happens once, after `main` has returned and its deferred
+        \\statements have run, and it may have effects of its own: the instance
+        \\for `E!void` prints the error. `termination_status` must return
+        \\exactly `s32` and must have a body that can run, because the entry
+        \\routine calls it as an ordinary procedure.
+    );
+    paragraph(29, #string,oneline
+        \\The standard library declares two instances. The instance for
+        \\integers, `$T ::: instance Termination where Is_Integer(T)`, casts
+        \\the value to `s32`, signed and unsigned types alike. The instance for
+        \\`E!void` where `Error(E)` holds is the subject of the section after
+        \\next. Any other type becomes a valid result type of `main` with an
+        \\instance of its own. This program maps its outcomes to the exit codes
+        \\that BSD tools use for usage and data errors:
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Outcome :: enum { Success; Usage_Error; Data_Error; }
+        \\
+        \\Outcome ::: instance Termination {
+        \\    termination_status :: (value: Outcome) -> s32 {
+        \\        if value == {
+        \\            case .Success; return 0;
+        \\            case .Usage_Error; return 64;
+        \\            case .Data_Error; return 65;
+        \\        }
+        \\    }
+        \\}
+        \\
+        \\main :: () -> Outcome {
+        \\    if get_cmdline_args().count < 2 {
+        \\        print("usage: outcome <file>\n");
+        \\        return .Usage_Error;
+        \\    }
+        \\    return .Success;
+        \\}
+    );
+    code_block(31, "text", #string
+        \\$ ./outcome; echo "status $?"
+        \\usage: outcome <file>
+        \\status 64
+        \\$ ./outcome data.txt; echo "status $?"
+        \\status 0
+    );
+    paragraph(32, #string,oneline
+        \\An instance whose `termination_status` returns another type does not
+        \\satisfy the typeclass, and the use in `main` is reported as well:
+    );
+    code_block(33, "text", #string
+        \\// termination_status :: (value: Outcome) -> s64 { ... }
+        \\error: instance 'Outcome :: Termination' does not satisfy #minimal(termination_status); termination_status is defined, but its signature does not match the typeclass
+        \\error: Termination.termination_status returned s64, expected s32
+    );
+    subheading(34, "Integer statuses");
+    paragraph(35, #string,oneline
+        \\An integer result is the most direct form. `--run` builds the program,
+        \\runs it, reports a nonzero status on one more `glosso:` line, and
+        \\exits with the same status:
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () -> s32 {
+        \\    print("working\n");
+        \\    return 3;
+        \\}
+    );
+    code_block(37, "text", #string
+        \\$ glosso --run status.glo 2>&1 | tail -2
+        \\working
+        \\glosso: program exited with status 3
+    );
+    paragraph(38, #string,oneline
+        \\The conversion to `s32` is a cast, which keeps the low 32 bits of a
+        \\wider value, and the operating system may narrow the status further:
+        \\POSIX systems pass only its low eight bits to the parent process. On
+        \\Linux, `return 256;` therefore exits with status 0 and `return -1;`
+        \\with 255. A status from 0 to 255 reaches the parent unchanged on every
+        \\host.
+    );
+    subheading(39, "Returning an error from `main`");
+    paragraph(40, #string,oneline
+        \\The most useful result type besides an integer is `E!void`, where the
+        \\error type `E` implements the `Error` typeclass of the
+        \\`Typeclass/Error` module. `Error` has one method, `report_error`,
+        \\which writes a description of the error, usually one
+        \\`category: message` line on standard error through the
+        \\`error_report_line` method of `str`. Together with the `?` operator,
+        \\which returns early with an error, a failure anywhere in the program
+        \\travels to the process boundary and is reported there:
+    );
+    code_block(41, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Typeclass/Error";
+        \\
+        \\Config_Error :: struct {
+        \\    line: ssize;
+        \\}
+        \\
+        \\Config_Error ::: instance Error {
+        \\    report_error :: (error: Config_Error) {
+        \\        ("config").error_report_line(tprint("no value on line {}", error.line));
+        \\    }
+        \\}
+        \\
+        \\load :: (text: str) -> Config_Error!ssize {
+        \\    if text.count == 0 return .Err(.{ .line = 1 });
+        \\    return .Ok(text.count);
+        \\}
+        \\
+        \\main :: () -> Config_Error!void {
+        \\    size := load("")?;
+        \\    print("loaded {} bytes\n", size);
+        \\    return .Ok;
+        \\}
+    );
+    code_block(42, "text", #string
+        \\$ glosso --run config.glo 2>&1 | tail -2
+        \\config: no value on line 1
+        \\glosso: program exited with status 1
+    );
+    paragraph(43, #string,oneline
+        \\The status does not distinguish one failure from another: every
+        \\`.Err` exits with 1. A program that needs several statuses, or a
+        \\`main` that returns a payload with its result, declares its own
+        \\`Termination` instance as shown above. A tagged union of error types
+        \\can obtain its `Error` instance with `#derive(Error)`, which forwards
+        \\to the variant that is set. `Try`, `?`, `#try`, and `Termination`
+        \\describes propagation and the `Error` typeclass in full; for a first
+        \\introduction, see Missing Values and Errors.
+    );
+    subheading(44, "Ending the program with `exit`");
+    paragraph(45, #string,oneline
+        \\`exit(status)`, a prelude procedure, ends the process from anywhere
+        \\with the given status. Its parameter is an `ssize` and its result type
+        \\is `#Never`, so the compiler knows that the code after a call does not
+        \\run. `exit` leaves at once: deferred statements, including those of
+        \\the procedures it is called from, do not run, and no `Termination`
+        \\instance is consulted.
+    );
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    defer print("cleanup\n");
+        \\    print("starting\n");
+        \\    if get_cmdline_args().count < 2 exit(2);
+        \\    print("working\n");
+        \\}
+    );
+    code_block(47, "text", #string
+        \\$ ./early; echo "status $?"
+        \\starting
+        \\status 2
+        \\$ ./early input; echo "status $?"
+        \\starting
+        \\working
+        \\cleanup
+        \\status 0
+    );
+    paragraph(48, #string,oneline
+        \\The status is clamped to the range of `s32` rather than cut: a value
+        \\above 2147483647 exits with 2147483647, which a POSIX system then
+        \\narrows to 255. Called from compile-time code, `exit` stops the
+        \\compiler with the given status instead (see Build Scripts and
+        \\Compile-Time Arguments).
+    );
+    paragraph(49, #string,oneline
+        \\A program can also end because a runtime check failed, such as an
+        \\array index out of bounds. It then prints the position and the check
+        \\on standard error and aborts, which a POSIX shell reports as status
+        \\134 (128 plus the number of the abort signal). Feature Gates and
+        \\Runtime Checks lists the checks.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values := .[1, 2, 3];
+        \\    index := 5;
+        \\    print("{}\n", values[index]);
+        \\}
+    );
+    code_block(51, "text", #string
+        \\$ ./bounds; echo "status $?"
+        \\bounds.glo:6:19: runtime check failed: array.bounds
+        \\status 134
+    );
+    subheading(52, "Command-line arguments");
+    paragraph(53, #string,oneline
+        \\`get_cmdline_args()` returns the program's arguments as a
+        \\`[]const str` view. The first element is the program as the
+        \\platform reported it, normally the path it was started with, so the
+        \\arguments proper begin at index 1.
+    );
+    code_block(54, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    print("{} arguments\n", args.count);
+        \\    for arg: args print("[{}]\n", arg);
+        \\}
+    );
+    code_block(55, "text", #string
+        \\$ ./args one "two words"
+        \\3 arguments
+        \\[./args]
+        \\[one]
+        \\[two words]
+    );
+    paragraph(56, #string,oneline
+        \\The view and its strings belong to the runtime: they stay valid for
+        \\the whole run and must not be freed or changed. On most targets the
+        \\strings point at the C `argv` entries; on Windows the wide-character
+        \\arguments are re-encoded as UTF-8, and on WASI they are copied from
+        \\the runtime. A program started by `glosso --run` receives only its
+        \\own path, because the arguments after `--` on the compiler's command
+        \\line are not the program's. They belong to compile-time code, which
+        \\reads them with the same procedure; there the view holds only those
+        \\arguments, without a program path in front (see Build Scripts and
+        \\Compile-Time Arguments).
+    );
+    subheading(57, "Before `main` runs");
+    paragraph(58, #string,oneline
+        \\No code of the program runs before `main`. The compiler computes the
+        \\initial value of every global variable and stores it in the
+        \\executable's data, so globals already hold their values when the
+        \\process starts (see Constants, Variables, and Globals). What the
+        \\runtime prepares is the context of the main thread: the default
+        \\allocator, and the temporary allocator, whose first block is a static
+        \\buffer sized by `--temp-allocator-size` (see `#Context` and `context`
+        \\and The Temporary Allocator). It also records the arguments that
+        \\`get_cmdline_args()` returns.
+    );
+    subheading(59, "Entry on other targets");
+    paragraph(60, #string,oneline
+        \\The program's `main` is the symbol `glo_main`. On Linux, macOS and
+        \\FreeBSD the generated entry routine is a C `main(argc, argv)`, and on
+        \\Windows a `wmain`, that calls `glo_main` and converts its result. A
+        \\WASI module exports `_start`, which does the same. A
+        \\`wasm32-freestanding` module instead exports `glo_main` for its host
+        \\to call; there, and only there, `main` may be a `#c_call` procedure
+        \\with parameters and a result, which no `Termination` instance
+        \\converts. On `x86_64-freestanding`, `glo_main` is the entry point of
+        \\the image and must not return. Freestanding, UEFI, and Wasm Programs
+        \\covers these targets.
+    );
+    note(61, #string,oneline
+        \\Two declarations of `main` pass checking but do not make a working
+        \\program on the operating-system targets. A `main` with result type
+        \\`#Never` fails to link with `undefined symbol: main`; declare `main`
+        \\without a result and end it with `exit` instead. A `#c_call` `main` is
+        \\called directly by the C runtime, so a `#c_call` `main` without a
+        \\result exits with an unpredictable status.
+    );
+}
+
+render_section_16 :: () {
+    paragraph(0, #string,oneline
+        \\The compiler is one executable, `glosso`, that takes options and the
+        \\path of the program's root source file. Everything else the program
+        \\needs is found through its imports, so there is no project file and
+        \\no list of sources to pass. This chapter describes the command line,
+        \\what the compiler prints, the five kinds of output it can produce and
+        \\their file names, `--run`, the optimization levels, and every other
+        \\option. What happens inside a build, and the caches that make a
+        \\repeated build fast, are described in Inside a Build: Stages and
+        \\Caches.
+    );
+    subheading(1, "The command line");
+    code_block(2, "text", #string
+        \\glosso [options] <file.glo> [-- <args...>]
+    );
+    paragraph(3, #string,oneline
+        \\Options and the source file may come in any order, but there is
+        \\exactly one source file. An option with a value takes it from the
+        \\next argument, and the long options with a value also accept it after
+        \\`=`, as in `--backend=object` or `--color=never`; `-o` accepts only
+        \\the separate form. Everything after `--` is not read as options: it
+        \\is the command line of the program's compile-time code (see Build
+        \\Scripts and Compile-Time Arguments).
+    );
+    paragraph(4, #string,oneline
+        \\A command line the compiler cannot use is rejected before any work
+        \\starts. The compiler prints the reason, for most mistakes followed by
+        \\the option summary, and exits with status 2:
+    );
+    code_block(5, "text", #string
+        \\$ glosso --frobnicate hello.glo
+        \\glosso: unknown option --frobnicate
+        \\$ glosso hello.glo args.glo
+        \\glosso: only one positional source file is supported
+        \\$ glosso --backend exe hello.glo
+        \\glosso: unknown backend 'exe' (choose llvm, object, static-lib, shared-lib, or llvm-ir)
+        \\$ glosso -O4 hello.glo
+        \\glosso: unknown option -O4
+    );
+    subheading(6, "What the compiler prints");
+    paragraph(7, #string,oneline
+        \\The compiler describes its work on lines that begin with `glosso:`,
+        \\and it writes them, with its diagnostics, to standard error. A build
+        \\that produces an executable prints three of them:
+    );
+    code_block(8, "text", #string
+        \\$ glosso hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    paragraph(9, #string,oneline
+        \\On a terminal the compiler also shows a progress display with the
+        \\stage it is in; `--color never` turns off both the display and the
+        \\colors of diagnostics. A program's own output goes to standard output,
+        \\so redirecting standard error leaves only what the program printed.
+        \\A build that finds errors prints them, writes no artifact and exits
+        \\with status 1; Appendix A: Diagnostic Format explains the messages,
+        \\and Appendix E: Environment, Toolchain, and Exit Codes lists every exit
+        \\status of the compiler.
+    );
+    subheading(10, "Output kinds");
+    paragraph(11, #string,oneline
+        \\`--backend <kind>` chooses what the build produces. All kinds share
+        \\every step up to code generation; they differ in whether and how the
+        \\generated code is linked, and in the progress lines they print.
+    );
+    table_header(12, "Backend   —   Artifact   —   Progress lines");
+    table_row(13, "`llvm` (default)   |   A linked executable.   |   `link`, `done`");
+    table_row(14, "`object`   |   An object file, not linked.   |   `wrote`");
+    table_row(15, "`static-lib`   |   A static library archive.   |   `link`, `done`");
+    table_row(16, "`shared-lib`   |   A shared library.   |   `link`, `done`");
+    table_row(17, "`llvm-ir`   |   The module as textual LLVM IR.   |   `wrote`");
+    code_block(18, "text", #string
+        \\$ glosso --backend object hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: wrote hello.o  (backend=object, target=x86_64-pc-linux-gnu, -O1)
+    );
+    subheading(19, "Output file names");
+    paragraph(20, #string,oneline
+        \\By default the artifact is written to the current directory and named
+        \\after the source file without its extension. The kind of output and
+        \\the target add a prefix or a suffix:
+    );
+    table_header(21, "Backend   —   Linux and other Unix targets   —   Other targets");
+    table_row(22, "`llvm`   |   `hello`   |   `hello.exe` on Windows, `hello.wasm` on WebAssembly");
+    table_row(23, "`object`   |   `hello.o`   |   `hello.obj` for `windows-msvc`");
+    table_row(24, "`static-lib`   |   `libhello.a`   |   `hello.lib` on Windows, except `windows-gnu`");
+    table_row(25, "`shared-lib`   |   `libhello.so`; `libhello.dylib` on macOS   |   `hello.dll` on Windows, `libhello.wasm` on WebAssembly");
+    table_row(26, "`llvm-ir`   |   `hello.ll`   |   `hello.ll`");
+    paragraph(27, #string,oneline
+        \\`-o <file>` names the output exactly, with no prefix or suffix added,
+        \\and creates the directories on its path that do not exist. A Windows
+        \\DLL built for `windows-gnu` also gets an import library next to it,
+        \\such as `libhello.dll.a`, which its own progress line names.
+    );
+    code_block(28, "text", #string
+        \\$ glosso -o build/greeter hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link build/greeter (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done build/greeter  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    subheading(29, "Roots: `main`, libraries, and `--no-main`");
+    paragraph(30, #string,oneline
+        \\The compiler translates only what the build's roots reach. An
+        \\executable's root is `main` (see What a Program Is). A static or
+        \\shared library has no entry point: its roots are the procedures
+        \\marked `#c_call`, which use the C calling convention and are exported
+        \\under the procedure's name with a `glo_` prefix, so a C caller
+        \\declares `add` below as `glo_add`. A `main` in the file of a library
+        \\is not a root.
+    );
+    code_block(31, "glosso", #string
+        \\add :: (a: s32, b: s32) -> s32 #c_call {
+        \\    return a + b;
+        \\}
+    );
+    code_block(32, "text", #string
+        \\$ glosso --backend shared-lib add.glo
+        \\glosso: compile add.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link libadd.so (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done libadd.so  (backend=shared-lib, target=x86_64-pc-linux-gnu, -O1)
+        \\$ nm -D libadd.so | grep add
+        \\0000000000002700 T glo_add
+    );
+    paragraph(33, #string,oneline
+        \\An object file follows the executable's rule: when the file declares
+        \\`main`, the object holds `main` and what it reaches, and a `#c_call`
+        \\procedure that `main` does not call is left out; when it declares no
+        \\`main`, every procedure of the program's own files is compiled.
+        \\`--no-main` makes the `#c_call` procedures the roots of an
+        \\executable or object build in place of `main`. An executable built
+        \\that way needs a C `main` from elsewhere, for instance from an object
+        \\file handed to the linker:
+    );
+    code_block(34, "text", #string
+        \\$ cat cmain.c
+        \\#include <stdio.h>
+        \\int glo_add(int, int);
+        \\int main(void) { printf("%d\n", glo_add(2, 3)); return 0; }
+        \\$ clang -c cmain.c -o cmain.o
+        \\$ glosso --no-main --linker-arg cmain.o -o adder add.glo 2>/dev/null
+        \\$ ./adder
+        \\5
+    );
+    paragraph(35, #string,oneline
+        \\Calling Glosso from C, including how data types cross the boundary,
+        \\is described in `#foreign`, `#library`, and `#c_call` and in C Types,
+        \\Callbacks, and Bindgen. Without `--no-main`, an executable build of a
+        \\file that declares no `main` fails with `error: program has no
+        \\`main` function`.
+    );
+    subheading(36, "Running the program: `--run`");
+    paragraph(37, #string,oneline
+        \\`--run` builds a native executable, writes it to its usual output
+        \\path, and starts it. The program receives no arguments besides its
+        \\own path; arguments after `--` go to compile-time code. The compiler
+        \\then exits with the program's status. A nonzero status is reported on
+        \\one more line, `glosso: program exited with status N`, and a program
+        \\killed by a signal counts as 128 plus the signal's number. `--run`
+        \\works only with the `llvm` backend and only for the host target:
+    );
+    code_block(38, "text", #string
+        \\$ glosso --run --backend object hello.glo
+        \\glosso: --run is available only for --backend llvm
+        \\$ glosso --run --target x86_64-windows-gnu hello.glo
+        \\glosso: --run can only execute the host target (got x86_64-w64-windows-gnu)
+    );
+    paragraph(39, #string,oneline
+        \\The first is a rejected command line (status 2), the second a failed
+        \\build (status 1). A build restored from the artifact cache is run in
+        \\the same way.
+    );
+    subheading(40, "Optimization levels");
+    paragraph(41, #string,oneline
+        \\`-O` sets how much work goes into making the generated code fast or
+        \\small. It applies both to Glosso's own intermediate code and to
+        \\LLVM's code generation. When several levels are given, the last one
+        \\counts.
+    );
+    table_header(42, "Flag   —   Effect");
+    table_row(43, "`-O0`   |   No optimization; the most direct translation of the source.");
+    table_row(44, "`-O1`   |   The default: light per-procedure cleanup that keeps builds fast.");
+    table_row(45, "`-O2`, `-O3`   |   Full speed optimization; `-O3` inlines and vectorizes more aggressively.");
+    table_row(46, "`-Os`, `-Oz`   |   Optimize for size, `-Oz` more strongly; also removes unused sections and folds identical code where the target supports it.");
+    table_row(47, "`-Ozz`   |   `-Oz` that also strips the symbols the program does not need at run time.");
+    paragraph(48, #string,oneline
+        \\For a sense of scale, the hello world above is about 51 KB at `-O0`
+        \\and `-O1`, 19 KB at `-O2` and 15 KB at `-Ozz` on x86-64 Linux.
+    );
+    note(49, #string,oneline
+        \\Some runtime checks are compiled only at `-O0` and `-O1`. Casting an
+        \\integer that names no member to an enum stops the program with
+        \\`runtime check failed: the value is not a member of Color` at the
+        \\default level, but is not checked at `-O2`. Feature Gates and Runtime
+        \\Checks lists which checks depend on the level.
+    );
+    subheading(50, "Targets");
+    paragraph(51, #string,oneline
+        \\The program is compiled for the machine the compiler runs on unless
+        \\`--target <triple>` names another. A triple may be written
+        \\operating system first or processor first, as in `linux-x86_64-musl`
+        \\or `x86_64-windows-gnu`. `--print-targets` (also `--targets`) prints
+        \\the accepted forms and the common targets and exits. Target Triples
+        \\and Cross Builds describes the targets and what each needs, and the
+        \\program sees its target as the constant `OUT`.
+    );
+    subheading(52, "Finding the standard library and modules");
+    paragraph(53, #string,oneline
+        \\`--std <dir>` names the standard library directory. Without it, the
+        \\compiler takes the first of these directories that holds a standard
+        \\library, that is a `Prelude.glo` file or a `Prelude` directory: the
+        \\directory in the `GLOSSO_STD` environment variable, `std` in the
+        \\current directory, `std` next to the compiler executable or one or
+        \\two levels above it, then `/usr/local/glosso/std` and
+        \\`~/.local/glosso/std` (on Windows `%APPDATA%\glosso\std` and
+        \\`%USERPROFILE%\.local\glosso\std`). A directory named by `--std` must
+        \\hold a standard library itself.
+    );
+    paragraph(54, #string,oneline
+        \\A module name such as `"Math/Core"` is looked up first in the
+        \\standard library and then in each `--module-path` directory, in the
+        \\order the options were given. In each directory the module is either
+        \\the file `Math/Core.glo` or the directory `Math/Core` with a
+        \\`module.glo`; the first directory that has one of them supplies the
+        \\module, and having both in one directory is an error. Imports by path
+        \\do not use the search; Modules, Imports, and the Prelude describes the
+        \\difference.
+    );
+    code_block(55, "text", #string
+        \\$ glosso --std /tmp hello.glo
+        \\glosso: --std directory must contain Prelude.glo or Prelude/
+        \\$ glosso --module-path vendor hello.glo
+        \\glosso: --module-path must name an existing directory
+        \\// #import "Geometry";   found nowhere
+        \\error: cannot find module "Geometry" (searched: /usr/local/glosso/std, /home/user/project/libs)
+    );
+    subheading(56, "Other options");
+    paragraph(57, #string,oneline
+        \\`--use-std` imports the standard modules into the root file, as if
+        \\it began with an `#import` for each of them, except `String_Builder`,
+        \\`Lua` and `Gui`. It exists for testing the compiler and the library;
+        \\a program should import what it uses.
+    );
+    paragraph(58, #string,oneline
+        \\`--linker-arg <arg>` passes one argument to the final link, such as
+        \\an object file, a library or a linker flag. The option may be
+        \\repeated, and the arguments keep their order.
+    );
+    paragraph(59, #string,oneline
+        \\`--temp-allocator-size <bytes>` sets the size of the static first
+        \\block of the temporary allocator, 4 MiB by default. The value must be
+        \\a positive whole number of bytes, at most 1073741824 (1 GiB); The
+        \\Temporary Allocator describes what the size means.
+    );
+    code_block(60, "text", #string
+        \\$ glosso --temp-allocator-size 0 hello.glo
+        \\glosso: --temp-allocator-size must be a positive byte count
+        \\$ glosso --temp-allocator-size 2000000000 hello.glo
+        \\glosso: --temp-allocator-size must not exceed 1073741824 bytes
+    );
+    subheading(61, "Option summary");
+    table_header(62, "Option   —   Meaning");
+    table_row(63, "`-o <file>`   |   Output path, used as given.");
+    table_row(64, "`--backend <kind>`   |   `llvm` (executable, the default), `object`, `static-lib`, `shared-lib` or `llvm-ir`.");
+    table_row(65, "`--run`   |   Build a native executable for the host and run it; exit with its status.");
+    table_row(66, "`--target <triple>`   |   Compile for another target; see Target Triples and Cross Builds.");
+    table_row(67, "`--print-targets`, `--targets`   |   Print the target syntax and the common targets, and exit.");
+    table_row(68, "`-O0` … `-O3`, `-Os`, `-Oz`, `-Ozz`   |   Optimization level; `-O1` is the default.");
+    table_row(69, "`--std <dir>`   |   Standard library directory.");
+    table_row(70, "`--module-path <dir>`   |   Another directory to search for module names; repeatable.");
+    table_row(71, "`--no-main`   |   Make the `#c_call` procedures the roots instead of `main`.");
+    table_row(72, "`--use-std`   |   Import every standard module into the root file.");
+    table_row(73, "`--linker-arg <arg>`   |   Pass an argument to the final link; repeatable.");
+    table_row(74, "`--temp-allocator-size <bytes>`   |   Size of the temporary allocator's first block (default 4 MiB).");
+    table_row(75, "`--memory-sanitizer`, `--thread-sanitizer`   |   Instrument the program; see `--memory-sanitizer` and `--thread-sanitizer`.");
+    table_row(76, "`--cache-dir <dir>`   |   Use another cache directory; see Inside a Build: Stages and Caches.");
+    table_row(77, "`--print-cache-dir`   |   Print the cache directory in use and exit.");
+    table_row(78, "`--show-generated`   |   Print the cached files that hold `#insert` output.");
+    table_row(79, "`--color <auto|always|never>`   |   Color in diagnostics; `never` also hides the progress display.");
+    table_row(80, "`--unit-source UNIT=FILE`   |   Assign a source file to an ownership unit; see Who Can Use a Declaration: Visibility and Units.");
+    table_row(81, "`-- <args...>`   |   Command-line arguments for compile-time code; see Build Scripts and Compile-Time Arguments.");
+    table_row(82, "`-h`, `--help`   |   Print the option summary and exit.");
+}
+
+render_section_17 :: () {
+    paragraph(0, #string,oneline
+        \\A build is a fixed sequence of stages, and between builds the
+        \\compiler keeps several caches. Knowing both explains when an error
+        \\appears, when compile-time code runs, why a generic procedure that
+        \\nothing uses can hold a type error, and why a second build of an
+        \\unchanged program finishes at once. This chapter describes the stages
+        \\in order, then the cache directory and each cache in it: finished
+        \\artifacts, the parsed standard library, archives compiled from C, and
+        \\the text produced by `#insert`.
+    );
+    subheading(1, "The stages of a build");
+    paragraph(2, #string,oneline
+        \\On a terminal, the progress display names the stage a build is in.
+        \\The stages run in this order:
+    );
+    table_header(3, "Stage   —   What happens");
+    table_row(4, #string,oneline
+        \\`load`   |   Read the root file, the prelude and every module reached
+        \\through `#import`; split them into tokens and parse them; resolve
+        \\each module's names, imports and visibility.
+    );
+    table_row(5, #string,oneline
+        \\`check`   |   Type-check the program, choose typeclass instances,
+        \\instantiate generic procedures for the types they are used with, and
+        \\evaluate compile-time constants and `#insert`s.
+    );
+    table_row(6, "`lower`   |   Translate the checked program to Glosso's intermediate code.");
+    table_row(7, "`optimize`   |   Optimize the intermediate code.");
+    table_row(8, #string,oneline
+        \\`comptime`   |   Run the top-level `#comptime` declarations, with the
+        \\procedures they call, inside the compiler. A build without them skips
+        \\this stage.
+    );
+    table_row(9, "`codegen`   |   Generate machine code with LLVM, on several threads for a large program.");
+    table_row(10, "`link`   |   Link the objects into the artifact with the linker built into the compiler.");
+    paragraph(11, #string,oneline
+        \\A stage that finds errors reports them and ends the build, so the
+        \\later stages do not run and no artifact is written. A build script
+        \\that asks for no output ends after the `comptime` stage (see Build
+        \\Scripts and Compile-Time Arguments).
+    );
+    subheading(12, "What gets checked");
+    paragraph(13, #string,oneline
+        \\Every procedure of the program's own modules is type-checked, whether
+        \\or not anything calls it. A generic procedure is the exception: its
+        \\body is checked once for each set of types it is used with, so a type
+        \\error in a generic procedure that nothing instantiates goes
+        \\unreported. At the declaration the compiler only warns about
+        \\operators that the procedure's `where` clauses do not provide (see
+        \\Generic Procedures and `where` Clauses).
+    );
+    code_block(14, "glosso", #string
+        \\broken :: (x: $T) -> s32 { return "text"; }   // never used: no error
+        \\
+        \\main :: () {}
+    );
+    paragraph(15, #string,oneline
+        \\The standard library is checked by reach: a procedure of a standard
+        \\module is checked only when the program reaches it. This keeps the
+        \\cost of the large library proportional to what a program uses. Code
+        \\generation works the same way for every module: only what the
+        \\build's roots reach is translated (see Compiler Options and Output
+        \\Kinds).
+    );
+    subheading(16, "When compile-time code runs");
+    paragraph(17, #string,oneline
+        \\Compile-time code runs inside the compiler, on an interpreter for
+        \\Glosso's intermediate code, and at two different moments. A constant
+        \\such as `X :: #comptime f();` is evaluated while the program is
+        \\checked, as soon as the checker needs its value. A top-level
+        \\`#comptime` declaration is a build step: it runs in the `comptime`
+        \\stage, after the whole program has been checked and lowered. What
+        \\either prints appears among the compiler's own lines:
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\
+        \\f :: () -> s64 { print("constant evaluated\n"); return 1; }
+        \\X :: #comptime f();
+        \\
+        \\#comptime { print("top-level block runs\n"); }
+        \\
+        \\main :: () { print("{}\n", X); }
+    );
+    code_block(19, "text", #string
+        \\$ glosso order.glo
+        \\glosso: compile order.glo (target=x86_64-pc-linux-gnu)
+        \\constant evaluated
+        \\top-level block runs
+        \\glosso: link order (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done order  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    paragraph(20, #string,oneline
+        \\A type error anywhere in the program therefore stops the build before
+        \\any top-level `#comptime` declaration runs, while the constants
+        \\checked before the error have already been evaluated:
+    );
+    code_block(21, "text", #string
+        \\// main :: () { y : s32 = "no"; print("{}\n", X); }
+        \\glosso: compile order.glo (target=x86_64-pc-linux-gnu)
+        \\constant evaluated
+        \\error: got str, expected s32
+    );
+    paragraph(22, #string,oneline
+        \\Compile-Time Evaluation gives the rules for what runs when, and Build
+        \\Scripts and Compile-Time Arguments describes the command line of
+        \\compile-time code and its limits.
+    );
+    subheading(23, "The cache directory");
+    paragraph(24, #string,oneline
+        \\The compiler keeps four kinds of data between builds: finished
+        \\artifacts, the parsed syntax of standard library files, static
+        \\archives compiled from C, and the text produced by `#insert`. None of
+        \\them is needed for a build to succeed; deleting any of them costs
+        \\time and nothing else. All four live under one cache directory,
+        \\chosen by the first of these that applies:
+    );
+    table_header(25, "Source   —   Cache directory");
+    table_row(26, "`--cache-dir <dir>`   |   That directory; a relative path is relative to the working directory.");
+    table_row(27, "`GLOSSO_CACHE_DIR`   |   That directory, which must be an absolute path.");
+    table_row(28, "`XDG_CACHE_HOME`, if absolute (not on Windows or macOS)   |   `$XDG_CACHE_HOME/glosso`");
+    table_row(29, "The home directory   |   `~/.cache/glosso`; on macOS `~/Library/Caches/glosso`.");
+    table_row(30, #string,oneline
+        \\Windows   |   `glosso\cache` in the local application data folder.
+    );
+    paragraph(31, #string,oneline
+        \\`--print-cache-dir` prints the directory in use and exits. A relative
+        \\`GLOSSO_CACHE_DIR` is an error there, while a build with it runs
+        \\without any cache and says nothing about it.
+    );
+    code_block(32, "text", #string
+        \\$ glosso --print-cache-dir
+        \\/home/user/.cache/glosso
+        \\$ XDG_CACHE_HOME=/var/cache glosso --print-cache-dir
+        \\/var/cache/glosso
+        \\$ GLOSSO_CACHE_DIR=/tmp/glosso-cache glosso --print-cache-dir
+        \\/tmp/glosso-cache
+        \\$ glosso --cache-dir build/cache --print-cache-dir
+        \\/home/user/project/build/cache
+        \\$ GLOSSO_CACHE_DIR=cache glosso --print-cache-dir
+        \\glosso: cache directory unavailable: GLOSSO_CACHE_DIR must contain an absolute path
+    );
+    table_header(33, "Path in the cache directory   —   Contents");
+    table_row(34, "`native/artifacts/v1/`   |   The artifact cache: `<key>.artifact`, `.manifest`, `.stdout` and `.stderr` for each stored build.");
+    table_row(35, "`syntax/v1/`   |   The standard library's parse cache: a `.syntax` and a `.facts` file for each library file.");
+    table_row(36, "`native/v9/<name>/<target>/`   |   Static archives compiled from C sources, by `compile_c_archive` and for the compiler's own helper routines.");
+    table_row(37, "`native/compiler-rt-sources-v1/`   |   C sources of helper routines that the compiler writes out to compile them.");
+    table_row(38, "`generated/insert/v1/`   |   The text of each string `#insert`, in a file named after its SHA-256 hash.");
+    subheading(39, "The artifact cache");
+    paragraph(40, #string,oneline
+        \\Before compiling an executable, an object or a static library, the
+        \\compiler looks for a stored artifact of the same build. When there is
+        \\one and its inputs are unchanged, it copies the artifact to the
+        \\output path, prints one line, and does nothing else; with `--run` it
+        \\then starts the program. Shared libraries and LLVM IR are always
+        \\compiled.
+    );
+    code_block(41, "text", #string
+        \\$ glosso hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\$ glosso -o greeter hello.glo
+        \\glosso: restored greeter from the native artifact cache
+        \\$ touch hello.glo
+        \\$ glosso hello.glo
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    paragraph(42, #string,oneline
+        \\A stored build is found by a key computed from everything that
+        \\describes the build. The output path is not part of it, which is why
+        \\`-o greeter` above restored the build of `hello`. Any difference in
+        \\the following gives another key and a separate entry:
+    );
+    table_header(43, "Part of the key   —   Examples");
+    table_row(44, "Sources   |   The root file's absolute path, the standard library directory, `--module-path`, `--unit-source`.");
+    table_row(45, "Target and code   |   The full target, the backend, the `-O` level and size mode, a sanitizer, `--no-main`, `--use-std`, `--temp-allocator-size`.");
+    table_row(46, "Link   |   Every `--linker-arg`.");
+    table_row(47, "Compile-time code   |   The arguments after `--`, and the working directory, against which compile-time code resolves relative paths.");
+    table_row(48, "Output   |   Whether diagnostics are colored, so that replayed warnings look as they did; whether `GLOSSO_DEBUG_ALLOCATOR` is set.");
+    table_row(49, "Compiler   |   The path of the compiler executable.");
+    paragraph(50, #string,oneline
+        \\The inputs that are files are checked separately. With each artifact
+        \\the compiler stores a manifest of the files the build read: the
+        \\program's sources and the standard library modules it imported, the
+        \\C sources and headers of archives built at compile time, files named
+        \\by linker arguments, and the compiler executable. Each is recorded
+        \\with its size and modification time, and the entry is used only when
+        \\every file still has both. A file counts as changed when its time
+        \\changes, even with the same content, so `touch` above forced a
+        \\rebuild; rebuilding the compiler invalidates every entry it made.
+    );
+    subheading(51, "What a restore replays");
+    paragraph(52, #string,oneline
+        \\A restored build is not compiled, so none of its compile-time code
+        \\runs and nothing that code printed appears again:
+    );
+    code_block(53, "glosso", #string
+        \\#import "Io";
+        \\
+        \\compute :: () -> s64 {
+        \\    print("computing the answer\n");
+        \\    return 6 * 7;
+        \\}
+        \\
+        \\ANSWER :: #comptime compute();
+        \\
+        \\main :: () {
+        \\    print("{}\n", ANSWER);
+        \\}
+    );
+    code_block(54, "text", #string
+        \\$ glosso --run answer.glo
+        \\glosso: compile answer.glo (target=x86_64-pc-linux-gnu)
+        \\computing the answer
+        \\glosso: link answer (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done answer  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\42
+        \\$ glosso --run answer.glo
+        \\glosso: restored answer from the native artifact cache
+        \\42
+    );
+    paragraph(55, #string,oneline
+        \\That is correct for compile-time code that only computes values from
+        \\the program's sources and its `--` arguments, which the key and the
+        \\manifest cover. The warnings a build printed are the one thing stored
+        \\with it, and each restore prints them again before the `restored`
+        \\line:
+    );
+    code_block(56, "text", #string
+        \\$ glosso main.glo
+        \\warning: unreachable pattern - already covered by an earlier case
+        \\  --> main.glo:7:10
+        \\  |
+        \\7 |     case .Err(_); return 1;
+        \\  |          ^
+        \\glosso: restored main from the native artifact cache
+    );
+    subheading(57, "Builds that are not stored");
+    paragraph(58, #string,oneline
+        \\A build whose result depends on something a manifest cannot describe
+        \\is never stored, and is compiled every time:
+    );
+    bullet(59, #string,oneline
+        \\A build with a top-level `#comptime` declaration, which runs after
+        \\checking. Such code can print, write files and start other builds,
+        \\which a restore would skip. A `#comptime` constant, evaluated while
+        \\checking, does not count.
+    );
+    bullet(60, #string,oneline
+        \\A build whose compile-time evaluation reads or writes files, reads
+        \\the environment, asks the operating system, runs a process, or uses
+        \\the compiler services, except for build options, path arithmetic,
+        \\linker arguments and `compile_c_archive`, whose inputs are recorded.
+    );
+    bullet(61, #string,oneline
+        \\A build that runs the bindings generator in the form that writes its
+        \\output to a file, or binds a header that is not among the recorded
+        \\files.
+    );
+    bullet(62, #string,oneline
+        \\A build with `--show-generated`, which always compiles so that it
+        \\has generated files to list.
+    );
+    paragraph(63, #string,oneline
+        \\This program takes its version from a file at compile time. The file
+        \\is not part of any manifest, so a stored build would keep printing an
+        \\old version after the file changed; the compiler compiles it every
+        \\time instead.
+    );
+    code_block(64, "glosso", #string
+        \\#import "Io";
+        \\#import "File_System/File";
+        \\
+        \\VERSION :: #comptime -> str {
+        \\    if read_file("version.txt", 64) == {
+        \\    case .Ok(text); return text;
+        \\    case .Err; return "unknown";
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    print("version {}\n", VERSION);
+        \\}
+    );
+    code_block(65, "text", #string
+        \\$ glosso version.glo
+        \\glosso: compile version.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link version (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done version  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\$ glosso version.glo
+        \\glosso: compile version.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link version (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done version  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\$ ./version
+        \\version 1.4.2
+    );
+    paragraph(66, #string,oneline
+        \\Setting `GLOSSO_DISABLE_ARTIFACT_CACHE` to any value, even `0` or the
+        \\empty string, turns the artifact cache off: nothing is looked up and
+        \\nothing is stored.
+    );
+    subheading(67, "The standard library's parse cache");
+    paragraph(68, #string,oneline
+        \\Every build reads many standard library files, and they rarely
+        \\change. The compiler therefore keeps what it learned from each of
+        \\them in `syntax/v1`: a `.facts` file with what the first pass over the
+        \\tokens finds, such as the file's imports and operator declarations,
+        \\and a `.syntax` file with its parsed declarations. A library file
+        \\whose two entries are both valid is not even split into tokens. Only
+        \\files under the standard library directory are cached; the program's
+        \\own files are parsed on every build, and a file with a syntax error
+        \\is never stored.
+    );
+    paragraph(69, #string,oneline
+        \\An entry is used only when everything it was made from is equal: the
+        \\compiler executable (its path, size and modification time), the
+        \\file's path, its text, and the operator syntax it was parsed with.
+        \\Entries are named without the compiler, so a rebuilt compiler
+        \\overwrites the entries of the previous one instead of adding more.
+        \\For hello world the parse cache saves about 50 ms of a 420 ms build
+        \\on the machine used for this manual, while a restore from the
+        \\artifact cache takes about 30 ms. Setting `GLOSSO_DISABLE_PARSE_CACHE`
+        \\to any value turns the parse cache off.
+    );
+    subheading(70, "Archives compiled from C");
+    paragraph(71, #string,oneline
+        \\`compile_c_archive`, which compile-time code uses to build C sources
+        \\into a static library, stores each archive under
+        \\`native/v9/<name>/<target>/`, keyed by the sources, include
+        \\directories, definitions, arguments, target and the toolchain
+        \\environment, and reuses it while the recorded sources and headers are
+        \\unchanged (see Build Scripts and Compile-Time Arguments). The compiler
+        \\builds some helper routines of its own the same way, for example the
+        \\128-bit integer conversions on WebAssembly.
+        \\`GLOSSO_NATIVE_CACHE_DIR`, an absolute path, holds these archives
+        \\instead of `native/v9` when no `--cache-dir` is given.
+    );
+    paragraph(72, #string,oneline
+        \\The musl C library of a `linux-musl` target is not kept in the cache.
+        \\Its first build, described in Target Triples and Cross Builds,
+        \\installs it next to the compiler's copy of the musl sources, and
+        \\leaves its intermediate objects under `build/musl/` in the working
+        \\directory of that build, which can be deleted afterwards.
+    );
+    subheading(73, "Generated sources");
+    paragraph(74, #string,oneline
+        \\`#insert` with a string value parses that string as source code (see
+        \\`#code`, `#insert`, and `#expand`). So that diagnostics can point
+        \\into the text, the compiler first writes it to
+        \\`generated/insert/v1/<hash>.glo`, where the name is the SHA-256 hash
+        \\of the text. The same text always gives the same file, which is never
+        \\rewritten; it is created readable by its owner only. When there is no
+        \\usable cache directory, the location shown in diagnostics is the
+        \\virtual path `<generated:#insert/<hash>.glo>` instead.
+    );
+    code_block(75, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\GETTERS :: #comptime -> str {
+        \\    text := "";
+        \\    for name, index: .["red", "green", "blue"] {
+        \\        text = tprint("{}{}_index :: () -> s64 {{ return {}; }}\n", text, name, index);
+        \\    }
+        \\    return text;
+        \\}
+        \\
+        \\#insert GETTERS;
+        \\
+        \\main :: () {
+        \\    print("{} {} {}\n", red_index(), green_index(), blue_index());
+        \\}
+    );
+    code_block(76, "text", #string
+        \\0 1 2
+    );
+    paragraph(77, #string,oneline
+        \\`--show-generated` adds a line for each generated file the build
+        \\used:
+    );
+    code_block(78, "text", #string
+        \\$ glosso --show-generated getters.glo
+        \\glosso: compile getters.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: generated source ~/.cache/glosso/generated/insert/v1/f41df44cc76f15d4f2759a26e9d8e8aa1e4592ce994b008b37aa6ab0e5148f82.glo
+        \\glosso: link getters (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done getters  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+        \\$ cat ~/.cache/glosso/generated/insert/v1/f41df44cc76f15d4f2759a26e9d8e8aa1e4592ce994b008b37aa6ab0e5148f82.glo
+        \\red_index :: () -> s64 { return 0; }
+        \\green_index :: () -> s64 { return 1; }
+        \\blue_index :: () -> s64 { return 2; }
+    );
+    paragraph(79, #string,oneline
+        \\An error inside generated text points at a line of such a file, as
+        \\shown in Appendix A: Diagnostic Format.
+    );
+    subheading(80, "Clearing the caches");
+    paragraph(81, #string,oneline
+        \\Nothing removes old entries: the cache grows with each distinct
+        \\program, target and set of options, and generated files and old
+        \\archives stay. Deleting the cache directory, or any directory in it,
+        \\is safe while no compiler is running; the next build recreates what
+        \\it needs. Entries are written to a temporary file and renamed into
+        \\place, so several compilers can share one cache at the same time. A
+        \\project that wants its own cache passes `--cache-dir`; this manual's
+        \\build script uses `build/cache` in its repository.
+    );
+    table_header(82, "Variable   —   Effect");
+    table_row(83, "`GLOSSO_CACHE_DIR`   |   The cache directory; must be absolute. `--cache-dir` wins over it.");
+    table_row(84, "`GLOSSO_NATIVE_CACHE_DIR`   |   Where archives compiled from C are kept; must be absolute.");
+    table_row(85, "`GLOSSO_DISABLE_ARTIFACT_CACHE`   |   When set, builds are neither restored nor stored.");
+    table_row(86, "`GLOSSO_DISABLE_PARSE_CACHE`   |   When set, standard library files are parsed on every build.");
+    table_row(87, "`XDG_CACHE_HOME`   |   The parent of the default cache directory on Linux and other POSIX systems.");
+    paragraph(88, #string,oneline
+        \\The other variables the compiler reads are listed in Appendix E:
+        \\Environment, Toolchain, and Exit Codes.
+    );
+}
+
+render_section_18 :: () {
+    paragraph(0, #string,oneline
+        \\Every source file is a module. Its top-level declarations are private
+        \\to it unless they are marked `#public`, and it sees the public
+        \\declarations of other modules only through its own `#import`
+        \\directives, plus the prelude that every module receives without one.
+        \\This chapter describes what an import names and how the module is
+        \\found, import lists and namespace imports, what happens when two
+        \\imports provide the same name, re-exporting, import cycles, and the
+        \\contents of the prelude. Who may use a declaration once it is
+        \\imported is the subject of Who Can Use a Declaration: Visibility and
+        \\Units. For a first introduction, see Splitting a Program into
+        \\Modules.
+    );
+    subheading(1, "Files are modules");
+    paragraph(2, #string,oneline
+        \\A program is its root file together with every module reached from
+        \\it. In this pair of files, `geometry.glo` exports a type and a
+        \\procedure, and `main.glo` imports them by naming the file:
+    );
+    code_block(3, "glosso", #string
+        \\// geometry.glo
+        \\#import "Math/Core";
+        \\
+        \\#public {
+        \\Point :: struct { x: f64; y: f64; }
+        \\
+        \\distance :: (a: Point, b: Point) -> f64 {
+        \\    return sqrt(square(a.x - b.x) + square(a.y - b.y));
+        \\}
+        \\}
+        \\
+        \\square :: (value: f64) -> f64 { return value * value; }
+    );
+    code_block(4, "glosso", #string
+        \\// main.glo
+        \\#import "Io";
+        \\#import "geometry.glo";
+        \\
+        \\main :: () {
+        \\    a := Point.{ .x = 0, .y = 0 };
+        \\    b := Point.{ .x = 3, .y = 4 };
+        \\    print("{}\n", distance(a, b));
+        \\}
+    );
+    code_block(5, "text", #string
+        \\5
+    );
+    paragraph(6, #string,oneline
+        \\`square` has no `#public`, so it belongs to `geometry.glo` alone.
+        \\Using it from `main.glo` is an error that says why:
+    );
+    code_block(7, "text", #string
+        \\// print("{}\n", square(2.0));
+        \\error: unknown function square
+        \\note: 'square' is private to its defining source and module
+    );
+    paragraph(8, #string,oneline
+        \\`#import` is a top-level declaration. It may stand in a branch of a
+        \\top-level `#if`, but not inside a procedure, where it is `error:
+        \\unexpected directive 'import'`. The order of imports and declarations
+        \\in a file does not matter.
+    );
+    subheading(9, "What an import names");
+    paragraph(10, #string,oneline
+        \\The text of an `#import` is either a file path or a module name. It
+        \\is a path when it ends in `.glo`, starts with `./` or `../`, or is
+        \\absolute; a relative path is relative to the directory of the file
+        \\that contains the import. Anything else is a module name, which may
+        \\have several parts separated by `/`.
+    );
+    table_header(11, "Import   —   What is loaded");
+    table_row(12, "`#import \"geometry.glo\";`   |   The file next to the importing file.");
+    table_row(13, "`#import \"../common/log.glo\";`   |   A file relative to the importing file's directory.");
+    table_row(14, "`#import \"./shapes\";`   |   The directory `shapes` next to the importing file, through its `module.glo`.");
+    table_row(15, "`#import \"Math/Core\";`   |   The module `Math/Core`, searched for in the standard library and the `--module-path` directories.");
+    paragraph(16, #string,oneline
+        \\A module name is looked up first in the standard library and then in
+        \\each `--module-path` directory, in order; in each directory the
+        \\module is a file `Name.glo` or a directory `Name` with a
+        \\`module.glo` (see Compiler Options and Output Kinds). A directory
+        \\module's `module.glo` usually re-exports the directory's other files,
+        \\as described below, and the standard library's larger modules are
+        \\built this way:
+    );
+    code_block(17, "glosso", #string
+        \\// shapes/module.glo
+        \\#export "circle.glo";
+        \\#export "square.glo";
+    );
+    code_block(18, "glosso", #string
+        \\#import "./shapes";   // a path: the directory next to this file
+        \\#import "shapes";     // a name: found only under --std or --module-path
+    );
+    paragraph(19, #string,oneline
+        \\A file that does not exist is reported at the import with the path
+        \\the compiler tried; a module name that is found nowhere lists the
+        \\directories searched. The names the program expected from the
+        \\missing module are reported as unknown after that.
+    );
+    code_block(20, "text", #string
+        \\// #import "geometri.glo";
+        \\error: #import: cannot find source file "geometri.glo" (looked for /home/user/project/geometri.glo)
+        \\// #import "Geometry";
+        \\error: cannot find module "Geometry" (searched: /usr/local/glosso/std)
+    );
+    subheading(21, "Imports do not chain");
+    paragraph(22, #string,oneline
+        \\An import makes the imported module's public names visible in the
+        \\importing module and nowhere else. `geometry.glo` imports
+        \\`Math/Core`, but `main.glo` does not see `sqrt` through it:
+    );
+    code_block(23, "text", #string
+        \\// main.glo calls sqrt(16.0) without importing Math/Core
+        \\error: unknown function sqrt
+        \\note: 'sqrt' is not available through this module's imports; import its module directly, or include it in the import selector
+    );
+    paragraph(24, #string,oneline
+        \\A module that wants its importers to see another module's names
+        \\re-exports them, as described under Re-exporting below.
+    );
+    subheading(25, "Import lists");
+    paragraph(26, #string,oneline
+        \\A list in parentheses after the module brings only the listed names:
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\#import "Math/Core" (sqrt);
+        \\#import "geometry.glo" (Point, distance);
+        \\
+        \\main :: () {
+        \\    p := Point.{ .x = 1, .y = 1 };
+        \\    print("{} {}\n", sqrt(2.0), distance(p, .{ .x = 4, .y = 5 }));
+        \\}
+    );
+    code_block(28, "text", #string
+        \\1.41421 5
+    );
+    paragraph(29, #string,oneline
+        \\Listing a typeclass brings its members too, so its methods and
+        \\operators can be called: `#import "Math/Core" (Floating);` makes
+        \\`sqrt`, `exp` and the other members of `Floating` available, as
+        \\procedures and as methods. A member whose typeclass is not listed is
+        \\reported with that typeclass's name. An operator is listed by its
+        \\quoted name, such as `'<->'` (see Encoding, Comments, and Tokens).
+        \\An empty list, `#import "instances.glo" ();`, brings no names at
+        \\all; the module is still loaded, and the typeclass instances it
+        \\declares become available.
+    );
+    code_block(30, "text", #string
+        \\// #import "Math/Core" (Fractional);   then x.sqrt()
+        \\error: typeclass member 'Floating.sqrt' is not available through this module's imports
+        \\note: list the member or its class in the import: #import "Module" (Class)
+        \\// #import "geometry.glo" (square);
+        \\error: #import names unknown public declaration 'square' in module "geometry.glo"
+        \\note: public names: Point, distance
+    );
+    subheading(31, "Namespace imports");
+    paragraph(32, #string,oneline
+        \\`Name :: #import "Module";` binds the module to a name instead of
+        \\bringing its declarations into scope. The declarations are then
+        \\written with that name as a prefix:
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\Geo :: #import "geometry.glo";
+        \\
+        \\main :: () {
+        \\    a := Geo.Point.{ .x = 0, .y = 0 };
+        \\    b := Geo.Point.{ .x = 6, .y = 8 };
+        \\    print("{}\n", Geo.distance(a, b));
+        \\}
+    );
+    code_block(34, "text", #string
+        \\10
+    );
+    paragraph(35, #string,oneline
+        \\A namespace import also takes an import list, which limits what the
+        \\prefix reaches: after `Geo :: #import "geometry.glo" (Point);`,
+        \\`Geo.distance` is an unknown function. A namespace import adds no
+        \\operators to the importing module, because an operator has no place
+        \\for a prefix between its operands; Encoding, Comments, and Tokens
+        \\describes how operators travel through imports. A namespace binding
+        \\can itself be `#public`: a module that declares `#public Geo ::
+        \\#import "geometry.glo";` lets its importers write `Geo.distance`.
+    );
+    subheading(36, "When two names collide");
+    paragraph(37, #string,oneline
+        \\When two imported modules export the same name, using it unqualified
+        \\is ambiguous. The same happens when a module declares a top-level
+        \\name that one of its imports also provides; only prelude names give
+        \\way to a module's own declarations, as described at the end of this
+        \\chapter.
+    );
+    code_block(38, "glosso", #string
+        \\// two_a.glo
+        \\#public describe :: () -> str { return "from a"; }
+    );
+    code_block(39, "glosso", #string
+        \\// two_b.glo
+        \\#public describe :: () -> str { return "from b"; }
+    );
+    code_block(40, "text", #string
+        \\// #import "two_a.glo"; #import "two_b.glo"; ... describe()
+        \\error: ambiguous imported name 'describe'
+        \\note: candidate declared in two_a.glo
+        \\note: candidate declared in two_b.glo
+        \\note: qualify the name with its module alias, or select a single import
+    );
+    paragraph(41, #string,oneline
+        \\Binding the modules to names, or listing the one name wanted from
+        \\each module, removes the ambiguity:
+    );
+    code_block(42, "glosso", #string
+        \\#import "Io";
+        \\A :: #import "two_a.glo";
+        \\B :: #import "two_b.glo";
+        \\
+        \\main :: () {
+        \\    print("{} {}\n", A.describe(), B.describe());
+        \\}
+    );
+    code_block(43, "text", #string
+        \\from a from b
+    );
+    subheading(44, "Re-exporting");
+    paragraph(45, #string,oneline
+        \\`#export "Module";` imports a module and also makes its public names
+        \\part of the exporting module's public names, so importers of the
+        \\exporting module see both. It takes a list like `#import`, and then
+        \\re-exports only the listed names. Operators are re-exported the same
+        \\way.
+    );
+    code_block(46, "glosso", #string
+        \\// reexp.glo
+        \\#export "geometry.glo" (Point);
+        \\
+        \\#public origin :: () -> Point { return .{ .x = 0, .y = 0 }; }
+    );
+    paragraph(47, #string,oneline
+        \\A module that imports `reexp.glo` can use `origin` and `Point`, but
+        \\not `distance`, which `reexp.glo` did not list; for it, `distance` is
+        \\"not available through this module's imports" as in the `sqrt` case
+        \\above.
+    );
+    subheading(48, "Import cycles");
+    paragraph(49, #string,oneline
+        \\Modules may import each other. A cycle is resolved as a whole, so two
+        \\modules can call each other's procedures and share each other's
+        \\global variables:
+    );
+    code_block(50, "glosso", #string
+        \\// b.glo
+        \\#import "a.glo";
+        \\
+        \\#public from_b :: () -> s32 { counter += 1; return 10; }
+    );
+    code_block(51, "glosso", #string
+        \\// a.glo
+        \\#import "b.glo";
+        \\
+        \\#public {
+        \\counter: s32 = 0;
+        \\from_a :: () -> s32 { return counter + from_b(); }
+        \\}
+    );
+    paragraph(52, #string,oneline
+        \\A program that imports `a.glo` and calls `from_a()` gets 10, after
+        \\which `counter` is 1. Within a cycle, as anywhere else, a declaration
+        \\may be used above the line that declares it.
+    );
+    subheading(53, "The prelude");
+    paragraph(54, #string,oneline
+        \\The standard library module `Prelude` is imported into every module
+        \\without an `#import`. It holds what the language itself is defined in
+        \\terms of: the typeclasses behind operators and `for` loops, the
+        \\helpers of optional and result values, dynamic arrays, the protocols
+        \\for `?` and for `main`'s result, and a few procedures that every
+        \\program may need.
+    );
+    code_block(55, "glosso", #string
+        \\main :: () {
+        \\    values: [..]s64;
+        \\    defer values.free();
+        \\    values.push(3, 1, 2);
+        \\    last := values.pop();
+        \\    maybe: ?s64 = null;
+        \\    fallback := maybe.unwrap_or(last);
+        \\    if fallback != 2 exit(1);
+        \\}
+    );
+    paragraph(56, #string,oneline
+        \\Nothing in that program is imported: dynamic arrays with `push`,
+        \\`pop` and `free`, optional values with `unwrap_or`, and `exit` all
+        \\come from the prelude.
+    );
+    table_header(57, "Part   —   Contents");
+    table_row(58, "Operators   |   One typeclass per operator (arithmetic, wrapping and saturating arithmetic, bitwise, comparison, indexing, ranges) and their instances for the primitive types; see Operator Declarations.");
+    table_row(59, "Equality and order   |   `PartialEq`, `Eq`, `PartialOrd`, `Ordering`, `Num`, `AsView`.");
+    table_row(60, "Iteration   |   `Iterable`, `PointerIterable`, and the iterators `Iter`, `PointerIter`, `PointerIterMut` and `Drain` that `for` loops expand through.");
+    table_row(61, "Arrays   |   The operations of dynamic arrays `[..]T` and views `[]T`: `push`, `pop`, `swap_remove`, `drain`, `free` and more.");
+    table_row(62, "Optional and result values   |   Helpers for `?T` and `E!T` such as `unwrap_or`, and their `Try` instances.");
+    table_row(63, "Protocols   |   `Try`, `Try_Branch` and `Propagate` for `?`; `Termination` for `main`; `Freeable` and `free`; `Show` and `FromString`; the thread traits `Sync` and `Send`.");
+    table_row(64, "Target description   |   `Target_OS`, `Target_CPU`, `Target_ABI` and endianness, with the build's own target.");
+    table_row(65, "Procedures   |   `get_cmdline_args`, `exit`, and the `Source_Location` produced by `#source_location`.");
+    paragraph(66, #string,oneline
+        \\Input and output, text formatting and reflection live in their own
+        \\modules. `print` is in `Io`; `tprint`, `format` and the formatting
+        \\machinery are in `Format`; `size_of`, `type_of` and the other type
+        \\queries are in `Meta`. Using one of them without its import is an
+        \\error:
+    );
+    code_block(67, "text", #string
+        \\// main :: () { size := size_of(s64); }
+        \\error: unknown function size_of
+        \\note: 'size_of' is not available through this module's imports; import its module directly, or include it in the import selector
+    );
+    subheading(68, "Shadowing prelude names");
+    paragraph(69, #string,oneline
+        \\Unlike the names of other imports, the prelude's names give way to a
+        \\module's own top-level declarations. Declaring `exit` makes every
+        \\unqualified `exit` in that module refer to the local procedure:
+    );
+    code_block(70, "glosso", #string
+        \\#import "Io";
+        \\
+        \\exit :: (code: ssize) {
+        \\    print("my exit {}\n", code);
+        \\}
+        \\
+        \\main :: () {
+        \\    exit(4);
+        \\    print("still running\n");
+        \\}
+    );
+    code_block(71, "text", #string
+        \\my exit 4
+        \\still running
+    );
+    paragraph(72, #string,oneline
+        \\Appendix D: Standard Library Modules lists the other modules of the
+        \\standard library, and the library reference documents every public
+        \\name.
+    );
+}
+
+render_section_19 :: () {
+    paragraph(0, #string,oneline
+        \\Every top-level declaration is private to the source file that
+        \\declares it. A visibility directive in front of a declaration names a
+        \\wider audience, and only modules in that audience may use the name.
+        \\Visibility does not bring names into a module: a module reaches
+        \\another module's names through its own imports, described in Modules,
+        \\Imports, and the Prelude, and visibility decides which of those names
+        \\it may use. This chapter covers the four audiences, how they apply to
+        \\fields, members and methods, the rule for public interfaces, the
+        \\ownership units that `#public,unit` refers to, and `#public,to`.
+    );
+    table_header(1, "Directive   —   Who may use the declaration");
+    table_row(2, "none, or `#private`   |   The declaring file only.");
+    table_row(3, "`#public`   |   Every module.");
+    table_row(4, "`#public,unit`   |   The modules in the declaring file's ownership unit.");
+    table_row(5, #string,oneline
+        \\`#public,to("module", ...)`   |   The declaring module and the listed
+        \\modules.
+    );
+    subheading(6, "Marking declarations");
+    paragraph(7, #string,oneline
+        \\A directive prefixes one named declaration: a procedure, a type, a
+        \\typeclass, a constant, a global variable, or a namespace import such
+        \\as `#public Net :: #import "Io";`. A directive followed by braces
+        \\applies to every declaration inside them. Such a group is
+        \\transparent: it adds no namespace, it may contain groups and prefixed
+        \\declarations of its own, and after its closing brace the audience in
+        \\force before it applies again. In this module, everything in the
+        \\group is public except `LIMIT`:
+    );
+    code_block(8, "glosso", #string
+        \\// account.glo
+        \\#public {
+        \\Account :: struct {
+        \\    owner: str;
+        \\    #private balance: s64;
+        \\}
+        \\
+        \\Status :: enum { Open; Frozen; #private Audited; }
+        \\
+        \\open :: (owner: str) -> Account {
+        \\    return .{ .owner = owner, .balance = 0 };
+        \\}
+        \\
+        \\#private LIMIT :: 1000;
+        \\}
+        \\
+        \\Account ::: {
+        \\    #public deposit :: (*#self, amount: s64) -> bool {
+        \\        if #self.balance + amount > LIMIT return false;
+        \\        #self.balance += amount;
+        \\        return true;
+        \\    }
+        \\
+        \\    #public balance_of :: (#self) -> s64 { return #self.balance; }
+        \\
+        \\    audit :: (#self) -> bool { return #self.balance >= 0; }
+        \\}
+    );
+    code_block(9, "glosso", #string
+        \\// main.glo
+        \\#import "Io";
+        \\#import "account.glo";
+        \\
+        \\main :: () {
+        \\    a := open("ada");
+        \\    a.deposit(300);
+        \\    print("{} has {}\n", a.owner, a.balance_of());
+        \\}
+    );
+    code_block(10, "text", #string
+        \\ada has 300
+    );
+    paragraph(11, #string,oneline
+        \\A name outside its audience is reported where it is used, with a note
+        \\that says why:
+    );
+    code_block(12, "text", #string
+        \\// x := LIMIT;
+        \\error: unknown identifier LIMIT
+        \\note: 'LIMIT' is private to its defining source and module
+        \\// ok := a.audit();
+        \\error: 'audit' is private to its defining source and module
+        \\note: declared here
+    );
+    subheading(13, "Fields and members");
+    paragraph(14, #string,oneline
+        \\Struct fields, enum members and union variants are public by default,
+        \\which makes them as visible as their type. `#private` on a member, or
+        \\on a brace group of members, hides it outside the declaring file,
+        \\where it cannot be read, written or have its address taken.
+    );
+    paragraph(15, #string,oneline
+        \\Code that cannot access a field cannot build a value of the struct
+        \\either: not with a literal, and not by default initialization, which
+        \\would have to fill the field. The declaring module provides a
+        \\procedure such as `open` instead. Copying an existing value and
+        \\assigning its accessible fields remain allowed.
+    );
+    code_block(16, "text", #string
+        \\// b := a.balance;
+        \\error: 'balance' is private to its defining source and module
+        \\// fresh: Account;
+        \\error: 'balance' is private to its defining source and module
+        \\// fresh := Account.{ .owner = "bob" };
+        \\error: 'balance' is private to its defining source and module
+    );
+    paragraph(17, #string,oneline
+        \\A private enum member or union variant cannot be named outside its
+        \\file, and a switch over the type there needs a catch-all case,
+        \\because it cannot list the hidden member:
+    );
+    code_block(18, "text", #string
+        \\// s := Status.Audited;
+        \\error: 'Audited' is private to its defining source and module
+        \\// if s == { case .Open; return "open"; case .Frozen; return "frozen"; }
+        \\error: non-exhaustive switch
+        \\note: missing case: _
+        \\note: cover them, or add 'else' or '#partial'
+    );
+    subheading(19, "Methods");
+    paragraph(20, #string,oneline
+        \\Inherent methods (see Inherent Methods, Member Access, and Call
+        \\Syntax) are private by default even when their type is public, which
+        \\is why `audit` above is private. A directive after `:::` sets the
+        \\default for a whole block, and a member can still override it:
+    );
+    code_block(21, "glosso", #string
+        \\// box.glo
+        \\#public Box :: struct { #private value: s64; }
+        \\#public make_box :: () -> Box { return .{ .value = 5 }; }
+        \\
+        \\Box ::: #public {
+        \\    get :: (#self) -> s64 { return #self.value; }
+        \\    #private reset :: (*#self) { #self.value = 0; }
+        \\}
+        \\
+        \\#public peek :: (thing: $T) -> s64 { return thing.value; }
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\#import "box.glo";
+        \\
+        \\main :: () {
+        \\    b := make_box();
+        \\    print("{} {}\n", b.get(), peek(b));
+        \\}
+    );
+    code_block(23, "text", #string
+        \\5 5
+    );
+    paragraph(24, #string,oneline
+        \\`get` is public through the block's default and `reset` stays
+        \\private. `peek` shows another rule: generic procedures and macros
+        \\keep the access of the module that defines them, so a public generic
+        \\procedure may read a private field even when it is instantiated for a
+        \\caller that could not.
+    );
+    subheading(25, "Public interfaces");
+    paragraph(26, #string,oneline
+        \\A declaration cannot expose a type whose audience is narrower than
+        \\its own. The parameter and result types of a public procedure, the
+        \\field types of a public struct and the target of a public alias all
+        \\have to be at least as visible:
+    );
+    code_block(27, "text", #string
+        \\// Hidden :: struct { x: s64; }
+        \\// #public expose :: (h: Hidden) {}
+        \\error: interface exposes less-visible type 'Hidden'
+        \\note: type has a narrower audience here
+    );
+    paragraph(28, #string,oneline
+        \\A private field may have a private type, since the field itself is
+        \\not part of the interface.
+    );
+    subheading(29, "Ownership units");
+    paragraph(30, #string,oneline
+        \\An ownership unit is a set of source files, decided by the build
+        \\rather than by the source. It matters in two places: a
+        \\`#public,unit` declaration is visible to the modules of its unit, and
+        \\only code in a type's own unit may add inherent methods to the type.
+        \\Without `--unit-source` options, the compiler assigns the units like
+        \\this:
+    );
+    table_header(31, "Source   —   Unit");
+    table_row(32, "The standard library   |   The reserved unit `builtin:std`.");
+    table_row(33, "The root file, and every file in its directory or below it   |   The project unit.");
+    table_row(34, "A file under a `--module-path` directory   |   One unit for each entry of that directory, so all of `libs/geometry/` is one unit.");
+    table_row(35, "Any other file   |   A unit of its own.");
+    paragraph(36, #string,oneline
+        \\A library found through `--module-path` is therefore a unit of its
+        \\own. Its `#public,unit` names are hidden from the project, and the
+        \\project cannot add methods to its types:
+    );
+    code_block(37, "glosso", #string
+        \\// libs/geometry/shapes.glo
+        \\#public Square :: struct { side: s64; }
+        \\#public,unit UNIT_SCALE :: 7;
+        \\#public area :: (s: Square) -> s64 { return s.side * s.side; }
+    );
+    code_block(38, "glosso", #string
+        \\// app/main.glo
+        \\#import "Io";
+        \\#import "geometry/shapes";
+        \\
+        \\Square ::: {
+        \\    #public doubled :: (#self) -> Square {
+        \\        return .{ .side = #self.side * 2 };
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    s := Square.{ .side = 3 };
+        \\    print("{} {}\n", area(s), UNIT_SCALE);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\$ glosso --module-path libs app/main.glo
+        \\error: inherent methods for 'Square' belong to ownership unit 'dependency:libs/geometry'; this block belongs to 'project:app'
+        \\error: unknown identifier UNIT_SCALE
+        \\note: 'UNIT_SCALE' is visible only within ownership unit 'dependency:libs/geometry'
+    );
+    paragraph(40, #string,oneline
+        \\The unit names in diagnostics hold absolute paths, shortened here.
+        \\`--unit-source UNIT=FILE` assigns a file to a named unit, and
+        \\repeating the option builds up the mapping. Once any file is
+        \\assigned, every source of the program outside the standard library
+        \\needs an assignment, and the build names each file that lacks one
+        \\before reporting what the missing assignment hides:
+    );
+    code_block(41, "text", #string
+        \\$ glosso --module-path libs --unit-source geo=app/main.glo \
+        \\      --unit-source geo=libs/geometry/shapes.glo --run app/main.glo
+        \\9 7
+        \\$ glosso --module-path libs --unit-source app=app/main.glo app/main.glo
+        \\error: source libs/geometry/shapes.glo has no ownership unit; add --unit-source UNIT=FILE (explicit ownership mapping requires every non-standard source)
+        \\error: unknown identifier UNIT_SCALE
+    );
+    paragraph(42, #string,oneline
+        \\Unit names beginning with `builtin:` are reserved, a file belongs to
+        \\one unit only, and standard library files cannot be assigned:
+    );
+    code_block(43, "text", #string
+        \\$ glosso --unit-source builtin:x=app/main.glo app/main.glo
+        \\glosso: ownership unit names beginning with 'builtin:' are reserved
+        \\$ glosso --unit-source a=app/main.glo --unit-source b=app/main.glo app/main.glo
+        \\glosso: source app/main.glo is already assigned to ownership unit 'a'
+        \\// --unit-source a=std/Io.glo
+        \\error: standard-library source std/Io.glo cannot be assigned to a user ownership unit
+    );
+    note(44, #string,oneline
+        \\The project unit is taken from the root file's directory as it is
+        \\written on the command line. For a root file given without a
+        \\directory, as in `glosso main.glo`, every file outside the standard
+        \\library and the `--module-path` directories lands in the
+        \\project unit, including files such as `../shared/util.glo` that the
+        \\table gives a unit of their own, and the artifact cache does not tell
+        \\the two spellings apart. Writing `./main.glo` gives the rule above.
+    );
+    subheading(45, "Naming the recipients: `#public,to`");
+    paragraph(46, #string,oneline
+        \\`#public,to(...)` lists the modules that may use a declaration, in the
+        \\notation of `#import`: a module name, or a path relative to the
+        \\declaring file. Every recipient has to exist. The declaring module
+        \\always has access, and a recipient still imports the declaring module
+        \\to see the name.
+    );
+    code_block(47, "glosso", #string
+        \\// store.glo
+        \\#public Store :: struct { items: s64; }
+        \\
+        \\#public,to("app.glo")
+        \\empty_store :: (store: *Store) { store.items = 0; }
+    );
+    code_block(48, "glosso", #string
+        \\// app.glo
+        \\#import "Io";
+        \\#import "store.glo";
+        \\
+        \\main :: () {
+        \\    store := Store.{ .items = 4 };
+        \\    empty_store(&store);
+        \\    print("{}\n", store.items);
+        \\}
+    );
+    code_block(49, "text", #string
+        \\0
+    );
+    paragraph(50, #string,oneline
+        \\Any other module that imports `store.glo` sees `Store` but not
+        \\`empty_store`, and a recipient that does not exist is reported at the
+        \\directive:
+    );
+    code_block(51, "text", #string
+        \\// report.glo: #import "store.glo"; ... empty_store(&store);
+        \\error: unknown function empty_store
+        \\note: 'empty_store' is private to its defining source and module
+        \\// #public,to("nothere.glo") f :: () {}
+        \\error: #public,to recipient "nothere.glo": #import: cannot find source file "nothere.glo" (looked for /home/user/project/nothere.glo)
+    );
+    subheading(52, "Rules");
+    paragraph(53, #string,oneline
+        \\A declaration carries at most one directive, and `#public` at most one
+        \\audience. The visibility of an inherent block goes after `:::`, not
+        \\before the type. Locals and parameters have no visibility. A name
+        \\that begins with `_` is not hidden by its spelling; only the
+        \\directives decide. Visibility concerns Glosso names only: a private
+        \\`#c_call` procedure keeps its exported symbol (see `#foreign`,
+        \\`#library`, and `#c_call`), and `main` needs no `#public` (see What a
+        \\Program Is).
+    );
+    code_block(54, "text", #string
+        \\// main :: () { #public x := 1; }
+        \\error: visibility directives are not allowed on local statements or declarations
+        \\// #public #private helper :: () {}
+        \\error: a declaration or member may have only one visibility prefix
+        \\// #public Account ::: { ... }
+        \\error: visibility cannot prefix an anonymous implementation block; place visibility groups inside an inherent method block
+        \\// #private,unit helper :: () {}
+        \\error: #private does not accept audience modifiers
+    );
+}
+
+render_section_20 :: () {
+    paragraph(0, #string,oneline
+        \\Compile-time code can do more than compute constants. It receives a
+        \\command line of its own, and through the `Compiler` module it can
+        \\start nested compilations, run commands, compile C code and locate
+        \\headers and libraries. A Glosso file whose compile-time code builds
+        \\other things is a build script, so a project needs no separate build
+        \\language. This chapter describes the compile-time command line, the
+        \\`Compiler` module's services, how build scripts interact with the
+        \\artifact cache, and the limits on compile-time execution. When
+        \\compile-time code runs at all is described in Compile-Time Evaluation
+        \\and in Inside a Build: Stages and Caches.
+    );
+    subheading(1, "The compile-time command line");
+    paragraph(2, #string,oneline
+        \\Everything after `--` on the compiler's command line is the command
+        \\line of compile-time code. Compile-time code reads it with
+        \\`get_cmdline_args()`, the procedure a running program uses for its
+        \\own arguments (see What a Program Is). Unlike a program's own
+        \\arguments, the list holds only the arguments, without a program path
+        \\in front, and it is empty when there is no `--`.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#comptime {
+        \\    args := get_cmdline_args();
+        \\    print("compile time sees {} arguments\n", args.count);
+        \\    for arg: args print("  {}\n", arg);
+        \\}
+        \\
+        \\main :: () {}
+    );
+    code_block(4, "text", #string
+        \\$ glosso ctargs.glo -- first second 2>/dev/null
+        \\compile time sees 2 arguments
+        \\  first
+        \\  second
+    );
+    paragraph(5, #string,oneline
+        \\Any compile-time code can read the list, a constant as well as a
+        \\top-level declaration, so the arguments can configure the program
+        \\being built:
+    );
+    code_block(6, "glosso", #string
+        \\#import "Io";
+        \\
+        \\choose_mode :: () -> str {
+        \\    args := get_cmdline_args();
+        \\    if args.count > 0 return args[0];
+        \\    return "debug";
+        \\}
+        \\
+        \\MODE :: #comptime choose_mode();
+        \\
+        \\main :: () {
+        \\    print("built in {} mode\n", MODE);
+        \\}
+    );
+    code_block(7, "text", #string
+        \\$ glosso mode.glo 2>/dev/null; ./mode
+        \\built in debug mode
+        \\$ glosso mode.glo -- release 2>/dev/null; ./mode
+        \\built in release mode
+        \\$ glosso mode.glo
+        \\glosso: restored mode from the native artifact cache
+    );
+    paragraph(8, #string,oneline
+        \\The arguments are part of the artifact cache's key, so the third
+        \\build, with no arguments again, restored the first one instead of
+        \\reusing the release build. With `--run`, the arguments after `--`
+        \\still go to compile-time code, and the program is started without
+        \\arguments.
+    );
+    subheading(9, "A first build script");
+    paragraph(10, #string,oneline
+        \\A build script does its work in a top-level `#comptime` declaration,
+        \\a build step that runs once per build, and produces no program of its
+        \\own. This one builds `hello.glo` with optimization into `bin`:
+    );
+    code_block(11, "glosso", #string
+        \\// hello.glo
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    print("hello from the built program\n");
+        \\}
+    );
+    code_block(12, "glosso", #string
+        \\// build.glo
+        \\#import "Io";
+        \\#import "Compiler";
+        \\#import "Typeclass/Error";
+        \\
+        \\#comptime {
+        \\    set_build_options_dc(.do_output = false);
+        \\
+        \\    workspace := Workspace.create("hello");
+        \\    options := workspace.get_build_options();
+        \\    options.output_path = "bin";
+        \\    options.set_optimization(.Optimized);
+        \\    options.set_build_options(workspace);
+        \\
+        \\    if add_build_file("hello.glo", workspace) == {
+        \\        case .Ok(output);
+        \\            print("{}", output);
+        \\        case .Err(failure);
+        \\            report_error(failure);
+        \\            exit(1);
+        \\    }
+        \\}
+    );
+    code_block(13, "text", #string
+        \\$ glosso build.glo
+        \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link bin/hello (target=x86_64-pc-linux-gnu, -O2)
+        \\glosso: done bin/hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O2)
+        \\$ bin/hello
+        \\hello from the built program
+        \\$ glosso build.glo
+        \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: restored bin/hello from the native artifact cache
+    );
+    paragraph(14, #string,oneline
+        \\`set_build_options_dc(.do_output = false)` tells the compilation in
+        \\progress, the one running the script, to stop after its compile-time
+        \\steps and write nothing. The script then needs no `main`. (`_dc`
+        \\stands for "during compile"; the setting applies to the current
+        \\compilation only.) `add_build_file` compiles `hello.glo` in a child
+        \\compiler process, waits for it, and returns what the child printed,
+        \\its standard output followed by its standard error, which the script
+        \\prints. The second run shows the two levels of caching: the script
+        \\has a top-level `#comptime`, so it runs on every build, while the
+        \\child compilation is an ordinary build that the artifact cache
+        \\restores when nothing has changed.
+    );
+    subheading(15, "Workspaces and build options");
+    paragraph(16, #string,oneline
+        \\The settings of a nested compilation are a `Build_Options` value held
+        \\by the compiler in a workspace. `Workspace.create(name)` makes a
+        \\workspace with default options and returns its handle.
+        \\`get_build_options` returns a copy of the options, which the script
+        \\changes through its fields or its `set_*` and `add_*` methods, and
+        \\`set_build_options(workspace)` installs the copy; edits to the copy
+        \\have no effect until then. A call that names no workspace uses a
+        \\shared implicit one, the handle `-1`. The defaults build an
+        \\executable for the target of the running compilation, with the
+        \\child's own optimization default.
+    );
+    table_header(17, "Field   —   Meaning   —   Method");
+    table_row(18, "`output_type`   |   What to produce: `Executable` (the default), `Object_File`, `LLVM_IR`, `Static_Library`, `Shared_Library`, or `No_Output`, which only leaves out `-o`   |   —");
+    table_row(19, "`output_path`, `output_executable_name`   |   Directory and name of the artifact; an empty name means the source file's name without `.glo`   |   —");
+    table_row(20, "`optimization_level`   |   `Debug`, `Very_Debug`, `Optimized` and `Very_Optimized` are `-O0` to `-O3`; `Optimized_Small`, `Optimized_Very_Small` and `Optimized_Tiny` are `-Os`, `-Oz`, `-Ozz`; `Default` passes no flag   |   `set_optimization`");
+    table_row(21, "`target`   |   An `Output_Target`; all zero, the default, means the current target   |   `set_target`");
+    table_row(22, "`import_path`   |   Extra `--module-path` directories   |   `add_module_path`");
+    table_row(23, "`compiler_args`, `linker_args`   |   Raw compiler arguments; arguments passed to the linker one by one   |   `add_compiler_arg`, `add_linker_arg`, `add_linker_args`");
+    table_row(24, "`compile_time_command_line`   |   Arguments after `--` for the child's compile-time code   |   —");
+    table_row(25, "`memory_sanitizer`, `thread_sanitizer`, `no_main`   |   The flags of the same names   |   `set_memory_sanitizer`, `set_thread_sanitizer`, `set_no_main`");
+    table_row(26, "`temp_allocator_size`, `color`, `backend`   |   Temporary arena size; color of the captured diagnostics; an explicit backend instead of one derived from `output_type`   |   `set_temp_allocator_size`, `set_color`, `set_backend`");
+    paragraph(27, #string,oneline
+        \\`Build_Options` also has the fields `intermediate_path`, `do_output`,
+        \\`write_added_strings` and `text_output_flags`, which the compiler
+        \\does not read. In particular, `do_output = false` in a workspace does
+        \\not suppress the child's artifact; only `set_build_options_dc` stops
+        \\output, and only for the compilation that calls it.
+    );
+    subheading(28, "Compiling a file or a string");
+    paragraph(29, #string,oneline
+        \\`add_build_file(path, workspace)` compiles a file at once; it does not
+        \\collect files for later. `add_build_string(source, workspace)` does
+        \\the same for source text: it writes the text to a new `.glo` file in
+        \\the system's temporary directory, which is not deleted afterwards,
+        \\and compiles that, so set `output_executable_name` to get a
+        \\predictable artifact name. Both return `Compiler_Error!str`. A child
+        \\that fails is not an error of the script: the result is `.Err` with
+        \\the child's exit status in `status` and its diagnostics in `message`,
+        \\and `report_error` (from `Typeclass/Error`) prints them after
+        \\`compiler error: `. With a syntax error in `hello.glo`, the script
+        \\above prints:
+    );
+    code_block(30, "text", #string
+        \\$ glosso build.glo; echo "status $?"
+        \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
+        \\compiler error: glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
+        \\error: unexpected token '}'
+        \\  --> hello.glo:5:1
+        \\  |
+        \\5 | }
+        \\  | ^
+        \\status 1
+    );
+    subheading(31, "Arguments for a nested build");
+    paragraph(32, #string,oneline
+        \\A build script hands arguments to the compile-time code of a program
+        \\it compiles through the `compile_time_command_line` field of the
+        \\workspace's options. Each element is passed as one argument, spaces
+        \\and empty strings included. This script passes two fixed arguments
+        \\and then its own:
+    );
+    code_block(33, "glosso", #string
+        \\// child.glo
+        \\#import "Io";
+        \\
+        \\#comptime {
+        \\    args := get_cmdline_args();
+        \\    print("child sees {} arguments:", args.count);
+        \\    for args print(" [{}]", it);
+        \\    print("\n");
+        \\}
+        \\
+        \\main :: () {}
+    );
+    code_block(34, "glosso", #string
+        \\// parent.glo
+        \\#import "Io";
+        \\#import "Compiler";
+        \\#import "Typeclass/Error";
+        \\
+        \\#comptime {
+        \\    set_build_options_dc(.do_output = false);
+        \\    workspace := Workspace.create("child");
+        \\    options := workspace.get_build_options();
+        \\    options.output_path = "bin";
+        \\    options.compile_time_command_line.push("two words");
+        \\    options.compile_time_command_line.push("");
+        \\    for get_cmdline_args() options.compile_time_command_line.push(it);
+        \\    options.set_build_options(workspace);
+        \\    if add_build_file("child.glo", workspace) == {
+        \\        case .Ok(output); print("{}", output);
+        \\        case .Err(failure); report_error(failure); exit(1);
+        \\    }
+        \\}
+    );
+    code_block(35, "text", #string
+        \\$ glosso parent.glo -- extra 2>/dev/null
+        \\child sees 3 arguments: [two words] [] [extra]
+        \\glosso: compile child.glo (target=x86_64-pc-linux-gnu)
+        \\glosso: link bin/child (target=x86_64-pc-linux-gnu, -O1)
+        \\glosso: done bin/child  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+    );
+    subheading(36, "Tasks and targets");
+    paragraph(37, #string,oneline
+        \\The compile-time command line is how one script serves several
+        \\tasks. The script below builds a debug or a release executable, or
+        \\cross-compiles one for 64-bit ARM Linux by setting the workspace's
+        \\target (see Target Triples and Cross Builds):
+    );
+    code_block(38, "glosso", #string
+        \\// make.glo
+        \\#import "Io";
+        \\#import "Compiler";
+        \\#import "Typeclass/Error";
+        \\
+        \\build :: (name: str, level: Optimization, target: Output_Target = .{}) -> bool {
+        \\    workspace := Workspace.create(name);
+        \\    options := workspace.get_build_options();
+        \\    options.output_path = "bin";
+        \\    options.output_executable_name = name;
+        \\    options.set_optimization(level);
+        \\    options.set_target(target);
+        \\    options.set_build_options(workspace);
+        \\    if add_build_file("hello.glo", workspace) == {
+        \\        case .Ok; return true;
+        \\        case .Err(failure);
+        \\            report_error(failure);
+        \\            return false;
+        \\    }
+        \\}
+        \\
+        \\run_task :: () {
+        \\    set_build_options_dc(.do_output = false);
+        \\    args := get_cmdline_args();
+        \\    task := "debug";
+        \\    if args.count > 0 task = args[0];
+        \\    ok := false;
+        \\    if task == {
+        \\        case "debug";
+        \\            ok = build("hello-debug", .Debug);
+        \\        case "release";
+        \\            ok = build("hello", .Optimized);
+        \\        case "arm";
+        \\            ok = build("hello-aarch64", .Optimized_Small,
+        \\                .{ .os = .Linux, .cpu = .Aarch64, .abi = .Musl });
+        \\        else;
+        \\            print("unknown task {}; use debug, release or arm\n", task);
+        \\    }
+        \\    if !ok exit(1);
+        \\    print("{} build done\n", task);
+        \\}
+        \\
+        \\#comptime run_task();
+    );
+    code_block(39, "text", #string
+        \\$ glosso make.glo -- arm 2>/dev/null
+        \\arm build done
+        \\$ glosso make.glo -- test 2>/dev/null; echo "status $?"
+        \\unknown task test; use debug, release or arm
+        \\status 1
+    );
+    paragraph(40, #string,oneline
+        \\`exit(1)` during compile-time execution ends the compiler at once with
+        \\that status, so a failed task fails the whole build, which is what a
+        \\shell script or a continuous-integration job checks. No artifact is
+        \\written, even when the status is 0.
+    );
+    subheading(41, "Running tools and finding files");
+    paragraph(42, #string,oneline
+        \\`run_build_command(command)` runs a command line through the host's
+        \\shell, `sh -c` (`cmd` on Windows), in the compiler's working
+        \\directory, and returns its standard output followed by its standard
+        \\error, or `.Err` with the exit status. Compile-time code can also use
+        \\the `Process` and `File_System` modules directly. Since compile-time
+        \\code runs while a constant is computed as well, a tool's output can
+        \\become part of the program:
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#import "Compiler";
+        \\
+        \\commit :: () -> str {
+        \\    if run_build_command("git rev-parse --short HEAD") == {
+        \\        case .Ok(output); return output[..(output.count - 1)];
+        \\        case .Err; return "unknown";
+        \\    }
+        \\}
+        \\
+        \\COMMIT :: #comptime commit();
+        \\
+        \\main :: () {
+        \\    print("built from commit {}\n", COMMIT);
+        \\}
+    );
+    code_block(44, "text", #string
+        \\$ ./stamp
+        \\built from commit 85dabc5f
+    );
+    paragraph(45, #string,oneline
+        \\The output of `git` ends with a line feed, which the slice drops. A
+        \\program that runs commands at compile time is not stored in the
+        \\artifact cache, so `COMMIT` is computed afresh on every build. The
+        \\`Compiler` module also locates the toolchain's files:
+    );
+    table_header(46, "Procedure   —   Result");
+    table_row(47, "`executable_path()`   |   The path of the running compiler, the one nested compilations use.");
+    table_row(48, "`find_header(name, root = \"\")`   |   The full path of a C header found in the target's include directories, the usual environment variables and the project's `include`, `thirdparty` and `lib` directories, or `\"\"`.");
+    table_row(49, "`find_library(name)`   |   The full path of `libname.a`, `libname.so` or `libname.dylib` (`name.lib` on Windows) in the target's library directories and the usual environment variables, or `\"\"`.");
+    table_row(50, "`find_resource(name)`   |   The full path of a data file shipped with the toolchain, or `\"\"`.");
+    table_row(51, "`add_current_linker_arg(arg)`   |   Adds an argument to the link of the compilation in progress.");
+    subheading(52, "C code in the build");
+    paragraph(53, #string,oneline
+        \\`Native_Compile_Output.compile_c_archive(name, sources)` compiles C
+        \\source files with the toolchain's C compiler, for the target being
+        \\built, and archives the objects into a static library. Further
+        \\parameters take include directories, preprocessor definitions, extra
+        \\compiler arguments, an optimization level and position-independent
+        \\code. The archive is kept in the compiler's native cache, keyed on the
+        \\sources, the headers they include and the settings, so an unchanged
+        \\call compiles nothing. Here a constant compiles `checksum.c` next to
+        \\the program and inserts the `#library` declaration that names the
+        \\archive (see `#foreign`, `#library`, and `#c_call`):
+    );
+    code_block(54, "text", #string
+        \\$ cat checksum.c
+        \\int checksum(const unsigned char *data, int count) {
+        \\    int sum = 0;
+        \\    for (int i = 0; i < count; i++) sum = sum * 31 + data[i];
+        \\    return sum;
+        \\}
+    );
+    code_block(55, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Compiler";
+        \\
+        \\LIBRARY :: #comptime -> str {
+        \\    if Native_Compile_Output.compile_c_archive("checksum", .["checksum.c"]) == {
+        \\        case .Ok(built);
+        \\            return tprint("checksum_lib :: #library,static \"{}\";", built.artifact);
+        \\        case .Err(failure);
+        \\            print("{}", failure.message);
+        \\            exit(1);
+        \\    }
+        \\}
+        \\#insert LIBRARY;
+        \\
+        \\checksum :: (data: [*]const u8, count: s32) -> s32 #foreign checksum_lib "checksum";
+        \\
+        \\main :: () {
+        \\    text := "glosso";
+        \\    print("{}\n", checksum(text.data, cast(s32) text.count));
+        \\}
+    );
+    code_block(56, "text", #string
+        \\$ glosso --run cmain.glo 2>/dev/null
+        \\-1243003483
+        \\$ glosso --run cmain.glo
+        \\glosso: restored cmain from the native artifact cache
+        \\-1243003483
+    );
+    paragraph(57, #string,oneline
+        \\Unlike other compile-time file access, `compile_c_archive` records the
+        \\files it compiled, so this program stays in the artifact cache and is
+        \\rebuilt when `checksum.c` or a header it includes changes. Bindings
+        \\for a C header can be generated at compile time as well; see C Types,
+        \\Callbacks, and Bindgen.
+    );
+    subheading(58, "Compiled generators");
+    paragraph(59, #string,oneline
+        \\Compile-time code is interpreted, which is slow for heavy work.
+        \\`macro_unit(path, argument)` builds the Glosso program at `path` as a
+        \\native executable, through the artifact cache, runs it with
+        \\`argument` after `--` on its command line, and returns what it printed
+        \\to standard output, which is usually source text for `#insert`:
+    );
+    code_block(60, "glosso", #string
+        \\// squares_gen.glo
+        \\#import "Io";
+        \\
+        \\// Prints the declaration of a table of squares, named by the argument.
+        \\main :: () {
+        \\    args := get_cmdline_args();
+        \\    name := "SQUARES";
+        \\    if args.count > 1 name = args[args.count - 1];
+        \\    print("{} :: .[", name);
+        \\    for i: 0..10 print("{}, ", i * i);
+        \\    print("];\n");
+        \\}
+    );
+    code_block(61, "glosso", #string
+        \\#import "Io";
+        \\#import "Compiler";
+        \\
+        \\#insert macro_unit("squares_gen.glo", "SQUARES");
+        \\
+        \\main :: () {
+        \\    print("{} {}\n", SQUARES.count, SQUARES[9]);
+        \\}
+    );
+    code_block(62, "text", #string
+        \\10 81
+    );
+    paragraph(63, #string,oneline
+        \\A generator that fails to build or exits with a nonzero status
+        \\returns its diagnostics instead of source, so the `#insert` fails to
+        \\parse and the build stops with the generator's message in view.
+    );
+    subheading(64, "Build scripts and the artifact cache");
+    paragraph(65, #string,oneline
+        \\A build restored from the artifact cache does not run any of its
+        \\compile-time code. That is correct for code that only computes values
+        \\from the program's sources and its `--` arguments, which the cache
+        \\checks. Compile-time code that depends on anything else keeps its
+        \\build out of the cache, so it runs on every build: a program with a
+        \\top-level `#comptime` declaration, which every build script has, and a
+        \\program whose compile-time code reads files or the environment, runs
+        \\commands or uses the `Compiler` services. `compile_c_archive` is the
+        \\exception, because the files it compiles are recorded. The nested
+        \\builds a script starts are ordinary builds with their own cache
+        \\entries. Inside a Build: Stages and Caches gives the exact rules.
+    );
+    subheading(66, "Limits of compile-time code");
+    paragraph(67, #string,oneline
+        \\Compile-time code runs on an interpreter, which is much slower than
+        \\compiled code, and its resources are bounded. Each evaluation, a
+        \\constant, a `#comptime` expression or a top-level declaration, may
+        \\execute at most 2^28 (268,435,456) steps of the interpreter. A loop
+        \\that does not end therefore stops the build with an error instead of
+        \\hanging it, after a while:
+    );
+    code_block(68, "text", #string
+        \\// spin :: () -> s64 { n := 0; while true n += 1; return n; }
+        \\// FOREVER :: #comptime spin();
+        \\error: constant evaluation exceeded GLOSSO_COMPTIME_STEP_LIMIT; set 0 for no limit
+        \\// #comptime { print("{}\n", spin()); }
+        \\error: #comptime stopped: compile-time evaluation did not finish within 1000000 VM instructions and may never terminate; set GLOSSO_COMPTIME_STEP_LIMIT to change the limit, or to 0 to remove it
+        \\VM trace: spin word 10 (Move) at spin.glo:1:40
+        \\  called from __run_0 before word 4
+    );
+    paragraph(69, #string,oneline
+        \\The first error points at the statement that was running; the second,
+        \\from a top-level block, comes with a trace of the calls it was in.
+        \\The environment variable `GLOSSO_COMPTIME_STEP_LIMIT` replaces the
+        \\limit; both messages came from builds with
+        \\`GLOSSO_COMPTIME_STEP_LIMIT=1000000`, which stop within a second
+        \\rather than after the much longer default. `0` removes the limit, for
+        \\a build that legitimately computes more, and a value that is not a
+        \\whole number is an error.
+    );
+    table_header(70, "Limit   —   Value   —   When exceeded");
+    table_row(71, "Interpreter steps per evaluation   |   2^28, or `GLOSSO_COMPTIME_STEP_LIMIT`   |   The errors above.");
+    table_row(72, "Nested calls   |   65,536   |   `call stack exhausted: more than 65536 nested calls`");
+    table_row(73, "One block from `alloc` or another raw allocation   |   4 MiB   |   `compile-time heap allocation of N bytes exceeds the 4194304-byte limit`");
+    table_row(74, "Nested macro expansions   |   128   |   `macro expansion depth exceeded while expanding 'name' (limit 128)`");
+    table_row(75, "Nested `#insert`; insertions per build   |   16; 16,384   |   `#insert expansion limit exceeded`");
+    paragraph(76, #string,oneline
+        \\The allocation limit applies to raw blocks of memory. Dynamic arrays
+        \\and string builders grow past it, at the speed of the interpreter.
+        \\Work that is too heavy for compile-time code belongs in a generator
+        \\program compiled with `macro_unit`, as shown above. Appendix E:
+        \\Environment, Toolchain, and Exit Codes lists the compiler's other
+        \\environment variables.
+    );
+    subheading(77, "A larger script");
+    paragraph(78, #string,oneline
+        \\This manual is built by such a script, `first.glo`. Its top-level
+        \\`#comptime run_manual_task();` reads a task name from the
+        \\compile-time command line, so that `glosso first.glo -- build`
+        \\builds the manual: it creates a workspace for the WebAssembly target
+        \\with a cache directory and a list of linker arguments, compiles the
+        \\manual's main file with `add_build_file`, and copies the web assets
+        \\next to the result. The task dispatch reads:
+    );
+    code_block(79, "glosso", #string
+        \\run_manual_task :: () {
+        \\    set_build_options_dc(.do_output = false);
+        \\    args := get_cmdline_args();
+        \\    if args.count == 0 {
+        \\        manual_task_usage();
+        \\        exit(1);
+        \\    }
+        \\    command := args[0];
+        \\
+        \\    if command == {
+        \\    case "build"; if !build_manual() exit(1); return;
+        \\    case "tree-sitter"; if !sync_tree_sitter() exit(1); return;
+        \\    case "gen-reference";
+        \\        if args.count < 2 {
+        \\            print("gen-reference requires a standard-library directory\n\n");
+        \\            manual_task_usage();
+        \\            exit(1);
+        \\        }
+        \\        if !run_reference_generator(args[1]) exit(1);
+        \\        return;
+        \\    else;
+        \\        print("unknown manual task: {}\n\n", command);
+        \\        manual_task_usage();
+        \\        exit(1);
+        \\    }
+        \\}
+        \\
+        \\#comptime run_manual_task();
+        \\main :: () {}
+    );
+}
+
+}

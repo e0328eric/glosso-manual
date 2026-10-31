@@ -20,7 +20,7 @@ for (const [source, staged] of [
 
 const { referenceIndex } = await import(
   `data:text/javascript;base64,${read("dist/reference-index.js").toString("base64")}`);
-assert(referenceIndex.manual[0][1].includes("A Glosso program is one source file"),
+assert(referenceIndex.manual[0][1].includes("This tutorial teaches Glosso by writing programs."),
   "Chapter search prose was overwritten when its text builder was reused");
 const decoder = new TextDecoder("utf-8", { fatal: true });
 let instance;
@@ -70,8 +70,8 @@ for (const shape of ["*", "[*]", "[]"])
   assert.notEqual(signatureHost.typeKey(`${shape}const s64`), signatureHost.typeKey(`${shape}s64`));
 const signatureNames = query => signatureHost.findSignatures(query)
   .map(result => referenceIndex.symbols[result.index][0]);
-assert(signatureNames("(*const String_Builder) -> string").includes("String_Builder.to_string"));
-assert(!signatureNames("(*String_Builder) -> string").includes("String_Builder.to_string"));
+assert(signatureNames("(*const String_Builder) -> str").includes("String_Builder.to_string"));
+assert(!signatureNames("(*String_Builder) -> str").includes("String_Builder.to_string"));
 assert(signatureNames("(*String_Builder) -> []u8").includes("String_Builder.to_bytes"));
 assert(!signatureNames("(*String_Builder) -> []const u8").includes("String_Builder.to_bytes"));
 // A click may press and release between animation frames. Navigation still
@@ -102,38 +102,32 @@ const language = await Language.load(read("tree-sitter/tree-sitter-glosso.wasm")
 const parser = new Parser();
 parser.setLanguage(language);
 const tree = parser.parse(`
-#load,embed "fragment.glo";
+#import "Io";
+#import "Math/Core" (sqrt, Fractional, Ops.'+', '<->');
+#import "instances.glo" ();
+Geometry :: #import "geometry.glo" (Point);
+#export "shapes.glo" (Circle);
+/* an outer comment /* with a nested one */ still a comment */
 #public Counter :: struct { value: s64; #private cached: s64; }
 Aligned :: struct #align(32) { value: s32; }
 Packed :: struct #packed #align(2) { value: s32; }
+Rows :: struct { items: []struct { v: s64; }; }
 libc :: #library "c";
-copy_c :: (value: [*]const u8) -> ?[*]u8 #foreign libc "strdup" #fresh_result;
-raw_transfer :: (slot: *$T) -> T #unchecked_transfer { return __value_move(slot); }
+copy_c :: (value: [*]const u8) -> ?[*]u8 #foreign libc "strdup";
 Counter ::: #public {
     make :: () -> #Self_Type { return .{ .value = 0, .cached = 0 }; }
     read :: (#self) -> s64 { return #self.value; }
     increment :: (*#self) { #self.value += 1; }
 }
-#public(unit) { shared :: () { value := Counter.make(); value.increment(); } }
-Cleanup ::: instance Drop {
-    Error :: #Never;
-    drop :: (value: *#Self_Type) -> #Never!void { return .Ok; }
-}
+#public,unit { shared :: () { value := Counter.make(); value.increment(); } }
+#public,to("reader.glo") Reader_Only :: struct { value: s64; }
 cleanup :: () {
-    resource: Fallible;
-    #on_drop_error(resource, error) { report_error(error); }
+    values: [..]s64;
+    defer values.free();
+    #temp_scope { text := tprint("{}", values.count); }
 }
-#memory { reads(source), noescape(source), returns_borrow(source) }
-view :: (source: []const u8) -> []const u8 { return source; }
-#public #memory { returns_borrow(input), noescape(input) }
 View :: #fn_ptr(input: []const u8) -> []const u8;
-#memory view { reads(arg(0)), returns_borrow(arg(0)) };
-#memory { returns_fresh, released_by(place: returned, by: (?*void).mem_free, instance: allocator) }
-allocate :: (allocator: Allocator) -> ?*void #foreign "c" "allocate";
-trusted :: (pointer: *u8) {
-    #memory trusted("foreign API") { use(pointer); }
-    use(pointer) #memory { reads(pointer), noescape(pointer) };
-}
+fail :: (status: s32) -> #Never { exit(status); }
 where_am_i :: () -> Source_Location { return #source_location; }
 inspect :: (path: $P, site: Source_Location = #source_location)
  where AsView(P, Path_View) {}
@@ -157,6 +151,11 @@ for (const source of [
 }
 for (const source of [
   'f :: (value: *mut s64) {}',
+  '#load "fragment.glo";',
+  '#import,only (sqrt) "Math/Core";',
+  '#public(unit) shared :: () {}',
+  '#memory { reads(source) } view :: (source: []const u8) {}',
+  'cleanup :: () { #on_drop_error(resource, error) { report(error); } }',
 ]) {
   const removed = parser.parse(source);
   assert(removed.rootNode.hasError, "Removed syntax still parses: " + source);
@@ -199,13 +198,12 @@ for (const literal of prefixedLiterals.rootNode.descendantsOfType(["c_string_lit
 prefixedLiterals.delete();
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
-for (const directive of ["#public", "#private", "#on_drop_error", "#memory"])
+for (const directive of ["#public", "#private", "#import", "#export", "#temp_scope"])
   assert(query.captures(tree.rootNode).some(capture =>
-    capture.node.text === directive && capture.name === "attribute"));
+    capture.node.text === directive && capture.name === "attribute"), `${directive} is not highlighted`);
 assert(query.captures(tree.rootNode).some(capture =>
-  capture.node.text === "returns_borrow" && capture.name === "attribute"));
-assert(query.captures(tree.rootNode).some(capture =>
-  capture.node.text === "trusted" && capture.name === "attribute"));
+  capture.node.text.startsWith("/* an outer comment") && capture.name === "comment"),
+  "A nested block comment is not one comment");
 assert(query.captures(tree.rootNode).some(capture =>
   capture.node.text === "#Self_Type" && capture.name === "type.builtin"));
 assert(query.captures(tree.rootNode).some(capture =>
@@ -356,19 +354,19 @@ const metaModule = moduleIndex("Meta/Utilities");
 const typeQuery = referenceIndex.symbols.find(symbol => symbol[4] === metaModule && symbol[0] === "type_of");
 assert(typeQuery, "Missing free type_of function in the reference");
 assert.equal(typeQuery[5], "function");
-assert.equal(typeQuery[1], '#memory { noescape(val) }\ntype_of :: (val: $T) -> type #magic "type_of"');
+assert.equal(typeQuery[1], 'type_of :: (val: $T) -> type #magic "type_of"');
 assert(!referenceIndex.symbols.some(symbol => symbol[0].endsWith(".type_of")),
   "Removed type_of receiver method remains in the reference");
 
 moduleIndex("Strings");
 const stringMemory = moduleIndex("Strings/Memory");
-const stringFree = referenceIndex.symbols.find(symbol => symbol[4] === stringMemory && symbol[0] === "string.free");
+const stringFree = referenceIndex.symbols.find(symbol => symbol[4] === stringMemory && symbol[0] === "str.free");
 assert(stringFree, "Missing owned-string cleanup from Strings/Memory");
 assert.equal(stringFree[5], "method");
-assert(referenceIndex.symbols.some(symbol => symbol[4] === stringMemory && symbol[0] === "string.into_temporary"),
+assert(referenceIndex.symbols.some(symbol => symbol[4] === stringMemory && symbol[0] === "str.into_temporary"),
   "Missing arena ownership transfer from Strings/Memory");
 for (const name of ["Workspace.create", "String_Builder.new", "String_Builder.writef",
-  "Compiler_Borrow_Check", "Path.from_string", "matrix_array_type", "matrix_from_array", "matrix_to_array"])
+  "Path.from_string", "matrix_array_type", "matrix_from_array", "matrix_to_array"])
   assert(referenceIndex.symbols.some(symbol => symbol[0] === name), `Missing current API ${name}`);
 for (const location of ["home", "cache", "config", "config_local", "data", "data_local",
   "executable", "preference", "runtime", "state", "audio", "desktop", "document",
@@ -378,21 +376,23 @@ for (const location of ["home", "cache", "config", "config_local", "data", "data
   assert(!referenceIndex.symbols.some(symbol => symbol[0] === `${location}_dir`),
     `Obsolete directory query ${location}_dir`);
 }
-for (const name of ["Workspace.create_workspace", "String_Builder.source_new", "Path.path_from_string"])
+for (const name of ["Workspace.create_workspace", "String_Builder.source_new", "Path.path_from_string",
+  "Compiler_Borrow_Check"])
   assert(!referenceIndex.symbols.some(symbol => symbol[0] === name), `Obsolete API ${name}`);
 
-const commandModule = moduleIndex("Process/Command");
-for (const name of ["run_command", "run_shell_command", "Command_Output"])
-  assert(referenceIndex.symbols.some(symbol => symbol[4] === commandModule && symbol[0] === name),
-    `${name} must be documented under its public Process/Command import`);
-assert(!referenceIndex.modules.some(module => module[0] === "Process/Run"),
-  "Embedded command implementation must not appear as a standalone import");
+// Every file is a module: Process/Command re-exports the modules that define
+// the command API, and each declaration is documented where it is defined.
+moduleIndex("Process/Command");
+for (const [name, module] of [["run_command", "Process/Run"], ["Command_Output", "Process/Run"],
+  ["run_shell_command", "Process/Command/Core"]])
+  assert(referenceIndex.symbols.some(symbol => symbol[4] === moduleIndex(module) && symbol[0] === name),
+    `${name} must be documented in ${module}`);
 const compilerModule = moduleIndex("Compiler");
 assert(referenceIndex.symbols.some(symbol => symbol[4] === compilerModule && symbol[0] === "run_build_command"));
 assert(!referenceIndex.symbols.some(symbol => symbol[4] === compilerModule && symbol[0] === "run_command"));
 assert(!referenceIndex.symbols.some(symbol => symbol[0] === "run_command_line"));
 
-assert(!referenceIndex.symbols.some(symbol => ["string.cat", "string.repeat"].includes(symbol[0])),
+assert(!referenceIndex.symbols.some(symbol => ["str.cat", "str.repeat", "string.cat", "string.repeat"].includes(symbol[0])),
   "Removed allocating-string methods remain in the reference");
 
 function symbolIndex(module, name) {
@@ -433,24 +433,19 @@ for (const width of [390, 1280]) {
     assert(text.length > 0, `Empty chapter ${index} at ${width}px`);
     assert(!text.includes(".type_of()"), `Removed type_of method in chapter ${index}`);
     assert(!text.includes('#magic "str_concat"'), `Removed string intrinsic in chapter ${index}`);
-    if (index === 123) assert(text.includes("--borrow-check=error") && text.includes("returns_borrow") && text.includes("Byte_Reader"), "Memory contracts chapter is stale");
-    if (index === 117) assert(text.includes("new(T)") && text.includes("delete(pointer)"), "Typed object allocation is missing");
-    if (index === 49) assert(text.includes("*const T") && text.includes("omit the qualifier for writable access"), "Pointer qualifiers are stale");
-    if (index === 127) assert(text.includes("strict module cannot overlay") && text.includes("unknown(reason:"), "Strict memory rules are missing");
-    if (index === 27) assert(text.includes("Strings/Memory"), "Owned-string cleanup imports are stale");
-    if (index === 105) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is stale");
-    if (index === 142) assert(text.includes("These six directories"), "Namespace-only directory list is stale");
-    if (index === 29) assert(text.includes("never evaluated"), "Type-query semantics are stale");
-    if (index === 38) assert(text.includes("#align(N)"), "Alignment chapter is stale");
-    if (index === 56) assert(text.includes("lexical block"), "Local-declaration scope is stale");
-    if (index === 20) assert(text.includes("#public(unit)"), "Visibility chapter is stale");
-    if (index === 55) assert(text.includes("#self"), "Receiver-method chapter is stale");
-    if (index === 55) assert(text.includes("p.field") || text.includes("`p.x`"), "Pointer-field shorthand is missing");
-    if (index === 78) assert(text.includes("{1:x}") && text.includes("writef") &&
-      text.includes("Explicit indices do not advance"), "Brace formatting rules are stale");
-    if (index === 121) assert(text.includes("repeated transfers are unchecked") &&
-      !text.includes("compiler rejects later use"), "Unchecked move behavior is stale");
-    if (index === 126) assert(text.includes("discards close errors"), "File cleanup behavior is stale");
+    for (const removed of ["#on_drop_error", "ManuallyDrop", "--borrow-check", "#load ", "#public(unit)"])
+      assert(!text.includes(removed), `Removed language feature ${removed} in chapter ${index}`);
+    if (index === 0) assert(text.includes("main") && text.includes("print"), "The tutorial's first chapter is stale");
+    if (index === 18) assert(text.includes("#import") && text.includes("#export"), "Module chapter is stale");
+    if (index === 19) assert(text.includes("#public,unit") && text.includes("#public,to"), "Visibility chapter is stale");
+    if (index === 20) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is missing");
+    if (index === 29) assert(text.includes("cstr") && text.includes("string16"), "String chapter is stale");
+    if (index === 38) assert(text.includes("null"), "Optional chapter is stale");
+    if (index === 39) assert(text.includes("*const T"), "Pointer chapter is stale");
+    if (index === 57) assert(text.includes("#self"), "Receiver-method chapter is stale");
+    if (index === 64) assert(text.includes("{1:x}") && text.includes("writef"), "Formatting chapter is stale");
+    if (index === 73) assert(text.includes("Freeable") && text.includes("value_take"), "Ownership chapter is stale");
+    if (index === 79) assert(text.includes("#comptime"), "Compile-time chapter is stale");
   }
   for (let index = -1; index < referenceIndex.modules.length; index += 1) {
     instance.exports.glo_manual_select_module(index);
@@ -458,7 +453,7 @@ for (const width of [390, 1280]) {
     const text = render(width);
     if (index >= 0 && referenceIndex.modules[index][0] === "File_System/File") {
       assert(textRuns.some(run => run.value === "read_file" && run.marker.startsWith("item:")));
-      assert(!text.includes("#MEMORY CONTRACTS"), "Module index still contains full documentation cards");
+      assert(!text.includes("RETURN TYPE"), "Module index still contains full documentation cards");
     }
   }
   // Each item now has its own page, so exercise every documentation body,
@@ -479,7 +474,7 @@ for (const width of [390, 1280]) {
   view.setInt32(host.searchBridgeAddress + 4, 0, true);
   instance.exports.glo_manual_set_search_results(host.searchBridgeAddress, 1);
   instance.exports.glo_manual_set_view(2);
-  assert(render(width).includes("Hello World"), "Search result bridge failed");
+  assert(render(width).includes("Hello, Glosso"), "Search result bridge failed");
 
   // Module indexes show linked items, with no declaration/method tabs or pagination.
   const arrayModule = moduleIndex("Prelude/Array");
@@ -494,15 +489,15 @@ for (const width of [390, 1280]) {
   text = clickText(width, "[..]$T");
   assert(instance.exports.glo_manual_get_type() >= 0, "Receiver link did not open its type page");
   assert(textRuns.some(run => run.value === "[..]$T.push"));
-  assert(!text.includes("#MEMORY CONTRACTS"), "Method bodies should initially fold");
+  assert(!text.includes("RETURN TYPE"), "Method bodies should initially fold");
   text = clickText(width, "▾ Methods and associated functions");
   assert(!textRuns.some(run => run.value === "[..]$T.push"));
   text = clickText(width, "▸ Methods and associated functions");
   assert(textRuns.some(run => run.value === "[..]$T.push"));
   text = clickText(width, "▸ Documentation");
-  assert(text.includes("#MEMORY CONTRACTS"), "Method body did not expand");
+  assert(text.includes("RETURN TYPE"), "Method body did not expand");
   text = clickText(width, "▾ Documentation");
-  assert(!text.includes("#MEMORY CONTRACTS"), "Method body did not collapse");
+  assert(!text.includes("RETURN TYPE"), "Method body did not collapse");
 
   // Free functions open dedicated documents. A cross-module type link collects
   // its receiver methods and constructors on the same documentation page.
@@ -510,7 +505,7 @@ for (const width of [390, 1280]) {
   instance.exports.glo_manual_select_module(fileModule);
   text = clickText(width, "read_file");
   assert.equal(instance.exports.glo_manual_get_symbol(), symbolIndex(fileModule, "read_file"));
-  assert(text.includes("#MEMORY CONTRACTS"));
+  assert(text.includes("RETURN TYPE"));
   assert(!textRuns.some(run => run.value === "write_file"));
   instance.exports.glo_manual_select_module(fileModule);
   text = clickText(width, "File");
@@ -523,7 +518,7 @@ for (const width of [390, 1280]) {
   text = openSymbolSearch(width, fileModule, "File.open");
   assert(textRuns.some(run => run.value === "File" && run.fontSize === 26));
   assert(textRuns.some(run => run.value === "File.open" && run.anchor));
-  assert(text.includes("#MEMORY CONTRACTS"));
+  assert(text.includes("RETURN TYPE"));
 
   // The entire module index is present, including items beyond the old page
   // limit. Class operations stay on the class's page.
@@ -538,46 +533,16 @@ for (const width of [390, 1280]) {
   assert(textRuns.some(run => run.value === "sin"));
   assert(text.includes("Implementations"));
 
-  text = openSymbolSearch(width, stringMemory, "string.free");
+  text = openSymbolSearch(width, stringMemory, "str.free");
   assert.equal(instance.exports.glo_manual_get_module(), stringMemory);
-  assert(textRuns.some(run => run.value === "string.free" && run.anchor));
-
-  // Contract rows are rendered for free functions, receiver methods, callback
-  // types and nested class operations, rather than only copied into signatures.
-  text = openSymbolSearch(width, metaModule, "type_of");
-  assert(text.includes("#MEMORY CONTRACTS"));
-  assert(textRuns.some(run => run.value === "noescape"));
-  assert(textRuns.some(run => run.value === "val"));
-  text = openSymbolSearch(width, moduleIndex("String_Builder"), "String_Builder.to_string");
-  assert(textRuns.some(run => run.value === "returns_borrow"));
-  assert(textRuns.some(run => run.value === "#self"));
-  text = openSymbolSearch(width, moduleIndex("String_Builder"), "String_Builder.clone");
-  assert(textRuns.some(run => run.value === "released_by"));
-  assert(textRuns.some(run => run.value === "string.free"));
-  assert(text.includes("*const String_Builder"));
-  text = openSymbolSearch(width, moduleIndex("Context"), "mem_alloc");
-  assert(textRuns.some(run => run.value === "(?*void).mem_free"));
-  text = openSymbolSearch(width, moduleIndex("Memory/Object"), "new");
-  assert(textRuns.some(run => run.value === "returns_fresh"));
-  assert(textRuns.some(run => run.value === "delete"));
-  text = openSymbolSearch(width, moduleIndex("Context"), "Allocator_Proc");
-  assert(textRuns.some(run => run.value === "maybe_kills"));
-  assert(textRuns.some(run => run.value === "unknown"));
-  text = openSymbolSearch(width, moduleIndex("Io/Core"), "read");
-  assert(textRuns.some(run => run.value === "read" && run.anchor));
-  assert(textRuns.some(run => run.value === "writes"));
-  assert(textRuns.some(run => run.value === "reader, destination"));
-  text = openSymbolSearch(width, moduleIndex("Gui/Native"), "gui_scene_end");
-  assert(text.includes("Written empty contract (#memory {})."));
-  text = openSymbolSearch(width, moduleIndex("Prelude/Drop"), "drop");
-  assert(text.includes("No written #memory contract"));
+  assert(textRuns.some(run => run.value === "str.free" && run.anchor));
 
   // Late methods and class operations open directly, without page selection.
   const utf8 = moduleIndex("Strings/Utf8");
   text = openSymbolSearch(width, utf8, "u8.char_to_string");
   assert.equal(instance.exports.glo_manual_get_module(), utf8);
   assert(textRuns.some(run => run.value === "u8.char_to_string" && run.anchor));
-  assert(text.includes("#MEMORY CONTRACTS"));
+  assert(text.includes("RETURN TYPE"));
   assert(!text.includes("Next page"));
   text = openSymbolSearch(width, math, "sin");
   assert.equal(instance.exports.glo_manual_get_module(), math);
@@ -595,7 +560,7 @@ for (const width of [390, 1280]) {
   const routeFunction = app.slice(app.indexOf("function documentRoute()"), app.indexOf("function syncOutline("));
   runInNewContext(routeFunction + routing + "applyHash(); this.route = documentRoute();", router);
   assert.equal(router.route, router.location.hash);
-  assert(render(width).includes("#MEMORY CONTRACTS"));
+  assert(render(width).includes("RETURN TYPE"));
   for (const suffix of ["", "/methods", "/declarations", "/item/999999", "/item/-1", "/item/1.5", "/item/0"]) {
     router.location.hash = `#/std/${fileModule}${suffix}`;
     runInNewContext("applyHash(); this.route = documentRoute();", router);

@@ -3,14 +3,24 @@
 The Glosso language manual is a static website rendered by Glosso and
 [Clay](https://github.com/nicbarker/clay) in freestanding WebAssembly.
 
-The site includes the language chapters, a generated public standard-library
+The site includes the language manual, a generated public standard-library
 reference, global name and function-signature search, a persistent light/dark
-theme, written memory-contract tables, and Tree-sitter Glosso highlighting
-running through WebAssembly.
+theme, and Tree-sitter Glosso highlighting running through WebAssembly.
 
-The latest reference refresh uses the sibling `../glosso` checkout at
-`0a17910d` (2026-10-18), including `#matrix` literals, the current filesystem
-API names, and the argument-vector command runner.
+The manual has 98 chapters in three parts. A two-part tutorial (chapters 0-14)
+teaches the language by building complete programs, ending with a
+word-frequency counter. The reference (chapters 15-91) states the rules topic
+by topic: programs and builds, source text, types and values, structured data,
+declarations and control flow, procedures and generics, typeclasses and
+operators, memory and ownership, concurrency, metaprogramming, and platforms
+and interop. Appendices (92-97) cover the diagnostic format, an index of error
+messages, the grammar, the standard library modules, the environment and exit
+codes, and style conventions.
+
+The chapters and the reference describe the sibling `../glosso` checkout at
+`85dabc5f` (2026-10-31). Every example in the chapters is compiled with that
+compiler, and every program's output is compared with the output the chapter
+shows (`scripts/test-examples.mjs`).
 
 The interface follows Rustdoc's documentation layout: a fixed sidebar, a wide
 search bar, section links, and compact module listings, using Glosso's existing
@@ -22,49 +32,23 @@ Search is available with `/` or Ctrl/Command+K, with help beside the search fiel
 GitHub Pages publishes precompiled files from `dist/`. It does not access the
 private Glosso repository or compile the project in GitHub Actions.
 
-## Printable language reference
-
-`docs/glosso-reference.typ` typesets the complete language manual as a linked,
-printable reference. Open `docs/glosso-reference.pdf` for the compiled edition.
-It includes all 146 sections, code examples and transcripts, notes, tables,
-grammar, and diagnostics, with a quick lookup page and PDF bookmarks.
-The website's generated per-symbol standard-library API is separate.
-
-Build with Typst (validated with 0.15.1):
-
-```sh
-typst compile docs/glosso-reference.typ docs/glosso-reference.pdf
-```
-
-The adjacent `docs/reference-manual.json` is a checked-in snapshot extracted
-from the catalog, chapter files loaded by `main.glo`, and the sidebar groups
-in `app.js`. After editing the manual, refresh it with Node.js before compiling:
-
-```sh
-node scripts/generate-typst-reference.mjs
-typst compile docs/glosso-reference.typ docs/glosso-reference.pdf
-node scripts/generate-typst-reference.mjs --check
-```
-
-The check fails when the snapshot differs from the current sources. The build
-uses local fonts and no external Typst packages or Glosso compiler. Its font
-fallbacks are listed in the Typst source and the PDF's reproduction notes.
-
 ## Files
 
 - `first.glo` is the compile-time build driver.
-- `main.glo` is the manual compiler entry point and loads the sources under
-  `src/` with `#load,embed`; these UI and chapter fragments intentionally
-  share one module and ownership unit. Shared declarations use `#public(unit)`;
-  embedding preserves each fragment's private source identity.
+- `main.glo` is the manual compiler entry point. It imports the sources under
+  `src/`; every file is a module with its own imports, the UI and chapter
+  modules import each other where they need to (cyclic imports are allowed),
+  and each exposes its shared declarations in a `#public { }` group.
 - `src/clay_bindings.glo` builds Clay and inserts its target-specific bindings.
 - `src/clay_ui.glo` contains shared Clay declarations and content primitives.
 - `src/section_catalog.glo` contains section state and titles. It is the single
   source of the chapter order; `SECTION_COUNT` and the titles must agree with the
   `render_section_N` procedures that exist.
-- `src/sections_*.glo` contains the manual chapters, one file per topic group,
-  each holding a contiguous run of `render_section_N` procedures. The group
-  order matches `manualSidebarGroups` in `app.js`.
+- `src/sections_*.glo` contains the manual chapters, one module per sidebar
+  group, each holding a contiguous run of `render_section_N` procedures:
+  `sections_tour_*.glo` for the tutorial, `sections_ref_*.glo` for the
+  reference and `sections_appendix.glo`. The group order matches
+  `manualSidebarGroups` in `app.js`.
 - `src/generated/std_reference.glo` is the generated standard-library data
   rendered by Glosso and Clay.
 - `src/reference_ui.glo` contains reference, search-result, and browser-bridge
@@ -74,25 +58,26 @@ fallbacks are listed in the Typst source and the PDF's reproduction notes.
 - `scripts/generate-reference-source.glo` extracts public declarations and their
   documentation comments directly from a supplied Glosso standard-library
   directory into an ignored JSON file. Whole-file reads use `read_file_up_to` so short
-  reads cannot truncate declarations.
-  Public declarations in `#load,embed` fragments are grouped under their owning
-  module's import path, including nested fragments, while source links retain the
-  physical file and line. The root file supplies the module description.
+  reads cannot truncate declarations. The file's `//!` intro supplies the
+  module description.
 - `scripts/generate-reference.glo` converts that intermediate data into the
   compact Glosso and browser reference files, and rebuilds the language-manual
   half of the search index by reading the chapter sources: titles from
   `src/section_catalog.glo`, prose from the `src/sections_*.glo` files that
-  `main.glo` loads. Code blocks are excluded, so a chapter is searched by what
+  `main.glo` imports. Code blocks are excluded, so a chapter is searched by what
   it says rather than by the programs it quotes.
 - `scripts/tree_sitter.glo` embeds the Tree-sitter highlight query in the
   browser host.
 - `vendor/clay/clay.h` is the pinned Clay source used during compilation.
 - `vendor/web-tree-sitter/` and `tree-sitter-glosso.wasm` are the pinned syntax
   highlighting runtime and grammar.
-- `tree-sitter/README.md` documents rebuilding the grammar for the current
-  language with the accompanying source patch.
+- `tree-sitter/README.md` documents rebuilding the grammar Wasm and queries
+  from the sibling `../tree-sitter-glosso` repository.
 - `index.html` and `app.js` are the browser host, search engine, theme switch,
   syntax highlighter, and Clay command renderer.
+- `scripts/test-*.mjs` are the checks described below; `scripts/tests/` holds
+  their fixtures and `manual-fragments.txt`, the list of chapter code blocks
+  that are deliberately incomplete.
 - `dist/` contains the complete precompiled site deployed to GitHub Pages.
 
 ## How the build works
@@ -139,19 +124,8 @@ the resulting tools. A CLI `-o` path still names the exact output file.
 After regenerating the reference, run `node scripts/test-reference.mjs` to check
 compact signatures, parameter constraints and defaults, pointer mutability,
 flag enums, lazy parameters, function-pointer declarations, private-name
-filtering, leading memory-contract attachment and documentation,
-embedded fragments with their owner's import path and original source links,
-`#Self_Type` factory results, `#Never` returns, and boundary-aware
-`try(Target)` operators.
-The reference restores a separate `#MEMORY CONTRACTS` table for functions,
-receiver methods, named function-pointer types, and nested typeclass operations.
-Effects and their arguments come from leading or historical trailing contracts.
-Typed releasers such as `(?*void).mem_free` retain their complete owner syntax,
-and read-only receiver parameters retain `*const` in the displayed tables.
-Written empty contracts are distinguished from declarations without a contract;
-these are source contracts, while compiler inference is available through the
-compiler report flags. Named result places and allocator/releaser labels are
-preserved.
+filtering, documentation comments, `#Self_Type` factory results, `#Never`
+returns, and boundary-aware `try(Target)` operators.
 The reference gives each module a compact index of types, typeclasses,
 constants, and functions. Item links open dedicated documentation pages; type
 pages include their inherent methods and associated functions, including those
@@ -165,51 +139,31 @@ their item pages. Primitive types link to their language chapters. References
 prefer the current receiver and module; ambiguous names remain plain text.
 `node scripts/test-reference-links.mjs` checks resolution and destination validity.
 
-`node scripts/test-language.mjs` uses the installed `glosso` on PATH to check
-operators, Try boundary witnesses, propagation cleanup, array reservation,
-source locations, visibility, receiver methods, associated factories, domain
-free functions, managed destruction and `ManuallyDrop`, string-view layouts and aliasing, and
-builder cloning and ownership transfer. They also verify free, unevaluated
-`type_of(value)` queries, lexical scope for local functions and types, local
-type aliases, `#align(N)` record layouts, compile-time source builders,
-recursive reflection and source-spelled type names, the `Strings` umbrella and allocator-matched cleanup,
-builder repetition and compile-time string concatenation, configurable execution
-limits for both compile-time engines, and rejection of removed string helpers,
-runtime string concatenation, non-exhaustive switches and overflowing
-integer or float constants. Syntax checks cover prefix and suffix
-pointer operators, C-string and byte-array literals, Unicode character
-escapes, signed enums, grouped constants, bracket-type aliases, nested tuple
-access, and generic struct literals. It also checks rejection of removed
-directives, invalid Try contracts, string capacity, and the removed `mut` qualifier.
-Formatting checks cover brace selectors, escaped braces, indexed and repeated
-arguments, compile-time rendering, custom formatters, builder `writef`, and
-invalid formats. Matrix checks cover `#matrix` row/column syntax, expected types,
-empty shapes, independent fixed-array copies, and rejection of plain arrays,
-incorrect shapes, ragged rows, and mismatched conversion element types. Valid
-matrix cases run at compile time and at runtime. Command checks cover literal
-argument vectors, byte-preserving capture, nonzero exits, timeouts, working
-directories, shell execution, compile-time build commands, and renamed helpers.
-Pointer-field checks cover reads, writes, addresses, nested access, qualifiers,
-and rejection of access through optional pointers.
-Memory checks cover leading contracts, strict exported boundaries, double release,
-body-contract violations, indirect calls, separate tuple-result release identities,
-report flags, and warning/error/off analysis modes. Strict boundary requirements
-are also checked with body analysis disabled.
-Escaping local pointers check the diagnostics. A separate builder-view escape
-records a current analysis gap; neither dangling fixture is executed.
-Use-after-move and consumed `ManuallyDrop` fixtures are also compile-only:
-automatic `Drop` cleanup no longer enforces ownership or lifetime validity.
-Pass a compiler path as its optional first argument to test another build.
-For the local installation, run
-`node scripts/test-language.mjs "$HOME/.local/glosso/bin/glosso"` with
-`GLOSSO_STD` pointing to `../glosso/std`. All output and caches stay under `build/`. The collection checks exercise
-automatic element destruction, allocator-captured object deletion, nested dynamic arrays, and `take()` / `replace()`
-ownership transfers.
+`node scripts/test-examples.mjs` uses the installed `glosso` on PATH to compile
+every `glosso` code block of the chapters. A block with `main` is run, and its
+standard output must equal the `text` block shown right after it, unless that
+block is a command transcript (it starts with `$ `) or a diagnostic (it starts
+with `//`). A block whose first line is `// name.glo` is saved under that name
+so later blocks of the same chapter can import it. Blocks listed in
+`scripts/tests/manual-fragments.txt` (`chapter:index`) are excerpts, quotes of
+standard-library declarations, programs for another target or programs that
+fail on purpose; they are checked by hand. Pass a compiler path as the first
+argument and chapter numbers after it to check a subset. Chapters run in
+parallel; output and caches stay under `build/example-tests/`.
+
+`node scripts/test-language.mjs` checks language behavior the chapters rely on
+beyond their own examples: operators, Try boundary witnesses, array
+reservation, source locations, visibility, receiver methods, string views,
+formatting selectors and invalid formats, matrix literals and conversions,
+argument-vector commands, compile-time builders and reflection, compile-time
+execution budgets, and the rejection of removed or invalid syntax. Pass a
+compiler path as its optional first argument to test another build. All output
+and caches stay under `build/`.
 
 `node scripts/test-manual.mjs` checks staged assets and exercises the actual
 Wasm renderer for every chapter, reference module, and item page at narrow and
-wide widths, including item routes, folding, method anchors, the search bridge, current operator and ownership syntax, and rejection
-of the removed `#precedence` directive. Its synthetic font metrics check layout
+wide widths, including item routes, folding, method anchors, the search bridge, parsing of
+current syntax with the staged grammar, and rejection of removed syntax. Its synthetic font metrics check layout
 validity and the browser/Clay ABI; they do not replace a visual browser check.
 
 `node scripts/test-browser-navigation.mjs` checks actual chapter and module
@@ -229,11 +183,11 @@ ignored and is never checked in.
 ## Document the standard library
 
 Only public declarations and marked comments reach the reference. Explicit
-`#public` declarations and public groups are included; private and
-`#public(unit)` declarations are excluded. Inherent methods and associated
+`#public` declarations and public groups are included; private,
+`#public,unit` and `#public,to(...)` declarations are excluded. Inherent methods and associated
 functions retain their qualified owner names. Inherent headers such as
 `Counter ::: #public { ... }` set the default visibility of their members;
-nested visibility groups and individual overrides are respected. Leading `#memory` blocks stay attached to the following signature and its documentation.
+nested visibility groups and individual overrides are respected.
 A `///` line documents the declaration
 written under it, and `//!` lines write the file's intro, which becomes the
 module summary. A plain `//` is an implementation note the reference never
@@ -277,115 +231,30 @@ sources in the same pass. Run it after editing chapters as well as after editing
 `glosso/std/`; it reports how many chapters produced no prose, which is how a
 missing or misnamed `render_section_N` shows up.
 
-When updating for a new compiler checkout, check the current declarations and
-module documentation under `../glosso/std/` as well as regenerating the reference.
-The library uses receiver methods for a value's own behavior, associated
-functions for constructors, and free functions for domain operations. For
-example, use `file.read()`, `File.open(path)`, and `read_file(path, max_count)`, respectively.
-Core string, numeric, and collection methods remain available. Compiler and
-Bindgen option lists are string slices; use
-`Library_Spec.library_spec("name", artifact)` to describe a Bindgen artifact,
-`Workspace.create("name")` to create a workspace, and
-`add_build_file(path, workspace)` to compile a source file. Managed values
-move by value and clean up through `Drop`; fallible cleanup needs a compatible
-result boundary or `#on_drop_error`. Chapter examples, the build driver, and the
-reference extractor must all use the same current API.
+## Write chapters
 
-Primitive `string` and `string16` values are borrowed `{data, count}` views;
-`cstring` and `cstring16` contain only a zero-terminated pointer. Slices,
-substrings, trimmed text, and split pieces borrow the original storage. Keep
-that storage alive, clone text that must outlive it, and release explicitly
-allocated strings with the allocator that created them. `String_Builder`
-owns its buffer and releases it automatically through `Drop`: `to_string()`
-borrows it, `clone()` copies it, and `into_string()` transfers it to the caller.
-`Path`, filesystem owners, and process owners also use automatic cleanup.
-`File` destruction is infallible and discards close errors. Use `file.close()`
-to observe them; it disarms the handle even on failure. `Directory` and
-`Mapping` still have fallible cleanup. `File_System/Directory` also exports
-user-location queries such as `get_home_dir`, `get_config_dir`, and `get_download_dir`:
-each returns an owned `?Path` without creating the directory.
-Construct a path with `Path.from_string(text)`; the former
-`Path.path_from_string` name has been removed.
-Standard containers and dynamic arrays also clean up automatically, including
-their live elements. Use `take()` and `replace()` to transfer dynamic-array
-storage and leave the original descriptor reusable. Dynamic arrays allocate and
-release through `context.allocator`; keep that allocator installed until cleanup.
-Containers capture their constructor's allocator. Dynamic arrays append values
-with `push()` or `append()`.
-`type_of(value)` is a free function from `Meta`; its argument is typechecked
-but never evaluated or moved. Local functions and type declarations belong to
-their containing lexical block. Structs accept `#align(N)` with a literal
-power-of-two alignment, including alongside `#packed`.
-Runtime concatenation and repetition use builders or formatting; `+` is
-available for compile-time string constants. The `string.cat()`,
-`string.repeat()` helpers have been removed. `string.into_temporary()` is
-available again for owned temporary-arena allocations: it transfers the release
-obligation to the arena without extending the bytes' lifetime.
-Import `Strings/Memory` for owned UTF-8 buffer cleanup with `string.free()`,
-or import the `Strings` umbrella for `Memory`, `Utf8`, and `Utf16`. A temporary
-string expires when its arena is reset or restored. Use `into_temporary()` only
-when handing an owned arena allocation back to that arena; never for heap storage.
-Both compile-time engines use a default execution budget of 2^28 steps;
-`GLOSSO_COMPTIME_STEP_LIMIT=0` removes that limit.
+A chapter is one `render_section_N :: () { ... }` procedure in a
+`src/sections_*.glo` module. Its body is a sequence of calls to the content
+primitives of `src/clay_ui.glo`: `paragraph`, `subheading`, `code_block`
+(`"glosso"`, `"text"` or `"ebnf"`), `bullet`, `note`, `table_header` and
+`table_row`. The first argument of each call is an index that counts up from 0
+within the chapter. Prose uses `#string,oneline`; backticks mark inline code.
+Code uses `#string`, which keeps every line as written.
 
-Formatting uses `{}` for default rendering, `{c}` for a character, `{x}` for
-hexadecimal, and `{name}` for a custom selector. `{{` and `}}` emit braces;
-percent signs are ordinary text. `{0}` and `{1:x}` select zero-based arguments,
-and explicit indices leave the automatic counter unchanged. Each argument is
-evaluated once and must be referenced at least once. `String_Builder.writef`
-uses the same syntax, stages output before appending, and returns void.
+Describe the language as the current compiler implements it. Every `glosso`
+block is a complete program unless it is listed in
+`scripts/tests/manual-fragments.txt`; paste a program's real output into the
+`text` block after it, and real diagnostics, with the offending code as a
+`// comment` line above them. `node scripts/test-examples.mjs` checks all of
+this. Refer to other chapters by their exact titles. Tutorial chapters teach
+through runnable programs and end by naming the reference chapters for the
+topics they touched; reference chapters are complete and precise.
 
-Matrix literals use `#matrix .[1, 2, 3; 4, 5, 6]` in a `Matrix(T, Rows, Cols)`
-context. Commas separate columns and semicolons separate rows; both dimensions
-must match. Ordinary array literals no longer initialize matrices. Import
-`Math/Matrix` for `matrix_from_array(M, values)`, `matrix_to_array(m)`,
-`m.to_array()`, and `matrix_array_type(M)`. Conversions copy a flat fixed array
-with exactly the matrix's element type and element count. `#matrix .[]`
-initializes shapes with zero rows or zero columns.
-
-Import `Process/Command` for `run_command(program, args...)`, which runs literal
-arguments with optional output capture and a timeout, returning
-`Command_Run_Error!Command_Output`.
-The result owns its captured stdout and stderr; nonzero exits and timeouts are
-`.Ok` outcomes to inspect. `run_shell_command(line)` replaces `run_command_line`
-for intentional shell interpretation. The compiler's former `run_command` is
-now `run_build_command(line)`, a compile-time shell helper returning
-`Compiler_Error!string`; nonzero exits remain `.Err` in that API.
-
-Address-of is `&value` or `value.&`; dereference is `*pointer` or `pointer.*`.
-For struct and union pointers, `pointer.field` is shorthand for
-`pointer.*.field`, including writes and taking addresses. Qualifiers remain in
-force; optional pointers require unwrapping and tagged-union payload rules
-still apply.
-Pointer types use writable `*T` and read-only `*const T`; many-pointers and views
-use `[*]T` / `[*]const T` and `[]T` / `[]const T`. The former `mut` qualifier
-has been removed; bare pointers and views are writable. Leading
-`#memory { ... }` contracts describe access, escapes, invalidation, allocation,
-release, and returned origins. Body contracts are checked; bodyless declarations
-supply external contracts. Private functions can use inference. Temporal memory
-analysis defaults to `--borrow-check=warning`; use `--borrow-check=error` to
-reject findings, `--borrow-check=off` to disable body analysis, and
-`--borrow-check-std` to include standard-library bodies. `#enable(memory_strict);`
-requires contracts at public and external memory boundaries, rejects overlays
-on imported functions, and requires explicit `unknown(...)` holes. These
-requirements also apply when temporal body checking is off.
-`--memory-signatures`, `--memory-axioms`, and `--memory-report` print inferred
-contracts, external contracts, and the inventory. `Drop` generates automatic
-destruction and disarms source cleanup on by-value transfers. It does not check
-ownership, borrowing, or lifetimes: use after a move, repeated transfers, and
-access after `ManuallyDrop.take()` or `.drop()` are unchecked. Keep accesses and
-resource transfers valid independently of the memory analyzer's findings.
-The literal `c"hello"` is a zero-terminated
-`cstring`; `b"hello"` is a fixed byte array. `ManuallyDrop(T)` suppresses automatic
-destruction until the value is extracted or explicitly destroyed. The generated
-reference includes the `Gui` modules and the `Memory/ManuallyDrop` and `Memory/Object` APIs. `new(T)` allocates and
-initializes one object; `delete(pointer)` destroys it and frees storage through
-its captured allocator, including when destruction fails.
-
-Adding or removing a chapter therefore means editing three things: the title and
+Adding or removing a chapter means editing three things: the title and
 `SECTION_COUNT` in `src/section_catalog.glo`, the `render_section_N` procedure in
 the matching `src/sections_*.glo`, and the section index lists in
-`manualSidebarGroups` in `app.js`. Everything else follows from those.
+`manualSidebarGroups` in `app.js`. Chapter titles that primitive types link to
+are listed in `reference-links.js`; update them when a title they use changes.
 
 ## Compile locally
 

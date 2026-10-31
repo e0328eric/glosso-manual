@@ -16,8 +16,8 @@ const scope = linker.context(-1, symbolIndex("File.open"));
 const links = (source, context = scope, prose = false) => linker.ranges(source, context, prose)
   .map(link => [source.slice(link.start, link.end), link.href]);
 
-// The reported File.open page: signatures, return types, defaults, constraints,
-// qualified releasers, and the unqualified methods in its documentation.
+// The reported File.open page: signatures, return types, defaults,
+// constraints, and the unqualified methods in its documentation.
 for (const name of ["File_Access", "Open_Disposition", "File_Permissions", "Open_Flags", "Fs_Error", "File", "Path_View", "AsView", "File.close"])
   assert.deepEqual(links(name), [[name, href(name)]]);
 assert.deepEqual(links("Fs_Error!File"), [["Fs_Error", href("Fs_Error")], ["File", href("File")]]);
@@ -33,7 +33,7 @@ assert.deepEqual(links("File_Access: File"), [["File", href("File")]]);
 assert.deepEqual(links("You can open a file and close it.", scope, true), []);
 assert.deepEqual(links("Open_Flags members select behavior.", scope, true), [["Open_Flags", href("Open_Flags")]]);
 assert.deepEqual(links("BTreeMap.insert"), [["BTreeMap.insert", href("BTreeMap($K, $V).insert")]]);
-for (const name of ["bool", "string", "s64", "u8", "u24", "ssize", "void"])
+for (const name of ["bool", "str", "cstr", "s64", "u8", "u24", "ssize", "void"])
   assert.match(links(name)[0]?.[1] ?? "", /^#\/manual\/\d+$/);
 assert.deepEqual(links("u65536"), []);
 

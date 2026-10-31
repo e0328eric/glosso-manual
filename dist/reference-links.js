@@ -22,16 +22,16 @@ export function createReferenceLinker(index) {
   };
   const primitives = new Map();
   for (const [title, types] of [
-    ["The Primitive Types", ["any", "void", "label", "Code", "Pattern", "Namespace", "Library", "Typeclass", "Macro"]],
-    ["Integers", ["ssize", "usize", "rune"]],
-    ["Floating Point", ["f16", "f32", "f64", "f80", "f128"]],
-    ["Complex Numbers", ["c32", "c64", "c128", "c160", "c256"]],
-    ["Booleans and Truthiness", ["bool"]],
-    ["Built-in Strings", ["string", "cstring", "string16", "cstring16"]],
-    ["SIMD Vectors and Matrices", ["Simd", "Matrix"]],
-    ["Types as Values", ["type"]],
+    ["Catalog of Built-in Types", ["any", "void", "label", "Code", "Pattern", "Namespace", "Library", "Typeclass", "Macro"]],
+    ["Integer Arithmetic, Overflow, and Traps", ["ssize", "usize", "rune"]],
+    ["Floating-Point and Complex Arithmetic", ["f16", "f32", "f64", "f80", "f128"]],
+    ["Floating-Point and Complex Arithmetic", ["c32", "c64", "c128", "c160", "c256"]],
+    ["`bool` and Conditions", ["bool"]],
+    ["`str`, `cstr`, and UTF-16 Text", ["str", "cstr", "string16", "cstring16"]],
+    ["`Simd` Vectors and `Matrix` Values", ["Simd", "Matrix"]],
+    ["`type` Values and Type Reflection", ["type"]],
   ]) for (const type of types) primitives.set(type, chapter(title));
-  const integers = chapter("Integers");
+  const integers = chapter("Integer Arithmetic, Overflow, and Traps");
 
   function context(module = -1, symbolIndex = -1) {
     const symbol = index.symbols[symbolIndex];

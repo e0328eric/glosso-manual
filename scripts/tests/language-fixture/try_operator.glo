@@ -1,19 +1,20 @@
 #import "Io";
+#import "Format";
 
 // A source and its boundary may have different success types.
-describe :: (value: string!s64) -> string!string {
+describe :: (value: str!s64) -> str!str {
     number := value?;
-    return show(number);
+    return .Ok(tprint("{}", number));
 }
-optional :: (value: ?s64) -> ?string {
+optional :: (value: ?s64) -> ?str {
     _ := value?;
     return "present";
 }
-void_success :: (value: string!void) -> string!string {
+void_success :: (value: str!void) -> str!str {
     value?;
     return "done";
 }
-local_boundary :: (value: string!s64) -> string!string {
+local_boundary :: (value: str!s64) -> str!str {
     captured := #try { value? + 1 };
     if captured.is_err() return "caught";
     return "continued";
@@ -31,34 +32,34 @@ Output_Error :: struct { trace: *s64; }
         return .{ .trace = value.trace };
     }
 }
-widen :: (value: Input_Error!s64, trace: *s64) -> Output_Error!string {
+widen :: (value: Input_Error!s64, trace: *s64) -> Output_Error!str {
     defer trace.* = trace.* * 10 + 3;
     #try defer trace.* = trace.* * 10 + 2;
     _ := value?;
     return "ok";
 }
-explicit_error :: (trace: *s64) -> Output_Error!string {
+explicit_error :: (trace: *s64) -> Output_Error!str {
     defer trace.* = trace.* * 10 + 3;
     #try defer trace.* = trace.* * 10 + 2;
     return .Err(.{ .trace = trace });
 }
-from_variant :: (value: Inner!s64) -> Outer!string {
+from_variant :: (value: Inner!s64) -> Outer!str {
     _ := value?;
     return "ok";
 }
 
 // An override must be called exactly once, after evaluating its operand once.
-Observed :: struct { value: string!s64; calls: ?*s64; }
+Observed :: struct { value: str!s64; calls: ?*s64; }
 Observed ::: instance Try {
     Output :: s64;
-    Residual :: Result_Residual(string);
+    Residual :: Result_Residual(str);
     from_output :: (#empty: Observed, output: s64) -> Observed {
-        return Observed.{ .value = .Ok(output), .calls = .None };
+        return Observed.{ .value = .Ok(output), .calls = null };
     }
-    from_residual :: (#empty: Observed, residual: Result_Residual(string)) -> Observed {
-        return Observed.{ .value = .Err(residual.error), .calls = .None };
+    from_residual :: (#empty: Observed, residual: Result_Residual(str)) -> Observed {
+        return Observed.{ .value = .Err(residual.error), .calls = null };
     }
-    branch :: (value: Observed) -> Try_Branch(s64, Result_Residual(string)) {
+    branch :: (value: Observed) -> Try_Branch(s64, Result_Residual(str)) {
         return branch(value.value);
     }
     '?' :: (#empty: $Target, value: Observed) -> Try_Branch(s64, Target)
@@ -74,9 +75,9 @@ observe :: (evaluations: *s64, calls: *s64) -> Observed {
     evaluations.* += 1;
     return Observed.{ .value = .Ok(41), .calls = .Some(calls) };
 }
-use_override :: (evaluations: *s64, calls: *s64) -> string!string {
+use_override :: (evaluations: *s64, calls: *s64) -> str!str {
     value := observe(evaluations, calls)?;
-    return show(value);
+    return .Ok(tprint("{}", value));
 }
 
 Forward_Try :: typeclass (Source: type) {
@@ -89,24 +90,24 @@ Forward_Try :: typeclass (Source: type) {
         return '?'(Target, value);
     }
 }
-string!s64 ::: instance Forward_Try {}
-forward :: (value: string!s64) -> string!string { return show(value!!); }
+str!s64 ::: instance Forward_Try {}
+forward :: (value: str!s64) -> str!str { return .Ok(tprint("{}", value!!)); }
 
 verify :: () -> bool {
-    good: string!s64 = .Ok(41);
-    bad: string!s64 = .Err("failure");
+    good: str!s64 = .Ok(41);
+    bad: str!s64 = .Err("failure");
     if (describe(good)).unwrap_or("") != "41" return false;
     if !(describe(bad)).is_err() return false;
     if (optional(.Some(1))).unwrap_or("") != "present" return false;
-    if !(optional(.None)).is_none() return false;
+    if !(optional(null)).is_none() return false;
     if (void_success(.Ok)).unwrap_or("") != "done" return false;
     if !(void_success(.Err("failure"))).is_err() return false;
     if (local_boundary(bad)).unwrap_or("") != "caught" return false;
     if (local_boundary(good)).unwrap_or("") != "continued" return false;
 
     // Quoted calls return tokens outside any boundary, including scoped calls.
-    continued := Try(string!s64).'?'(string!string, good);
-    broken := '?'(string!s64, bad);
+    continued := Try(str!s64).'?'(str!str, good);
+    broken := '?'(str!s64, bad);
     if #pattern .Continue(value) = continued {
         if value != 41 return false;
     } else return false;
@@ -115,7 +116,7 @@ verify :: () -> bool {
             if error != "failure" return false;
         } else return false;
     } else return false;
-    scoped := Forward_Try.'!!'(string!string, good);
+    scoped := Forward_Try.'!!'(str!str, good);
     if #pattern .Continue(value) = scoped {
         if value != 41 return false;
     } else return false;

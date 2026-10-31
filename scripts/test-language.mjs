@@ -1,4 +1,5 @@
-// Check documented language behavior with the installed compiler:
+// Check language behavior the manual relies on, beyond its own examples
+// (scripts/test-examples.mjs), with the installed compiler:
 // node scripts/test-language.mjs [path/to/glosso]
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -58,9 +59,6 @@ assert.equal(compileAndRun("current_build_commands"), "current build command API
 assert.equal(compileAndRun("string_views"), "string views passed\n");
 assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
 assert.equal(compileAndRun("pointers_literals"), "pointers and literals passed\n");
-assert.equal(compileAndRun("manual_drop"), "manual and automatic Drop passed\n");
-assert.equal(compileAndRun("owned_collections"), "owned collections passed\n");
-assert.equal(compileAndRun("owned_objects"), "owned objects passed\n");
 assert.equal(compileAndRun("current_reflection"), "current reflection passed\n");
 assert.equal(compileAndRun("current_matrix"), "matrix literals and conversions passed\n");
 assert.equal(compileAndRun("current_comptime"), "current comptime passed\n");
@@ -79,8 +77,8 @@ for (const [name, diagnostic] of [
   ["invalid_const_overflow", "constant arithmetic overflow"],
   ["invalid_float_literal", "out of range for f16"],
   ["non_exhaustive_switch", "non-exhaustive switch"],
-  ["removed_string_cat", "string has no field cat"],
-  ["removed_string_repeat", "string has no field repeat"],
+  ["removed_string_cat", "str has no field cat"],
+  ["removed_string_repeat", "str has no field repeat"],
   ["runtime_string_add", "string concatenation with '+' requires constant strings"],
   ["readonly_write", "not assignable"],
   ["readonly_view_write", "not assignable"],
@@ -152,50 +150,4 @@ for (const [name, diagnostic] of [
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
 }
 
-// Drop prepares cleanup but no longer checks uses after a move or consumed slot.
-// Disable the independent memory analyzer to isolate automatic Drop behavior.
-for (const name of ["manual_drop_reuse", "unchecked_moves"]) {
-  const unchecked = compile(name, "object", process.env, ["--borrow-check=off"]);
-  assert.equal(unchecked.status, 0, `${name}: ${unchecked.stdout}\n${unchecked.stderr}`);
-}
-
-// Warning mode may emit code for a dangling view. Never execute this fixture.
-const escaping = compile("pointer_view_escape", "object");
-assert.equal(escaping.status, 0);
-assert.match(`${escaping.stdout}\n${escaping.stderr}`, /warning:.*dangling_return/);
-const strictEscape = compile("pointer_view_escape", "object", process.env, ["--borrow-check=error"]);
-assert.notEqual(strictEscape.status, 0);
-assert.match(`${strictEscape.stdout}\n${strictEscape.stderr}`, /dangling_return/);
-assert.equal(compile("pointer_view_escape", "object", process.env, ["--borrow-check=off"]).status, 0);
-
-// The current analyzer misses this builder-backed escape, even in error mode.
-// Preserve the limitation as a compile-only fixture; its pointer is dangling.
-assert.equal(compile("string_view_escape", "object", process.env, ["--borrow-check=error"]).status, 0);
-
-assert.equal(compileAndRun("memory_callbacks"), "");
-const resultPlaces = compile("memory_result_places", "object", process.env, ["--borrow-check=error"]);
-assert.equal(resultPlaces.status, 0, `${resultPlaces.stdout}\n${resultPlaces.stderr}`);
-assert.equal(compileAndRun("current_memory"), "memory contracts passed\n");
-const strictMemory = compile("current_memory", "object", process.env, [
-  "--borrow-check=error", "--memory-signatures", "--memory-axioms", "--memory-report",
-]);
-assert.equal(strictMemory.status, 0, `${strictMemory.stdout}\n${strictMemory.stderr}`);
-assert.match(`${strictMemory.stdout}\n${strictMemory.stderr}`, /#memory/);
-for (const [name, diagnostic] of [
-  ["memory_double_release", /double.release/],
-  ["memory_invalid_contract", /undeclared writes effect/],
-  ["memory_strict_boundary", /contract/],
-]) {
-  const checked = compile(name, "object", process.env, ["--borrow-check=error"]);
-  assert.notEqual(checked.status, 0, `${name}: memory violation compiled successfully`);
-  assert.match(`${checked.stdout}\n${checked.stderr}`, diagnostic);
-}
-
-// Contract requirements still apply when temporal body checking is disabled.
-for (const name of ["memory_strict_boundary", "memory_strict_unknown"]) {
-  const checked = compile(name, "object", process.env, ["--borrow-check=off"]);
-  assert.notEqual(checked.status, 0, `${name}: strict boundary requirements were disabled`);
-  assert.match(`${checked.stdout}\n${checked.stderr}`, /memory_strict/);
-}
-
-console.log("Language checks passed: argument-vector commands, captured raw bytes, process exit outcomes and timeouts, shell and compile-time build commands, matrix literals and fixed-array conversions at compile time and runtime, current path and directory queries, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, infallible File cleanup, unchecked moves (compile only), leading memory contracts, strict boundaries, release obligations, borrow analysis modes and reports, temporary string transfers, Strings umbrella, allocator-matched string cleanup, builder repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, ManuallyDrop and automatic builder cleanup, string views, visibility, inherent methods, current std APIs, cleanup errors, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: argument-vector commands, shell and compile-time build commands, matrix literals and fixed-array conversions, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, explicit file and container cleanup, Strings umbrella, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, string views, visibility, inherent methods, current std APIs, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

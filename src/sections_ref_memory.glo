@@ -1,0 +1,2625 @@
+#import "Format";
+#import "String_Builder";
+#import "Math/Core";
+#import "clay_ui.glo";
+
+#public {
+
+// Chapters 70-75: Memory and Ownership.
+
+render_section_70 :: () {
+    paragraph(0, #string,oneline
+        \\Every procedure can read and change a value named `context` without
+        \\importing or declaring it. The context holds the policies that
+        \\library code consults instead of taking them as parameters: the
+        \\allocator that serves memory, the arena for short-lived memory, the
+        \\sink for log records and the source of random numbers, together with
+        \\two fields that belong to the program. A caller changes a field for a
+        \\stretch of code, and every procedure that runs in that stretch,
+        \\standard-library code included, follows the change although no
+        \\signature mentions it. This chapter describes the fields, the ways
+        \\to change them, and the places where the context is not available.
+        \\The allocators themselves are the subject of `Allocator` and
+        \\Allocation Procedures.
+    );
+    table_header(1, "Field   —   Type   —   In the default context");
+    table_row(2, "`allocator`   |   `Allocator`   |   The heap allocator, or the debug allocator in a build made with `GLOSSO_DEBUG_ALLOCATOR=1`");
+    table_row(3, "`temp_allocator`   |   `Allocator`   |   The temporary arena");
+    table_row(4, "`logger`   |   `Logger`   |   Zero: no sink installed");
+    table_row(5, "`random_generator`   |   `Random_Generator`   |   Zero: the operating system's entropy source");
+    table_row(6, "`user_ptr`   |   `?*void`   |   `null`");
+    table_row(7, "`user_index`   |   `ssize`   |   0");
+    paragraph(8, #string,oneline
+        \\The type of `context` is the built-in struct `#Context`, with exactly
+        \\these six fields. `context.allocator` serves every allocation that
+        \\does not name an allocator: the growth of dynamic arrays, `format`,
+        \\`new`, and the default of almost every `allocator` parameter in the
+        \\standard library. `context.temp_allocator` serves `tprint` and the
+        \\other short-lived results described in The Temporary Allocator. The
+        \\procedures of the `Random` module draw from
+        \\`context.random_generator` unless they are given a generator.
+        \\Nothing in the standard library writes through `context.logger`, and
+        \\nothing at all reads `user_ptr` or `user_index`; those three are
+        \\slots for the program.
+    );
+    subheading(9, "Reading and changing fields");
+    paragraph(10, #string,oneline
+        \\`context.user_index` reads a field like any struct field, and
+        \\`context.user_index = 7;` changes it for everything that runs
+        \\afterwards on the same thread, until the next assignment. `saved :=
+        \\context;` copies the whole context into an ordinary `#Context` value,
+        \\which can be changed, passed to procedures and returned. To change
+        \\the context for a limited stretch of code and have the change undone
+        \\afterwards, install such a value with `#push_context`.
+    );
+    paragraph(11, #string,oneline
+        \\Two operations are not available on `context` itself: assigning a
+        \\whole `#Context` to it, and taking the address of the context or of
+        \\one of its fields. Both are rejected when the program is compiled:
+    );
+    code_block(12, "text", #string
+        \\// saved := context;  ...  context = saved;
+        \\error: while lowering demanded function 'main': unsupported assignment target
+        \\// p := &context.user_index;
+        \\error: while lowering demanded function 'main': cannot take pointer to expression
+    );
+    subheading(13, "`#push_context`");
+    paragraph(14, #string,oneline
+        \\`#push_context expr { ... }` evaluates `expr`, which must be a
+        \\`#Context`, installs it as the whole context for the block, and puts
+        \\the previous context back when the block is left. The new value is
+        \\usually built by copying the current context and changing one field:
+    );
+    code_block(15, "glosso", #string
+        \\#import "Io";
+        \\
+        \\with_depth :: (base: #Context, depth: ssize) -> #Context {
+        \\    out := base;
+        \\    out.user_index = depth;
+        \\    return out;
+        \\}
+        \\
+        \\report :: (message: str) {
+        \\    for 0..context.user_index print("  ");
+        \\    print("{}\n", message);
+        \\}
+        \\
+        \\nested :: (levels: s64) -> s64 {
+        \\    report("enter");
+        \\    if levels == 0 return 0;
+        \\    #push_context with_depth(context, context.user_index + 1) {
+        \\        return nested(levels - 1) + 1;   // leaving by return restores the context
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    n := nested(2);
+        \\    report("back in main");
+        \\    print("{} levels, depth {}\n", n, context.user_index);
+        \\}
+    );
+    code_block(16, "text", #string
+        \\enter
+        \\  enter
+        \\    enter
+        \\back in main
+        \\2 levels, depth 0
+    );
+    paragraph(17, #string,oneline
+        \\`report` has no depth parameter; it finds the depth in the context
+        \\its callers installed. The restore is registered like a deferred
+        \\statement, so it happens on every exit that runs deferred
+        \\statements: the end of the block, `return`, `break`, `continue` and
+        \\`?` (see Deferred Statements). The body can also be a single
+        \\statement, as in `#push_context saved report("x");`.
+    );
+    paragraph(18, #string,oneline
+        \\Without an expression, `#push_context { ... }` installs the default
+        \\context, the one every thread starts with. It runs a piece of code
+        \\under known settings whatever its callers installed:
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    context.user_index = 7;
+        \\    print("outer {}\n", context.user_index);
+        \\    #push_context {
+        \\        print("default {}\n", context.user_index);
+        \\    }
+        \\    print("outer again {}\n", context.user_index);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\outer 7
+        \\default 0
+        \\outer again 7
+    );
+    subheading(21, "Program state for callbacks: `user_ptr` and `user_index`");
+    paragraph(22, #string,oneline
+        \\The two user fields carry a program's own state to code that is
+        \\called by something the program does not control, such as a
+        \\callback with a fixed signature. The callback finds the state in the
+        \\context and casts the pointer back to its type:
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// A library procedure whose callback takes no state of its own.
+        \\each_even :: (limit: s64, visit: (s64) -> void) {
+        \\    for i: 0..limit if i % 2 == 0 visit(i);
+        \\}
+        \\
+        \\Totals :: struct { count: s64; sum: s64; }
+        \\
+        \\record :: (n: s64) {
+        \\    #pattern .Some(p) := context.user_ptr else { return; }
+        \\    totals := cast(*Totals) p;
+        \\    totals.count += 1;
+        \\    totals.sum += n;
+        \\}
+        \\
+        \\main :: () {
+        \\    totals: Totals;
+        \\    scoped := context;
+        \\    scoped.user_ptr = &totals;
+        \\    #push_context scoped {
+        \\        each_even(10, record);
+        \\    }
+        \\    print("{} values, sum {}\n", totals.count, totals.sum);
+        \\    print("user_ptr restored: {}\n", context.user_ptr == null);
+        \\}
+    );
+    code_block(24, "text", #string
+        \\5 values, sum 20
+        \\user_ptr restored: true
+    );
+    paragraph(25, #string,oneline
+        \\The cast is not checked. The context does not record what `user_ptr`
+        \\points to, so the code that sets it and the code that reads it must
+        \\agree on the type, and the value it points to must outlive the
+        \\region in which it is installed.
+    );
+    subheading(26, "The random generator");
+    paragraph(27, #string,oneline
+        \\Every sampling procedure of the `Random` module takes a last
+        \\parameter `generator` whose default is `context.random_generator`.
+        \\The zero generator of the default context draws from the operating
+        \\system's entropy source. Installing the generator of a deterministic
+        \\engine makes every draw in a region reproducible, in code that does
+        \\not know about the engine:
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\#import "Random";
+        \\
+        \\roll :: () -> s64 {
+        \\    #pattern .Ok(n) := random_range_s64(1, 7) else { return 0; }
+        \\    return n;
+        \\}
+        \\
+        \\rolls :: (label: str) {
+        \\    print("{}:", label);
+        \\    for 0..6 print(" {}", roll());
+        \\    print("\n");
+        \\}
+        \\
+        \\main :: () {
+        \\    for run: 0..2 {
+        \\        engine := Splitmix64.splitmix64(42);
+        \\        seeded := context;
+        \\        seeded.random_generator = engine.generator();
+        \\        #push_context seeded {
+        \\            rolls("seeded");
+        \\        }
+        \\    }
+        \\    print("system generator installed: {}\n", context.random_generator.procedure == null);
+        \\}
+    );
+    code_block(29, "text", #string
+        \\seeded: 2 2 1 1 5 1
+        \\seeded: 2 2 1 1 5 1
+        \\system generator installed: true
+    );
+    paragraph(30, #string,oneline
+        \\A `Random_Generator` is a procedure and a pointer to the engine's
+        \\state. `engine.generator()` points at `engine`, so the engine must
+        \\outlive the region where its generator is installed. Neither the
+        \\engine nor the context synchronizes anything: each thread has its own
+        \\context, and an engine reached from several threads needs a lock.
+    );
+    subheading(31, "The logger");
+    paragraph(32, #string,oneline
+        \\`Logger` has three fields. `procedure` is an optional `Logger_Proc`,
+        \\a procedure `(data: ?*void, level: Logger_Level, text: *void, len:
+        \\ssize)` that receives the bytes of one record; `data` is handed back
+        \\to it; and `lowest_level` names the least severe level the sink is
+        \\meant to keep. `Logger_Level` has the members `Debug`, `Info`,
+        \\`Warning`, `Error` and `Fatal`, with the values 0, 10, 20, 30 and 40.
+        \\Nothing reads the logger on the program's behalf, so a program
+        \\writes its own logging procedure that hands records to whatever sink
+        \\its caller installed:
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\// The program's own logging procedure: it hands each record to the sink in
+        \\// `context.logger`, and does nothing while none is installed.
+        \\log :: (level: Logger_Level, text: str) {
+        \\    logger := context.logger;
+        \\    #pattern .Some(sink) := logger.procedure else { return; }
+        \\    if cast(s64) level < cast(s64) logger.lowest_level return;
+        \\    sink(logger.data, level, cast(*void) text.data, text.count);
+        \\}
+        \\
+        \\// A sink that numbers the records it receives; `data` points at its counter.
+        \\counting_sink :: (data: ?*void, level: Logger_Level, text: *void, len: ssize) {
+        \\    #pattern .Some(p) := data else { return; }
+        \\    count := cast(*s64) p;
+        \\    count.* += 1;
+        \\    print("record {}: {}, {} bytes\n", count.*, level, len);
+        \\}
+        \\
+        \\work :: () {
+        \\    log(.Debug, "opening the archive");
+        \\    log(.Warning, "the archive is almost full");
+        \\}
+        \\
+        \\main :: () {
+        \\    work();                                  // no sink: nothing happens
+        \\    records: s64 = 0;
+        \\    logged := context;
+        \\    logged.logger = .{ .procedure = counting_sink, .data = &records, .lowest_level = .Info };
+        \\    #push_context logged {
+        \\        work();
+        \\    }
+        \\    print("{} record(s) logged\n", records);
+        \\}
+    );
+    code_block(34, "text", #string
+        \\record 1: Warning, 26 bytes
+        \\1 record(s) logged
+    );
+    paragraph(35, #string,oneline
+        \\`lowest_level` is advisory: nothing compares it on the program's
+        \\behalf, so the code that produces records, or the sink, drops the ones
+        \\below it, as `log` does here.
+    );
+    subheading(36, "`#push_allocator`");
+    paragraph(37, #string,oneline
+        \\`#push_allocator(a);` is the shorthand for the most common change: it
+        \\replaces only `context.allocator`, from the statement to the end of
+        \\the enclosing block, and puts the previous allocator back on every
+        \\exit, as `#push_context` does. Its rules, including how its restore
+        \\is ordered with deferred releases, are in `Allocator` and Allocation
+        \\Procedures.
+    );
+    subheading(38, "One context per thread");
+    paragraph(39, #string,oneline
+        \\Each thread has its own context. A new thread starts with the default
+        \\context, not with a copy of its creator's, and an assignment, a
+        \\`#push_context` or a `#push_allocator` in one thread is never seen
+        \\by another. State that a thread needs is handed to it explicitly, as
+        \\`spawn_owned`, `thread_scope`, and `Thread_Pool` describes; that
+        \\chapter also explains that a thread which runs several tasks of a
+        \\batch keeps its context from one task to the next. Each thread also
+        \\has its own temporary arena. On a target without
+        \\thread-local storage, such as a freestanding one, the program has a
+        \\single context.
+    );
+    subheading(40, "Procedures without a context: `#no_context` and `#c_call`");
+    paragraph(41, #string,oneline
+        \\A procedure marked `#no_context` must not name `context`. The same
+        \\holds for a `#c_call` procedure, which can be entered from foreign
+        \\code (see `#foreign`, `#library`, and `#c_call`):
+    );
+    code_block(42, "text", #string
+        \\// hash :: (n: s64) -> s64 #no_context { return n * 31 + context.user_index; }
+        \\error: cannot access 'context' in a #c_call / #no_context procedure
+    );
+    paragraph(43, #string,oneline
+        \\The restriction is on the name, not on the machinery. The procedures
+        \\such a procedure calls still read the context of the thread;
+        \\`#push_allocator`, which does not name `context`, is accepted; and a
+        \\`#push_context` block installs a context and makes the name usable
+        \\again inside it:
+    );
+    code_block(44, "glosso", #string
+        \\#import "Io";
+        \\
+        \\hash :: (n: s64) -> s64 #no_context {
+        \\    print("print works here\n");     // print reads the context itself
+        \\    #push_context {
+        \\        print("index {}\n", context.user_index);
+        \\    }
+        \\    return n * 31;
+        \\}
+        \\
+        \\main :: () {
+        \\    context.user_index = 5;
+        \\    print("{}\n", hash(2));
+        \\}
+    );
+    code_block(45, "text", #string
+        \\print works here
+        \\index 0
+        \\62
+    );
+    paragraph(46, #string,oneline
+        \\A parameter default that reads the context is evaluated at the call,
+        \\so calling a procedure with such a default from a `#no_context`
+        \\procedure is an error at the call. The message names the parameter
+        \\and the two ways around it:
+    );
+    code_block(47, "text", #string
+        \\// callback :: (n: ssize) -> ssize #no_context {
+        \\//     return String_Builder.make_len_cap(n).len();
+        \\// }
+        \\error: cannot access 'context' in a #c_call / #no_context procedure: call 'make_len_cap' uses the default value of parameter 'allocator', which reads 'context'
+        \\note: the default value of parameter 'allocator' of 'make_len_cap' reads 'context' here
+        \\help: pass 'allocator' explicitly, for example `heap_allocator()`, or make the call inside `#push_context { ... }`
+    );
+    subheading(48, "The context at compile time");
+    paragraph(49, #string,oneline
+        \\Compile-time code runs with a context of its own, inside the
+        \\compiler. Changing it does not change the context the program starts
+        \\with:
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\
+        \\#comptime {
+        \\    context.user_index = 7;
+        \\    print("compile-time context {}\n", context.user_index);
+        \\}
+        \\
+        \\main :: () {
+        \\    print("run-time context {}\n", context.user_index);
+        \\}
+    );
+    code_block(51, "text", #string
+        \\$ glosso --run ctx.glo 2>/dev/null
+        \\compile-time context 7
+        \\run-time context 0
+    );
+    paragraph(52, #string,oneline
+        \\In compile-time code both `context.allocator` and
+        \\`context.temp_allocator` are the heap allocator, so a temporary
+        \\allocation there is an ordinary heap allocation.
+    );
+    subheading(53, "Naming the types");
+    paragraph(54, #string,oneline
+        \\The context's type is spelled with the directive sigil, `#Context`,
+        \\because it is built into the compiler rather than declared in a
+        \\source file. `Context` without the sigil is an error that says so:
+    );
+    code_block(55, "text", #string
+        \\// f :: (c: Context) {}
+        \\error: the built-in Context type is written #Context
+    );
+    paragraph(56, #string,oneline
+        \\The field types and their companions (`Allocator`,
+        \\`Allocator_Proc`, `Allocator_Mode`, `Allocator_Error`, `Logger`,
+        \\`Logger_Proc`, `Logger_Level`, `Random_Generator`,
+        \\`Random_Generator_Proc` and `Random_Generator_Mode`) are declared in
+        \\the `Context` module, together with `Layout` and the procedures that
+        \\make and use allocators. The type names can be written in any
+        \\module, but the procedures, such as `heap_allocator` and `alloc`,
+        \\need `#import "Context";`.
+    );
+}
+
+render_section_71 :: () {
+    paragraph(0, #string,oneline
+        \\An allocator is a value: a procedure that serves memory requests and
+        \\a pointer to the state it works on. Every allocation the language and
+        \\the standard library make goes through one, usually the one in
+        \\`context.allocator` (see `#Context` and `context`), so replacing that
+        \\value redirects the allocations of a whole region of code without
+        \\changing a single call. This chapter describes the `Allocator` type
+        \\and its protocol, the standard allocators, the procedures that
+        \\allocate and release raw and typed memory, how to install an
+        \\allocator, how to write one, and the debug allocator that finds
+        \\leaks and bad releases. Owning and Freeing Memory introduces the
+        \\same ground step by step.
+    );
+    subheading(1, "The `Allocator` value");
+    paragraph(2, #string,oneline
+        \\The `Context` module declares the type and the signature of its
+        \\procedure:
+    );
+    code_block(3, "glosso", #string
+        \\Allocator_Proc :: #fn_ptr(
+        \\    data: ?*void,
+        \\    mode: Allocator_Mode,
+        \\    size: ssize,
+        \\    alignment: ssize,
+        \\    old_memory: ?*void,
+        \\    old_size: ssize
+        \\) -> ?*void;
+        \\
+        \\Allocator :: struct { procedure: ?Allocator_Proc; data: ?*void; }
+    );
+    paragraph(4, #string,oneline
+        \\One procedure serves every kind of request, and `mode` says which. It
+        \\returns the block for a request that produces one, and `null` for a
+        \\request that failed or that it does not handle. Copying an
+        \\`Allocator` copies the two pointers, not the memory behind them, so
+        \\copies are interchangeable. A zero `Allocator` has no procedure and
+        \\stands for "none installed".
+    );
+    table_header(5, "Mode   —   Request");
+    table_row(6, "`Alloc`   |   A block of `size` bytes aligned to `alignment`.");
+    table_row(7, "`Alloc_Non_Zeroed`   |   The same, without asking for zeroed memory.");
+    table_row(8, "`Resize`, `Resize_Non_Zeroed`   |   Move the block `old_memory` of `old_size` bytes to a block of `size` bytes, keeping the contents.");
+    table_row(9, "`Free`   |   Release `old_memory`; `old_size` and `alignment` describe the block.");
+    table_row(10, "`Free_All`   |   Release everything the allocator owns.");
+    table_row(11, "`Query_Features`, `Query_Info`   |   Report capabilities; no standard allocator answers them.");
+    paragraph(12, #string,oneline
+        \\The protocol is size-based: the resize and the release of a block
+        \\pass the size and alignment it was allocated with, so an allocator
+        \\does not have to record them. Whether `Alloc` zeroes is up to the
+        \\allocator; the heap allocator treats both `Alloc` modes alike and
+        \\returns memory as C's `malloc` does.
+    );
+    subheading(13, "The standard allocators");
+    table_header(14, "Constructor   —   Behaviour");
+    table_row(15, "`heap_allocator()`   |   The process heap. The default `context.allocator`.");
+    table_row(16, "`debug_allocator()`   |   The heap with bookkeeping that finds leaks and bad releases; see the last section.");
+    table_row(17, "`temp_allocator()`, `default_temp_allocator()`   |   The temporary arena; `Free` and `Resize` do nothing. See The Temporary Allocator.");
+    table_row(18, "`nil_allocator()`   |   Refuses every request; for testing failure paths.");
+    table_row(19, "`arena.allocator()`   |   An `Arena` from the `Memory` module; see Container Buffers, Arenas, and Pools.");
+    table_row(20, "`x.allocator()`   |   Any value whose type has an `Allocator_Impl` instance; see Writing an allocator below.");
+    paragraph(21, #string,oneline
+        \\The first four constructors return a vtable with no state, so calling
+        \\one costs nothing and the result needs no release. Their procedures
+        \\are public as well, as `heap_allocator_proc`, `debug_allocator_proc`,
+        \\`default_temp_allocator_proc` and `nil_allocator_proc`.
+    );
+    subheading(22, "Raw memory: `Layout`, `mem_alloc`, `mem_resize`, `mem_free`");
+    paragraph(23, #string,oneline
+        \\A `Layout` is a size and an alignment. `Layout.bytes(n)` is `n`
+        \\bytes at 16-byte alignment, `Layout.of(T)` fits one `T`, and
+        \\`Layout.array(T, n)` fits `n` of them; it returns `?Layout` and is
+        \\`null` for a negative count or a size that overflows. `mem_alloc`,
+        \\`mem_resize` and `mem_free` take a layout and an allocator, which
+        \\defaults to `context.allocator`:
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\Vec3 :: struct { x: f32; y: f32; z: f32; }
+        \\
+        \\main :: () {
+        \\    one := Layout.of(Vec3);
+        \\    print("Vec3: size {} alignment {}\n", one.size, one.alignment);
+        \\
+        \\    #pattern .Some(small) := Layout.array(s64, 4) else { return; }
+        \\    #pattern .Some(block) := mem_alloc(small) else { return; }
+        \\    numbers := cast([*]s64) block;
+        \\    for i: 0..4 numbers[i] = i * 10;
+        \\
+        \\    // Grow to 8 elements. After a successful resize only the new pointer is valid.
+        \\    #pattern .Some(large) := Layout.array(s64, 8) else { return; }
+        \\    #pattern .Some(grown) := mem_resize(block, small, large.size) else {
+        \\        mem_free(block, small);
+        \\        return;
+        \\    }
+        \\    numbers = cast([*]s64) grown;
+        \\    for i: 4..8 numbers[i] = i * 10;
+        \\    print("{} {} {}\n", numbers[0], numbers[3], numbers[7]);
+        \\    mem_free(grown, large);
+        \\
+        \\    nothing := mem_alloc(Layout.bytes(64), nil_allocator());
+        \\    print("nil allocator served: {}\n", nothing != null);
+        \\    print("too many: {}\n", Layout.array(s64, -1) == null);
+        \\}
+    );
+    code_block(25, "text", #string
+        \\Vec3: size 12 alignment 4
+        \\0 30 70
+        \\nil allocator served: false
+        \\too many: true
+    );
+    paragraph(26, #string,oneline
+        \\A block is released through the allocator that produced it, with its
+        \\current layout. A failed `mem_resize` leaves the old block valid and
+        \\still owned by the caller, which is why the example releases `block`
+        \\on that path. `mem_free` of `null` does nothing.
+    );
+    table_header(27, "Procedure   —   What it does");
+    table_row(28, "`mem_alloc(layout, allocator)`   |   `Alloc` through `allocator`; `null` on failure or for a zero `Allocator`.");
+    table_row(29, "`mem_resize(ptr, old, size, allocator)`   |   `Resize`; keeps `old.alignment`.");
+    table_row(30, "`mem_free(ptr, layout, allocator)`   |   `Free`; a zero `Allocator` stands for `context.allocator`.");
+    table_row(31, "`a.mem_alloc(layout)`, `a.mem_free(ptr, layout)`   |   The same with the allocator written first.");
+    table_row(32, "`a.free_all()`   |   `Free_All`; the heap ignores it.");
+    table_row(33, "`mem_alloc_raw(layout)`, `mem_free_raw(ptr, layout)`   |   Always through `context.allocator`.");
+    table_row(34, "`alloc(n)`, `p.free()`   |   `n` bytes at 16-byte alignment through `context.allocator`; the release passes no size.");
+    paragraph(35, #string,oneline
+        \\Pair each allocating call with its own release: a block from `alloc`
+        \\is released with `p.free()`, a block from `mem_alloc` with
+        \\`mem_free`. `free` passes zero as the size, so an allocator that
+        \\needs the size of every block must receive its blocks through the
+        \\`mem_*` procedures.
+    );
+    subheading(36, "Typed objects: `new` and `delete`");
+    paragraph(37, #string,oneline
+        \\The `Memory` module's `new(T)` allocates one `T` from
+        \\`context.allocator`, gives it the defaults a fresh `x: T;` has, and
+        \\returns `?*T`, which is `null` when the allocation fails. `delete(p)`
+        \\releases what the object owns (see `Freeable`, Copies, and Ownership
+        \\Transfer) and then its memory. The allocation remembers its
+        \\allocator, so `delete` does not depend on the context it runs under;
+        \\`delete` of `null` does nothing.
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\#import "Memory";
+        \\
+        \\Node :: struct {
+        \\    value: s64;
+        \\    weight: s64 = 1;
+        \\    children: [..]*Node;
+        \\}
+        \\
+        \\main :: () {
+        \\    #pattern .Some(root) := new(Node) else { return; }
+        \\    defer delete(root);       // also releases root.children's buffer
+        \\    root.value = 10;
+        \\    #pattern .Some(leaf) := new(Node) else { return; }
+        \\    defer delete(leaf);
+        \\    leaf.value = 20;
+        \\    root.children.push(leaf);
+        \\    print("{} {} {} {}\n", root.value, root.weight, root.children.count, root.children[0].value);
+        \\}
+    );
+    code_block(39, "text", #string
+        \\10 1 1 20
+    );
+    subheading(40, "Choosing an allocator: parameters and `#push_allocator`");
+    paragraph(41, #string,oneline
+        \\A standard-library procedure that allocates on the caller's behalf
+        \\usually takes a last parameter `allocator` whose default is
+        \\`context.allocator`: `format`, `clone`, `String_Builder.make_len_cap`
+        \\and the container constructors among them. A few path helpers
+        \\default to `context.temp_allocator` instead, and say so. A caller
+        \\that wants another allocator for one call passes it by name.
+    );
+    paragraph(42, #string,oneline
+        \\A caller that wants it for a whole region installs it with
+        \\`#push_allocator(a);`, which also reaches the allocations that take
+        \\no parameter, such as the growth of a dynamic array. The directive
+        \\is a statement, not a block. It replaces `context.allocator` where
+        \\it is written, lasts to the end of the enclosing block, and puts the
+        \\previous allocator back on every exit from the block, as
+        \\`#push_context` does:
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    {
+        \\        #push_allocator(nil_allocator());   // refuses every request
+        \\        p := alloc(64);
+        \\        print("inside the block: {}\n", p == null);
+        \\    }
+        \\    p := alloc(64);
+        \\    defer p.free();
+        \\    print("after the block: {}\n", p == null);
+        \\}
+    );
+    code_block(44, "text", #string
+        \\inside the block: true
+        \\after the block: false
+    );
+    paragraph(45, #string,oneline
+        \\An arena (see Container Buffers, Arenas, and Pools) shows both ways
+        \\of choosing: one call names the arena's allocator, and a block
+        \\installs it for everything inside, including the array's growth and
+        \\the strings `format` makes:
+    );
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\#import "Format";
+        \\#import "Memory";
+        \\
+        \\main :: () {
+        \\    arena := Arena.new();
+        \\    defer free(arena);
+        \\
+        \\    // One call: pass the allocator.
+        \\    title := format("report {}", 7, .allocator = arena.allocator());
+        \\
+        \\    // A region: install it for everything inside.
+        \\    {
+        \\        #push_allocator(arena.allocator());
+        \\        rows: [..]str;
+        \\        for i: 0..3 rows.push(format("row {}", i));
+        \\        print("{}: {} rows, last {}\n", title, rows.count, rows[2]);
+        \\    }
+        \\    print("arena holds {} bytes\n", arena.reserved());
+        \\}
+    );
+    code_block(47, "text", #string
+        \\report 7: 3 rows, last row 2
+        \\arena holds 65536 bytes
+    );
+    paragraph(48, #string,oneline
+        \\Nothing in the block is released on its own: the arena reclaims all
+        \\of it when `free(arena)` runs. Because the restore is registered like
+        \\a deferred statement, its order relative to `defer` matters when an
+        \\owner that grew under the pushed allocator is released at the end of
+        \\the same block; the rule is given under Releasing through the
+        \\allocator that allocated, below. At file scope the directive is an
+        \\error; a program
+        \\that wants another allocator everywhere assigns `context.allocator`
+        \\at the start of `main`. Passing the constructor instead of calling it
+        \\is caught with a hint:
+    );
+    code_block(49, "text", #string
+        \\// #push_allocator(nil_allocator());   at file scope
+        \\error: bad decl name 'push_allocator'
+        \\// #push_allocator(heap_allocator);
+        \\error: got fnptr, expected Allocator
+        \\note: this is a procedure that returns an Allocator; call it to get one
+    );
+    subheading(50, "Writing an allocator");
+    paragraph(51, #string,oneline
+        \\A type becomes an allocator through an instance of the
+        \\`Allocator_Impl` typeclass. Only `allocate` and `deallocate` are
+        \\required; `x.allocator()` wraps a pointer to `x` in an `Allocator`
+        \\whose procedure calls the instance's methods.
+    );
+    table_header(52, "Method   —   Mode   —   Default");
+    table_row(53, "`allocate(a, size, alignment) -> ?[*]u8`   |   `Alloc`   |   required");
+    table_row(54, "`deallocate(a, memory, size, alignment)`   |   `Free`   |   required");
+    table_row(55, "`allocate_non_zeroed`   |   `Alloc_Non_Zeroed`   |   calls `allocate`");
+    table_row(56, "`reallocate(a, memory, old_size, size, alignment)`   |   `Resize`   |   allocate, copy, deallocate");
+    table_row(57, "`reallocate_non_zeroed`   |   `Resize_Non_Zeroed`   |   calls `reallocate`");
+    table_row(58, "`deallocate_all(a)`   |   `Free_All`   |   does nothing");
+    table_row(59, "`query_features`, `query_info`   |   the query modes   |   not answered");
+    paragraph(60, #string,oneline
+        \\The methods receive the size and alignment the releasing code
+        \\passed: the block's real ones for `mem_free`, dynamic arrays and
+        \\containers, and a size of zero for `p.free()` and `str.free()`, which
+        \\do not know it. The counting allocator below reports what one region
+        \\of code asked for:
+    );
+    code_block(61, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\#import "Format";
+        \\
+        \\Counting :: struct {
+        \\    live: ssize;
+        \\    requests: ssize;
+        \\    bytes: ssize;
+        \\}
+        \\
+        \\Counting ::: instance Allocator_Impl {
+        \\    allocate :: (a: *Counting, size: ssize, alignment: ssize) -> ?[*]u8 {
+        \\        #pattern .Some(p) := mem_alloc(.{ .size = size, .alignment = alignment }, heap_allocator()) else {
+        \\            return null;
+        \\        }
+        \\        a.live += 1;
+        \\        a.requests += 1;
+        \\        a.bytes += size;
+        \\        return cast([*]u8) p;
+        \\    }
+        \\    deallocate :: (a: *Counting, memory: [*]u8, size: ssize, alignment: ssize) {
+        \\        a.live -= 1;
+        \\        mem_free(cast(*void) memory, .{ .size = size, .alignment = alignment }, heap_allocator());
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    counter: Counting;
+        \\    {
+        \\        #push_allocator(counter.allocator());
+        \\        values: [..]s64;
+        \\        defer values.free();
+        \\        for i: 0..100 values.push(i);
+        \\        text := format("{} values", values.count);
+        \\        defer text.free();
+        \\        print("{}: {} requests, {} bytes, {} live\n", text, counter.requests, counter.bytes, counter.live);
+        \\    }
+        \\    print("after the block: {} live\n", counter.live);
+        \\}
+    );
+    code_block(62, "text", #string
+        \\100 values: 7 requests, 2011 bytes, 2 live
+        \\after the block: 0 live
+    );
+    paragraph(63, #string,oneline
+        \\The array's buffer was allocated for 8 elements and grown four times
+        \\to 128; each growth went through the default `reallocate`, which
+        \\allocates, copies and deallocates. `format` made the other two
+        \\requests. An instance promises that every block it returns is
+        \\aligned as asked, does not overlap a live block, and stays valid
+        \\until it is deallocated or reallocated.
+    );
+    note(64, #string,oneline
+        \\The `Allocator` that `x.allocator()` returns holds the address of
+        \\`x`. `x` must stay alive, and must not be copied to another place and
+        \\used from there, while that vtable or any owner that grew through it
+        \\is in use.
+    );
+    paragraph(65, #string,oneline
+        \\An allocator can also be built without a typeclass, by storing a
+        \\procedure with the `Allocator_Proc` signature in the `procedure`
+        \\field of an `Allocator` and its state in `data`. The procedure then
+        \\handles every mode itself. This one records each request and lets
+        \\the heap allocator's procedure serve it, which shows the requests a
+        \\dynamic array and `alloc` make:
+    );
+    code_block(66, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\Request :: struct { mode: Allocator_Mode; size: ssize; old_size: ssize; }
+        \\
+        \\Trace :: struct {
+        \\    requests: [16]Request;
+        \\    count: s64;
+        \\}
+        \\
+        \\// Records each request, then lets the heap allocator serve it. It must not
+        \\// allocate itself: it is the allocator in use.
+        \\tracing_proc :: (data: ?*void, mode: Allocator_Mode, size: ssize, alignment: ssize,
+        \\                 old_memory: ?*void, old_size: ssize) -> ?*void {
+        \\    #pattern .Some(p) := data else { return null; }
+        \\    trace := cast(*Trace) p;
+        \\    if trace.count < 16 {
+        \\        trace.requests[trace.count] = .{ .mode = mode, .size = size, .old_size = old_size };
+        \\        trace.count += 1;
+        \\    }
+        \\    return heap_allocator_proc(null, mode, size, alignment, old_memory, old_size);
+        \\}
+        \\
+        \\main :: () {
+        \\    trace: Trace;
+        \\    {
+        \\        #push_allocator(Allocator.{ .procedure = tracing_proc, .data = &trace });
+        \\        xs: [..]s64;
+        \\        defer xs.free();
+        \\        for i: 0..20 xs.push(i);
+        \\        p := alloc(10);
+        \\        p.free();
+        \\    }
+        \\    for i: 0..trace.count {
+        \\        r := trace.requests[i];
+        \\        print("{} size {} old_size {}\n", r.mode, r.size, r.old_size);
+        \\    }
+        \\}
+    );
+    code_block(67, "text", #string
+        \\Resize size 64 old_size 0
+        \\Resize size 128 old_size 64
+        \\Resize size 256 old_size 128
+        \\Alloc size 10 old_size 0
+        \\Free size 0 old_size 0
+        \\Free size 0 old_size 256
+    );
+    paragraph(68, #string,oneline
+        \\A dynamic array asks for its first buffer with `Resize` from no
+        \\block, so a procedure must treat a `Resize` with `old_memory` `null`
+        \\as an allocation. A `Free` describes the block in `old_size`, and
+        \\`p.free()` passes zero there. The procedure runs with itself
+        \\installed: a `print` inside it would allocate through it and never
+        \\finish, which is why `tracing_proc` only records.
+    );
+    subheading(69, "Releasing through the allocator that allocated");
+    paragraph(70, #string,oneline
+        \\Every block must go back to the allocator it came from. Builders,
+        \\containers, arenas and `new` record their allocator and use it for
+        \\the release. A dynamic array does not: it grows and is released
+        \\through whatever `context.allocator` is installed at that moment. The
+        \\restore that `#push_allocator` registers is ordered with the
+        \\block's deferred statements, last registered first, so a deferred
+        \\release of an array that grows under the pushed allocator must be
+        \\registered after the push. The counting allocator from above, cut
+        \\down to its live count, shows the difference:
+    );
+    code_block(71, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\Counting :: struct { live: ssize; }
+        \\
+        \\Counting ::: instance Allocator_Impl {
+        \\    allocate :: (a: *Counting, size: ssize, alignment: ssize) -> ?[*]u8 {
+        \\        #pattern .Some(p) := mem_alloc(.{ .size = size, .alignment = alignment }, heap_allocator()) else { return null; }
+        \\        a.live += 1;
+        \\        return cast([*]u8) p;
+        \\    }
+        \\    deallocate :: (a: *Counting, memory: [*]u8, size: ssize, alignment: ssize) {
+        \\        a.live -= 1;
+        \\        mem_free(cast(*void) memory, .{ .size = size, .alignment = alignment }, heap_allocator());
+        \\    }
+        \\}
+        \\
+        \\counter: Counting;
+        \\
+        \\right :: () {
+        \\    #push_allocator(counter.allocator());
+        \\    xs: [..]s64;
+        \\    defer xs.free();          // runs before the allocator is restored
+        \\    xs.push(1, 2, 3);
+        \\}
+        \\
+        \\wrong :: () {
+        \\    xs: [..]s64;
+        \\    defer xs.free();          // runs after the restore: the wrong allocator
+        \\    #push_allocator(counter.allocator());
+        \\    xs.push(1, 2, 3);
+        \\}
+        \\
+        \\main :: () {
+        \\    right();
+        \\    print("after right: {} live\n", counter.live);
+        \\    wrong();
+        \\    print("after wrong: {} live\n", counter.live);
+        \\}
+    );
+    code_block(72, "text", #string
+        \\after right: 0 live
+        \\after wrong: 1 live
+    );
+    paragraph(73, #string,oneline
+        \\In `wrong` the buffer is handed to the heap allocator although the
+        \\counting allocator produced it. That goes unnoticed here only because
+        \\the counting allocator takes its blocks from the heap; with an arena
+        \\or any allocator with memory of its own, the same mistake releases a
+        \\pointer the heap never handed out.
+    );
+    subheading(74, "When allocation fails");
+    paragraph(75, #string,oneline
+        \\The procedures that return memory report failure as `null`, and the
+        \\caller tests for it, as the `#pattern ... else` statements above do.
+        \\Code that has no way to report a failure stops the program instead:
+        \\a dynamic array that cannot grow fails with `runtime check failed:
+        \\array.push.allocation` at every optimization level, and `format` with
+        \\`array.reserve.allocation`. `Allocator_Error` names the kinds of
+        \\failure for APIs that want to return one; nothing in the `Context`
+        \\module returns it.
+    );
+    subheading(76, "The debug allocator");
+    paragraph(77, #string,oneline
+        \\When the environment variable `GLOSSO_DEBUG_ALLOCATOR` is set to
+        \\anything but `0` while a program is compiled, the program's default
+        \\`context.allocator` is the debug allocator, at every optimization
+        \\level. It records where each block was allocated and released, checks
+        \\loads and stores through pointers against released blocks, guards
+        \\the bytes past the end of each block, and prints a report on
+        \\standard error when the program ends, including through `exit`:
+    );
+    code_block(78, "glosso", #string
+        \\#import "Io";
+        \\
+        \\collect :: (n: s64) -> [..]s64 {
+        \\    out: [..]s64;
+        \\    for i: 0..n out.push(i);
+        \\    return out;
+        \\}
+        \\
+        \\main :: () {
+        \\    kept := collect(10);       // never freed
+        \\    freed := collect(20);
+        \\    freed.free();
+        \\    print("done\n");
+        \\}
+    );
+    code_block(79, "text", #string
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run leak.glo 2>&1 | grep -v '^glosso:'
+        \\done
+        \\glosso debug allocator: leaked 1 allocation(s), 128 byte(s)
+        \\  leak: 128 byte(s)
+        \\    allocated at:
+        \\      leak.glo:5:17
+        \\      leak.glo:10:13
+    );
+    paragraph(80, #string,oneline
+        \\A trace lists the call sites from the innermost out: the `push` that
+        \\asked for memory, then the call of `collect`. These are the faults
+        \\it reports:
+    );
+    table_header(81, "Report   —   Traces");
+    table_row(82, "`leaked N allocation(s), M byte(s)`   |   `allocated at:` for each live block");
+    table_row(83, "`double free`   |   `allocated at:`, `first free at:`, `second free at:`");
+    table_row(84, "`use after free`   |   `allocated at:`, `freed at:`, `used at:`");
+    table_row(85, "`invalid free`, `invalid realloc`   |   `free at:` or `realloc at:`, for a pointer the allocator never handed out");
+    table_row(86, "`heap buffer overflow past a N-byte block`   |   `allocated at:`, `freed at:`: a write past the end of the block, found when it is released");
+    table_row(87, "`N allocator error(s)`   |   the count, printed last");
+    paragraph(88, #string,oneline
+        \\Faults do not stop the program and do not change its exit status.
+        \\The report is printed once per process; `debug_allocator_report_leaks()`
+        \\prints it early, after which nothing more is reported. A run that
+        \\stops on a failed runtime check prints no report. Memory from the
+        \\temporary arena, from another installed allocator or from a foreign
+        \\`malloc` is not tracked. Installing `debug_allocator()` by hand in an
+        \\ordinary build routes allocations through the bookkeeping but prints
+        \\no automatic report.
+    );
+}
+
+render_section_72 :: () {
+    paragraph(0, #string,oneline
+        \\Much of what a program allocates is needed only briefly: a formatted
+        \\line, a path built for one system call, a C string for one foreign
+        \\call. `context.temp_allocator` serves such values from an arena, a
+        \\region that hands out memory by advancing an offset. Its blocks are
+        \\never released one by one. The arena is rewound as a whole instead,
+        \\and everything allocated after the rewind point is reclaimed at once.
+        \\This chapter describes the ways to rewind, what lives in the arena,
+        \\and how large it is.
+    );
+    paragraph(1, #string,oneline
+        \\`tprint` is `format` with the temporary allocator: it returns a `str`
+        \\in the arena, which the caller does not release. The arena is rewound
+        \\only when the program asks for it, so temporary memory accumulates
+        \\until then:
+    );
+    code_block(2, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    for i: 0..3 {
+        \\        line := tprint("line {}", i);
+        \\        print("{}: arena at +{}\n", line, temp_mark() - start);
+        \\    }
+        \\    for i: 0..3 {
+        \\        #temp_scope {
+        \\            line := tprint("line {}", i);
+        \\            print("{} in a scope: arena at +{}\n", line, temp_mark() - start);
+        \\        }
+        \\    }
+        \\    print("after the loops: +{}\n", temp_mark() - start);
+        \\    reset_temporary_storage();
+        \\    print("after reset_temporary_storage: +{}\n", temp_mark() - start);
+        \\}
+    );
+    code_block(3, "text", #string
+        \\line 0: arena at +8
+        \\line 1: arena at +24
+        \\line 2: arena at +40
+        \\line 0 in a scope: arena at +56
+        \\line 1 in a scope: arena at +56
+        \\line 2 in a scope: arena at +56
+        \\after the loops: +40
+        \\after reset_temporary_storage: +0
+    );
+    paragraph(4, #string,oneline
+        \\`temp_mark()` returns the arena's current position. In the first
+        \\loop every line takes new memory. In the second, `#temp_scope`
+        \\rewinds the arena at the end of each iteration, so the three lines
+        \\use the same bytes. `reset_temporary_storage()` rewinds the arena to
+        \\its start.
+    );
+    subheading(5, "Three ways to rewind");
+    table_header(6, "Form   —   Rewinds");
+    table_row(7, "`#temp_scope { ... }`   |   To the position at the start of the block, when the block reaches its end.");
+    table_row(8, "`mark := temp_mark();` ... `temp_rewind(mark);`   |   To `mark`, wherever the call is written.");
+    table_row(9, "`reset_temporary_storage()`   |   To the start of the arena; also releases the overflow blocks.");
+    paragraph(10, #string,oneline
+        \\`#temp_scope` needs no import; `temp_mark`, `temp_rewind` and
+        \\`reset_temporary_storage` come from the `Context` module. Every
+        \\temporary value allocated after the rewind point is dead afterwards,
+        \\including values that a called procedure returned. Nothing detects a
+        \\later use: the bytes are handed to the next temporary allocation.
+    );
+    subheading(11, "`#temp_scope`");
+    paragraph(12, #string,oneline
+        \\`#temp_scope { ... }` is a block that takes a mark where it starts
+        \\and rewinds to it where it ends. The rewind happens only when control
+        \\reaches the closing brace. Leaving the block with `break`,
+        \\`continue`, `return`, `?` or `goto` does not rewind it, and what the
+        \\block allocated stays until an enclosing rewind:
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    for i: 0..4 {
+        \\        #temp_scope {
+        \\            line := tprint("line {}", i);
+        \\            if i % 2 == 0 continue;          // leaves the scope without rewinding
+        \\            print("{}: arena at +{}\n", line, temp_mark() - start);
+        \\        }
+        \\    }
+        \\    print("after the loop: +{}\n", temp_mark() - start);
+        \\}
+    );
+    code_block(14, "text", #string
+        \\line 1: arena at +24
+        \\line 3: arena at +40
+        \\after the loop: +24
+    );
+    paragraph(15, #string,oneline
+        \\Iterations 0 and 2 left the scope by `continue` and kept their line;
+        \\iterations 1 and 3 reached the closing brace and gave theirs back. A
+        \\loop body whose early exits matter rewinds with a deferred
+        \\`temp_rewind`, described below, which runs on every exit.
+    );
+    paragraph(16, #string,oneline
+        \\The compiler also leaves out the rewind when the block may store a
+        \\string, view, pointer or `any` where code after the block can reach
+        \\it: in a variable declared outside the block, in a global, through a
+        \\pointer, or in a procedure the block calls that does one of these. A
+        \\temporary value that escapes the block therefore stays valid, and
+        \\the block costs the memory it used. Nothing reports that a scope was
+        \\left without its rewind:
+    );
+    code_block(17, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    kept: str;
+        \\    #temp_scope {
+        \\        kept = tprint("kept-{}", 1);     // stored where code after the block sees it
+        \\    }
+        \\    other := tprint("other");
+        \\    print("{} {}: arena at +{}\n", kept, other, temp_mark() - start);
+        \\}
+    );
+    code_block(18, "text", #string
+        \\kept-1 other: arena at +24
+    );
+    paragraph(19, #string,oneline
+        \\The check is made separately for each block, so a `#temp_scope` that
+        \\keeps nothing still rewinds when another one in the same procedure
+        \\keeps something.
+    );
+    subheading(20, "Marks with `defer`");
+    paragraph(21, #string,oneline
+        \\`temp_mark` and `temp_rewind` do what `#temp_scope` does, on every
+        \\way out of a scope, when the rewind is deferred. The procedure below
+        \\uses temporary memory and gives all of it back before it returns:
+    );
+    code_block(22, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\log_value :: (name: str, value: s64) {
+        \\    mark := temp_mark();
+        \\    defer temp_rewind(mark);         // give the memory back on every way out
+        \\    line := tprint("{} = {}", name, value);
+        \\    print("{} ({} bytes)\n", line, line.count);
+        \\}
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    for i: 0..3 log_value("x", i * 100);
+        \\    print("arena at +{}\n", temp_mark() - start);
+        \\}
+    );
+    code_block(23, "text", #string
+        \\x = 0 (5 bytes)
+        \\x = 100 (7 bytes)
+        \\x = 200 (7 bytes)
+        \\arena at +0
+    );
+    paragraph(24, #string,oneline
+        \\A procedure that rewinds this way must not return a temporary value
+        \\allocated after its mark. A procedure that returns one, like `tprint`
+        \\itself, leaves the rewinding to its callers.
+    );
+    subheading(25, "Resetting once per iteration");
+    paragraph(26, #string,oneline
+        \\`reset_temporary_storage()` discards every temporary value, the
+        \\callers' included. It belongs at a level where nothing temporary is
+        \\alive, typically the top of a program's main loop, where it bounds
+        \\the arena to what one iteration uses:
+    );
+    code_block(27, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Context";
+        \\
+        \\handle :: (request: s64) -> str {
+        \\    return tprint("response to request {}", request);   // a temporary result
+        \\}
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    for request: 1..4 {
+        \\        defer reset_temporary_storage();    // nothing temporary outlives an iteration
+        \\        reply := handle(request);
+        \\        print("{}\n", reply);
+        \\    }
+        \\    print("arena at +{}\n", temp_mark() - start);
+        \\}
+    );
+    code_block(28, "text", #string
+        \\response to request 1
+        \\response to request 2
+        \\response to request 3
+        \\arena at +0
+    );
+    subheading(29, "What comes from temporary storage");
+    paragraph(30, #string,oneline
+        \\These standard-library results live in the arena. None of them is
+        \\released by the caller, and each is dead after the next rewind that
+        \\covers it.
+    );
+    table_header(31, "Call   —   Temporary result");
+    table_row(32, "`tprint(fmt, args...)`   |   The formatted string.");
+    table_row(33, "`text.c_string()`   |   A zero-terminated copy of `text` for a foreign call.");
+    table_row(34, "`file.read_line()`   |   The `text` field of the `Read_Line` it returns.");
+    table_row(35, "`value.format_int(base)`   |   The digits of an integer in base 2 to 16.");
+    table_row(36, "`builder.into_temporary_string()`   |   The bytes of a builder made with `.allocator = context.temp_allocator`.");
+    table_row(37, "Path helpers of `File_System/Path`   |   Native renderings of a path, where their documentation says so.");
+    paragraph(38, #string,oneline
+        \\A temporary value that has to outlive the next rewind is copied into
+        \\memory the program owns, for a string with `text.clone()` or
+        \\`format`:
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Strings/Utf8";
+        \\#import "Context";
+        \\
+        \\main :: () {
+        \\    names: [..]str;
+        \\    defer {
+        \\        for name: names name.free();
+        \\        names.free();
+        \\    }
+        \\    for i: 0..3 {
+        \\        label := tprint("item-{}", i);       // temporary
+        \\        names.push(label.clone());           // an owned copy outlives the arena
+        \\    }
+        \\    reset_temporary_storage();
+        \\    print("{} {}\n", names[0], names[2]);
+        \\}
+    );
+    code_block(40, "text", #string
+        \\item-0 item-2
+    );
+    paragraph(41, #string,oneline
+        \\Releasing a temporary value is a mistake that the heap usually
+        \\catches, because `free` hands the pointer to `context.allocator`,
+        \\which never allocated it:
+    );
+    code_block(42, "text", #string
+        \\// s := tprint("{} items", 3);  s.free();
+        \\$ glosso --run tfree.glo 2>&1 | tail -2
+        \\free(): invalid size
+        \\glosso: program exited with status 134
+    );
+    paragraph(43, #string,oneline
+        \\The message comes from the C library and depends on the platform.
+        \\Built with the debug allocator (see `Allocator` and Allocation
+        \\Procedures), the same program reports `invalid free` with the call
+        \\that released the pointer.
+    );
+    subheading(44, "Other allocations in the arena");
+    paragraph(45, #string,oneline
+        \\`context.temp_allocator` is an `Allocator` like any other, so code can
+        \\install it with `#push_allocator` or pass it as an `allocator`
+        \\argument. Owners that grow in the arena are reclaimed by the next
+        \\rewind and are not released. The arena does not resize blocks in
+        \\place: a growing dynamic array gets a new block for each growth and
+        \\leaves the old ones behind until the rewind, so building a large
+        \\array this way costs about twice its final size.
+    );
+    code_block(46, "glosso", #string
+        \\#import "Io";
+        \\#import "Context";
+        \\
+        \\squares :: (n: s64) -> []s64 {
+        \\    #push_allocator(context.temp_allocator);
+        \\    out: [..]s64;
+        \\    for i: 0..n out.push(i * i);
+        \\    return out.view();            // no free: the arena holds the buffer
+        \\}
+        \\
+        \\main :: () {
+        \\    start := temp_mark();
+        \\    v := squares(1000);
+        \\    print("{} squares, last {}, arena at +{}\n", v.count, v[999], temp_mark() - start);
+        \\}
+    );
+    code_block(47, "text", #string
+        \\1000 squares, last 998001, arena at +16320
+    );
+    subheading(48, "Size, threads and compile time");
+    paragraph(49, #string,oneline
+        \\The arena's first block is a static buffer in the executable, 4 MiB
+        \\by default and 64 KiB on freestanding targets. `--temp-allocator-size
+        \\<bytes>` (also written `--temp-allocator-size=<bytes>`) sets its
+        \\size; the value must be a positive number of bytes. A request that
+        \\does not fit takes an overflow block from the heap, and
+        \\`reset_temporary_storage()` returns the overflow blocks.
+    );
+    code_block(50, "text", #string
+        \\$ glosso --temp-allocator-size 65536 server.glo
+        \\$ glosso --temp-allocator-size 0 server.glo
+        \\glosso: --temp-allocator-size must be a positive byte count
+    );
+    paragraph(51, #string,oneline
+        \\On targets with thread-local storage each thread has its own arena:
+        \\a temporary value belongs to the thread that made it, a rewind in
+        \\that thread ends it, and a rewind in another thread does not. In
+        \\compile-time code the temporary allocator is the heap allocator, and
+        \\`reset_temporary_storage()` frees nothing.
+    );
+}
+
+render_section_73 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso releases nothing implicitly. There are no destructors and no
+        \\garbage collector: memory and other resources that a value holds stay
+        \\allocated until the program releases them with an explicit call. A
+        \\value that holds something to release is an owner, and the usual
+        \\pattern registers its release with `defer` on the line after it is
+        \\created, so that the release runs on every way out of the scope (see
+        \\Deferred Statements). This chapter gives the complete rules: which
+        \\types are owners, what a release does, how a type gets a release of
+        \\its own, and what happens to an owner when it is copied, passed,
+        \\returned or stored. Owning and Freeing Memory introduces them with a
+        \\running program.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct { x: f64; y: f64; }
+        \\Polygon :: struct { name: str; corners: [..]Point; }
+        \\
+        \\main :: () {
+        \\    #assert Freeable([..]Point);         // a dynamic array owns its buffer
+        \\    #assert Freeable(Polygon);           // a struct that contains an owner
+        \\    #assert Freeable([2]Polygon);        // so does an array of them
+        \\    #assert Freeable(?Polygon);
+        \\    #assert !Freeable(Point);            // plain data
+        \\    #assert !Freeable(*Polygon);         // pointers never own
+        \\    #assert !Freeable([]Point);          // nor do views
+        \\    #assert !Freeable(str);              // nor strings, even allocated ones
+        \\
+        \\    shape: Polygon = .{ .name = "triangle" };
+        \\    defer shape.free();
+        \\    shape.corners.push(.{ .x = 0, .y = 0 }, .{ .x = 4, .y = 0 }, .{ .x = 0, .y = 3 });
+        \\    print("{} with {} corners\n", shape.name, shape.corners.count);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\triangle with 3 corners
+    );
+    subheading(3, "The `Freeable` typeclass");
+    paragraph(4, #string,oneline
+        \\The release protocol is a typeclass of the prelude, so it needs no
+        \\import:
+    );
+    code_block(5, "glosso", #string
+        \\Freeable :: typeclass (T: type) {
+        \\    free :: (x: T);
+        \\}
+    );
+    paragraph(6, #string,oneline
+        \\`Freeable(T)` holds exactly when `T` is an owner. `free(x)`,
+        \\`x.free()` and `Freeable.free(x)` are the same call. `free` cannot
+        \\fail and has no result; a release that can fail is offered as a
+        \\separate method, as Files, Handles, and Non-Memory Resources
+        \\describes. These types are owners:
+    );
+    bullet(7, #string,oneline
+        \\`[..]T` and `#soa [..]T`, which own their buffer.
+    );
+    bullet(8, #string,oneline
+        \\A nominal type with a hand-written `Freeable` instance, whatever its
+        \\fields are. The standard library's builders, containers, files,
+        \\sockets and arenas are owners this way.
+    );
+    bullet(9, #string,oneline
+        \\A struct, tuple, fixed array, tagged union, `?T` or `E!T` that
+        \\contains an owner.
+    );
+    paragraph(10, #string,oneline
+        \\Nothing else is an owner: not numbers, not pointers or
+        \\many-pointers, not views, not `str`, `cstr` or `any`, whatever the
+        \\memory they refer to. Calling `free` on a value that is not an owner
+        \\is a compile-time error, so a release cannot be written for a type
+        \\that has nothing to release. The message lists the `free` methods
+        \\that were tried, each with a note that the constraint failed:
+    );
+    code_block(11, "text", #string
+        \\// p: Point;  p.free();
+        \\error: no typeclass method 'free' accepts this receiver and these arguments
+        \\note: got Point, expected String_Builder
+        \\note: constraint failed for free
+        \\note: got *Point, expected String_Builder
+        \\note: constraint failed for free
+    );
+    subheading(12, "The structural release");
+    paragraph(13, #string,oneline
+        \\An owner without a hand-written instance is released structurally:
+        \\`free` releases its owner parts and skips everything else. Struct
+        \\fields go in reverse declaration order and tuple elements from the
+        \\last; fixed-array and dynamic-array elements go in ascending order; a
+        \\tagged union, `?T` or `E!T` releases only the payload it holds; and
+        \\a dynamic array's buffer goes last, through `context.allocator`.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// A type whose release is visible: it only prints.
+        \\Tag :: struct { id: s64; }
+        \\Tag ::: instance Freeable {
+        \\    free :: (x: Tag) { print("release {}\n", x.id); }
+        \\}
+        \\
+        \\Pair :: struct { first: Tag; count: s64; second: Tag; }
+        \\Shape :: union { Plain: s64; Labelled: Tag; }
+        \\
+        \\main :: () {
+        \\    p: Pair = .{ .first = .{ .id = 1 }, .count = 9, .second = .{ .id = 2 } };
+        \\    free(p);                                  // fields in reverse order
+        \\    tags: [..]Tag;
+        \\    tags.push(.{ .id = 3 }, .{ .id = 4 });
+        \\    free(tags);                               // elements in ascending order, then the buffer
+        \\    s: Shape = .Labelled(.{ .id = 5 });
+        \\    free(s);                                  // the active payload
+        \\    o: ?Tag = null;
+        \\    free(o);                                  // nothing to release
+        \\}
+    );
+    code_block(15, "text", #string
+        \\release 2
+        \\release 1
+        \\release 3
+        \\release 4
+        \\release 5
+    );
+    paragraph(16, #string,oneline
+        \\A freshly declared owner holds nothing yet: an empty dynamic array has
+        \\no buffer, and releasing it does nothing. That is what makes `defer
+        \\x.free();` directly after the declaration safe on every path.
+    );
+    subheading(17, "Hand-written instances");
+    paragraph(18, #string,oneline
+        \\A type needs its own instance when the structural release is not
+        \\enough. The common reason is memory that the type owns through a
+        \\field that is not an owner: a `str` made by `format`, or a pointer
+        \\from `new`. The instance releases those, and `free_fields(x)` runs
+        \\the structural release of the owner fields:
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\
+        \\// `name` is allocated with `format`. A `str` is never an owner, so the
+        \\// structural release would free `phones` and leak `name`.
+        \\Contact :: struct {
+        \\    name: str;
+        \\    phones: [..]str;
+        \\}
+        \\
+        \\Contact ::: instance Freeable {
+        \\    free :: (x: Contact) {
+        \\        defer free_fields(x);      // afterwards, the owner fields: `phones`
+        \\        x.name.free();
+        \\    }
+        \\}
+        \\
+        \\make_contact :: (first: str, last: str) -> Contact {
+        \\    c: Contact;
+        \\    c.name = format("{} {}", first, last);
+        \\    return c;
+        \\}
+        \\
+        \\main :: () {
+        \\    c := make_contact("Grace", "Hopper");
+        \\    defer c.free();
+        \\    c.phones.push("555-0100", "555-0199");
+        \\    print("{}: {} phones\n", c.name, c.phones.count);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\Grace Hopper: 2 phones
+    );
+    paragraph(21, #string,oneline
+        \\A hand-written instance runs only its own body: without
+        \\`free_fields(x)` the `phones` buffer would leak. Three rules limit
+        \\where instances and `free_fields` may appear. The type must be
+        \\nominal: a struct, union, enum or `distinct` type. The instance must
+        \\be visible from the file that declares the type, so it is written in
+        \\that file or in a file that file imports. And `free_fields` is
+        \\allowed only on a by-value parameter of the type, inside its
+        \\hand-written `Freeable` instance or another procedure of the module
+        \\that defines the type. A `distinct` integer with an instance is a
+        \\convenient owner for a foreign handle (see Files, Handles, and
+        \\Non-Memory Resources).
+    );
+    code_block(22, "text", #string
+        \\// *s64 ::: instance Freeable { free :: (x: *s64) {} }
+        \\error: `Freeable` instances require a nominal type defined in this module
+        \\// Box ::: instance Freeable { ... }  in a module that imports Box
+        \\error: `Freeable` instance for 'Box' is not visible from the file that declares 'Box'; declare it in that file, or in a file that file imports
+        \\// free_fields(b);  in main, with Box from another module
+        \\error: `free_fields` can only be used inside a hand-written `Freeable` instance or a function of `Box`'s defining module, on a by-value parameter of type `Box`
+    );
+    subheading(23, "After `free`: `reset` and `clear`");
+    paragraph(24, #string,oneline
+        \\`free(x)` releases what `x` owns and ends `x`: afterwards `x` must
+        \\not be used or released again. A value that stays in use, such as a
+        \\field of a longer-lived struct or a global, is released with `reset`
+        \\instead where its type has one. `reset` releases the same things and
+        \\leaves an empty, usable value, so resetting twice is harmless.
+        \\`clear` releases the elements but keeps the buffer for reuse.
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    b: [..]s64;
+        \\    defer b.free();
+        \\    b.push(1, 2, 3);
+        \\    b.reset();
+        \\    print("after reset: count {} capacity {}\n", b.count, b.capacity);
+        \\    b.push(4);                     // usable again
+        \\    b.reset();
+        \\    b.reset();                     // resetting an empty array does nothing
+        \\
+        \\    c: [..]s64;
+        \\    defer c.free();
+        \\    c.push(1, 2, 3);
+        \\    c.clear();
+        \\    print("after clear: count {} capacity {}\n", c.count, c.capacity);
+        \\}
+    );
+    code_block(26, "text", #string
+        \\after reset: count 0 capacity 0
+        \\after clear: count 0 capacity 8
+    );
+    paragraph(27, #string,oneline
+        \\Dynamic arrays, the containers, `String_Builder`, `Arena` and `Pool`
+        \\have `reset`, and most of them also have `clear`. Releasing an owner
+        \\twice, or using it after `free`, is undefined behaviour that the
+        \\compiler does not detect. The debug allocator described in
+        \\`Allocator` and Allocation Procedures reports both at run time,
+        \\together with owners that were never released.
+    );
+    subheading(28, "Owners in generic code");
+    paragraph(29, #string,oneline
+        \\`Freeable(T)` is a compile-time condition, so generic code releases a
+        \\`$T` only when it is an owner, with `#if` (see `#if`, `#assert`, and
+        \\`#compile_error`). `where Freeable(T)` instead restricts a procedure
+        \\to owners; calling it with anything else fails with `constraint
+        \\failed`.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\// Releases what a value owns, whatever its type.
+        \\discard :: (value: $T) {
+        \\    #if Freeable(T) {
+        \\        free(value);
+        \\        print("released a {}\n", type_name(T));
+        \\    } else {
+        \\        print("nothing to release in a {}\n", type_name(T));
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    numbers: [..]s64;
+        \\    numbers.push(1, 2);
+        \\    discard(numbers);
+        \\    discard(42);
+        \\    discard("text");
+        \\}
+    );
+    code_block(31, "text", #string
+        \\released a [..]s64
+        \\nothing to release in a ssize
+        \\nothing to release in a str
+    );
+    paragraph(32, #string,oneline
+        \\`Freeable(T)` is evaluated by the compiler. Use it in `#if`,
+        \\`#assert`, `where` and `#comptime` expressions, not as a run-time
+        \\`bool`.
+    );
+    subheading(33, "Copies share what an owner owns");
+    paragraph(34, #string,oneline
+        \\Assigning a value, passing it to a procedure and returning it all copy
+        \\its bytes, as in C. A struct of numbers is copied completely, and the
+        \\two copies are independent. An owner is copied the same way, but what
+        \\it owns is not: the copy of a dynamic array is a second descriptor for
+        \\the same buffer, and a struct that contains one copies that
+        \\descriptor. The copies share the resource, and exactly one of them
+        \\may release it.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Buffer :: struct { name: str; items: [..]s64; }
+        \\
+        \\main :: () {
+        \\    a: Buffer = .{ .name = "a" };
+        \\    defer a.free();               // the one release of the shared buffer
+        \\    a.items.push(1, 2, 3);
+        \\    b := a;                       // copies the descriptor, not the elements
+        \\    b.name = "b";
+        \\    b.items[0] = 100;
+        \\    print("{} {} / {} {}\n", a.name, a.items[0], b.name, b.items[0]);
+        \\    print("same buffer: {}\n", a.items.data == b.items.data);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\a 100 / b 100
+        \\same buffer: true
+    );
+    paragraph(37, #string,oneline
+        \\Releasing both copies is a double free. Nothing prevents it at
+        \\compile time; at run time the C library may stop the program, and
+        \\the debug allocator names the places:
+    );
+    code_block(38, "glosso", #string
+        \\// twice.glo: wrong, both copies are released
+        \\Buffer :: struct { name: str; items: [..]s64; }
+        \\
+        \\main :: () {
+        \\    a: Buffer = .{ .name = "a" };
+        \\    defer a.free();
+        \\    a.items.push(1, 2, 3);
+        \\    b := a;
+        \\    defer b.free();               // a second release of the same buffer
+        \\}
+    );
+    code_block(39, "text", #string
+        \\$ glosso --run twice.glo 2>&1 | tail -2
+        \\free(): double free detected in tcache 2
+        \\glosso: program exited with status 134
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run twice.glo 2>&1 | grep -v '^glosso:'
+        \\glosso debug allocator: double free
+        \\    allocated at:
+        \\      twice.glo:7:5
+        \\    first free at:
+        \\      twice.glo:9:11
+        \\    second free at:
+        \\      twice.glo:6:11
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(40, #string,oneline
+        \\Glosso does not track which copy is responsible. That is a convention
+        \\the program keeps, and the rest of this chapter describes the
+        \\conventions the standard library follows and the operations that make
+        \\them easy to keep.
+    );
+    subheading(41, "Who releases what");
+    bullet(42, #string,oneline
+        \\The code that creates an owner releases it, unless it hands it on.
+    );
+    bullet(43, #string,oneline
+        \\A procedure that only reads or changes an owner takes a pointer or a
+        \\view: `*[..]T`, `*const Polygon`, `[]const T`. It neither copies the
+        \\descriptor nor releases anything.
+    );
+    bullet(44, #string,oneline
+        \\A procedure that takes an owner by value and keeps it takes over the
+        \\release. `push` on a dynamic array, the `insert` operations of the
+        \\containers and `Pool.insert` store the value they are given, and
+        \\`free` itself takes its argument by value. After such a call the
+        \\caller does not release the value.
+    );
+    bullet(45, #string,oneline
+        \\A procedure that returns an owner hands it to the caller, as `format`
+        \\and `collect`-style builders do. So does an operation that removes
+        \\an element from a container: `pop`, `swap_remove`, `remove`, and an
+        \\`insert` that returns the value it displaced.
+    );
+    paragraph(46, #string,oneline
+        \\Passing an owner by value to a procedure that changes it is the
+        \\dangerous case. The callee works on a copy of the descriptor, and a
+        \\`push` that reallocates moves the buffer, releases the old one, and
+        \\records the new one only in the copy:
+    );
+    code_block(47, "glosso", #string
+        \\#import "Io";
+        \\
+        \\add_marker :: (values: [..]s64) {
+        \\    values.push(-1);              // grows a copy of the caller's descriptor
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [..]s64;
+        \\    defer a.free();
+        \\    for i: 0..8 a.push(i);        // count 8, capacity 8: the next push reallocates
+        \\    add_marker(a);
+        \\    print("{} {}\n", a.count, a[0]);
+        \\}
+    );
+    code_block(48, "text", #string
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run marker.glo 2>&1 | grep 'debug allocator'
+        \\glosso debug allocator: use after free
+        \\glosso debug allocator: double free
+        \\glosso debug allocator: leaked 1 allocation(s), 128 byte(s)
+        \\glosso debug allocator: 2 allocator error(s)
+    );
+    paragraph(49, #string,oneline
+        \\`main` then reads the released buffer, releases it a second time,
+        \\and leaks the new one. With `values: *[..]s64` and `add_marker(&a)`
+        \\all three faults disappear: a procedure that grows an array takes it
+        \\by pointer.
+    );
+    subheading(50, "Handing an owner on: `value_take`");
+    paragraph(51, #string,oneline
+        \\A deferred release always runs, also on the path where the owner was
+        \\returned or stored somewhere else; nothing checks whether the value
+        \\was handed on in the meantime. Returning a local owner that has a
+        \\deferred `free` therefore returns a released buffer:
+    );
+    code_block(52, "glosso", #string
+        \\// evens.glo: wrong, returns a released buffer
+        \\#import "Io";
+        \\
+        \\evens :: (n: s64) -> [..]s64 {
+        \\    out: [..]s64;
+        \\    defer out.free();
+        \\    for i: 0..n out.push(i * 2);
+        \\    return out;                   // the deferred free releases what is returned
+        \\}
+        \\
+        \\main :: () {
+        \\    values := evens(4);
+        \\    print("{}\n", values[1]);
+        \\}
+    );
+    code_block(53, "text", #string
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run evens.glo 2>&1 | grep 'debug allocator'
+        \\glosso debug allocator: use after free
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    paragraph(54, #string,oneline
+        \\`value_take(&x)` from the `Memory/Ownership` module returns the value
+        \\of `x` and leaves `x` holding its default value, which owns nothing.
+        \\The deferred release then releases the empty value, and the returned
+        \\or stored copy is the only one that holds the resource. The deferred
+        \\`free` still does its job on every path that did not hand the owner
+        \\on:
+    );
+    code_block(55, "glosso", #string
+        \\#import "Io";
+        \\#import "Memory/Ownership";
+        \\
+        \\Batch :: struct { id: s64; rows: [..]s64; }
+        \\
+        \\// Builds a batch; on success the caller owns it.
+        \\load :: (id: s64, n: s64) -> ?Batch {
+        \\    b: Batch = .{ .id = id };
+        \\    defer b.free();                  // releases a partial batch on the failure path
+        \\    for i: 0..n {
+        \\        if id == 2 && i == 3 return null;
+        \\        b.rows.push(i);
+        \\    }
+        \\    return value_take(&b);           // hands the batch over; the defer frees an empty one
+        \\}
+        \\
+        \\main :: () {
+        \\    queue: [..]Batch;
+        \\    defer queue.free();              // releases every batch, then the buffer
+        \\    for id: 1..4 {
+        \\        #pattern .Some(b) := load(id, 5) else {
+        \\            print("batch {} failed\n", id);
+        \\            continue;
+        \\        }
+        \\        queue.push(b);               // the queue owns the batch from here on
+        \\    }
+        \\    print("{} batches queued, {} rows in the last\n", queue.count, queue[1].rows.count);
+        \\}
+    );
+    code_block(56, "text", #string
+        \\batch 2 failed
+        \\2 batches queued, 5 rows in the last
+    );
+    paragraph(57, #string,oneline
+        \\`b` in `main` needs no release of its own: `push` stored it in the
+        \\queue, and `queue.free()` releases it with the others. Had `main`
+        \\registered `defer b.free();`, it would have written
+        \\`queue.push(value_take(&b))`.
+    );
+    paragraph(58, #string,oneline
+        \\The other way to release only on the failure path is `#try defer`,
+        \\which registers a statement that runs only when `?` propagates a
+        \\failure out of the scope. Files, Handles, and Non-Memory Resources
+        \\uses it for resources acquired one after another, and Deferred
+        \\Statements gives the exact rule.
+    );
+    subheading(59, "The transfer operations");
+    table_header(60, "Operation   —   Effect");
+    table_row(61, "`value_take(&x)`   |   Returns the value of `x` and leaves `x` with its default value.");
+    table_row(62, "`value_replace(&x, v)`   |   Stores `v` in `x` and returns the previous value, unreleased.");
+    table_row(63, "`value_swap(&a, &b)`   |   Exchanges the two values; nothing is released.");
+    table_row(64, "`xs.take()`   |   For `[..]T`: returns the array and leaves `xs` empty. Needs no import.");
+    table_row(65, "`xs.replace(ys)`   |   For `[..]T`: installs `ys` and returns the previous array.");
+    paragraph(66, #string,oneline
+        \\The first three work on any type and come from `Memory/Ownership`,
+        \\which `Memory` also exports. The default that `value_take` leaves
+        \\includes field defaults, so a struct field declared `name: str =
+        \\"unnamed"` reads `"unnamed"` afterwards:
+    );
+    code_block(67, "glosso", #string
+        \\#import "Io";
+        \\#import "Memory/Ownership";
+        \\
+        \\Job :: struct {
+        \\    name: str = "unnamed";
+        \\    steps: [..]str;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Job = .{ .name = "build" };
+        \\    defer a.free();
+        \\    a.steps.push("compile", "link");
+        \\
+        \\    b := value_take(&a);                 // a is left with its defaults
+        \\    defer b.free();
+        \\    print("a: {} {} / b: {} {}\n", a.name, a.steps.count, b.name, b.steps.count);
+        \\
+        \\    c: Job = .{ .name = "test" };
+        \\    old := value_replace(&b, c);         // b holds c's value; the previous one is returned
+        \\    defer old.free();
+        \\    print("b: {} / old: {} {}\n", b.name, old.name, old.steps.count);
+        \\
+        \\    front: [..]s64;
+        \\    defer front.free();
+        \\    back: [..]s64;
+        \\    defer back.free();
+        \\    for frame: 0..3 {
+        \\        back.clear();
+        \\        back.push(frame, frame * 10);
+        \\        value_swap(&front, &back);       // exchange the descriptors, not the elements
+        \\        print("frame {}: front {} {}\n", frame, front[0], front[1]);
+        \\    }
+        \\}
+    );
+    code_block(68, "text", #string
+        \\a: unnamed 0 / b: build 2
+        \\b: test / old: build 2
+        \\frame 0: front 0 0
+        \\frame 1: front 1 10
+        \\frame 2: front 2 20
+    );
+    paragraph(69, #string,oneline
+        \\After `value_replace(&b, c)`, `c` and `b` hold the same value, and
+        \\only `b` is released. Assigning over an owner, `b = c;`, releases
+        \\nothing: the value `b` held before is lost unless it was released or
+        \\taken out first, which is what `value_replace` does in one step.
+    );
+    subheading(70, "Copying what an owner owns");
+    paragraph(71, #string,oneline
+        \\There is no general deep copy, because only the type knows what a
+        \\copy of its resources means. Strings have `text.clone(allocator)`, a
+        \\builder has `builder.clone()`, and `Deque` and `LinkedList` have
+        \\`clone` and `clone_with`, which takes a procedure that copies one
+        \\element. For a dynamic array of plain elements a loop is enough:
+    );
+    code_block(72, "glosso", #string
+        \\#import "Io";
+        \\
+        \\// A new array holding copies of the elements of `source`.
+        \\duplicate :: (source: []const $T) -> [..]T {
+        \\    out: [..]T;
+        \\    out.reserve(source.count);
+        \\    for x: source out.push(x);
+        \\    return out;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [..]s64;
+        \\    defer a.free();
+        \\    a.push(1, 2, 3);
+        \\    b := duplicate(a.view());
+        \\    defer b.free();
+        \\    b[0] = 100;
+        \\    print("{} {} same buffer: {}\n", a[0], b[0], a.data == b.data);
+        \\}
+    );
+    code_block(73, "text", #string
+        \\1 100 same buffer: false
+    );
+    paragraph(74, #string,oneline
+        \\For elements that are owners themselves, `duplicate` would copy
+        \\descriptors again; each element needs its own copy, made the same way
+        \\one level down.
+    );
+    subheading(75, "Loops copy elements");
+    paragraph(76, #string,oneline
+        \\`for x: values` binds a copy of each element. For an array of owners
+        \\the copy shares the element's resources, so the body must not release
+        \\it, and leaving the loop early releases nothing either: the array's
+        \\own release still covers every element. A loop that consumes the
+        \\elements uses `drain`, described in Container Buffers, Arenas, and
+        \\Pools.
+    );
+    subheading(77, "Deliberately not releasing: `leak`");
+    paragraph(78, #string,oneline
+        \\`leak(x)` takes a value and does nothing with it. It marks in the
+        \\source that an owner is meant to live until the program ends, such
+        \\as a table built once at startup. The debug allocator still reports
+        \\the memory, since it was never released.
+    );
+}
+
+render_section_74 :: () {
+    paragraph(0, #string,oneline
+        \\A dynamic array, a `String_Builder` and every container in the
+        \\`Container` modules keep their elements in memory they allocate: a
+        \\small descriptor that lives wherever the value lives, and a buffer on
+        \\the heap. The first half of this chapter is about that buffer: who
+        \\allocates and releases it, what happens to pointers into it when it
+        \\grows, and how elements go in and come out. The second half
+        \\describes two types built for particular lifetimes: the arena, which
+        \\releases many values in one step, and the pool, whose handles can
+        \\tell that the value they named is gone. Arrays, Views, Dynamic
+        \\Arrays, and Slicing introduces the array operations themselves.
+    );
+    subheading(1, "The buffer of a dynamic array");
+    paragraph(2, #string,oneline
+        \\A `[..]T` is three words: `count`, `data` and `capacity`. The first
+        \\`push` allocates room for eight elements, and each `push` that finds
+        \\the buffer full allocates one twice as large, copies the elements and
+        \\releases the old buffer. `reserve(n)` makes room for `n` elements in
+        \\one step. The buffer comes from `context.allocator` at the moment it
+        \\grows and goes back to `context.allocator` at the moment the array is
+        \\released, so the same allocator must be installed at every growth
+        \\and at the release (see `Allocator` and Allocation Procedures). The
+        \\descriptor itself never moves: a pointer to the array, `*[..]T`,
+        \\stays valid while the buffer moves.
+    );
+    subheading(3, "Views and pointers into the buffer");
+    paragraph(4, #string,oneline
+        \\A view from `xs.view()` or `xs[a..b]`, a pointer from `&xs[i]`, and
+        \\the `str` from a builder's `to_string()` all record the buffer's
+        \\address. Any operation that moves or releases the buffer leaves them
+        \\pointing at released memory, and nothing reports it except the debug
+        \\allocator:
+    );
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: [..]s64;
+        \\    defer a.free();
+        \\    a.push(1, 2, 3);
+        \\    first := a.view();
+        \\    a.push(4, 5, 6, 7, 8, 9);     // the ninth element moves the buffer
+        \\    print("{}\n", first[0]);      // reads the released buffer
+        \\}
+    );
+    code_block(6, "text", #string
+        \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run stale.glo 2>&1 | grep -v '^glosso:'
+        \\glosso debug allocator: use after free
+        \\    allocated at:
+        \\      stale.glo:6:5
+        \\    freed at:
+        \\      stale.glo:8:5
+        \\    used at:
+        \\      stale.glo:9:19
+        \\1
+        \\glosso debug allocator: 1 allocator error(s)
+    );
+    table_header(7, "Operation   —   Effect on existing views and pointers");
+    table_row(8, "`push`, `append`, `reserve`   |   Stale when the buffer grows.");
+    table_row(9, "`pop`, `swap_remove`, `truncate`, `clear`   |   Same buffer, but a view still has the old count; removed elements are gone.");
+    table_row(10, "`take`, `replace`, `drain`   |   The buffer belongs to another value.");
+    table_row(11, "`free`, `reset`   |   The buffer is released.");
+    paragraph(12, #string,oneline
+        \\The safe patterns are to keep an index instead of a pointer, to take
+        \\views only after the array has stopped growing, or to `reserve` the
+        \\final size first so that no `push` reallocates. The containers follow
+        \\the same rule: a pointer returned by `HashMap.get` or `Deque.front`
+        \\is valid only until the next operation that changes the container's
+        \\structure. A `LinkedList` element pointer is the exception; it stays
+        \\valid until its own node is removed.
+    );
+    subheading(13, "Elements that are owners");
+    paragraph(14, #string,oneline
+        \\An array or container of owners owns its elements too. Releasing it
+        \\releases each live element, then the buffer; `clear` and `truncate`
+        \\release the elements they remove. An operation that hands an element
+        \\out gives the caller the responsibility for it: `pop` and
+        \\`swap_remove` return the element unreleased, and so do a container's
+        \\`remove` and the displaced value of an `insert`. `Freeable`, Copies,
+        \\and Ownership Transfer states these conventions in general.
+    );
+    paragraph(15, #string,oneline
+        \\`for x: xs.drain()` is the loop that consumes an array. `drain` takes
+        \\the buffer out of `xs`, leaving it empty and usable, and the loop
+        \\hands each element to the body by value, so the body owns it. When
+        \\the loop ends early, through `break`, `return` or `?`, the elements
+        \\not yet handed out are released with the buffer:
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Ticket :: struct { id: s64; }
+        \\Ticket ::: instance Freeable {
+        \\    free :: (x: Ticket) { print("  release {}\n", x.id); }
+        \\}
+        \\
+        \\main :: () {
+        \\    queue: [..]Ticket;
+        \\    defer queue.free();
+        \\    queue.push(.{ .id = 1 }, .{ .id = 2 }, .{ .id = 3 }, .{ .id = 4 });
+        \\    for t: queue.drain() {
+        \\        print("handle {}\n", t.id);
+        \\        stop := t.id == 2;
+        \\        free(t);                     // the body owns each element
+        \\        if stop break;               // the rest are released with the drain
+        \\    }
+        \\    print("queue count {}\n", queue.count);
+        \\    queue.push(.{ .id = 5 });        // the drained array is empty and usable
+        \\    print("end of main\n");
+        \\}
+    );
+    code_block(17, "text", #string
+        \\handle 1
+        \\  release 1
+        \\handle 2
+        \\  release 2
+        \\  release 4
+        \\  release 3
+        \\queue count 0
+        \\end of main
+        \\  release 5
+    );
+    paragraph(18, #string,oneline
+        \\Because the drain holds the buffer and not a pointer into `queue`,
+        \\the body may push onto `queue` while the loop runs. A plain `for t:
+        \\queue` loop, by contrast, binds copies and releases nothing.
+    );
+    subheading(19, "The containers");
+    paragraph(20, #string,oneline
+        \\`HashMap`, `HashSet`, `BTreeMap`, `BTreeSet`, `Deque`, `LinkedList`
+        \\and `BinaryHeap` are owners with hand-written `Freeable` instances.
+        \\Unlike a dynamic array, each records the allocator it was made with:
+        \\the constructors take an `allocator` parameter that defaults to
+        \\`context.allocator`, and growth and release use the recorded one
+        \\whatever is installed later. A `HashMap` declared without a
+        \\constructor is empty and records `context.allocator` at its first
+        \\insertion. `free` and `reset` release the live elements and then the
+        \\storage, and `clear` releases the elements and may keep the storage.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#import "Container/HashMap";
+        \\#import "Container/Error";
+        \\
+        \\main :: () -> Container_Error!void {
+        \\    scores := HashMap(str, [..]s64).with_seed(1, 2);
+        \\    defer scores.free();             // releases every live value's buffer, then the table
+        \\
+        \\    first: [..]s64;
+        \\    first.push(70, 85);
+        \\    _ := scores.insert("ana", first)?;      // the map holds this array from here on
+        \\
+        \\    second: [..]s64;
+        \\    second.push(90);
+        \\    displaced := scores.insert("ana", second)?;
+        \\    if #pattern .Some(old) = displaced {
+        \\        print("replaced {} scores\n", old.count);
+        \\        old.free();                  // a displaced value is handed back
+        \\    }
+        \\
+        \\    empty: [..]s64;
+        \\    list := scores.get_or_insert("ben", empty)?;
+        \\    list.push(60, 65, 70);
+        \\    if #pattern .Some(removed) = scores.remove("ben") {
+        \\        defer removed.free();        // removal hands the value to the caller
+        \\        print("ben had {}\n", removed.count);
+        \\    }
+        \\    print("{} entries\n", scores.len());
+        \\    return .Ok;
+        \\}
+    );
+    code_block(22, "text", #string
+        \\replaced 2 scores
+        \\ben had 3
+        \\1 entries
+    );
+    paragraph(23, #string,oneline
+        \\`insert` stores the value it is given and returns the value it
+        \\replaced, if any, as `?V`; discarding that result discards the old
+        \\value without releasing it. `insert_new`, `get_or_insert` and
+        \\`entry(key).or_insert(value)` hand nothing back, and when they find
+        \\the key already present they release the value they were given. Keys
+        \\and values that are views or strings stay borrowed: the map stores
+        \\the view, so the memory it refers to must outlive the map. Here the
+        \\keys are literals, which live for the whole program.
+    );
+    subheading(24, "Strings and builders");
+    paragraph(25, #string,oneline
+        \\A `String_Builder` is a `[..]u8` together with the allocator it grows
+        \\through. Its `to_string()` borrows the bytes, `clone()` copies them
+        \\into a new string, and `into_string()` turns the buffer itself into
+        \\a string. `into_string` takes the builder by value, so the variable
+        \\still holds the buffer afterwards; take the builder out first when it
+        \\also has a deferred release:
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\#import "String_Builder";
+        \\#import "Memory/Ownership";
+        \\
+        \\main :: () {
+        \\    b := String_Builder.make_len_cap();
+        \\    defer b.free();
+        \\    b.write_string("hello");
+        \\    view := b.to_string();                       // borrows the builder's bytes
+        \\    print("{}\n", view);
+        \\    b.write_string(", world");                   // may move the bytes: `view` is stale from here on
+        \\    copy := b.clone();                           // an independent copy
+        \\    defer copy.free();
+        \\    text := value_take(&b).into_string();        // the buffer itself; b is left empty
+        \\    defer text.free();
+        \\    print("{} / {} / builder has {}\n", copy, text, b.len());
+        \\}
+    );
+    code_block(27, "text", #string
+        \\hello
+        \\hello, world / hello, world / builder has 0
+    );
+    paragraph(28, #string,oneline
+        \\Written as `text := b.into_string();`, the deferred `b.free()` would
+        \\release the buffer that `text` refers to, and `text.free()` would
+        \\release it a second time. The same holds for `into_bytes` and
+        \\`into_temporary_string`.
+    );
+    paragraph(29, #string,oneline
+        \\A `str` never owns its bytes, so an array of strings releases only
+        \\its own buffer. Strings that the program allocated, such as the
+        \\results of `format` or `clone`, are released one by one before the
+        \\array, as the example in The Temporary Allocator does. Strings that
+        \\point into other storage, such as the pieces from splitting a string,
+        \\are not released at all; they are valid as long as the storage they
+        \\point into.
+    );
+    subheading(30, "Global containers");
+    paragraph(31, #string,oneline
+        \\A global dynamic array or container is declared without an
+        \\initializer. It starts empty and allocates on first use like a local
+        \\one, and the program releases it, for example with `defer
+        \\log_lines.free();` at the start of `main`:
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\
+        \\log_lines: [..]str;
+        \\
+        \\note :: (line: str) { log_lines.push(line); }
+        \\
+        \\main :: () {
+        \\    defer log_lines.free();
+        \\    note("start");
+        \\    note("work");
+        \\    print("{} lines, first {}\n", log_lines.count, log_lines[0]);
+        \\}
+    );
+    code_block(33, "text", #string
+        \\2 lines, first start
+    );
+    note(34, #string,oneline
+        \\A global dynamic array initialized from a literal, `nums: [..]s64 =
+        \\.[1, 2];`, compiles, but its elements are static data in the
+        \\executable, not a heap buffer. Growing or releasing it hands that
+        \\address to the allocator, and the program crashes. Declare the
+        \\global empty and push the initial elements at the start of `main`.
+    );
+    subheading(35, "Arenas");
+    paragraph(36, #string,oneline
+        \\Releasing every allocation on its own is the right default, but when
+        \\many values live and die together an arena serves them better.
+        \\`Arena` from the `Memory` module is a bump allocator. It takes blocks
+        \\from the allocator that was installed when it was made, by default 64
+        \\KiB at a time, and serves requests by advancing an offset inside the
+        \\current block. Nothing is released individually; the whole arena is
+        \\released at once.
+    );
+    table_header(37, "Operation   —   Effect");
+    table_row(38, "`Arena.new(block_size)`   |   An empty arena; no block is taken until the first allocation. A size below 256 is raised to 256.");
+    table_row(39, "`a.alloc(T)`   |   Room for one `T`, zeroed and then given `T`'s field defaults; returns `*T`.");
+    table_row(40, "`a.allocator()`   |   An `Allocator` that bumps in the arena; `Free` and `Free_All` do nothing.");
+    table_row(41, "`a.clear()`   |   Every allocation dies; the first block is kept for reuse.");
+    table_row(42, "`a.reset()`, `free(a)`   |   Every allocation dies and every block goes back; `reset` leaves the arena usable.");
+    table_row(43, "`a.reserved()`   |   The bytes taken from the backing allocator.");
+    paragraph(44, #string,oneline
+        \\`alloc` aborts the program when the backing allocator fails. A zero
+        \\`Arena`, declared without `Arena.new`, is a valid empty arena that
+        \\takes its blocks from `context.allocator` at its first allocation.
+        \\The usual way to put a whole computation in an arena is to install its
+        \\allocator with `#push_allocator`, so that everything the computation
+        \\allocates, its arrays and strings included, lands in the arena:
+    );
+    code_block(45, "glosso", #string
+        \\#import "Io";
+        \\#import "Format";
+        \\#import "Memory";
+        \\
+        \\Token :: struct {
+        \\    text: str;
+        \\    next: ?*Token;
+        \\}
+        \\
+        \\// Everything this procedure allocates comes from the arena.
+        \\tokenize :: (arena: *Arena, count: s64) -> ?*Token {
+        \\    #push_allocator(arena.allocator());
+        \\    head: ?*Token = null;
+        \\    for i: 0..count {
+        \\        t := arena.alloc(Token);                     // a zeroed Token in the arena
+        \\        t.text = format("token-{}", count - i);      // format uses context.allocator: the arena
+        \\        t.next = head;
+        \\        head = t;
+        \\    }
+        \\    return head;
+        \\}
+        \\
+        \\main :: () {
+        \\    arena := Arena.new(4096);
+        \\    defer free(arena);
+        \\    for round: 1..4 {
+        \\        list := tokenize(&arena, round * 50);
+        \\        n := 0;
+        \\        first := "";
+        \\        if #pattern .Some(t) = list first = t.text;
+        \\        while #pattern .Some(t) = list { n += 1; list = t.next; }
+        \\        print("round {}: {} tokens from {}, {} bytes reserved\n", round, n, first, arena.reserved());
+        \\        arena.clear();                                 // every token dies at once
+        \\    }
+        \\}
+    );
+    code_block(46, "text", #string
+        \\round 1: 50 tokens from token-1, 4096 bytes reserved
+        \\round 2: 100 tokens from token-1, 4096 bytes reserved
+        \\round 3: 150 tokens from token-1, 8192 bytes reserved
+    );
+    paragraph(47, #string,oneline
+        \\No token and no string is released on its own. `clear` makes the
+        \\memory of one round available to the next, so the program allocates
+        \\from the heap only when a round needs more than the blocks it
+        \\already has.
+    );
+    subheading(48, "Rules for arenas");
+    bullet(49, #string,oneline
+        \\An owner that grew through the arena's allocator needs no release of
+        \\its own; the arena reclaims it. Releasing it while the arena's
+        \\allocator is installed does nothing. Releasing it under another
+        \\allocator hands an arena address to that allocator, which is an
+        \\error (see `Allocator` and Allocation Procedures).
+    );
+    bullet(50, #string,oneline
+        \\`a.alloc(T)` places only the `T` in the arena. A dynamic array inside
+        \\it grows through whatever `context.allocator` is installed when it
+        \\grows, so it lands in the arena only under `#push_allocator`;
+        \\otherwise it is released on its own.
+    );
+    bullet(51, #string,oneline
+        \\The `Allocator` from `a.allocator()` holds the address of `a`. The
+        \\arena must stay alive, and in place, while that allocator or any
+        \\owner that grew through it is in use: storing the arena by value in
+        \\an array that later grows, or returning it from the procedure that
+        \\took its allocator, breaks this.
+    );
+    bullet(52, #string,oneline
+        \\Copying an `Arena` copies the pointer to its block chain, not the
+        \\blocks. Exactly one copy is released, and the arena is passed to
+        \\procedures as `*Arena`, as `tokenize` does.
+    );
+    bullet(53, #string,oneline
+        \\An arena is not synchronized. An arena shared between threads needs
+        \\a lock around every use; usually each thread has its own.
+    );
+    paragraph(54, #string,oneline
+        \\The temporary allocator described in The Temporary Allocator is an
+        \\arena that every thread already has. A separate `Arena` is the better
+        \\choice when its lifetime does not match a rewind of that shared
+        \\arena, for example data that lives for one request while other code
+        \\uses temporary memory freely.
+    );
+    subheading(55, "Pools and handles");
+    paragraph(56, #string,oneline
+        \\When values refer to each other and come and go individually, a
+        \\pointer into a growing array goes stale silently. `Pool(T)` from the
+        \\`Container/Pool` module stores values of type `T` in slots and
+        \\returns a `Handle` for each, a slot index together with a generation
+        \\number. Removing a value empties its slot and advances the
+        \\generation, so every handle to the removed value is detected as stale
+        \\from then on, even after the slot is reused. That makes handles the
+        \\tool for structures whose parts refer to each other, such as graphs,
+        \\trees with parent links and entity tables.
+    );
+    code_block(57, "glosso", #string
+        \\#import "Io";
+        \\#import "Container/Pool";
+        \\
+        \\Employee :: struct {
+        \\    name: str;
+        \\    manager: ?Handle;
+        \\    reports: [..]Handle;
+        \\}
+        \\
+        \\main :: () {
+        \\    staff := Pool(Employee).new();
+        \\    defer free(staff);                 // releases every live value, then the slots
+        \\
+        \\    boss := staff.insert(.{ .name = "Ada" });
+        \\    names: []const str = .["Brian", "Carol", "Dave"];
+        \\    for name: names {
+        \\        h := staff.insert(.{ .name = name, .manager = .Some(boss) });
+        \\        staff.at_mut(boss).reports.push(h);   // look up again after each insert
+        \\    }
+        \\    print("{} reports to {}\n", staff.at(staff.at(boss).reports[1]).name, staff.at(boss).name);
+        \\
+        \\    carol := staff.at(boss).reports[1];
+        \\    #pattern .Some(gone) := staff.remove(carol) else { return; }
+        \\    defer gone.free();                 // remove hands the value back
+        \\    print("removed {}; handle still valid: {}\n", gone.name, staff.contains(carol));
+        \\    if #pattern .Some(e) = staff.get(carol) print("found {}\n", e.name);
+        \\    else print("stale handle\n");
+        \\    print("{} employees\n", staff.count());
+        \\}
+    );
+    code_block(58, "text", #string
+        \\Carol reports to Ada
+        \\removed Carol; handle still valid: false
+        \\stale handle
+        \\3 employees
+    );
+    table_header(59, "Operation   —   Effect");
+    table_row(60, "`Pool(T).new(capacity)`   |   An empty pool; a zero `Pool(T)` is also empty and usable.");
+    table_row(61, "`p.insert(value)`   |   Stores `value` and returns its handle; the pool owns the value.");
+    table_row(62, "`p.remove(h)`   |   Returns the value as `?T`, `null` when `h` is stale; the caller owns it.");
+    table_row(63, "`p.get(h)`, `p.get_mut(h)`   |   `?*const T` or `?*T`; `null` when `h` is stale.");
+    table_row(64, "`p.at(h)`, `p.at_mut(h)`   |   The pointer, or a stop with `runtime check failed: pool.handle`.");
+    table_row(65, "`p.get2_mut(a, b)`   |   Pointers to two different values at once; the same handle twice stops with `pool.alias`.");
+    table_row(66, "`p.contains(h)`, `p.count()`   |   Whether `h` is live; the number of live values.");
+    table_row(67, "`p.reset()`, `free(p)`   |   Release every live value and the slots; every handle goes stale.");
+    paragraph(68, #string,oneline
+        \\A pointer from `get` or `at` is valid only until the next `insert`,
+        \\which may move the slots, or until its value is removed; that is why
+        \\the loop above looks the boss up again after each insertion rather
+        \\than keeping a pointer. The zero `Handle` is always stale, so
+        \\`?Handle` or a zero handle both work as "no reference". A handle from
+        \\another pool is detected when its index or generation does not
+        \\match; one that happens to match designates that slot, which is a
+        \\logic error but never touches released memory.
+    );
+    code_block(69, "text", #string
+        \\// h := p.insert(41);  _ := p.remove(h);  print("{}\n", p.at(h).*);
+        \\$ glosso --run stale_handle.glo 2>&1 | tail -2
+        \\runtime check failed: pool.handle
+        \\glosso: program exited with status 134
+        \\$ glosso -O2 --run stale_handle.glo 2>&1 | tail -1
+        \\glosso: program exited with status 134
+    );
+    paragraph(70, #string,oneline
+        \\`at`, `at_mut` and `get2_mut` stop the program at every optimization
+        \\level, but the `runtime check failed` line is printed only at `-O0`
+        \\and `-O1`; at `-O2` and above the program aborts without a message.
+        \\Code that expects stale handles uses `get`, `get_mut` or `contains`
+        \\and handles `null`.
+    );
+    paragraph(71, #string,oneline
+        \\The slots grow like a dynamic array, through the `context.allocator`
+        \\installed at each growth, and the release uses the one installed
+        \\then. Removing a value hands it to the caller unreleased, as for any
+        \\container; `gone.free()` above releases Carol's `reports` array.
+    );
+}
+
+render_section_75 :: () {
+    paragraph(0, #string,oneline
+        \\Memory is not the only thing a program has to give back. Open files,
+        \\sockets, directory handles, memory mappings, loaded libraries and
+        \\child processes are resources of the operating system, and a handle
+        \\to one is a number or pointer that means nothing once the resource is
+        \\closed. Glosso treats them like memory: nothing closes them
+        \\implicitly, and the program closes each one exactly once. This
+        \\chapter describes the standard handle types, closing with and
+        \\without an error report, copies of handles, and how to make a
+        \\resource from a C library into an owner. The rules for owners in
+        \\general are in `Freeable`, Copies, and Ownership Transfer.
+    );
+    subheading(1, "Standard handles are owners");
+    paragraph(2, #string,oneline
+        \\The standard library's handle types have hand-written `Freeable`
+        \\instances, so `defer x.free();` closes them on every way out of a
+        \\scope, as it releases memory. Among them are `File` and `Directory`
+        \\(`File_System`), `Mapping`, `Watcher` and `Temporary_File`, `Socket`
+        \\and `Tls_Stream` (`Net`), and `Thread_Pool` and `Channel`
+        \\(`Thread`).
+    );
+    paragraph(3, #string,oneline
+        \\Two handle types are not owners. A `Dynamic_Library` is released only
+        \\by its `close`, and a spawned `Child` process only by `wait`, a `poll`
+        \\that reports completion, or `close`. For them a deferred `close` takes
+        \\the place of `free`; it may be deferred as it is, although it returns
+        \\a result:
+    );
+    code_block(4, "glosso", #string
+        \\#import "Io";
+        \\#import "Dynamic_Library";
+        \\
+        \\main :: () -> Dynamic_Library_Error!void {
+        \\    #assert !Freeable(Dynamic_Library);
+        \\    lib := Dynamic_Library.dynamic_library_open("libm.so.6")?;
+        \\    defer lib.close();                   // the error of a deferred close is dropped
+        \\    sym := lib.symbol("cos")?;
+        \\    print("found cos: {}\n", sym != null);
+        \\    return .Ok;
+        \\}
+    );
+    code_block(5, "text", #string
+        \\found cos: true
+    );
+    subheading(6, "Closing and its errors");
+    paragraph(7, #string,oneline
+        \\Closing can fail. A file opened for writing may report at `close`
+        \\that the data did not reach the disk. `free` cannot report anything,
+        \\because a release has no result, so the handle types offer both: an
+        \\explicit `close` that returns an error, and `free`, which closes and
+        \\discards the error. A file whose close matters uses both:
+    );
+    code_block(8, "glosso", #string
+        \\#import "Io";
+        \\#import "File_System/File";
+        \\
+        \\save :: (path: str, lines: []const str) -> Fs_Error!void {
+        \\    file := File.open(path, .Write, .Create_Always)?;
+        \\    defer file.free();                 // closes on every way out; a close error is dropped
+        \\    for line: lines {
+        \\        _ := file.write(line)?;
+        \\        _ := file.write("\n")?;
+        \\    }
+        \\    file.close()?;                     // on success, close explicitly and report its error
+        \\    return .Ok;
+        \\}
+        \\
+        \\main :: () -> Fs_Error!void {
+        \\    lines: []const str = .["first", "second"];
+        \\    save("notes.txt", lines)?;
+        \\
+        \\    file := File.open("notes.txt")?;
+        \\    defer file.free();
+        \\    text := file.read()?;
+        \\    defer text.free();
+        \\    print("{} bytes:\n{}", text.count, text);
+        \\    file.close()?;
+        \\    if #pattern .Err(e) = file.close() print("second close: {}\n", e.kind);
+        \\    if #pattern .Err(e) = File.open("missing/notes.txt") print("open failed: {}\n", e.kind);
+        \\    return .Ok;
+        \\}
+    );
+    code_block(9, "text", #string
+        \\13 bytes:
+        \\first
+        \\second
+        \\second close: Invalid_Handle
+        \\open failed: Not_Found
+    );
+    paragraph(10, #string,oneline
+        \\When a `write` fails, `?` returns its error and the deferred `free`
+        \\closes the file; a second error from closing would only hide the
+        \\first. On the success path the explicit `close` reports its own
+        \\error. `close` marks the handle closed before it calls the operating
+        \\system, so the deferred `free` that runs afterwards finds nothing to
+        \\close, and a second `close` fails with `Invalid_Handle` instead of
+        \\closing the number again. A failed `close` is not retried: the
+        \\operating system may already have given the number to another file.
+    );
+    paragraph(11, #string,oneline
+        \\`File.stdin()`, `File.stdout()` and `File.stderr()` return borrowed
+        \\handles. Closing one only marks that `File` value closed; the
+        \\process's standard stream stays open.
+    );
+    subheading(12, "Copies of a handle");
+    paragraph(13, #string,oneline
+        \\A handle is copied like any other value, and every copy holds the
+        \\same number. Closing through one copy marks only that copy closed.
+        \\Closing through another then closes the number a second time, and if
+        \\the operating system has reused it in the meantime, it closes an
+        \\unrelated file or socket. Pass handles to procedures as `*File`, keep
+        \\one copy that is closed, and hand that copy on with `value_take` when
+        \\its owner changes.
+    );
+    subheading(14, "Releasing on failure: `#try defer`");
+    paragraph(15, #string,oneline
+        \\A procedure that acquires several resources and returns them to its
+        \\caller releases them only if it fails partway. `#try defer
+        \\statement;` registers a statement that runs only when `?` propagates
+        \\a failure out of the scope it is written in, so the resources
+        \\acquired so far are closed on the failure path and returned on the
+        \\success path:
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\#import "File_System/File";
+        \\
+        \\Copy_Job :: struct {
+        \\    input: File;
+        \\    output: File;
+        \\}
+        \\
+        \\// Opens both files. The caller owns them on success; on failure the file
+        \\// opened so far is closed here.
+        \\open_job :: (from: str, to: str) -> Fs_Error!Copy_Job {
+        \\    input := File.open(from)?;
+        \\    #try defer {
+        \\        print("closing {} after a failure\n", from);
+        \\        input.free();
+        \\    }
+        \\    output := File.open(to, .Write, .Create_Always)?;
+        \\    return Copy_Job.{ .input = input, .output = output };
+        \\}
+        \\
+        \\main :: () -> Fs_Error!void {
+        \\    source := File.open("source.txt", .Write, .Create_Always)?;
+        \\    defer source.free();
+        \\    _ := source.write("data\n")?;
+        \\    source.close()?;
+        \\
+        \\    if #pattern .Err(e) = open_job("source.txt", "missing/copy.txt") print("failed: {}\n", e.kind);
+        \\    job := open_job("source.txt", "copy.txt")?;
+        \\    defer job.free();                  // closes both files
+        \\    print("both open\n");
+        \\    return .Ok;
+        \\}
+    );
+    code_block(17, "text", #string
+        \\closing source.txt after a failure
+        \\failed: Not_Found
+        \\both open
+    );
+    paragraph(18, #string,oneline
+        \\The structural release of `Copy_Job` closes both files, since `File`
+        \\is an owner. Deferred Statements gives the exact rule for `#try
+        \\defer`, including that a hand-written `return .Err(...)` does not
+        \\count as a failure.
+    );
+    subheading(19, "Wrapping a foreign resource");
+    paragraph(20, #string,oneline
+        \\A resource from a C library becomes an owner through a type of the
+        \\program with a `Freeable` instance. The type holds the handle, a
+        \\`close` method reports C's result, and `free` calls `close` and
+        \\ignores the result. Disarming the handle before the foreign call, as
+        \\`close` does below, keeps a second `close` or `free` from reaching C
+        \\again. `#foreign`, `#library`, and `#c_call` describes the
+        \\declarations of the C procedures.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\#import "Strings/Utf8";
+        \\
+        \\libc :: #library "c";
+        \\c_fopen  :: (path: cstr, mode: cstr) -> ?*void #foreign libc "fopen";
+        \\c_fputs  :: (text: cstr, stream: *void) -> s32 #foreign libc "fputs";
+        \\c_fclose :: (stream: *void) -> s32 #foreign libc "fclose";
+        \\
+        \\// Owns one C `FILE *`. The zero value holds nothing.
+        \\C_File :: struct {
+        \\    stream: ?*void;
+        \\}
+        \\
+        \\C_File ::: #public {
+        \\    open :: (path: str, mode: str) -> ?C_File {
+        \\        #pattern .Some(stream) := c_fopen(path.c_string(), mode.c_string()) else { return null; }
+        \\        return C_File.{ .stream = .Some(stream) };
+        \\    }
+        \\
+        \\    put :: (*#self, text: str) -> bool {
+        \\        #pattern .Some(stream) := #self.stream else { return false; }
+        \\        return c_fputs(text.c_string(), stream) >= 0;
+        \\    }
+        \\
+        \\    // Closes the stream and reports whether C's fclose succeeded.
+        \\    close :: (*#self) -> bool {
+        \\        #pattern .Some(stream) := #self.stream else { return false; }
+        \\        #self.stream = null;               // disarm first: a failed close is not retried
+        \\        return c_fclose(stream) == 0;
+        \\    }
+        \\}
+        \\
+        \\C_File ::: instance Freeable {
+        \\    free :: (x: C_File) {
+        \\        if x.stream print("closing a C stream\n");
+        \\        _ := x.close();
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    #pattern .Some(out) := C_File.open("log.txt", "w") else {
+        \\        print("cannot open\n");
+        \\        return;
+        \\    }
+        \\    defer out.free();
+        \\    _ := out.put("written through C stdio\n");
+        \\    print("wrote the log\n");
+        \\}
+    );
+    code_block(22, "text", #string
+        \\wrote the log
+        \\closing a C stream
+    );
+    paragraph(23, #string,oneline
+        \\The C strings passed to `fopen` and `fputs` come from `c_string()`,
+        \\which allocates them in the temporary arena; they only have to live
+        \\for the duration of the call (see The Temporary Allocator).
+    );
+    paragraph(24, #string,oneline
+        \\When a handle is a plain integer, such as a POSIX file descriptor, a
+        \\`distinct` type over it with a `Freeable` instance makes the integer
+        \\an owner without a wrapping struct (see Nominal Types with
+        \\`distinct`):
+    );
+    code_block(25, "glosso", #string
+        \\#import "Io";
+        \\
+        \\libc :: #library "c";
+        \\c_dup   :: (fd: s32) -> s32 #foreign libc "dup";
+        \\c_write :: (fd: s32, data: *const void, count: usize) -> ssize #foreign libc "write";
+        \\c_close :: (fd: s32) -> s32 #foreign libc "close";
+        \\
+        \\// A POSIX file descriptor that the program owns; a negative one holds nothing.
+        \\Fd :: distinct s32;
+        \\
+        \\Fd ::: instance Freeable {
+        \\    free :: (x: Fd) {
+        \\        if cast(s32) x < 0 return;
+        \\        print("closing descriptor {}\n", cast(s32) x);
+        \\        _ := c_close(cast(s32) x);
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    #assert Freeable(Fd);
+        \\    out := cast(Fd) c_dup(1);                  // a second descriptor for standard output
+        \\    defer out.free();
+        \\    text := "written through the duplicate\n";
+        \\    _ := c_write(cast(s32) out, cast(*const void) text.data, cast(usize) text.count);
+        \\}
+    );
+    code_block(26, "text", #string
+        \\written through the duplicate
+        \\closing descriptor 3
+    );
+    paragraph(27, #string,oneline
+        \\An `Fd` comes only from a call that produced a descriptor. Its zero
+        \\value is descriptor 0, standard input, so unlike an empty dynamic
+        \\array a freshly declared `Fd` is not a value that holds nothing.
+    );
+    subheading(28, "Memory that crosses the boundary");
+    bullet(29, #string,oneline
+        \\Memory that C allocates is released the way C says, usually with its
+        \\own `free` declared through `#foreign`. Passing it to a Glosso
+        \\release hands it to `context.allocator`, which never allocated it.
+    );
+    bullet(30, #string,oneline
+        \\Memory that Glosso allocates and hands to C stays Glosso's: C must
+        \\not release it, and the program releases it after C stops using it.
+        \\A temporary C string from `c_string()` is enough for a call that does
+        \\not keep the pointer; a pointer that C keeps needs memory that lives
+        \\as long, such as a string from `cstring_from_string`, released with
+        \\`free` when C is done with it.
+    );
+    bullet(31, #string,oneline
+        \\A Glosso procedure that C calls back, marked `#c_call`, cannot name
+        \\`context`; `#Context` and `context` explains how such a procedure
+        \\installs one with `#push_context` when it needs to allocate.
+    );
+}
+
+}

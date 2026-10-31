@@ -16,23 +16,20 @@
     None :: 0;
     Append :: 1;
     Sync :: 32;
-    Default :: Append | Sync;
+    Temporary :: 16#40;
 }
 
-#public lazy :: (#lazy #comptime value: bool, #comptime #lazy other: bool, size := 42, values: []const string = .[]) -> bool {
+#public lazy :: (#lazy #comptime value: bool, #comptime #lazy other: bool, size := 42, values: []const str = .[]) -> bool {
 }
 
-#public legacy :: (path: $P) -> string #memory { returns_borrow(path) } where AsView(P, Path_View) {
+/// A borrowed path view whose constraint is written after the return type.
+// An ordinary note between documentation lines does not end the block.
+/// The constraint stays out of the display signature.
+#public view_text :: (path: $P) -> str where AsView(P, Path_View) {
 }
 
-/// A borrowed path view with a leading contract.
-#public #memory { reads(path), noescape(path), returns_borrow(path) }
-bare :: (path: $P) -> string  where AsView(P, Path_View) {
-}
-
-/// A callback retains the contract of its function-pointer type.
-#memory { returns_borrow(path), noescape(path) }
-#public Callback :: #fn_ptr(path: $P) -> string  where AsView(P, Path_View);
+/// A callback keeps its calling-convention directive.
+#public Callback :: #fn_ptr(path: cstr, data: ?*void) -> s32 #c_call;
 
 /// Private implementation declarations must never enter the public reference.
 _private_helper :: () {}
@@ -46,10 +43,12 @@ section_private :: () {}
 }
 
 unmarked_private :: () {}
-#public(unit) unit_private :: () {}
+#public,unit unit_private :: () {}
+#public,unit {
+    unit_grouped :: () {}
+}
 #public {
     /// A public function inside a visibility group.
-    #memory {}
     grouped :: () {}
     #private {
         hidden_nested :: () {}
@@ -60,7 +59,7 @@ unmarked_private :: () {}
 #public Box :: struct {
     value: ssize;
     #private secret: ssize;
-    #public(unit) internal: string;
+    #public,unit internal: str;
     #private {
         hidden: bool;
         #public exposed: bool;
@@ -70,25 +69,36 @@ unmarked_private :: () {}
 Box ::: #public
 {
     /// Constructs a box without a receiver.
-    make :: (value: ssize, label: string = "#Self_Type") -> #Self_Type {}
+    make :: (value: ssize, label: str = "#Self_Type") -> #Self_Type {}
     /// Reads a box through its receiver.
-    #memory { reads(#self), noescape(#self) }
     get :: (#self) -> ssize {}
     copy_from :: (*#self, other: *const #Self_Type) -> Fs_Error!#Self_Type {}
-    #private secret :: (#self) -> ssize {}
-    #public(unit) internal :: (*#self) {}
+    #private reveal :: (#self) -> ssize {}
+    #public,unit adjust :: (*#self) {}
 }
 
 Box ::: {
-    hidden :: (#self) {}
+    conceal :: (#self) {}
     #public set :: (*#self, value: ssize) {}
 }
 
+Box ::: #public,unit {
+    unit_method :: (#self) {}
+}
+
+/// A second public block reads through a read-only receiver.
+Box ::: #public {
+    peek :: (*const #self) -> ssize {}
+}
+
 $T ::: #public where Show(T) {
-    inspect :: (*#self) -> string {}
+    inspect :: (*#self) -> str {}
 }
 
 #public abort :: () -> #Never #foreign "c" "abort";
+
+/// A foreign declaration keeps its directive after a nullable return type.
+#public c_malloc :: (size: usize) -> ?*void #foreign "c" "malloc";
 
 #public GROUPED :: (1 + 2) * 3;
 #public GROUPED_SIMPLE :: (42);
@@ -97,46 +107,9 @@ $T ::: #public where Show(T) {
 #public {
     C_TEXT :: c"// { ; }";
     BYTE_TEXT :: b"\xFF; // }";
-    literal_defaults :: (message: cstring = c"// { ; }", bytes: [2]u8 = b"\xFF;") -> *const u8 {}
+    literal_defaults :: (message: cstr = c"// { ; }", bytes: [2]u8 = b"\xFF;") -> *const u8 {}
 }
 
-/// Visibility before an inline contract.
-#public #memory { unknown(reason: "// { ; }") } inline_contract :: () {}
-/// Visibility after a multiline contract.
-#memory
-{
-    reads(value),
-    noescape(value),
-}
-#public after_contract :: (value: *const u8) {}
-#public(unit) #memory {} hidden_unit_contract :: () {}
-#memory {} hidden_contract :: () {}
-
-/// Independent results retain their release identities.
-#memory {
-    returns_fresh(returned.0, returned.1),
-    released_by(place: returned.0, by: release, instance: allocator),
-    released_by(place: returned.1, by: release, instance: allocator),
-    unknown(arg: arg(0).data, reason: "external, { opaque } API"),
-}
-#public acquire_pair :: (allocator: Allocator) -> (*u8, *u8) #foreign "c" "acquire_pair";
-
-#public old_parentheses :: (value: *const u8) #memory(reads(value), noescape(value),);
-
-/// Typed release operations retain their complete owner syntax.
-#memory {
-    returns_fresh,
-    released_by(place: returned, by: (?*void).mem_free, instance: allocator),
-}
-#public typed_acquire :: (allocator: Allocator) -> ?*void #foreign "c" "typed_acquire";
-
-Box ::: #public {
-    #memory { reads(#self), noescape(#self) }
-    peek :: (*const #self) -> ssize {}
-}
-
-// #load,embed "not-a-file.glo";
-/*
-#load,embed "not-a-file-either.glo";
-*/
-#load, embed "A_Embedded.glo";
+// Every file is a module: the import names Source_Location.glo, whose
+// declarations stay in their own module.
+#import "Source_Location.glo";

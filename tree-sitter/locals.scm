@@ -8,12 +8,7 @@
   (pattern_case_clause)
   (pattern_quote_expression)
   (code_expression)
-  (on_drop_error_statement)
 ] @local.scope
-
-; Lifetime binders use a separate namespace from value parameters.
-((lifetimes_directive) @local.scope
-  (#set! local.scope-inherits false))
 
 ; Parameters
 (receiver_parameter
@@ -38,8 +33,6 @@
   ] @local.definition))
 (lambda_parameter
   name: (identifier) @local.definition)
-(on_drop_error_statement
-  error: (identifier) @local.definition)
 
 ; Local bindings prevent a same-named outer parameter from leaking through a
 ; shadowing declaration.
@@ -100,7 +93,6 @@
     (non_hygienic_identifier)
   ] @local.reference)
 (qualified_operator scope: (identifier) @local.reference)
-(on_drop_error_statement owner: (identifier) @local.reference)
 (using_statement name: (identifier) @local.reference)
 (asm_output_operand target: (identifier) @local.reference)
 (structured_asm_output_operand target: (identifier) @local.reference)

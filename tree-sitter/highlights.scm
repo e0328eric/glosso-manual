@@ -13,10 +13,7 @@
   "enum_flags"
   "using"
   "noalias"
-  "mut"
   "const"
-  "raw"
-  "raw_mut"
   "volatile"
   "defer"
   "where"
@@ -34,7 +31,6 @@
   "#comptime"
   "#lazy"
   "#import"
-  "#load"
   "#export"
   "#thread_local"
   "#library"
@@ -55,13 +51,13 @@
   "#no_context"
   "#dump"
   "#must"
-  "#on_drop_error"
   "#returns_twice"
   "#inline"
   "#bytes"
   "#asm"
   "#push_context"
   "#push_allocator"
+  "#temp_scope"
   "#if"
   "#insert"
   "#compile_error"
@@ -77,10 +73,6 @@
   "#enable"
   "#disable"
   "#derive"
-  "#lifetimes"
-  "#memory"
-  "#fresh_result"
-  "#unchecked_transfer"
   "#assert"
   "#public"
   "#private"
@@ -114,8 +106,6 @@
 (code_splice_identifier) @variable
 (non_hygienic_identifier) @variable
 (label) @label
-(lifetime) @label
-(lifetimes_directive (identifier) @label)
 (quoted_operator) @operator
 (operator) @operator
 (prefix_operator) @operator
@@ -168,7 +158,7 @@
   ]
   (#any-of? @type.builtin
     "ssize" "usize" "rune" "bool"
-    "string" "cstring" "string16" "cstring16"
+    "str" "cstr" "string16" "cstring16"
     "type" "void" "any" "label"
     "Code" "Pattern" "Namespace" "Library" "Typeclass" "Macro"
     "s8" "s16" "s32" "s64" "s128"
@@ -197,7 +187,10 @@
   ] @type.definition)
   [
     (function_pointer_type_declaration)
+    (typeclass_declaration)
+    (distinct_type_declaration)
     (struct_declaration)
+    (enum_flags_declaration)
     (enum_declaration)
     (union_declaration)
   ])
@@ -216,7 +209,6 @@
 (named_argument name: (identifier) @variable.parameter)
 (typeclass_parameter name: (identifier) @variable.parameter)
 (lambda_parameter name: (identifier) @variable.parameter)
-(on_drop_error_statement error: (identifier) @variable.parameter)
 (parameter
   name: (binding_list [
     (identifier)
@@ -314,30 +306,16 @@
 (structured_asm_constraint_kind) @constant.builtin
 (structured_asm_operand_flag) @attribute
 (structured_asm_clobber_kind) @constant.builtin
-(import_selector mode: _ @attribute)
-(load_modifier "embed" @attribute)
+; Import lists name declarations of the imported module. Capitalized names
+; are types, classes, or namespaces by convention.
+((import_list (identifier) @type)
+  (#match? @type "^[A-Z]"))
+(import_member scope: (identifier) @type)
+(import_member member: (identifier) @property)
+((import_member member: (identifier) @type)
+  (#match? @type "^[A-Z]"))
 (expand_directive mode: (identifier) @attribute)
 (insert_scope "scope" @attribute)
-(visibility_modifier "unit" @attribute)
+(visibility_modifier ["unit" "to"] @attribute)
 (operator_try_modifier "try" @attribute)
 (operator_try_modifier target: (identifier) @type)
-
-; Memory contracts use effect names and labels only within the directive.
-(memory_effect (identifier) @attribute)
-(memory_release_argument name: (identifier) @attribute)
-(memory_typed_releaser method: (identifier) @function)
-(memory_unknown_argument name: (identifier) @attribute)
-(memory_trusted_statement "trusted" @attribute)
-(memory_place . (identifier) @variable.parameter)
-(memory_place field: (identifier) @property)
-((memory_place . (identifier) @variable.builtin)
-  (#eq? @variable.builtin "returned"))
-(memory_qualified_name field: (identifier) @property)
-((memory_qualified_name . (identifier) @variable.builtin)
-  (#eq? @variable.builtin "returned"))
-(memory_overlay target: (memory_qualified_name (identifier) @function .))
-(memory_release_argument (memory_qualified_name (identifier) @function .))
-((memory_effect
-  kind: (identifier) @_memory_effect
-  (memory_qualified_name (identifier) @function .))
-  (#any-of? @_memory_effect "released_by" "gives" "maybe_gives"))

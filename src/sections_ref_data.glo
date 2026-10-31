@@ -1,0 +1,3868 @@
+#import "Format";
+#import "String_Builder";
+#import "Math/Core";
+#import "clay_ui.glo";
+
+#public {
+
+// Chapters 33-42: Structured Data.
+
+render_section_33 :: () {
+    paragraph(0, #string,oneline
+        \\A struct is a record type: a fixed list of named fields stored
+        \\together in one value. This chapter is the reference for declaring
+        \\structs and for everything a field declaration can say: defaults,
+        \\type parameters, `using`, `#empty` and `#as` fields, and types written
+        \\inline. Structs and Methods introduces structs through a worked
+        \\program. How the fields are placed in memory is the subject of Field
+        \\Order, Alignment, and Packing, and the full literal syntax is in
+        \\Aggregate Literal Syntax.
+    );
+    subheading(1, "Declaring a struct");
+    paragraph(2, #string,oneline
+        \\A struct is declared like every other named thing, as a constant
+        \\whose value is a `struct` body. The type's identity comes from that
+        \\declaration: two structs with the same fields are still different
+        \\types, and a value of one is not accepted where the other is
+        \\expected (`a: P = Q.{ 1, 2 };` is `error: got Q, expected P`).
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct {
+        \\    x: f64;
+        \\    y: f64;
+        \\    label: str = "unnamed";
+        \\}
+        \\
+        \\main :: () {
+        \\    p: Point;
+        \\    p.x = 1.5;
+        \\    q := Point.{ .x = 3, .y = 4, .label = "corner" };
+        \\    print("{} {} {}\n", p.x, p.y, p.label);
+        \\    print("{} {} {}\n", q.x, q.y, q.label);
+        \\}
+    );
+    code_block(4, "text", #string
+        \\1.5 0 unnamed
+        \\3 4 corner
+    );
+    paragraph(5, #string,oneline
+        \\A field is written `name: Type;`, optionally with a default value
+        \\after `=`. Every field ends with a semicolon, the last one included,
+        \\while the declaration itself ends at its closing brace and takes no
+        \\semicolon. A field name may appear only once. Each of these mistakes
+        \\has its own diagnostic:
+    );
+    code_block(6, "text", #string
+        \\// Point :: struct { x: f64, y: f64; }
+        \\error: struct member 'x' must end with ';'
+        \\// Point :: struct { x: f64; y: f64; };
+        \\error: expected a declaration, found ';'
+        \\help: a declaration whose body is braced ends at its '}', and is not followed by a semicolon; remove it
+        \\// Point :: struct { x: f64; x: f64; }
+        \\error: field 'x' is already declared
+        \\note: 'x' is first declared here
+    );
+    paragraph(7, #string,oneline
+        \\A struct may also be declared inside a procedure body, where its name
+        \\is visible only in that body. Procedures that belong to a struct are
+        \\not written inside its body; they are declared separately, as
+        \\described in Inherent Methods, Member Access, and Call Syntax.
+    );
+    subheading(8, "Defaults and zero initialization");
+    paragraph(9, #string,oneline
+        \\A variable declared without an initializer never holds garbage. Each
+        \\field that has a default receives it, and every other field is zero:
+        \\numbers are 0, a `bool` is false, a `str` is empty and an optional is
+        \\`null`. The same rule fills the elements of an array of structs, a
+        \\struct nested in another struct, a global variable, and the fields
+        \\that a struct literal leaves out.
+    );
+    paragraph(10, #string,oneline
+        \\A default is an ordinary expression, not a constant. It is evaluated
+        \\every time a value is initialized from it, and not at all when the
+        \\field receives a value of its own:
+    );
+    code_block(11, "glosso", #string
+        \\#import "Io";
+        \\
+        \\issued: s64 = 0;
+        \\next_id :: () -> s64 { issued += 1; return issued; }
+        \\
+        \\Ticket :: struct {
+        \\    id:    s64 = next_id();
+        \\    seats: s32 = 1;
+        \\    note:  str;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Ticket;
+        \\    b: Ticket;
+        \\    c := Ticket.{ .id = 100 };
+        \\    row: [2]Ticket;
+        \\    print("{} {} {}\n", a.id, b.id, c.id);
+        \\    print("{} {}\n", c.seats, c.note.count);
+        \\    print("{} {}\n", row[0].id, row[1].id);
+        \\}
+    );
+    code_block(12, "text", #string
+        \\1 2 100
+        \\1 0
+        \\3 4
+    );
+    paragraph(13, #string,oneline
+        \\Because `c` gives its own `id`, `next_id` runs four times: for `a`,
+        \\for `b` and for the two elements of `row`. A default is checked in the
+        \\scope that surrounds the struct, where the other fields are not
+        \\names, so it cannot refer to a sibling field:
+    );
+    code_block(14, "text", #string
+        \\// Range :: struct { low: s64; high: s64 = low + 10; }
+        \\error: unbound 'low'
+    );
+    paragraph(15, #string,oneline
+        \\`#undefined` opts out of initialization altogether.
+        \\`t: Ticket = #undefined;` declares `t` without zeroing it and without
+        \\running any default, and the program must then write every field
+        \\before it reads it.
+    );
+    subheading(16, "Struct literals");
+    paragraph(17, #string,oneline
+        \\A struct literal builds a value in one expression. `Vec2.{ ... }`
+        \\names the type, and `.{ ... }` takes it from the place where the
+        \\literal appears. A field is given by name, as in `.y = 7`, or by
+        \\position, in the order the fields are declared; positional values
+        \\come first and named ones after them. The fields a literal leaves out
+        \\take their defaults, so `.{}` is the default value of the struct.
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec2 :: struct { x: s64 = 1; y: s64 = 2; }
+        \\
+        \\sum :: (v: Vec2) -> s64 { return v.x + v.y; }
+        \\make :: () -> Vec2 { return .{ 6, 7 }; }
+        \\
+        \\main :: () {
+        \\    a := Vec2.{ 10, 20 };
+        \\    b := Vec2.{ .y = 7 };
+        \\    c := Vec2.{ 3, .y = 4 };
+        \\    d: Vec2 = .{ .x = 5 };
+        \\    print("{} {} | {} {} | {} {} | {} {}\n", a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y);
+        \\    d = .{ 8, 9 };
+        \\    grid: [2]Vec2 = .[ .{}, .{ 0, 0 } ];
+        \\    print("{} {} {} {}\n", sum(.{ 3, 4 }), make().y, d.x, grid[0].y);
+        \\}
+    );
+    code_block(19, "text", #string
+        \\10 20 | 1 7 | 3 4 | 5 2
+        \\7 7 8 2
+    );
+    paragraph(20, #string,oneline
+        \\Positional values follow the declaration order even when the
+        \\compiler stores the fields in a different order. A literal whose
+        \\fields are all constants can initialize a constant, as in
+        \\`ORIGIN :: Vec2.{ 0, 0 };`. Aggregate Literal Syntax lists the places
+        \\that supply the type of a short `.{ }` literal and the diagnostics for
+        \\a malformed one.
+    );
+    subheading(21, "Reading and writing fields");
+    paragraph(22, #string,oneline
+        \\`value.field` reads or assigns one field. Through a pointer the same
+        \\dot reaches the field without an explicit dereference, so a procedure
+        \\that takes `*Counter` writes `c.hits += 1`. A struct is a plain value:
+        \\assigning it or passing it to a procedure copies every field, and the
+        \\copy is independent of the original.
+    );
+    code_block(23, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Counter :: struct { hits: s64; misses: s64; }
+        \\
+        \\record :: (c: *Counter, hit: bool) {
+        \\    if hit c.hits += 1;
+        \\    else c.misses += 1;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Counter;
+        \\    record(&a, true);
+        \\    record(&a, false);
+        \\    b := a;
+        \\    record(&b, true);
+        \\    print("a: {} {}\n", a.hits, a.misses);
+        \\    print("b: {} {}\n", b.hits, b.misses);
+        \\}
+    );
+    code_block(24, "text", #string
+        \\a: 1 1
+        \\b: 2 1
+    );
+    paragraph(25, #string,oneline
+        \\A field name that does not exist is reported with a close match when
+        \\there is one:
+    );
+    code_block(26, "text", #string
+        \\// n := v.yy;
+        \\error: no field 'yy' in 'Vec2'
+        \\help: did you mean 'y'?
+    );
+    paragraph(27, #string,oneline
+        \\A copy never duplicates what a field points to. A struct that holds a
+        \\pointer, a view or a dynamic array shares that memory with each of its
+        \\copies; `Freeable`, Copies, and Ownership Transfer describes how such
+        \\structs are released. The rules for member access through pointers of
+        \\several levels are in Pointer Types.
+    );
+    subheading(28, "Opening a struct with `using`");
+    paragraph(29, #string,oneline
+        \\The statement `using name;` makes the fields of the struct variable
+        \\`name` usable as plain identifiers for the rest of the enclosing
+        \\block. Writing `using` before a parameter does the same for the whole
+        \\procedure body. The names are not copies: reading `x` reads `r.x`,
+        \\and assigning to `x` assigns to `r.x`.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Rect :: struct { x: s64; y: s64; w: s64; h: s64; }
+        \\
+        \\area :: (using r: Rect) -> s64 { return w * h; }
+        \\
+        \\main :: () {
+        \\    r := Rect.{ 1, 2, 30, 40 };
+        \\    print("area {}\n", area(r));
+        \\    using r;
+        \\    x += 5;
+        \\    print("{} {} {}\n", x, r.x, y);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\area 1200
+        \\6 6 2
+    );
+    paragraph(32, #string,oneline
+        \\The opened fields are found last. A local variable, parameter, global
+        \\or constant of the same name wins, including a local declared after
+        \\the `using`, so opening a struct never changes what an existing name
+        \\means. When two opened structs have a field of the same name, the most
+        \\recent `using` wins. The operand must be a variable of struct type; a
+        \\pointer is rejected rather than dereferenced:
+    );
+    code_block(33, "text", #string
+        \\// width :: (using r: *Rect) -> s64 { return w; }
+        \\error: using expects a struct, got *Rect
+    );
+    paragraph(34, #string,oneline
+        \\`using` written before a field declaration is accepted and has no
+        \\effect. The struct has the same fields and size as without it, and
+        \\the inner fields are still reached through the field's name: there is
+        \\no field promotion and no inheritance between structs.
+    );
+    code_block(35, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Base    :: struct { x: s64 = 1; y: s64 = 2; }
+        \\Derived :: struct { using base: Base; z: s64 = 3; }
+        \\
+        \\main :: () {
+        \\    d: Derived;
+        \\    print("{} {} {}\n", d.base.x, d.base.y, d.z);
+        \\}
+    );
+    code_block(36, "text", #string
+        \\1 2 3
+    );
+    code_block(37, "text", #string
+        \\// print("{}\n", d.x);
+        \\error: no field 'x' in 'Derived'
+    );
+    subheading(38, "Equality and printing");
+    paragraph(39, #string,oneline
+        \\Two values of the same struct type compare with `==` and `!=` without
+        \\any declaration. The comparison is structural: each field is compared
+        \\with its own `==`, so strings compare by content and arrays element
+        \\by element.
+    );
+    code_block(40, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Item :: struct {
+        \\    name: str;
+        \\    sizes: [3]s32;
+        \\    price: f64;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := Item.{ "shirt", .[1, 2, 3], 9.5 };
+        \\    b := Item.{ "shirt", .[1, 2, 3], 9.5 };
+        \\    c := Item.{ "shirt", .[1, 2, 4], 9.5 };
+        \\    print("{} {} {}\n", a == b, a == c, a != c);
+        \\}
+    );
+    code_block(41, "text", #string
+        \\true false true
+    );
+    paragraph(42, #string,oneline
+        \\A field that the structural walk cannot compare, such as an `any` or
+        \\a raw union, makes `==` on the whole struct a compile error. A
+        \\`PartialEq` instance, written by hand or generated with
+        \\`#derive(PartialEq)`, replaces the structural comparison; see
+        \\`PartialEq`, `PartialOrd`, and `Hash`. Printing is not automatic:
+        \\`print("{}", value)` on a struct needs a `Show` instance, usually from
+        \\`#derive(Show)` (see `#derive` and `Show`, `Formatter`, `FromString`, and
+        \\Format Strings).
+    );
+    subheading(43, "Recursive structs");
+    paragraph(44, #string,oneline
+        \\A struct cannot contain itself by value, because its size would be
+        \\infinite. A struct that refers to its own type does so through a
+        \\pointer, an optional pointer, a view or a dynamic array, whose size
+        \\does not depend on what they refer to.
+    );
+    code_block(45, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Node :: struct {
+        \\    value: s64;
+        \\    next:  ?*Node;
+        \\}
+        \\
+        \\sum :: (head: *Node) -> s64 {
+        \\    total := head.value;
+        \\    if head.next == {
+        \\        case .Some(rest); total += sum(rest);
+        \\        case null;
+        \\    }
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    c := Node.{ 3, null };
+        \\    b := Node.{ 2, &c };
+        \\    a := Node.{ 1, &b };
+        \\    print("{}\n", sum(&a));
+        \\}
+    );
+    code_block(46, "text", #string
+        \\6
+    );
+    code_block(47, "text", #string
+        \\// Node :: struct { value: s64; next: Node; }
+        \\error: struct 'Node' contains itself by value (Node.next -> Node), so its size would be infinite; refer to it through a pointer, slice or dynamic array instead
+    );
+    subheading(48, "Generic structs");
+    paragraph(49, #string,oneline
+        \\Writing `$T` in a field's type makes the struct generic over `T`, and
+        \\later fields refer to the same parameter as plain `T`. The struct is
+        \\then used with type arguments, as in `Pair(s32)`, given in the order
+        \\in which the parameters first appear among the fields. A qualified
+        \\literal without arguments infers them from the field values.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Pair :: struct {
+        \\    first:  $T;
+        \\    second: T;
+        \\}
+        \\
+        \\Entry :: struct {
+        \\    key:   $K;
+        \\    value: $V;
+        \\}
+        \\
+        \\swap :: (p: Pair($T)) -> Pair(T) { return .{ p.second, p.first }; }
+        \\
+        \\main :: () {
+        \\    a: Pair(s32) = .{ 1, 2 };
+        \\    b := Pair(f64).{ 1.5, 2.5 };
+        \\    c := Pair.{ "left", "right" };
+        \\    e := Entry(str, s64).{ "apples", 3 };
+        \\    print("{} {} {}\n", type_name(type_of(a)), type_name(type_of(b)), type_name(type_of(c)));
+        \\    print("{} {}\n", swap(a).first, swap(c).first);
+        \\    print("{} {}\n", type_name(type_of(e)), e.value);
+        \\}
+    );
+    code_block(51, "text", #string
+        \\Pair(s32) Pair(f64) Pair(str)
+        \\2 right
+        \\Entry(str, s64) 3
+    );
+    paragraph(52, #string,oneline
+        \\Each set of arguments makes a separate type, and the bare name is not
+        \\a type at all. The arguments are types; a struct cannot take a number
+        \\as a parameter. A procedure that accepts any `Pair` declares its
+        \\parameter as `Pair($T)`, as `swap` does; Generic Procedures and
+        \\`where` Clauses explains how `T` is inferred there.
+    );
+    code_block(53, "text", #string
+        \\// p: Pair;
+        \\error: generic struct Pair needs type arguments
+        \\// a: Pair(s32) = .{ 1, 2 }; b: Pair(s64) = a;
+        \\error: got Pair(s32), expected Pair(s64)
+    );
+    subheading(54, "`#empty` fields");
+    paragraph(55, #string,oneline
+        \\`#empty: T;` declares a field with no name and no storage; its only
+        \\purpose is to mention a type. Written with a `$` parameter, it makes
+        \\the struct generic over a type that it never stores, so that values
+        \\which look the same in memory get distinct types:
+    );
+    code_block(56, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Metric   :: struct {}
+        \\Imperial :: struct {}
+        \\
+        \\Length :: struct {
+        \\    #empty: $System;
+        \\    value: f64;
+        \\}
+        \\
+        \\add :: (a: Length($S), b: Length(S)) -> Length(S) {
+        \\    return .{ .value = a.value + b.value };
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Length(Metric) = .{ .value = 2 };
+        \\    b: Length(Metric) = .{ .value = 3.5 };
+        \\    c := add(a, b);
+        \\    print("{} {}\n", c.value, type_name(type_of(c)));
+        \\    print("size={} fields={}\n", size_of(Length(Metric)), field_count(Length(Metric)));
+        \\}
+    );
+    code_block(57, "text", #string
+        \\5.5 Length(Metric)
+        \\size=8 fields=1
+    );
+    paragraph(58, #string,oneline
+        \\`Length(Metric)` and `Length(Imperial)` are both a single `f64`, yet
+        \\adding one to the other does not compile:
+    );
+    code_block(59, "text", #string
+        \\// add(Length(Metric).{ .value = 1 }, Length(Imperial).{ .value = 1 });
+        \\error: generic arg mismatch: Length(Imperial) vs Length(Metric)
+    );
+    paragraph(60, #string,oneline
+        \\One `#empty` may list several types separated by commas, as in
+        \\`#empty: $K, $V;`. An `#empty` field is not counted by `field_count`
+        \\and has no place in a struct literal. The standard library uses it in
+        \\containers that store their elements behind pointers, such as
+        \\`LinkedList`.
+    );
+    note(61, #string,oneline
+        \\`#empty` in a parameter list is a related feature: a parameter that
+        \\passes a type and no value. `noalias`, `#lazy`, `#comptime`, and
+        \\Type Parameters describes it.
+    );
+    subheading(62, "`#as` fields");
+    paragraph(63, #string,oneline
+        \\Marking one field with `#as` lets a value of the struct be used where
+        \\a value of that field's type is expected: to initialize or assign a
+        \\variable, as an argument, or as a returned value. The compiler reads
+        \\the field in the struct's place. The struct remains a type of its
+        \\own, so it is not confused with other structs that hold the same
+        \\type.
+    );
+    code_block(64, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Celsius :: struct {
+        \\    #as degrees: f64;
+        \\    station: str = "roof";
+        \\}
+        \\
+        \\average :: (a: f64, b: f64) -> f64 { return (a + b) / 2; }
+        \\reading :: (c: Celsius) -> f64 { return c; }
+        \\
+        \\main :: () {
+        \\    morning := Celsius.{ .degrees = 12.5 };
+        \\    noon := Celsius.{ .degrees = 21.5 };
+        \\    raw: f64 = morning;
+        \\    print("{} {} {}\n", raw, average(morning, noon), reading(noon));
+        \\}
+    );
+    code_block(65, "text", #string
+        \\12.5 17 21.5
+    );
+    paragraph(66, #string,oneline
+        \\The conversion goes one way and takes one step. A field value does
+        \\not become a struct, operators and `cast` do not look through `#as`,
+        \\and a struct whose `#as` field is itself a struct with an `#as` field
+        \\does not convert twice. A struct has at most one `#as` field, and
+        \\union variants cannot be marked `#as`.
+    );
+    code_block(67, "text", #string
+        \\// reading(21.5);
+        \\error: arg type f64 != Celsius in call reading
+        \\// t := morning + 1.0;
+        \\error: no operator '+' for Celsius, f64
+        \\// Celsius :: struct { #as degrees: f64; #as kelvin: f64; }
+        \\error: struct 'Celsius' already converts through its '#as' field 'degrees'; a struct has only one '#as' field
+    );
+    subheading(68, "Inline field types");
+    paragraph(69, #string,oneline
+        \\A `struct`, `union`, `enum` or `enum_flags` body can be written
+        \\directly as a field's type. The compiler declares it as a named type
+        \\called `Owner.field` and gives the field that type. The name can be
+        \\written in any type annotation, so the type is as usable as one
+        \\declared separately; the inline form saves inventing a name for a
+        \\type that belongs to one field.
+    );
+    code_block(70, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Window :: struct {
+        \\    size:  struct { width: s32; height: s32; };
+        \\    mode:  enum u8 { Windowed; Fullscreen; };
+        \\    flags: enum_flags u8 { Resizable :: 1; Hidden :: 2; };
+        \\    title: union { Text: str; Untitled: void; };
+        \\}
+        \\
+        \\pixels :: (s: Window.size) -> s32 { return s.width * s.height; }
+        \\
+        \\main :: () {
+        \\    w: Window;
+        \\    w.size = .{ 640, 480 };
+        \\    w.mode = .Fullscreen;
+        \\    w.flags = .Resizable;
+        \\    w.flags |= .Hidden;
+        \\    w.title = .Text("editor");
+        \\    print("{} {} {}\n", pixels(w.size), w.mode, cast(u8) w.flags);
+        \\    print("{} {} {} {}\n", type_name(type_of(w.size)), type_name(type_of(w.mode)),
+        \\          type_name(type_of(w.flags)), type_name(type_of(w.title)));
+        \\    thumbnail: Window.size = .{ 64, 48 };
+        \\    print("{}\n", pixels(thumbnail));
+        \\}
+    );
+    code_block(71, "text", #string
+        \\307200 Fullscreen 3
+        \\Window.size Window.mode Window.flags Window.title
+        \\3072
+    );
+    paragraph(72, #string,oneline
+        \\An inline body takes the same directives as a declared one, such as
+        \\`struct #packed { ... }` or `union #raw { ... }`. It may also appear
+        \\further inside the field's type, under a pointer, a view or an
+        \\optional, and inside another inline body; the name then grows with
+        \\the path. A union variant counts as a field, so a payload type can be
+        \\inline as well:
+    );
+    code_block(73, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Outer :: struct {
+        \\    inner: struct {
+        \\        deep: struct { n: s64; };
+        \\        m: s64;
+        \\    };
+        \\    items: []struct { v: s64; };
+        \\}
+        \\
+        \\Message :: union {
+        \\    Header: struct { id: s64; length: s64; };
+        \\    End: void;
+        \\}
+        \\
+        \\main :: () {
+        \\    o: Outer;
+        \\    print("{} {}\n", type_name(type_of(o.inner.deep)), type_name(type_of(o.items)));
+        \\    m := Message.Header(.{ .id = 1, .length = 20 });
+        \\    if m == {
+        \\        case .Header(h); print("{} {}\n", h.length, type_name(type_of(h)));
+        \\        case .End;       print("end\n");
+        \\    }
+        \\}
+    );
+    code_block(74, "text", #string
+        \\Outer.inner.deep []Outer.items
+        \\20 Message.Header
+    );
+    paragraph(75, #string,oneline
+        \\Because the name is built from the owner and the field, an inline
+        \\body is allowed only in a struct field or a union variant, and only
+        \\one per field. `Window.size` names a type only in a type annotation;
+        \\in an expression the dot is member access, so `size_of(Window.size)`
+        \\asks for a field of the type `Window` and is rejected. A struct body
+        \\cannot contain a named declaration such as `Inner :: struct { ... }`.
+    );
+    code_block(76, "text", #string
+        \\// main :: () { p: struct { a: s32; }; }
+        \\error: inline aggregate types are only allowed in aggregate fields
+        \\// Pair :: struct { both: (struct { p: s64; }, struct { q: s64; }); }
+        \\error: type 'Pair.both' is already declared
+        \\// n := size_of(Window.size);
+        \\error: Window is a type, not a value; '.size' needs a value of type Window
+    );
+    subheading(77, "Private fields");
+    paragraph(78, #string,oneline
+        \\Fields are public by default. A field marked `#private` can be named
+        \\only inside the module that declares the struct, and code elsewhere
+        \\cannot build the struct with a literal either. Who Can Use a
+        \\Declaration: Visibility and Units describes the rule.
+    );
+    subheading(79, "Struct directives");
+    paragraph(80, #string,oneline
+        \\Directives written between `struct` and the opening brace change how
+        \\the struct is laid out or generate declarations for it:
+    );
+    table_header(81, "Directive   —   Effect");
+    table_row(82, "`#c_call`   |   C layout: declaration order with C padding. See Field Order, Alignment, and Packing.");
+    table_row(83, "`#packed`   |   Declaration order with no padding. See Field Order, Alignment, and Packing.");
+    table_row(84, "`#align(N)`   |   Raises the alignment to at least `N` bytes. See Field Order, Alignment, and Packing.");
+    table_row(85, "`#derive(...)`   |   Generates typeclass instances. See `#derive`.");
+    table_row(86, "`#modify { ... }`   |   Checks or rewrites the type arguments of a generic struct. See Directives That Modify Procedures.");
+}
+
+render_section_34 :: () {
+    paragraph(0, #string,oneline
+        \\The layout of a struct is the offset of each field, the total size,
+        \\and the alignment that every address of the struct must respect. The
+        \\compiler chooses the layout of an ordinary struct itself; this
+        \\chapter describes that choice, how to measure the result, and the
+        \\three directives that replace it with a fixed rule: `#c_call`,
+        \\`#packed` and `#align(N)`. Whatever the layout, the source only ever
+        \\sees the declaration order: positional literals, field reflection and
+        \\`#derive` all follow it.
+    );
+    subheading(1, "The compiler's order");
+    paragraph(2, #string,oneline
+        \\An ordinary struct stores its fields sorted by alignment, largest
+        \\first. Fields of equal alignment are sorted by size, largest first,
+        \\and fields that are still equal keep their declaration order. Each
+        \\field is then placed at the next offset that is a multiple of its
+        \\alignment. The struct's alignment is the largest field alignment, and
+        \\its size is the end of the last field rounded up to that alignment.
+        \\Because the strictest fields come first, padding can only appear at
+        \\the end.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Bytes  :: struct { a: u8; b: [3]u8; c: u8; }
+        \\Mixed  :: struct { flag: bool; id: u64; code: u16; ratio: f32; }
+        \\
+        \\offset :: (base: *$T, field: *$F) -> ssize {
+        \\    return cast(ssize) field - cast(ssize) base;
+        \\}
+        \\
+        \\main :: () {
+        \\    x: Bytes;
+        \\    m: Mixed;
+        \\    print("Bytes size={} a={} b={} c={}\n", size_of(Bytes),
+        \\          offset(&x, &x.a), offset(&x, &x.b), offset(&x, &x.c));
+        \\    print("Mixed size={} align={} id={} ratio={} code={} flag={}\n",
+        \\          size_of(Mixed), type_info(Mixed).alignment,
+        \\          offset(&m, &m.id), offset(&m, &m.ratio),
+        \\          offset(&m, &m.code), offset(&m, &m.flag));
+        \\}
+    );
+    code_block(4, "text", #string
+        \\Bytes size=5 a=3 b=0 c=4
+        \\Mixed size=16 align=8 id=0 ratio=8 code=12 flag=14
+    );
+    paragraph(5, #string,oneline
+        \\Every field of `Bytes` has alignment 1, so the larger array goes
+        \\first and `a` and `c` follow in declaration order. `Mixed` is stored
+        \\as alignments 8, 4, 2 and 1 and needs 16 bytes; in declaration order
+        \\it would need 24.
+    );
+    subheading(6, "Measuring a layout");
+    paragraph(7, #string,oneline
+        \\The `Meta` module answers layout questions at compile time.
+        \\`size_of(T)` is the size in bytes, including the padding at the end,
+        \\which makes it also the distance between consecutive elements of a
+        \\`[N]T`. The alignment is a field of the record that `type_info(T)`
+        \\returns. There is no `align_of` and no `offset_of`: a field's offset
+        \\is the difference between its address and the struct's, which is
+        \\what the `offset` helper above computes.
+    );
+    table_header(8, "Expression   —   Result");
+    table_row(9, "`size_of(T)`   |   Size in bytes, tail padding included.");
+    table_row(10, "`type_info(T).size`   |   The same size, from the reflection record.");
+    table_row(11, "`type_info(T).alignment`   |   Alignment in bytes.");
+    table_row(12, "`field_name(T, i)`, `field_type(T, i)`   |   The `i`-th field in declaration order.");
+    paragraph(13, #string,oneline
+        \\All of these describe the target being compiled for, so a pointer
+        \\field is 8 bytes on a 64-bit target and 4 on a 32-bit one. The
+        \\reflection procedures list the fields in the order they are
+        \\written, never in the order they are stored:
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Plain :: struct { a: u8; b: u64; c: u16; }
+        \\
+        \\main :: () {
+        \\    print("{} fields: {} {} {}\n", field_count(Plain),
+        \\          field_name(Plain, 0), field_name(Plain, 1), field_name(Plain, 2));
+        \\    print("first field type: {}\n", type_name(field_type(Plain, 0)));
+        \\}
+    );
+    code_block(15, "text", #string
+        \\3 fields: a b c
+        \\first field type: u8
+    );
+    paragraph(16, #string,oneline
+        \\`type` Values and Type Reflection describes the rest of the
+        \\reflection interface.
+    );
+    subheading(17, "`#c_call` and `#packed`");
+    paragraph(18, #string,oneline
+        \\`struct #c_call { ... }` stores the fields in declaration order with
+        \\the padding a C compiler for the target would insert. Every struct
+        \\shared with C code needs this layout, because the two sides agree on
+        \\offsets only when both follow the declared order.
+        \\`struct #packed { ... }` also keeps the declaration order but inserts
+        \\no padding at all: the size is the sum of the field sizes and the
+        \\alignment is 1.
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Plain  :: struct         { a: u8; b: u64; c: u16; }
+        \\C_Like :: struct #c_call { a: u8; b: u64; c: u16; }
+        \\Packed :: struct #packed { a: u8; b: u64; c: u16; }
+        \\
+        \\offset :: (base: *$T, field: *$F) -> ssize {
+        \\    return cast(ssize) field - cast(ssize) base;
+        \\}
+        \\
+        \\main :: () {
+        \\    p: Plain;
+        \\    q: C_Like;
+        \\    r: Packed;
+        \\    print("Plain  size={} align={} a={} b={} c={}\n", size_of(Plain),
+        \\          type_info(Plain).alignment,
+        \\          offset(&p, &p.a), offset(&p, &p.b), offset(&p, &p.c));
+        \\    print("C_Like size={} align={} a={} b={} c={}\n", size_of(C_Like),
+        \\          type_info(C_Like).alignment,
+        \\          offset(&q, &q.a), offset(&q, &q.b), offset(&q, &q.c));
+        \\    print("Packed size={} align={} a={} b={} c={}\n", size_of(Packed),
+        \\          type_info(Packed).alignment,
+        \\          offset(&r, &r.a), offset(&r, &r.b), offset(&r, &r.c));
+        \\}
+    );
+    code_block(20, "text", #string
+        \\Plain  size=16 align=8 a=10 b=0 c=8
+        \\C_Like size=24 align=8 a=0 b=8 c=16
+        \\Packed size=11 align=1 a=0 b=1 c=9
+    );
+    paragraph(21, #string,oneline
+        \\The same three fields take 16 bytes in the compiler's order, 24 in C
+        \\order, and 11 packed, where the `u64` sits at offset 1. `#c_call`
+        \\also checks that every field type has a C representation, and a
+        \\field that C cannot express is reported at the struct:
+    );
+    code_block(22, "text", #string
+        \\// Pair :: struct #c_call { value: c64; }
+        \\error: primitive c64 has no declared C ABI; pass its real and imaginary components separately
+    );
+    paragraph(23, #string,oneline
+        \\When both directives are written, `#packed` decides the layout. C
+        \\Types, Callbacks, and Bindgen covers the rest of what a struct shared
+        \\with C must look like.
+    );
+    subheading(24, "Packing nested structs");
+    paragraph(25, #string,oneline
+        \\`#packed` applies to one struct only. A field whose type is another
+        \\struct keeps that struct's own size and padding, so a wire format
+        \\made of nested records needs `#packed` at every level:
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Header :: struct #packed {
+        \\    magic:   u32;
+        \\    version: u8;
+        \\    length:  u32;
+        \\}
+        \\
+        \\Inner  :: struct { a: u8; b: u64; }
+        \\Nested :: struct #packed { tag: u8; inner: Inner; }
+        \\
+        \\main :: () {
+        \\    h := Header.{ 16#474C4F00, 2, 300 };
+        \\    h.length += 1;
+        \\    print("{} {} {}\n", size_of(Header), h.version, h.length);
+        \\    print("{} {}\n", size_of(Inner), size_of(Nested));
+        \\}
+    );
+    code_block(27, "text", #string
+        \\9 2 301
+        \\16 17
+    );
+    note(28, #string,oneline
+        \\Reading and writing the fields of a packed struct through the struct
+        \\is always correct. A pointer taken to a packed field, such as
+        \\`&h.length` above, is an ordinary `*u32` whose address need not be a
+        \\multiple of 4.
+    );
+    subheading(29, "`#align(N)`");
+    paragraph(30, #string,oneline
+        \\`#align(N)` raises the struct's alignment to at least `N` bytes, and
+        \\the size is rounded up to the new alignment. `N` is an integer
+        \\literal, a power of two no greater than 268435456. An `N` below the
+        \\natural alignment changes nothing. On a `#packed` struct the
+        \\alignment becomes exactly `N`, and the packed size is rounded up to
+        \\it.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Slot    :: struct #align(64) { value: s32; }
+        \\Wide    :: struct #align(2) { a: s64; b: u8; }
+        \\Framed  :: struct #packed #align(4) { tag: u8; value: s32; }
+        \\Nothing :: struct {}
+        \\
+        \\main :: () {
+        \\    print("Slot    size={} align={}\n", size_of(Slot), type_info(Slot).alignment);
+        \\    print("Wide    size={} align={}\n", size_of(Wide), type_info(Wide).alignment);
+        \\    print("Framed  size={} align={}\n", size_of(Framed), type_info(Framed).alignment);
+        \\    print("Nothing size={} align={}\n", size_of(Nothing), type_info(Nothing).alignment);
+        \\}
+    );
+    code_block(32, "text", #string
+        \\Slot    size=64 align=64
+        \\Wide    size=16 align=8
+        \\Framed  size=8 align=4
+        \\Nothing size=0 align=1
+    );
+    paragraph(33, #string,oneline
+        \\An array of `Slot` puts every element on its own 64-byte boundary,
+        \\the size of a cache line on common hardware, so threads that each
+        \\update their own slot do not share a line. Any other argument is
+        \\rejected when the struct is parsed:
+    );
+    code_block(34, "text", #string
+        \\// Slot :: struct #align(48) { value: s32; }
+        \\error: #align expects a positive power of two no greater than 268435456
+    );
+    subheading(35, "Fields that take no space");
+    paragraph(36, #string,oneline
+        \\A struct with no fields has size 0, as `Nothing` above shows. A
+        \\`void` field and an array of length zero take no bytes either, but
+        \\they are still fields: `field_count` counts them, and a positional
+        \\literal fills them. A zero-length array keeps the alignment of its
+        \\element type, so it can still raise the struct's alignment and size.
+    );
+    code_block(37, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Marked  :: struct { tag: void; none: [0]u8; n: u8; }
+        \\Aligned :: struct { none: [0]s64; n: u8; }
+        \\
+        \\main :: () {
+        \\    m := Marked.{ .(), .[], 7 };
+        \\    print("{} {}\n", size_of(Marked), size_of(Aligned));
+        \\    print("{} {} {}\n", field_count(Marked), field_name(Marked, 1), m.n);
+        \\}
+    );
+    code_block(38, "text", #string
+        \\1 8
+        \\3 none 7
+    );
+    paragraph(39, #string,oneline
+        \\`#empty` fields, described in Struct Types, are different: they are
+        \\not fields of the value at all, and `field_count` does not see them.
+    );
+    subheading(40, "Other aggregate layouts");
+    paragraph(41, #string,oneline
+        \\The reordering applies to structs only. A tuple stores its elements
+        \\in the order they are written, so the same members can cost more as a
+        \\tuple than as a struct (see Tuple Types). A union's layout follows its
+        \\own rules, described in Tagged and Untagged Unions, and a fixed array
+        \\`[N]T` is `N` elements placed `size_of(T)` bytes apart (see Arrays,
+        \\Views, Dynamic Arrays, and Slicing).
+    );
+}
+
+render_section_35 :: () {
+    paragraph(0, #string,oneline
+        \\A tuple is an ordered group of values with no names and no
+        \\declaration. Its type is written `(A, B, C)`, and its identity is
+        \\that list of element types, so two procedures that each write
+        \\`(s64, str)` agree on the type without sharing a declaration. A
+        \\tuple literal is `.(a, b, c)`, and the elements are read as `.0`,
+        \\`.1` and so on. A procedure with several results returns a tuple,
+        \\which is where most programs meet them.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    t: (s64, str, bool) = .(7, "seven", true);
+        \\    print("{} {} {}\n", t.0, t.1, t.2);
+        \\    t.0 += 1;
+        \\    print("{} {}\n", t.0, t.count);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\7 seven true
+        \\8 3
+    );
+    table_header(3, "Form   —   Meaning");
+    table_row(4, "`(A, B, C)`   |   The tuple type with those elements, in that order.");
+    table_row(5, "`.(a, b, c)`   |   A tuple literal; with an expected type it must have exactly as many elements.");
+    table_row(6, "`t.0`, `t.1`   |   One element; it can be read and assigned. The index is a decimal literal.");
+    table_row(7, "`t.count`   |   The number of elements, a constant.");
+    table_row(8, "`a, b := t;`   |   Declares one variable per element.");
+    table_row(9, "`.()`   |   The empty tuple, whose type is `void`.");
+    subheading(10, "Several results from one procedure");
+    paragraph(11, #string,oneline
+        \\A procedure that produces more than one value returns a tuple; there
+        \\is no separate mechanism for multiple results. The caller either
+        \\keeps the tuple whole or destructures it into new variables, writing
+        \\`_` for an element it does not need.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\
+        \\divmod :: (a: s64, b: s64) -> (s64, s64) {
+        \\    return .(a / b, a % b);
+        \\}
+        \\
+        \\main :: () {
+        \\    q, r := divmod(17, 5);
+        \\    print("{} remainder {}\n", q, r);
+        \\    _, odd := divmod(9, 2);
+        \\    print("{}\n", odd);
+        \\    pair := divmod(20, 6);
+        \\    print("{} {}\n", pair.0, pair.1);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\3 remainder 2
+        \\1
+        \\3 2
+    );
+    paragraph(14, #string,oneline
+        \\Destructuring declares new variables and cannot assign to existing
+        \\ones, and the number of names must match the number of elements. An
+        \\element index is always a number written after the dot, never a
+        \\constant or an expression, and it is checked against the tuple's
+        \\length:
+    );
+    code_block(15, "text", #string
+        \\// a, b, c := divmod(9, 2);
+        \\error: destructuring binds 3 names from a 2-value result
+        \\// q, r = divmod(9, 2);
+        \\error: unexpected token '='
+        \\// t := .(1, 2); i :: 0; x := t.i;
+        \\error: tuple member must be a numeric field like .0
+        \\// x := t.2;
+        \\error: tuple index .2 is out of range for 2-value tuple
+        \\// t: (s64, s64, s64) = .(1, 2);
+        \\error: tuple literal has 2 value(s), expected 3
+    );
+    subheading(16, "Element types");
+    paragraph(17, #string,oneline
+        \\An annotation fixes the element types. Without one, each element has
+        \\the type of its value, and a number literal stays a compile-time
+        \\number (see Literal Typing and Type Conversion). A tuple may contain
+        \\tuples, and `n.0.1` reads an element of an element.
+    );
+    code_block(18, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    loose := .(1, 2.5, "x");
+        \\    exact: (s32, f32, str) = .(1, 2.5, "x");
+        \\    print("{}\n", type_name(type_of(loose)));
+        \\    print("{}\n", type_name(type_of(exact)));
+        \\    nested := .(.(1, 2), 3);
+        \\    print("{} {}\n", nested.0.1, nested.1);
+        \\}
+    );
+    code_block(19, "text", #string
+        \\(comptime_int, comptime_float, str)
+        \\(s32, f32, str)
+        \\2 3
+    );
+    paragraph(20, #string,oneline
+        \\A single type in parentheses is that type, not a tuple of one: in
+        \\`one: (s64) = .(5);` the annotation is `s64`, and the literal is
+        \\rejected with "got (comptime_int), expected s64". A tuple type can be
+        \\written wherever a type annotation is expected, but not where an
+        \\expression is, so it cannot be given a name with a constant
+        \\declaration or passed to `size_of` directly. Take it from a variable
+        \\with `type_of` instead, as the next example does.
+    );
+    code_block(21, "text", #string
+        \\// Triple :: (u8, s64, u8);
+        \\error: unexpected token ','
+    );
+    subheading(22, "Layout, equality, and the empty tuple");
+    paragraph(23, #string,oneline
+        \\A tuple stores its elements in the order they are written, each with
+        \\the padding it needs; tuples are not reordered the way structs are
+        \\(see Field Order, Alignment, and Packing). Two tuples of the same type
+        \\compare with `==` element by element. `.()` is the tuple with no
+        \\elements. Its type is `void`, the same `void` that a procedure without
+        \\a result returns, and it takes no space.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Record :: struct { a: u8; b: s64; c: u8; }
+        \\
+        \\main :: () {
+        \\    t: (u8, s64, u8);
+        \\    print("struct {} tuple {}\n", size_of(Record), size_of(type_of(t)));
+        \\    e := .();
+        \\    print("{} {}\n", type_name(type_of(e)), size_of(type_of(e)));
+        \\    a: (s64, str) = .(1, "a");
+        \\    b: (s64, str) = .(1, "a");
+        \\    print("{}\n", a == b);
+        \\}
+    );
+    code_block(25, "text", #string
+        \\struct 16 tuple 24
+        \\void 0
+        \\true
+    );
+    paragraph(26, #string,oneline
+        \\The same three members cost 16 bytes as a struct and 24 as a tuple.
+        \\A tuple suits a short-lived group such as a procedure's results; data
+        \\that is stored in quantity, or whose parts deserve names, belongs in a
+        \\struct.
+    );
+    subheading(27, "What tuples do not have");
+    bullet(28, #string,oneline
+        \\No `Show` instance: `print("{}", t)` on a tuple is "no Formatter
+        \\instance for selector '' and value type (s64, str)". Print the
+        \\elements one by one.
+    );
+    bullet(29, #string,oneline
+        \\No tuple pattern. A struct pattern `.{ ... }` does not match a tuple
+        \\("struct pattern needs a struct value, got (s64, str)"); destructure
+        \\with `a, b := t;` or compare the elements instead.
+    );
+    bullet(30, #string,oneline
+        \\No names. When the meaning of the elements is not obvious from their
+        \\position, a struct is clearer.
+    );
+}
+
+render_section_36 :: () {
+    paragraph(0, #string,oneline
+        \\An enum is a type whose values are a fixed set of named integer
+        \\constants, its members. `enum_flags` declares the related kind of
+        \\type whose values are sets of bits. This chapter gives the rules for
+        \\both: member syntax and values, the backing type, conversions, the
+        \\zero value, reflection, and the bitwise operators of flag enums.
+        \\Enums, Unions, and Matching introduces enums alongside the switch
+        \\statements that usually consume them.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Direction :: enum {
+        \\    North;
+        \\    East;
+        \\    South;
+        \\    West;
+        \\}
+        \\
+        \\turn_right :: (d: Direction) -> Direction {
+        \\    if d == {
+        \\        case .North; return .East;
+        \\        case .East;  return .South;
+        \\        case .South; return .West;
+        \\        case .West;  return .North;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    d := Direction.North;
+        \\    d = turn_right(d);
+        \\    print("{} {}\n", d, turn_right(.West));
+        \\    print("{} {}\n", d == .East, Direction.North < Direction.South);
+        \\}
+    );
+    code_block(2, "text", #string
+        \\East North
+        \\true true
+    );
+    paragraph(3, #string,oneline
+        \\Each member is a name followed by a semicolon. In full a member is
+        \\written `Direction.North`; where the enum type is already expected,
+        \\the short form `.North` is enough. Those places are an annotated
+        \\declaration, an assignment, an argument, a `return`, the other side
+        \\of a comparison and a `case` label. Printing a member writes its
+        \\name. Members compare with `==` and with `<` and the other orderings,
+        \\by their values. A switch over an enum must cover every member or say
+        \\otherwise; Switch Statements and Coverage, Binding Forms, and Pattern
+        \\Constants have the rules.
+    );
+    code_block(4, "text", #string
+        \\// d := .North;
+        \\error: enum shorthand needs an enum context
+        \\// d: Direction = .Up;
+        \\error: no enum variant Direction.Up
+        \\// if d == { case .North; }
+        \\error: non-exhaustive switch
+        \\note: missing case: Direction.East
+        \\note: cover them, or add 'else' or '#partial'
+    );
+    subheading(5, "Member values and the backing type");
+    paragraph(6, #string,oneline
+        \\The first member is 0, and each member is one more than the member
+        \\before it. `Name :: value;` gives a member an explicit value, and the
+        \\count continues from there. The value is one integer literal,
+        \\optionally negative, in any base; it cannot be a named constant or an
+        \\expression. Two members may have the same value.
+    );
+    paragraph(7, #string,oneline
+        \\A type written after `enum` is the backing type. It fixes the enum's
+        \\size and alignment and must be an integer type. Without one, the
+        \\backing type is `ssize`, one machine word. Every member's value must
+        \\fit the backing type.
+    );
+    code_block(8, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Status :: enum { Ok; Moved :: 301; Found; Missing :: 404; }
+        \\Opcode :: enum u8 { Push; Pop; Halt :: 16#FF; }
+        \\Delta  :: enum s8 { Down :: -1; Same; Up; }
+        \\
+        \\main :: () {
+        \\    print("{} {} {} {}\n", cast(s64) Status.Ok, cast(s64) Status.Moved,
+        \\          cast(s64) Status.Found, cast(s64) Status.Missing);
+        \\    print("{} {} {}\n", size_of(Status), size_of(Opcode), cast(u8) Opcode.Halt);
+        \\    print("{} {}\n", cast(s64) Delta.Down, cast(s64) Delta.Up);
+        \\}
+    );
+    code_block(9, "text", #string
+        \\0 301 302 404
+        \\8 1 255
+        \\-1 1
+    );
+    paragraph(10, #string,oneline
+        \\A member value is attached with `::`, the way every constant is
+        \\bound, never with `=`. The other mistakes in a member list are
+        \\reported as follows:
+    );
+    code_block(11, "text", #string
+        \\// Direction :: enum { North = 1; }
+        \\error: enum variant integer values use '::', not '='
+        \\// Direction :: enum { North, East }
+        \\error: enum member 'North' must end with ';'
+        \\// Direction :: enum { North :: BASE; }
+        \\error: unexpected token 'BASE'
+        \\// Opcode :: enum u8 { Push :: 255; Pop; }
+        \\error: enum variant 'Pop': value 256 does not fit u8 (0..255)
+        \\note: a member without '::' is one more than the member before it
+        \\// Delta :: enum f32 { Down; }
+        \\error: enum backing type must be an integer type, got f32
+    );
+    subheading(12, "Converting to and from integers");
+    paragraph(13, #string,oneline
+        \\An enum is not an integer type. It does not convert to one
+        \\implicitly, it has no arithmetic, and an integer literal is not a
+        \\member. `cast(s64) d` gives the member's value, and `cast(Direction)
+        \\n` goes the other way; `acast n` does the same when the target type
+        \\comes from the context (see Literal Typing and Type Conversion).
+    );
+    code_block(14, "text", #string
+        \\// n: s64 = Direction.East;
+        \\error: got Direction, expected s64
+        \\// n := Direction.East + 1;
+        \\error: no operator '+' for Direction, ssize
+        \\// d: Direction = 1;
+        \\error: integer literal is not a value of enum Direction; use a named variant
+    );
+    paragraph(15, #string,oneline
+        \\An integer can hold a value that no member has. When an integer
+        \\computed at run time is cast to an enum, a program built at `-O0` or
+        \\the default `-O1` checks that the value is a member and stops with a
+        \\message if it is not:
+    );
+    code_block(16, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Color :: enum u8 { Red; Green; Blue; }
+        \\
+        \\decode :: (raw: s64) -> Color {
+        \\    return cast(Color) raw;
+        \\}
+        \\
+        \\main :: () {
+        \\    print("{}\n", decode(2));
+        \\    print("{}\n", decode(7));
+        \\}
+    );
+    code_block(17, "text", #string
+        \\$ glosso --run color.glo 2>&1 | tail -3
+        \\Blue
+        \\color.glo:6:12: runtime check failed: the value is not a member of Color
+        \\glosso: program exited with status 134
+    );
+    paragraph(18, #string,oneline
+        \\At `-O2` and above the check is not compiled, and the same program
+        \\prints `Blue` and then `7`: a value that is not a member prints as its
+        \\number. Feature Gates and Runtime Checks lists the checks that depend
+        \\on the optimization level. Code that decodes untrusted numbers should
+        \\test the range itself before casting.
+    );
+    subheading(19, "The zero value");
+    paragraph(20, #string,oneline
+        \\A variable of enum type that is not initialized holds 0, like any
+        \\other zero-initialized value, whether or not a member has the value
+        \\0. A switch that names every member then matches nothing and stops
+        \\the program with "switch matched no case: undeclared enum value". An
+        \\`else;` arm handles every value that is not a member:
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Level :: enum { Low :: 1; High :: 2; }
+        \\
+        \\describe :: (l: Level) -> str {
+        \\    if l == {
+        \\        case .Low;  return "low";
+        \\        case .High; return "high";
+        \\        else;       return "not a level";
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    l: Level;
+        \\    print("{} {}\n", l, describe(l));
+        \\}
+    );
+    code_block(22, "text", #string
+        \\0 not a level
+    );
+    paragraph(23, #string,oneline
+        \\Giving the first member the value 0, or initializing every variable,
+        \\avoids the question.
+    );
+    subheading(24, "Reflecting on members");
+    paragraph(25, #string,oneline
+        \\The `Meta` module describes an enum's members in declaration order.
+        \\`enum_count(T)` is the number of members, and `enum_name(T, i)` and
+        \\`enum_value(T, i)` give the name and value of member `i`, which must
+        \\be a compile-time constant. `type` Values and Type Reflection
+        \\describes the rest of `Meta`.
+    );
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Status :: enum { Ok; Moved :: 301; Found; }
+        \\
+        \\main :: () {
+        \\    print("{} members\n", enum_count(Status));
+        \\    print("{} = {}\n", enum_name(Status, 0), enum_value(Status, 0));
+        \\    print("{} = {}\n", enum_name(Status, 2), enum_value(Status, 2));
+        \\}
+    );
+    code_block(27, "text", #string
+        \\3 members
+        \\Ok = 0
+        \\Found = 302
+    );
+    subheading(28, "Flag enums");
+    paragraph(29, #string,oneline
+        \\`enum_flags` declares an enum whose values are sets of bits rather
+        \\than alternatives. The backing type is required. Members are numbered
+        \\exactly as in a plain enum, so each member should be given its own
+        \\power of two explicitly; without values, `Read; Write; Run;` would be
+        \\0, 1 and 2.
+    );
+    code_block(30, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Access :: enum_flags u8 {
+        \\    Read  :: 1;
+        \\    Write :: 2;
+        \\    Run   :: 4;
+        \\}
+        \\
+        \\allows :: (set: Access, wanted: Access) -> bool {
+        \\    return (set & wanted) == wanted;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Access = .Read;
+        \\    a |= .Run;
+        \\    print("{} {} {}\n", cast(u8) a, allows(a, .Run), allows(a, .Write));
+        \\    a = a | Access.Write;
+        \\    a &= ~Access.Run;
+        \\    print("{} {}\n", cast(u8) a, a);
+        \\    print("{}\n", Access.Write);
+        \\}
+    );
+    code_block(31, "text", #string
+        \\5 true false
+        \\3 3
+        \\Write
+    );
+    paragraph(32, #string,oneline
+        \\Flag enums have the bitwise operators `|`, `&`, `^` and `~` and the
+        \\compound assignments `|=`, `&=` and `^=`. Both operands belong to the
+        \\same flag enum, and so does the result, so a combination keeps its
+        \\type. A value that is exactly one member prints as that member's
+        \\name; a combination prints as its number.
+    );
+    paragraph(33, #string,oneline
+        \\Because every combination is a valid value, a cast to a flag enum is
+        \\never checked, and a switch over one needs a `case _;` or `else;` arm
+        \\however many members it names. Plain enums have none of the bitwise
+        \\operators. In `.Read | .Write` neither operand knows the type, even
+        \\when the result is assigned to an `Access`; write the first operand in
+        \\full, as in `Access.Read | .Write`.
+    );
+    code_block(34, "text", #string
+        \\// Access :: enum_flags { Read :: 1; }
+        \\error: unexpected token '{'
+        \\// a := Access.Read | 4;
+        \\error: no operator '|' for Access, ssize
+        \\// a: Access = .Read | .Write;
+        \\error: enum shorthand needs an enum context
+        \\// c := Color.Red | Color.Green;
+        \\error: no operator '|' for Color, Color
+    );
+}
+
+render_section_37 :: () {
+    paragraph(0, #string,oneline
+        \\A union holds one of several variants at a time. An ordinary union
+        \\is tagged: it stores a tag that records which variant it holds, and
+        \\the language uses the tag to make sure that a payload is only read
+        \\as the variant the value holds. A raw union, `union #raw`, drops the tag, for C
+        \\interfaces and for reading the same bytes as different types. This
+        \\chapter covers both, together with `#from` variants, which let one
+        \\error union collect the errors of several lower layers. The built-in
+        \\`?T` and `E!T` are tagged unions too; `?T` and `E!T` describes them.
+        \\Enums, Unions, and Matching introduces unions through a worked
+        \\program.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Size :: struct { w: s64; h: s64; }
+        \\
+        \\Shape :: union {
+        \\    Circle: s64;
+        \\    Rect:   Size;
+        \\    Empty:  void;
+        \\}
+        \\
+        \\area :: (s: Shape) -> s64 {
+        \\    if s == {
+        \\        case .Circle(r); return 3 * r * r;
+        \\        case .Rect(z);   return z.w * z.h;
+        \\        case .Empty;     return 0;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    shapes: [3]Shape = .[ .Circle(5), .Rect(.{ 4, 6 }), .Empty ];
+        \\    for s: shapes print("{} ", area(s));
+        \\    print("\n");
+        \\}
+    );
+    code_block(2, "text", #string
+        \\75 24 0 
+    );
+    subheading(3, "Declaring variants");
+    paragraph(4, #string,oneline
+        \\Each variant has a name and a payload type, written like a struct
+        \\field and ended with a semicolon. A variant that carries nothing has
+        \\the payload type `void`. Variant names are capitalized by convention
+        \\only. A payload type may be written inline, as described in Struct
+        \\Types. The usual way to use a union is to switch on it, and each arm
+        \\receives the payload of the variant it matched. Such a switch must
+        \\handle every variant, so adding a variant later points at each switch
+        \\that needs a new arm:
+    );
+    code_block(5, "text", #string
+        \\// if s == { case .Circle(r); case .Rect(z); }
+        \\error: non-exhaustive switch
+        \\note: missing case: Shape.Empty
+        \\note: cover them, or add 'else' or '#partial'
+    );
+    subheading(6, "Constructing a value");
+    paragraph(7, #string,oneline
+        \\A variant with a payload is constructed like a call, either qualified
+        \\with the union's name or in the short form where the union type is
+        \\expected. A `void` variant is written without parentheses. Assigning
+        \\to a variant through a variable sets the tag and the payload
+        \\together, and the statement `s.Empty;` sets a `void` variant.
+    );
+    code_block(8, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Shape :: union { Circle: s64; Square: s64; Empty: void; }
+        \\
+        \\name :: (s: Shape) -> str {
+        \\    return ifx s == {
+        \\        case .Circle; "circle";
+        \\        case .Square; "square";
+        \\        case .Empty;  "empty";
+        \\    };
+        \\}
+        \\
+        \\main :: () {
+        \\    a := Shape.Circle(1);
+        \\    b: Shape = .Square(2);
+        \\    c := Shape.Empty;
+        \\    d: Shape = .Empty;
+        \\    e: Shape;
+        \\    f: Shape;
+        \\    f.Square = 3;
+        \\    g := Shape.Circle(4);
+        \\    g.Empty;
+        \\    print("{} {} {} {} {} {} {}\n", name(a), name(b), name(c), name(d),
+        \\          name(e), name(f), name(g));
+        \\}
+    );
+    code_block(9, "text", #string
+        \\circle square empty empty circle square empty
+    );
+    paragraph(10, #string,oneline
+        \\`e` shows the default value of a union: the first variant, with a
+        \\zero payload. Each construction form checks the variant name and the
+        \\payload:
+    );
+    code_block(11, "text", #string
+        \\// x := .Empty;
+        \\error: enum shorthand needs an enum context
+        \\// x := Shape.Circle;
+        \\error: union variant requires one payload
+        \\// x: Shape = .Hexagon(2);
+        \\error: 'Hexagon' is not a variant of union Shape
+        \\// x.Hexagon = 2;
+        \\error: no union field Hexagon
+        \\// x.Empty = 1;
+        \\error: assign ssize to void
+    );
+    subheading(12, "Reading the payload");
+    paragraph(13, #string,oneline
+        \\A payload is read through a pattern, which tests the tag and binds
+        \\the payload in one step, so a payload is only ever named where the
+        \\tag is known to match. Besides the switch there are two other forms:
+        \\an `if` that tests one variant, and a binding that leaves the block
+        \\when the variant does not match. A capture written `*name` binds a
+        \\pointer to the payload, which lets the arm change it in place.
+    );
+    code_block(14, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Shape :: union { Circle: s64; Square: s64; Empty: void; }
+        \\
+        \\radius_or_zero :: (s: Shape) -> s64 {
+        \\    if #pattern .Circle(r) = s return r;
+        \\    return 0;
+        \\}
+        \\
+        \\radius :: (s: Shape) -> s64 {
+        \\    #pattern .Circle(r) := s else { return -1; };
+        \\    return r;
+        \\}
+        \\
+        \\grow :: (s: *Shape) {
+        \\    if s.* == {
+        \\        case .Circle(*r); r.* += 1;
+        \\        case .Square(*side); side.* += 1;
+        \\        case .Empty;
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    s := Shape.Circle(4);
+        \\    grow(&s);
+        \\    print("{} {} {} {}\n", radius_or_zero(s), radius_or_zero(.Square(2)),
+        \\          radius(s), radius(.Empty));
+        \\}
+    );
+    code_block(15, "text", #string
+        \\5 0 5 -1
+    );
+    paragraph(16, #string,oneline
+        \\`#pattern` Matching and Pattern Forms and Coverage, Binding Forms,
+        \\and Pattern Constants describe these forms and the patterns they
+        \\accept. Naming a payload directly as a member is an error, even right
+        \\after the variant was stored, because nothing there proves which
+        \\variant the value holds. Compound assignment reads the payload first,
+        \\so it is rejected too:
+    );
+    code_block(17, "text", #string
+        \\// r := s.Circle;
+        \\error: tagged-union payload '.Circle' may only be bound by a pattern match
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+        \\// s.Circle += 1;
+        \\error: tagged-union payload '.Circle' may only be bound by a pattern match
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+    );
+    subheading(18, "Direct reads with `allow_union_unwrap`");
+    paragraph(19, #string,oneline
+        \\The feature gate `allow_union_unwrap` permits `s.Circle` as a read.
+        \\`#enable(allow_union_unwrap)` at the top level of a file applies to
+        \\the declarations after it, and `#disable(allow_union_unwrap)` ends
+        \\it; Feature Gates and Runtime Checks describes gates in general. The
+        \\gate removes the compile-time proof but not the check: at `-O0` and
+        \\`-O1` a read of the wrong variant stops the program.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Shape :: union { Circle: s64; Square: s64; Empty: void; }
+        \\
+        \\#enable(allow_union_unwrap)
+        \\radius :: (s: Shape) -> s64 { return s.Circle; }
+        \\#disable(allow_union_unwrap)
+        \\
+        \\main :: () {
+        \\    print("{}\n", radius(.Circle(5)));
+        \\    print("{}\n", radius(.Square(9)));
+        \\}
+    );
+    code_block(21, "text", #string
+        \\$ glosso --run unwrap.glo 2>&1 | tail -3
+        \\5
+        \\unwrap.glo:6:40: union access: expected .Circle, but the value holds .Square
+        \\glosso: program exited with status 134
+    );
+    note(22, #string,oneline
+        \\At `-O2` and above the check is not compiled: the same program prints
+        \\`5` and then `9`, the payload of the `Square` it actually holds, and
+        \\exits normally. A pattern match is correct at every optimization
+        \\level; the gate is meant for generated code and interfaces where a
+        \\switch is impractical.
+    );
+    paragraph(23, #string,oneline
+        \\When the compiler can see which variant a constant holds, reading
+        \\another variant under the gate is a compile error, since the runtime
+        \\check could only fail:
+    );
+    code_block(24, "text", #string
+        \\// UNIT :: Shape.Circle(1);
+        \\// SIDE :: UNIT.Square;
+        \\error: this holds .Circle; reading .Square is never valid
+        \\note: the tag is known at compile time, so the gate's runtime check would fail on every execution
+    );
+    subheading(25, "Equality, printing, and reflection");
+    paragraph(26, #string,oneline
+        \\Two values of the same tagged union compare with `==` without any
+        \\declaration: they are equal when they hold the same variant with
+        \\equal payloads. As with structs, printing a union needs a `Show`
+        \\instance, usually from `#derive(Show)`.
+    );
+    paragraph(27, #string,oneline
+        \\`variant_count(T)`, `variant_name(T, i)` and `variant_type(T, i)`
+        \\from the `Meta` module describe a union's variants in declaration
+        \\order. `i` must be a compile-time constant, and a variant without a
+        \\payload reports `void`.
+    );
+    code_block(28, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Shape :: union { Circle: s64; Rect: [2]s64; Empty: void; }
+        \\
+        \\main :: () {
+        \\    print("{} variants\n", variant_count(Shape));
+        \\    print("{}: {}\n", variant_name(Shape, 0), type_name(variant_type(Shape, 0)));
+        \\    print("{}: {}\n", variant_name(Shape, 1), type_name(variant_type(Shape, 1)));
+        \\    print("{}: {}\n", variant_name(Shape, 2), type_name(variant_type(Shape, 2)));
+        \\    a := Shape.Circle(2);
+        \\    print("{} {}\n", a == Shape.Circle(2), a == Shape.Empty);
+        \\}
+    );
+    code_block(29, "text", #string
+        \\3 variants
+        \\Circle: s64
+        \\Rect: [2]s64
+        \\Empty: void
+        \\true false
+    );
+    subheading(30, "Generic and recursive unions");
+    paragraph(31, #string,oneline
+        \\`$T` in a payload type makes the union generic, exactly as in a
+        \\struct, and the union is used with type arguments in the order in
+        \\which the parameters first appear. A union cannot contain itself by
+        \\value, but it can refer to itself through pointers:
+    );
+    code_block(32, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Tree :: union {
+        \\    Leaf:   $T;
+        \\    Branch: [2]*Tree(T);
+        \\}
+        \\
+        \\total :: (t: *Tree(s64)) -> s64 {
+        \\    if t.* == {
+        \\        case .Leaf(v);    return v;
+        \\        case .Branch(kids); return total(kids[0]) + total(kids[1]);
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    a: Tree(s64) = .Leaf(3);
+        \\    b: Tree(s64) = .Leaf(4);
+        \\    root: Tree(s64) = .Branch(.[&a, &b]);
+        \\    print("{} {}\n", total(&root), type_name(type_of(root)));
+        \\}
+    );
+    code_block(33, "text", #string
+        \\7 Tree(s64)
+    );
+    subheading(34, "`#from` variants");
+    paragraph(35, #string,oneline
+        \\Writing `#from` before a variant declares that a value of the
+        \\variant's payload type can be widened into the union by wrapping it
+        \\in that variant. The compiler generates a `Propagate` instance for the
+        \\pair, and `?` uses `Propagate` when the error it passes on is not the
+        \\error type of the enclosing procedure's result. A procedure that
+        \\returns `Load_Error!s64` can therefore apply `?` to results whose
+        \\errors are `Read_Error` and `Parse_Error`:
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Read_Error  :: struct { code: s64; }
+        \\Parse_Error :: struct { line: s64; }
+        \\
+        \\Load_Error :: union {
+        \\    #from read:  Read_Error;
+        \\    #from parse: Parse_Error;
+        \\    Too_Large: void;
+        \\}
+        \\
+        \\read_text :: (ok: bool) -> Read_Error!str {
+        \\    if !ok return .Err(.{ .code = 5 });
+        \\    return .Ok("42");
+        \\}
+        \\
+        \\parse_number :: (text: str) -> Parse_Error!s64 {
+        \\    if text.count == 0 return .Err(.{ .line = 1 });
+        \\    return .Ok(42);
+        \\}
+        \\
+        \\load :: (ok: bool) -> Load_Error!s64 {
+        \\    text := read_text(ok)?;
+        \\    value := parse_number(text)?;
+        \\    if value > 1000 return .Err(.Too_Large);
+        \\    return value;
+        \\}
+        \\
+        \\report :: (result: Load_Error!s64) {
+        \\    if result == {
+        \\        case .Ok(v);             print("loaded {}\n", v);
+        \\        case .Err(.read(e));     print("read error {}\n", e.code);
+        \\        case .Err(.parse(e));    print("parse error on line {}\n", e.line);
+        \\        case .Err(.Too_Large);   print("too large\n");
+        \\    }
+        \\}
+        \\
+        \\main :: () {
+        \\    report(load(true));
+        \\    report(load(false));
+        \\    direct := propagate(Load_Error, Parse_Error.{ .line = 9 });
+        \\    report(.Err(direct));
+        \\}
+    );
+    code_block(37, "text", #string
+        \\loaded 42
+        \\read error 5
+        \\parse error on line 9
+    );
+    paragraph(38, #string,oneline
+        \\In every other respect `#from` variants are ordinary: they are
+        \\constructed and matched like any other variant, and a union can mix
+        \\them with plain variants such as `Too_Large`. The generated instance
+        \\is ordinary too, so `propagate(Load_Error, value)` calls it directly,
+        \\with the target type as its first argument. For the `read` variant it
+        \\is the instance one would write by hand:
+    );
+    code_block(39, "glosso", #string
+        \\Read_Error :: struct { code: s64; }
+        \\
+        \\Load_Error :: union {
+        \\    read: Read_Error;
+        \\    Too_Large: void;
+        \\}
+        \\
+        \\(Read_Error, Load_Error) ::: instance Propagate {
+        \\    propagate :: (#empty: Load_Error, value: Read_Error) -> Load_Error {
+        \\        return .read(value);
+        \\    }
+        \\}
+    );
+    paragraph(40, #string,oneline
+        \\Without `#from` or such an instance the error types do not convert,
+        \\and no overload of `?` accepts them. `Try`, `?`, `#try`, and
+        \\`Termination` explains the protocol behind `?` and how an error union
+        \\reports itself when `main` returns it.
+    );
+    code_block(41, "text", #string
+        \\// load :: () -> Load_Error!s64 { t := read_text(true)?; ... }
+        \\error: no overload '?' accepts these arguments
+        \\note: constraint failed for ?
+    );
+    paragraph(42, #string,oneline
+        \\The conversion takes one step. If `Outer` has a `#from` variant
+        \\holding `Middle`, and `Middle` has one holding `Inner_Error`, an
+        \\`Inner_Error` result still does not propagate into an `Outer` result;
+        \\`Outer` needs a variant, or an instance, for `Inner_Error` itself. The
+        \\payload may be of any type other than `void`, and it need not
+        \\implement `Error`. These declarations are rejected:
+    );
+    table_header(43, "Declaration   —   Diagnostic");
+    table_row(44, "`union #raw { #from a: E; ... }`   |   `#from is not defined for #raw union`");
+    table_row(45, "`#from none: void;`   |   `#from variant 'none' must have a payload`");
+    table_row(46, "Two `#from` variants with the same payload type   |   `#from variant 'again' duplicates the source type Read_Error`");
+    table_row(47, "`#from` in a generic union   |   `#from does not yet support generic unions`");
+    table_row(48, "`#from` on a struct field   |   `unexpected token 'from'`");
+    subheading(49, "Raw unions");
+    paragraph(50, #string,oneline
+        \\`union #raw { ... }` is an untagged union, the equivalent of a C
+        \\`union`. Every member starts at offset 0, so all of them share the
+        \\same bytes, and any member can be read at any time, whichever was
+        \\written last. Reading a member other than the one written
+        \\reinterprets the stored bytes; nothing converts them.
+    );
+    code_block(51, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Bits :: union #raw {
+        \\    f: f64;
+        \\    i: s64;
+        \\    bytes: [8]u8;
+        \\}
+        \\
+        \\main :: () {
+        \\    b: Bits;
+        \\    b.f = 1.0;
+        \\    print("i={} top byte={}\n", b.i, b.bytes[7]);
+        \\    c := Bits.i(258);
+        \\    print("{} {}\n", c.bytes[0], c.bytes[1]);
+        \\    print("size={} align={}\n", size_of(Bits), type_info(Bits).alignment);
+        \\}
+    );
+    code_block(52, "text", #string
+        \\i=4607182418800017408 top byte=63
+        \\2 1
+        \\size=8 align=8
+    );
+    paragraph(53, #string,oneline
+        \\`b.i` is the IEEE-754 bit pattern of `1.0`, and the bytes show the
+        \\little-endian order of an x86-64 target. A member is written by
+        \\assignment or with the constructor forms of a tagged union, such as
+        \\`Bits.i(258)`. A raw union that is not initialized is all zero
+        \\bytes.
+    );
+    paragraph(54, #string,oneline
+        \\Since nothing records which member is live, everything that depends
+        \\on the tag is unavailable: there is no pattern matching on a raw
+        \\union, no built-in `==`, no derived `PartialEq` and no `#from`, and
+        \\no read is checked at any optimization level. A program that needs to
+        \\know which member is valid keeps that information beside the union,
+        \\typically in an enum field of the same struct.
+    );
+    code_block(55, "text", #string
+        \\// if a == { case .i(v); case _; }
+        \\error: cannot match a variant of raw union Bits (it has no tag)
+        \\note: a raw union's members are always readable directly, e.g. 'value.member'
+        \\// same := a == b;
+        \\error: no operator '==' for Bits, Bits: builtin equality cannot compare the raw union Bits (no tag says which variant is live)
+    );
+    paragraph(56, #string,oneline
+        \\C Types, Callbacks, and Bindgen shows raw unions in C declarations,
+        \\where they appear most often.
+    );
+    subheading(57, "Layout");
+    paragraph(58, #string,oneline
+        \\A tagged union is stored as an `ssize` tag followed by room for the
+        \\largest payload; `void` variants add nothing. The alignment is the
+        \\larger of the tag's and the strictest payload's, and the payload
+        \\starts at the first offset after the tag that suits it. Tagged unions
+        \\take no layout directives: `union #packed` and `union #c_call` do not
+        \\parse, and a union shared with C is a raw union.
+    );
+    code_block(59, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Tiny :: union { A: u8; B: u8; }
+        \\Mixed :: union { A: [24]u8; B: s32; Off: void; }
+        \\Wide :: union { A: Simd(f32, 4); B: u8; }
+        \\
+        \\main :: () {
+        \\    print("Tiny  size={} align={}\n", size_of(Tiny), type_info(Tiny).alignment);
+        \\    print("Mixed size={} align={}\n", size_of(Mixed), type_info(Mixed).alignment);
+        \\    print("Wide  size={} align={}\n", size_of(Wide), type_info(Wide).alignment);
+        \\}
+    );
+    code_block(60, "text", #string
+        \\Tiny  size=16 align=8
+        \\Mixed size=32 align=8
+        \\Wide  size=32 align=16
+    );
+    paragraph(61, #string,oneline
+        \\On a 64-bit target the tag is 8 bytes, so even a union of two bytes
+        \\takes 16. The 16-byte vector in `Wide` raises the alignment to 16 and
+        \\pushes its payload to offset 16. Only the built-in optional and result
+        \\types can do without the tag; `?T` and `E!T` explains when.
+    );
+    paragraph(62, #string,oneline
+        \\A raw union has no tag. Its alignment is the strictest member
+        \\alignment, and its size is the largest member rounded up to that
+        \\alignment, so it can be half the size of the tagged union with the
+        \\same members:
+    );
+    code_block(63, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Raw    :: union #raw { a: u8; b: [3]u16; c: u32; }
+        \\Tagged :: union      { a: u8; b: [3]u16; c: u32; }
+        \\
+        \\main :: () {
+        \\    print("raw    size={} align={}\n", size_of(Raw), type_info(Raw).alignment);
+        \\    print("tagged size={} align={}\n", size_of(Tagged), type_info(Tagged).alignment);
+        \\}
+    );
+    code_block(64, "text", #string
+        \\raw    size=8 align=4
+        \\tagged size=16 align=8
+    );
+}
+
+render_section_38 :: () {
+    paragraph(0, #string,oneline
+        \\Two built-in tagged unions describe values that may not be there.
+        \\`?T` is a `T` that may be absent, and `E!T` is the result of an
+        \\operation that either succeeds with a `T` or fails with an error of
+        \\type `E`. Both need no import, and neither do their helper methods,
+        \\which live in the prelude. This chapter covers constructing and
+        \\reading both types, the helpers, propagation with postfix `?`, results
+        \\returned from `main`, and how the two are laid out. Missing Values and
+        \\Errors introduces them through a worked program.
+    );
+    subheading(1, "Optional values: `?T`");
+    paragraph(2, #string,oneline
+        \\A value of type `?s64` either holds an `s64`, written `.Some(5)`, or
+        \\holds nothing, written `null`. It is the type for answers that may
+        \\not exist, such as the position of an element that may not be in a
+        \\list, and it puts the absence in the type instead of in a special
+        \\value like -1. `?T` is a tagged union with two variants: `Some`, which
+        \\carries the `T`, and the empty one, which is always spelled `null`.
+        \\Everything in Tagged and Untagged Unions applies to it: a switch must
+        \\cover both cases, and the payload is read through a pattern.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\find :: (values: []s64, wanted: s64) -> ?ssize {
+        \\    for value, index: values {
+        \\        if value == wanted return index;
+        \\    }
+        \\    return null;
+        \\}
+        \\
+        \\main :: () {
+        \\    storage: [4]s64 = .[4, 8, 15, 16];
+        \\    values := storage[..];
+        \\    if find(values, 15) == {
+        \\        case .Some(i); print("found at {}\n", i);
+        \\        case null;     print("missing\n");
+        \\    }
+        \\    missing := find(values, 23);
+        \\    print("{} {}\n", missing == null, missing.unwrap_or(-1));
+        \\}
+    );
+    code_block(4, "text", #string
+        \\found at 2
+        \\true -1
+    );
+    subheading(5, "Making an optional");
+    paragraph(6, #string,oneline
+        \\A present value is written `.Some(value)` where the type is expected,
+        \\and `(?T).make_some(value)` anywhere. An optional that is not
+        \\initialized is `null`. Inside a procedure that returns `?T`,
+        \\`return value;` with a plain `T` means `return .Some(value);`, as
+        \\`find` above relies on. Everywhere else a `T` does not become a `?T`
+        \\by itself, and an empty optional is never written `.None`:
+    );
+    code_block(7, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: ?s64;
+        \\    b: ?s64 = .Some(5);
+        \\    c: ?s64 = null;
+        \\    d := (?s64).make_some(6);
+        \\    print("{} {} {} {}\n", a, b, c, d);
+        \\    print("{} {} {}\n", a.is_none(), b.is_some(), !c);
+        \\}
+    );
+    code_block(8, "text", #string
+        \\None Some(5) None Some(6)
+        \\true true true
+    );
+    code_block(9, "text", #string
+        \\// b: ?s64 = 5;
+        \\error: got ssize, expected ?s64
+        \\// c: ?s64 = .None;
+        \\error: use `null` for an empty `?T`
+        \\// n: s64 = b;
+        \\error: got ?s64, expected s64
+    );
+    paragraph(10, #string,oneline
+        \\An optional prints as `Some(...)`, or as `None` when it is empty,
+        \\provided its payload can be printed. `!x` is true when `x` is empty,
+        \\as `x.is_none()` is; it does not look at the payload, so `!x` on a
+        \\`.Some(false)` is false. `x == null` tests the same thing, and two
+        \\optionals compare equal when both are empty or both hold equal
+        \\payloads.
+    );
+    subheading(11, "Reading an optional");
+    paragraph(12, #string,oneline
+        \\The payload comes out through a pattern: a switch with
+        \\`case .Some(v);` and `case null;`, an `if #pattern .Some(v) = x` that
+        \\runs only when a value is present, or
+        \\`#pattern .Some(v) := x else { ... };`, which leaves the block when it
+        \\is not. Reading `x.Some` directly is the same error as for any tagged
+        \\union. For the common cases the helper methods are shorter:
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\
+        \\half :: (n: s64) -> ?s64 {
+        \\    if n % 2 != 0 return null;
+        \\    return n / 2;
+        \\}
+        \\
+        \\main :: () {
+        \\    if #pattern .Some(h) = half(10) print("half of 10 is {}\n", h);
+        \\    #pattern .Some(q) := half(12) else { return; };
+        \\    print("half of 12 is {}\n", q);
+        \\    print("{} {}\n", half(7).unwrap_or(0), half(8).map(|h| -> s64 { return h * 100; }));
+        \\    print("{}\n", half(40).and_then(half).and_then(half));
+        \\    print("{}\n", half(6).and_then(half));
+        \\    print("{}\n", half(9).ok_or("odd").is_err());
+        \\}
+    );
+    code_block(14, "text", #string
+        \\half of 10 is 5
+        \\half of 12 is 6
+        \\0 Some(400)
+        \\Some(5)
+        \\None
+        \\true
+    );
+    table_header(15, "Helper   —   Result");
+    table_row(16, "`x.is_some()`, `x.is_none()`   |   Whether a value is present.");
+    table_row(17, "`x.unwrap_or(fallback)`   |   The payload, or `fallback`. The fallback is evaluated either way.");
+    table_row(18, "`x.unwrap_or_else(f)`   |   The payload, or `f()`, called only when `x` is empty.");
+    table_row(19, "`x.map(f)`   |   `.Some(f(v))` for a payload `v`, else `null`.");
+    table_row(20, "`x.map_or(f, fallback)`   |   `f(v)` for a payload `v`, else `fallback`.");
+    table_row(21, "`x.and_then(f)`   |   `f(v)` where `f` itself returns an optional, else `null`.");
+    table_row(22, "`x.or_else(f)`   |   `x` if it holds a value, else the optional `f()` returns.");
+    table_row(23, "`x.filter(p)`   |   `x` if its payload satisfies `p`, else `null`.");
+    table_row(24, "`x.ok_or(e)`, `x.ok_or_else(f)`   |   A result: `.Ok(v)`, or `.Err(e)` / `.Err(f())`.");
+    table_row(25, "`(?T).make_some(v)`, `(?T).make_none()`   |   Construct with the type written out.");
+    paragraph(26, #string,oneline
+        \\The `f` arguments are procedures or lambdas (see Lambdas and
+        \\`#fn_ptr` Values). The payload is copied out; for a pointer payload
+        \\the copy is the same pointer.
+    );
+    subheading(27, "Results: `E!T`");
+    paragraph(28, #string,oneline
+        \\A value of type `E!T` is either a success holding a `T`, written
+        \\`.Ok(value)`, or a failure holding an error of type `E`, written
+        \\`.Err(error)`. The error type comes first, so a signature ends with
+        \\the type a successful call hands back. `E!T` is a tagged union with
+        \\the variants `Ok` and `Err`: a switch must handle both, and the
+        \\payloads are read through patterns. The error type can be any type:
+        \\an enum of failure kinds, a struct with details, or a union of other
+        \\error types (see `#from` variants in Tagged and Untagged Unions).
+    );
+    code_block(29, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Parse_Error :: enum { Empty; Not_A_Digit; }
+        \\
+        \\digit :: (c: u8) -> Parse_Error!s64 {
+        \\    if c < #char "0" || c > #char "9" return .Err(.Not_A_Digit);
+        \\    return .Ok(cast(s64) (c - #char "0"));
+        \\}
+        \\
+        \\number :: (text: str) -> Parse_Error!s64 {
+        \\    if text.count == 0 return .Err(.Empty);
+        \\    total: s64 = 0;
+        \\    for i: 0..text.count total = total * 10 + digit(text[i])?;
+        \\    return total;
+        \\}
+        \\
+        \\main :: () {
+        \\    inputs: [3]str = .["2026", "20x6", ""];
+        \\    for text: inputs {
+        \\        if number(text) == {
+        \\            case .Ok(n);  print("\"{}\" -> {}\n", text, n);
+        \\            case .Err(e); print("\"{}\" -> {}\n", text, e);
+        \\        }
+        \\    }
+        \\}
+    );
+    code_block(30, "text", #string
+        \\"2026" -> 2026
+        \\"20x6" -> Not_A_Digit
+        \\"" -> Empty
+    );
+    subheading(31, "Writing result types");
+    paragraph(32, #string,oneline
+        \\`!` between two types binds more loosely than the prefix type
+        \\modifiers, so `Lookup_Error!?*User` is a result whose success is an
+        \\optional pointer. It groups to the right: `A!B!T` is `A!(B!T)`, a
+        \\result whose success value is itself a result. `E!void` is the result
+        \\of an operation that produces nothing but can fail. Adjacent operator
+        \\characters form one token, so a pointer success type needs a space
+        \\after the `!`:
+    );
+    code_block(33, "text", #string
+        \\// find :: () -> Lookup_Error!*s64 { ... }
+        \\error: unexpected token '!*'; no operator '!*' is declared, and adjacent operator characters form one token - write '! *' with spaces
+    );
+    subheading(34, "Making and inspecting a result");
+    paragraph(35, #string,oneline
+        \\`.Ok(value)` and `.Err(error)` work where the result type is
+        \\expected, and `(E!T).make_ok(value)` and `(E!T).make_err(error)` work
+        \\anywhere. The success of an `E!void` is `.Ok`. Inside a procedure
+        \\that returns a result, `return value;` with a plain `T` means
+        \\`return .Ok(value);`. An `E!void` procedure still ends with
+        \\`return .Ok;`, because a bare `return;` would not say which outcome it
+        \\is.
+    );
+    code_block(36, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Lookup_Error :: enum { Unknown_Key; }
+        \\
+        \\port_of :: (service: str) -> Lookup_Error!s64 {
+        \\    if service == "http" return .Ok(80);
+        \\    if service == "ssh" return 22;
+        \\    return .Err(.Unknown_Key);
+        \\}
+        \\
+        \\check :: (service: str) -> Lookup_Error!void {
+        \\    port_of(service)?;
+        \\    return .Ok;
+        \\}
+        \\
+        \\main :: () {
+        \\    http := port_of("http");
+        \\    gopher := port_of("gopher");
+        \\    print("{} {}\n", http.unwrap_or(-1), gopher.unwrap_or(-1));
+        \\    print("{} {} {}\n", http.is_ok(), gopher.is_err(), !gopher);
+        \\    doubled := port_of("ssh").map(|p| -> s64 { return p * 2; });
+        \\    print("{} {}\n", doubled.unwrap_or(0), port_of("ssh").ok());
+        \\    print("{} {}\n", check("ssh").is_ok(), check("ftp").is_ok());
+        \\}
+    );
+    code_block(37, "text", #string
+        \\80 -1
+        \\true true true
+        \\44 Some(22)
+        \\true false
+    );
+    paragraph(38, #string,oneline
+        \\`!r` is true when `r` failed. A result has no `Show` instance of its
+        \\own, so it is printed by matching it or through a helper such as
+        \\`ok()`, as above. The helpers:
+    );
+    table_header(39, "Helper   —   Result");
+    table_row(40, "`r.is_ok()`, `r.is_err()`   |   Which variant `r` holds.");
+    table_row(41, "`r.unwrap_or(fallback)`   |   The success value, or `fallback`, which is evaluated either way.");
+    table_row(42, "`r.unwrap_or_else(f)`   |   The success value, or `f(error)`.");
+    table_row(43, "`r.map(f)`   |   `.Ok(f(v))` on success; an error passes through.");
+    table_row(44, "`r.map_error(f)`   |   `.Err(f(e))` on failure, changing the error type; a success passes through.");
+    table_row(45, "`r.and_then(f)`   |   `f(v)` on success, where `f` returns a result with the same error type.");
+    table_row(46, "`r.or_else(f)`, `r.bind_error(f)`   |   On failure, the result `f(e)` returns; a success passes through.");
+    table_row(47, "`r.map_or(f, fallback)`, `r.map_or_else(f, g)`   |   One value from either side.");
+    table_row(48, "`r.ok()`, `r.err()`   |   The success or the error as an optional, dropping the other side.");
+    table_row(49, "`(E!T).make_ok(v)`, `(E!T).make_err(e)`   |   Construct with the type written out.");
+    code_block(50, "text", #string
+        \\// r: Lookup_Error!s64 = 80;
+        \\error: got ssize, expected Lookup_Error!s64
+        \\// check :: () -> Lookup_Error!void { return; }
+        \\error: empty return in function returning Lookup_Error!void
+        \\// n := r.Ok;
+        \\error: tagged-union payload '.Ok' may only be bound by a pattern match
+        \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
+    );
+    subheading(51, "Propagating with `?`");
+    paragraph(52, #string,oneline
+        \\Postfix `?` reads the payload of an optional or the success value of
+        \\a result. When there is none, it returns from the enclosing procedure
+        \\at once: `null` for an optional, the error for a result. The procedure
+        \\must itself return the same kind of type. A chain of steps that can
+        \\each come up empty then reads as straight-line code:
+    );
+    code_block(53, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Node :: struct { value: s64; next: ?*Node; }
+        \\
+        \\third :: (head: *Node) -> ?s64 {
+        \\    second := head.next?;
+        \\    last := second.next?;
+        \\    return last.value;
+        \\}
+        \\
+        \\main :: () {
+        \\    c := Node.{ 3, null };
+        \\    b := Node.{ 2, &c };
+        \\    a := Node.{ 1, &b };
+        \\    print("{} {}\n", third(&a), third(&b));
+        \\}
+    );
+    code_block(54, "text", #string
+        \\Some(3) None
+    );
+    paragraph(55, #string,oneline
+        \\On a result, the error types must match, or the error must convert
+        \\through `Propagate`, as `#from` variants arrange. `number` in the
+        \\first result example uses `?` on every digit, and `check` uses it on a
+        \\call whose value it does not need. Where a failure should stop short
+        \\of a `return`, a `#try { ... }` block holding one expression is the
+        \\boundary instead, and its value is the result:
+    );
+    code_block(56, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Input_Error :: enum { Bad_Input; }
+        \\
+        \\parse :: (text: str) -> Input_Error!s64 {
+        \\    if text.count == 0 return .Err(.Bad_Input);
+        \\    return text.count;
+        \\}
+        \\
+        \\main :: () {
+        \\    sum := #try { parse("abc")? + parse("de")? };
+        \\    none := #try { parse("abc")? + parse("")? };
+        \\    print("{} {}\n", sum.unwrap_or(-1), none.unwrap_or(-1));
+        \\}
+    );
+    code_block(57, "text", #string
+        \\5 -1
+    );
+    paragraph(58, #string,oneline
+        \\An absent optional carries no error, so `?` cannot pass it on as the
+        \\failure of a result. `ok_or` supplies the error, and the `?` that
+        \\follows propagates it:
+    );
+    code_block(59, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Config_Error :: enum { Missing; Not_A_Number; }
+        \\
+        \\lookup :: (key: str) -> ?str {
+        \\    if key == "port" return "8080";
+        \\    return null;
+        \\}
+        \\
+        \\to_number :: (text: str) -> ?s64 {
+        \\    value: s64 = 0;
+        \\    for i: 0..text.count {
+        \\        c := text[i];
+        \\        if c < #char "0" || c > #char "9" return null;
+        \\        value = value * 10 + cast(s64) (c - #char "0");
+        \\    }
+        \\    return value;
+        \\}
+        \\
+        \\setting :: (key: str) -> Config_Error!s64 {
+        \\    text := lookup(key).ok_or(Config_Error.Missing)?;
+        \\    return to_number(text).ok_or(Config_Error.Not_A_Number)?;
+        \\}
+        \\
+        \\main :: () {
+        \\    if setting("port") == {
+        \\        case .Ok(n);  print("port {}\n", n);
+        \\        case .Err(e); print("error {}\n", e);
+        \\    }
+        \\    if setting("host") == {
+        \\        case .Ok(n);  print("host {}\n", n);
+        \\        case .Err(e); print("error {}\n", e);
+        \\    }
+        \\}
+    );
+    code_block(60, "text", #string
+        \\port 8080
+        \\error Missing
+    );
+    paragraph(61, #string,oneline
+        \\When none of these conditions holds, no `?` applies. In a procedure
+        \\that returns neither kind of type the message says so; otherwise it
+        \\names the operator, and the note points at its constraint, which
+        \\requires matching or convertible types:
+    );
+    code_block(62, "text", #string
+        \\// whole :: (n: s64) -> s64 { h := half(n)?; return h; }
+        \\error: postfix '?' requires a Try-returning function or an enclosing #try block
+        \\// setting :: (key: str) -> Config_Error!str { text := lookup(key)?; return text; }
+        \\error: no overload '?' accepts these arguments
+        \\note: constraint failed for ?
+        \\// parse :: (text: str) -> Parse_Error!s64 { p := port_of(text)?; return p; }
+        \\error: no overload '?' accepts these arguments
+        \\note: constraint failed for ?
+    );
+    paragraph(63, #string,oneline
+        \\`Try`, `?`, `#try`, and `Termination` describes the protocol behind
+        \\`?`, how other types take part in it, and `#try` blocks in general.
+    );
+    subheading(64, "Results from `main`");
+    paragraph(65, #string,oneline
+        \\`main` may return `E!void` when `E` implements the `Error`
+        \\typeclass. `.Ok` exits with status 0, and `.Err` reports the error on
+        \\standard error and exits with status 1, so `?` in `main` sends a
+        \\failure straight to the process boundary. What a Program Is has an
+        \\example, and `Try`, `?`, `#try`, and `Termination` describes `Error`.
+    );
+    subheading(66, "Optional pointers and layout");
+    paragraph(67, #string,oneline
+        \\A pointer `*T` is never null, so "a pointer or nothing" is spelled
+        \\`?*T`. A `*T` converts to `?*T` wherever one is expected, without
+        \\`.Some`. The optional uses the null address for `null` and needs no
+        \\tag, so `?*T` is exactly as large as `*T` and passes to C as an
+        \\ordinary pointer. The same holds for many-pointers `?[*]T` and for
+        \\function pointers. Every other optional stores a tag next to its
+        \\payload, `?bool` and `?cstr` included.
+    );
+    paragraph(68, #string,oneline
+        \\A result is stored like any tagged union: an `ssize` tag and room for
+        \\the larger of the two payloads. The one exception is a result where
+        \\one side takes no space and the other is a pointer, such as
+        \\`void! *T`, which uses the null address instead of a tag, as `?*T`
+        \\does.
+    );
+    code_block(69, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\F :: #fn_ptr(x: s64) -> s64;
+        \\Failure :: enum { Failed; }
+        \\
+        \\main :: () {
+        \\    print("{} {} {} {}\n", size_of(*s64), size_of(?*s64), size_of(?[*]s64), size_of(?F));
+        \\    print("{} {} {} {}\n", size_of(s64), size_of(?s64), size_of(?bool), size_of(?cstr));
+        \\    print("{} {} {}\n", size_of(Failure!s64), size_of(Failure!void), size_of(void! *s64));
+        \\    print("{}\n", type_name(Failure!?*s64));
+        \\}
+    );
+    code_block(70, "text", #string
+        \\8 8 8 8
+        \\8 16 16 16
+        \\16 16 8
+        \\Failure!?*s64
+    );
+    paragraph(71, #string,oneline
+        \\In a pattern, `case .Some(p);` on a `?*T` binds `p` as a `*T` that
+        \\can be used without further checks. Pointer Types describes `null`
+        \\and the optional pointer forms in more detail.
+    );
+}
+
+render_section_39 :: () {
+    paragraph(0, #string,oneline
+        \\A pointer holds an address. Glosso has two pointer shapes: `*T`
+        \\points at exactly one `T`, and the many-pointer `[*]T` points at the
+        \\first of a run of them. Neither can be zero, so a pointer that may be
+        \\absent is an optional, `?*T` or `?[*]T`. Each shape has a read-only
+        \\form with `const`. This chapter covers taking addresses,
+        \\dereferencing, field access through pointers, the qualifiers,
+        \\many-pointer arithmetic, `null`, and the conversions between pointer
+        \\types. A run of values together with its count is a view, described
+        \\in Arrays, Views, Dynamic Arrays, and Slicing; pointers to procedures
+        \\are in Lambdas and `#fn_ptr` Values.
+    );
+    subheading(1, "Single pointers");
+    paragraph(2, #string,oneline
+        \\A pointer `*T` holds the address of one value of type `T`. It is one
+        \\machine word, it carries no element count, and it is never zero.
+        \\`*T` allows reading and writing the value it points at, and
+        \\`*const T` allows only reading.
+    );
+    code_block(3, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    count: s64 = 10;
+        \\    p: *s64 = &count;
+        \\    p.* = 20;            // write through the pointer
+        \\    *p += 1;             // the prefix spelling of the same place
+        \\    q := count.&;        // the suffix spelling of &count
+        \\    print("{} {} {}\n", count, q.*, p == q);
+        \\}
+    );
+    code_block(4, "text", #string
+        \\21 21 true
+    );
+    subheading(5, "Taking an address");
+    paragraph(6, #string,oneline
+        \\`&x` and `x.&` both take the address of `x`; they are two spellings
+        \\of one operation. The operand must name storage: a variable or
+        \\parameter, a field of something that has storage, an element of an
+        \\array, or the place a pointer points at. When `x` has type `T`, the
+        \\pointer has type `*T`.
+    );
+    paragraph(7, #string,oneline
+        \\Values that exist only as the result of an expression have no
+        \\address. That covers arithmetic results, call results, struct
+        \\literals, compile-time constants, the bytes of a `str`, and the
+        \\elements of a `#soa` array (see `#soa` and `#aos` Storage):
+    );
+    code_block(8, "text", #string
+        \\// LIMIT :: 5;   p := &LIMIT;
+        \\error: cannot take a pointer to a non-addressable expression: 'LIMIT'
+    );
+    paragraph(9, #string,oneline
+        \\The one exception is an array literal: `&.[a, b, c]` makes a
+        \\temporary fixed array and points at it, which is useful for passing
+        \\a short list to a view parameter (see Aggregate Literal Syntax).
+    );
+    subheading(10, "Dereferencing");
+    paragraph(11, #string,oneline
+        \\`*p` and `p.*` name the value `p` points at. Both forms are places:
+        \\they can be read, assigned and compound-assigned, and their address
+        \\can be taken again. The suffix form reads left to right and chains
+        \\with member access and indexing, as in `pp.*.*` or `p.*[0]`; the
+        \\prefix form stacks, as in `**pp`.
+    );
+    code_block(12, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    x: s64 = 7;
+        \\    p := &x;
+        \\    pp := &p;
+        \\    print("{} {}\n", **pp, pp.*.*);
+        \\    print("{} {}\n", type_name(type_of(pp)), size_of(*s64));
+        \\    print("{}\n", type_of(p) == *s64);
+        \\}
+    );
+    code_block(13, "text", #string
+        \\7 7
+        \\**s64 8
+        \\true
+    );
+    paragraph(14, #string,oneline
+        \\The last two lines apply prefix `*` to a type: `*s64` in an
+        \\expression is the pointer type itself, so it can be passed to
+        \\`size_of` or compared with `type_of(p)`. Applied to anything that is
+        \\neither a type nor a pointer, `*` is an error:
+    );
+    code_block(15, "text", #string
+        \\// x: s64 = 1;   y := *x;
+        \\error: operator '*' expects a typed pointer, got s64
+    );
+    paragraph(16, #string,oneline
+        \\Adjacent operator characters form one token, so `-*p` is read as an
+        \\operator named `-*` and rejected. Write `- *p` with a space, or use
+        \\the suffix form `-p.*`, which needs none. Likewise `2**p` is an error
+        \\and `2 * *p` is a product.
+    );
+    code_block(17, "text", #string
+        \\// print("{}\n", -*p);
+        \\error: unexpected token '-*'; no operator '-*' is declared, and adjacent operator characters form one token - write '- *' with spaces
+    );
+    paragraph(18, #string,oneline
+        \\`&`, `.&`, prefix `*` and `.*` on pointers are built into the
+        \\language and cannot be overloaded. Binary `&` (bitwise and) and
+        \\binary `*` (multiplication) are ordinary operators; see Operator
+        \\Declarations.
+    );
+    subheading(19, "Fields through a pointer");
+    paragraph(20, #string,oneline
+        \\When `p` points at a struct or a union, `p.field` is shorthand for
+        \\`p.*.field`. The shorthand works for reading, assignment, compound
+        \\assignment and `&p.field`, and it follows pointer fields one level
+        \\at a time: `sp.to.y` below reads the `to` field of the struct that
+        \\`sp` points at, and then the `y` field of the struct that `to`
+        \\points at.
+    );
+    code_block(21, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Point :: struct { x: s64; y: s64; }
+        \\Segment :: struct { from: Point; to: *Point; }
+        \\
+        \\nudge :: (p: *Point) {
+        \\    p.x += 1;           // p.*.x += 1
+        \\}
+        \\
+        \\main :: () {
+        \\    a := Point.{ 1, 2 };
+        \\    b := Point.{ 3, 4 };
+        \\    nudge(&a);
+        \\    s := Segment.{ a, &b };
+        \\    sp := &s;
+        \\    sp.from.y = 20;     // a field of the struct sp points at
+        \\    sp.to.y = 40;       // through the pointer field, into b
+        \\    print("{} {} {}\n", a.x, s.from.y, b.y);
+        \\}
+    );
+    code_block(22, "text", #string
+        \\2 20 40
+    );
+    paragraph(23, #string,oneline
+        \\The shorthand removes exactly one pointer, and only in front of a
+        \\struct or a union. A pointer to a pointer, or a pointer to an array,
+        \\needs the explicit dereference: `pp.*.x`, `p.*.count`, `p.*[0]`.
+        \\The diagnostic does not mention the missing `.*`:
+    );
+    code_block(24, "text", #string
+        \\// pp: **Point;   n := pp.x;
+        \\error: member of non-struct
+    );
+    paragraph(25, #string,oneline
+        \\Method calls are more lenient: a method that takes its receiver by
+        \\pointer can be called on a value or on a pointer, and one that takes
+        \\it by value can be called on a pointer. Inherent Methods, Member
+        \\Access, and Call Syntax describes the receiver forms.
+    );
+    subheading(26, "Read-only and volatile pointers");
+    paragraph(27, #string,oneline
+        \\`*const T` points at a `T` that may not be changed through this
+        \\pointer. The value may still change through another, writable
+        \\pointer, so `const` describes the access, not the storage. A `*T`
+        \\converts to `*const T` wherever one is expected. The opposite
+        \\direction is rejected, and so is any write through the read-only
+        \\pointer:
+    );
+    code_block(28, "text", #string
+        \\// r: *const s64 = &x;   r.* = 2;
+        \\error: left side of assignment is not assignable
+        \\
+        \\// w: *s64 = r;
+        \\error: got *const s64, expected *s64
+    );
+    paragraph(29, #string,oneline
+        \\The qualifier travels with field access: when `r` is a
+        \\`*const Point`, `&r.x` is a `*const s64`. In a nested pointer type
+        \\each level has its own qualifier. `*const *s64` is a read-only
+        \\pointer to a writable pointer, so `pc.*.* = 9` is allowed and
+        \\`pc.* = &y` is not. The implicit conversion adds `const` only at the
+        \\outermost level: a `**s64` converts to `*const *s64` but not to
+        \\`*const *const s64` or `**const s64`.
+    );
+    paragraph(30, #string,oneline
+        \\`volatile` is a second qualifier. Every read and write through a
+        \\`*volatile T` or `*const volatile T` is performed as written and is
+        \\not merged with other accesses or removed by the optimizer. It is
+        \\meant for memory that something other than the program also reads
+        \\or writes, such as device registers. A `*T` converts to the volatile
+        \\forms implicitly.
+    );
+    subheading(31, "What a single pointer does not do");
+    paragraph(32, #string,oneline
+        \\A `*T` addresses exactly one value, so it has no arithmetic and no
+        \\indexing. A run of values is addressed by a many-pointer `[*]T`,
+        \\described below, or by a view `[]T`.
+    );
+    code_block(33, "text", #string
+        \\// p := &x;   q := p + 1;
+        \\error: no operator '+' for *s64, ssize
+        \\
+        \\// y := p[0];
+        \\error: no operator '[]' for *s64, ssize
+    );
+    paragraph(34, #string,oneline
+        \\Two pointers compare with `==` and `!=`, and by address with `<`,
+        \\`<=`, `>` and `>=`. Formatting a pointer with `{}` prints its
+        \\address in hexadecimal.
+    );
+    paragraph(35, #string,oneline
+        \\A pointer does not own what it points at and does not keep it alive.
+        \\Nothing stops a procedure from returning the address of one of its
+        \\own local variables; the pointer then refers to storage that has
+        \\stopped belonging to the variable, and using it is undefined.
+        \\`Freeable`, Copies, and Ownership Transfer explains who releases
+        \\what.
+    );
+    subheading(36, "Uninitialized pointers");
+    paragraph(37, #string,oneline
+        \\Because zero is not a valid `*T`, a pointer declared without a value
+        \\holds a different invalid address, with every bit set. Dereferencing
+        \\that address stops the program and names the location of the
+        \\dereference, at every optimization level:
+    );
+    code_block(38, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    p: *s64;
+        \\    print("{}\n", p);
+        \\    p.* = 1;
+        \\    print("not reached\n");
+        \\}
+    );
+    code_block(39, "text", #string
+        \\$ glosso --run uninit.glo 2>&1 | tail -3
+        \\0xffffffffffffffff
+        \\uninit.glo:6:6: dereference of an uninitialized pointer
+        \\glosso: program exited with status 134
+    );
+    paragraph(40, #string,oneline
+        \\The check catches only the untouched default. A pointer that was
+        \\once valid and whose target has since gone away is not detected.
+    );
+    subheading(41, "Many-pointers");
+    paragraph(42, #string,oneline
+        \\A many-pointer `[*]T` holds the address of the first of an unknown
+        \\number of consecutive `T` values. Like `*T` it is one machine word
+        \\and never zero; unlike `*T` it can be indexed and moved forward and
+        \\back. It carries no count, so nothing checks that an index or an
+        \\offset stays inside the run: that is the program's responsibility.
+        \\`[*]const T` is the read-only form.
+    );
+    code_block(43, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    values: [5]s64 = .[10, 20, 30, 40, 50];
+        \\    m: [*]s64 = values.data;     // the address of values[0]
+        \\    m[1] = 21;                   // index: no bounds check
+        \\    third := m + 2;              // advance by two elements, not two bytes
+        \\    print("{} {} {}\n", values[1], third[0], third[-1]);
+        \\    print("{} {}\n", third - m, type_name(type_of(third - m)));
+        \\
+        \\    end := m + values.count;     // one past the last element
+        \\    cursor := m;
+        \\    while cursor < end {
+        \\        print("{} ", cursor.*);
+        \\        cursor += 1;
+        \\    }
+        \\    print("\n");
+        \\}
+    );
+    code_block(44, "text", #string
+        \\21 30 21
+        \\2 ssize
+        \\10 21 30 40 50 
+    );
+    table_header(45, "Expression   —   Meaning");
+    table_row(46, "`m[i]`   |   The element `i` places after `m`; a place that can be assigned when `m` is writable. `i` may be negative.");
+    table_row(47, "`m.*`, `*m`   |   The element `m` points at, the same as `m[0]`.");
+    table_row(48, "`m + n`, `m - n`   |   A many-pointer `n` elements further or back; the byte offset is `n * size_of(T)`.");
+    table_row(49, "`m += n`, `m -= n`   |   Move `m` itself.");
+    table_row(50, "`a - b`   |   The distance in elements, as `ssize`; both must point into the same run.");
+    table_row(51, "`==`, `!=`, `<`, `<=`, `>`, `>=`   |   Compare addresses.");
+    paragraph(52, #string,oneline
+        \\The offset must be an `ssize`; an integer literal is one already,
+        \\and a variable of another integer type needs a cast. The offset goes
+        \\on the right: `m + 1` is a pointer, while `1 + m` has no operator. A
+        \\many-pointer has no members, so `m.count` is `error: member of
+        \\non-struct`, and it cannot be sliced, since a slice needs an end
+        \\that the pointer does not know:
+    );
+    code_block(53, "text", #string
+        \\// m := values.data;   v := m[0..2];
+        \\error: no operator '[]' for [*]s64, Range(ssize)
+    );
+    subheading(54, "Where many-pointers come from");
+    paragraph(55, #string,oneline
+        \\Every counted sequence exposes its first element through the `.data`
+        \\member, as a many-pointer whose qualifier matches the sequence:
+    );
+    code_block(56, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    fixed: [3]s64;
+        \\    view: []const s64 = fixed[..];
+        \\    dynamic: [..]s64;
+        \\    text := "abc";
+        \\    print("{}\n", type_name(type_of(fixed.data)));
+        \\    print("{}\n", type_name(type_of(view.data)));
+        \\    print("{}\n", type_name(type_of(dynamic.data)));
+        \\    print("{}\n", type_name(type_of(text.data)));
+        \\}
+    );
+    code_block(57, "text", #string
+        \\[*]s64
+        \\[*]const s64
+        \\[*]s64
+        \\[*]const u8
+    );
+    paragraph(58, #string,oneline
+        \\The pointer is only as valid as the storage behind it. A dynamic
+        \\array that grows may move its elements, which leaves an earlier
+        \\`.data` pointing at released memory; Arrays, Views, Dynamic Arrays,
+        \\and Slicing describes when that happens. A `cstr` converts
+        \\implicitly to `[*]const u8` and `*const u8`, which is how text is
+        \\handed to C (see `str`, `cstr`, and UTF-16 Text).
+    );
+    paragraph(59, #string,oneline
+        \\Turning a pointer and a count back into a view is an intrinsic of
+        \\the compiler. A program that receives both, for example from C, can
+        \\declare the intrinsic as a procedure; `#asm`, `#bytes`, and `#magic`
+        \\explains the mechanism.
+    );
+    code_block(60, "glosso", #string
+        \\#import "Io";
+        \\
+        \\view_of :: (data: [*]$T, count: ssize) -> []T #magic "slice_from_pointer";
+        \\
+        \\main :: () {
+        \\    values: [5]s64 = .[10, 20, 30, 40, 50];
+        \\    middle := view_of(values.data + 1, 3);
+        \\    for x: middle print("{} ", x);
+        \\    print("\n");
+        \\}
+    );
+    code_block(61, "text", #string
+        \\20 30 40 
+    );
+    subheading(62, "Null and optional pointers");
+    paragraph(63, #string,oneline
+        \\`*T`, `[*]T` and function pointers exclude the address zero, so none
+        \\of them can hold `null`. The compiler says what to write instead:
+    );
+    code_block(64, "text", #string
+        \\// p: *s64 = null;
+        \\error: 'null' is not a value of *s64
+        \\note: a plain pointer excludes zero - write ?*s64 for a pointer that may be absent
+        \\note: then 'null' is the absent ?*s64
+    );
+    paragraph(65, #string,oneline
+        \\`?*T` and `?[*]T` are optional pointers. Their absent value `null` is
+        \\stored as address zero, the one value the plain pointer cannot have,
+        \\so an optional pointer is still one machine word, with the same
+        \\layout as a C pointer that may be null (see `?T` and `E!T`). A plain
+        \\pointer converts to the optional one implicitly.
+    );
+    code_block(66, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Node :: struct {
+        \\    value: s64;
+        \\    next: ?*Node;      // null at the end of the list
+        \\}
+        \\
+        \\main :: () {
+        \\    c := Node.{ 3, null };
+        \\    b := Node.{ 2, &c };     // a *Node converts to ?*Node
+        \\    a := Node.{ 1, &b };
+        \\    cursor: ?*Node = &a;
+        \\    while #pattern .Some(node) = cursor {
+        \\        print("{} ", node.value);
+        \\        cursor = node.next;
+        \\    }
+        \\    print("\n{} {}\n", cursor == null, size_of(?*Node));
+        \\}
+    );
+    code_block(67, "text", #string
+        \\1 2 3 
+        \\true 8
+    );
+    paragraph(68, #string,oneline
+        \\An optional pointer has to be unwrapped before it is used as a
+        \\pointer, usually with a pattern as above or with a helper such as
+        \\`unwrap_or`. The field shorthand does not look through the optional,
+        \\and the optional does not convert back to a plain pointer:
+    );
+    code_block(69, "text", #string
+        \\// p: ?*Node = &a;   x := p.value;
+        \\error: no union field value
+        \\
+        \\// q: *Node = p;
+        \\error: got ?*Node, expected *Node
+    );
+    paragraph(70, #string,oneline
+        \\`p == null` and `p != null` test for absence directly. A cast from an
+        \\integer to `?*T` accepts every value, zero included, and produces
+        \\`null` for zero; it is the cast to use for an address that may be
+        \\zero, such as one returned by a C function.
+    );
+    subheading(71, "Conversions and casts");
+    paragraph(72, #string,oneline
+        \\A pointer to one type does not convert to a pointer to another type
+        \\implicitly: `b: *u8 = p` with `p: *s64` is `error: got *s64, expected
+        \\*u8`. `cast` converts between any two pointer types, and between a
+        \\pointer and an integer. `*void` is the type-erased pointer: any
+        \\writable pointer converts to it, and it converts back to any pointer
+        \\type, both without a cast. `*void` has no arithmetic.
+    );
+    code_block(73, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    value: u32 = 16#11223344;
+        \\    bytes := cast(*u8) &value;         // the first byte in memory
+        \\    print("{x}\n", bytes.*);
+        \\
+        \\    erased: *void = &value;            // any pointer converts to *void
+        \\    back: *u32 = erased;               // and *void converts back
+        \\    print("{x}\n", back.*);
+        \\
+        \\    address := cast(usize) back;       // pointer to integer
+        \\    again := cast(*u32) address;       // and back again
+        \\    print("{}\n", again == back);
+        \\}
+    );
+    code_block(74, "text", #string
+        \\44
+        \\11223344
+        \\true
+    );
+    paragraph(75, #string,oneline
+        \\The first line is `44` because x86-64 stores the low byte first. A
+        \\cast is not checked against the layout of the types involved, and it
+        \\can also remove `const`; the program is responsible for the result
+        \\being meaningful. Literal Typing and Type Conversion covers casts in
+        \\general.
+    );
+    paragraph(76, #string,oneline
+        \\A single pointer and a many-pointer describe different things, one
+        \\value against a run of them, so neither converts to the other
+        \\implicitly: `p: *s64 = m` is `error: got [*]s64, expected *s64`.
+        \\`cast` converts in both directions. Adding `const` needs no cast,
+        \\for either shape.
+    );
+    code_block(77, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    values: [3]s64 = .[1, 2, 3];
+        \\    many := values.data;
+        \\    one := cast(*s64) many;          // the first element as a single pointer
+        \\    again := cast([*]s64) one;       // and back to a many-pointer
+        \\    readonly: [*]const s64 = many;   // adding const needs no cast
+        \\    print("{} {} {}\n", one.*, again[2], readonly[1]);
+        \\}
+    );
+    code_block(78, "text", #string
+        \\1 3 2
+    );
+    paragraph(79, #string,oneline
+        \\A cast from an integer to a plain pointer must not produce zero. A
+        \\zero known at compile time is an error that suggests the optional
+        \\type instead. A zero that arrives at run time stops the program at
+        \\`-O0` and `-O1` with "cast to *s64 of an address that is zero", and
+        \\is not checked at higher levels.
+    );
+    code_block(80, "text", #string
+        \\// p := cast(*s64) 0;
+        \\error: cast to *s64 of an address that is zero at compile time
+        \\note: a plain pointer excludes zero - that is what gives ?T its niche, where .None IS address 0
+        \\note: cast to ?*s64 instead, which is total and yields .None here
+    );
+    paragraph(81, #string,oneline
+        \\Code that reinterprets pointers often, such as a binding to a C
+        \\library, can relax the implicit conversion rule for a stretch of
+        \\source with `#enable(pointer_punning)`. Inside it, pointers of
+        \\different pointee types and shapes convert without a cast, but a
+        \\read-only pointer still does not become writable. See Feature Gates
+        \\and Runtime Checks.
+    );
+}
+
+render_section_40 :: () {
+    paragraph(0, #string,oneline
+        \\Glosso has three array shapes. A fixed array `[N]T` is `N` values of
+        \\type `T` stored inline, wherever the array itself is stored. A view
+        \\`[]T` is a count and a pointer to elements stored somewhere else. A
+        \\dynamic array `[..]T` is a count, a pointer and a capacity, and it
+        \\owns a heap buffer that grows as elements are added. This chapter
+        \\covers the three shapes, indexing and bounds checks, the ranges
+        \\written with `..`, and slicing, which turns part of any shape into a
+        \\view. Arrays, Views, and Growing Lists introduces them through
+        \\worked programs.
+    );
+    table_header(1, "Type   —   Holds   —   Size on a 64-bit target");
+    table_row(2, "`[N]T`   |   The `N` elements themselves   |   `N * size_of(T)`");
+    table_row(3, "`[]T`, `[]const T`   |   `count`, `data`   |   16 bytes");
+    table_row(4, "`[..]T`   |   `count`, `data`, `capacity`   |   24 bytes");
+    code_block(5, "glosso", #string
+        \\#import "Io";
+        \\
+        \\total :: (values: []const s64) -> s64 {
+        \\    sum: s64 = 0;
+        \\    for x: values sum += x;
+        \\    return sum;
+        \\}
+        \\
+        \\main :: () {
+        \\    fixed: [4]s64 = .[1, 2, 3, 4];     // four s64 values, stored inline
+        \\    dynamic: [..]s64;                  // empty; grows on the heap
+        \\    defer dynamic.free();
+        \\    dynamic.push(10, 20, 30);
+        \\    print("{} {}\n", total(fixed[..]), total(dynamic.view()));
+        \\}
+    );
+    code_block(6, "text", #string
+        \\10 60
+    );
+    paragraph(7, #string,oneline
+        \\A procedure that only reads or writes elements takes a view, as
+        \\`total` does, so that one procedure serves every shape. `fixed[..]`
+        \\and `dynamic.view()` both produce a view of all the elements. A view
+        \\never owns its elements; only the dynamic array has a buffer to
+        \\release.
+    );
+    subheading(8, "Fixed arrays");
+    paragraph(9, #string,oneline
+        \\The length of a fixed array is part of its type. It is written as an
+        \\integer literal or the name of a constant; an expression such as
+        \\`[K + 1]T` is not accepted, but a constant `K1 :: K + 1;` is. `[_]T`
+        \\takes the length from the array literal that initializes it. An array
+        \\declared without a value has every element zeroed. Arrays nest, and
+        \\`[2][3]s64` is two arrays of three.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\SIZE :: 3;
+        \\
+        \\main :: () {
+        \\    grid: [2][SIZE]s64 = .[.[1, 2, 3], .[4, 5, 6]];
+        \\    squares: [_]s64 = .[1, 4, 9, 16, 25];    // the length comes from the literal
+        \\    zeros: [4]u8;                            // every element is zero
+        \\    print("{} {} {}\n", grid.count, grid[0].count, grid[1][2]);
+        \\    print("{} {}\n", type_name(type_of(squares)), size_of([2][SIZE]s64));
+        \\    print("{} {}\n", zeros[3], squares.count);
+        \\    #assert squares.count == 5;              // known at compile time
+        \\}
+    );
+    code_block(11, "text", #string
+        \\2 3 6
+        \\[5]s64 48
+        \\0 5
+    );
+    paragraph(12, #string,oneline
+        \\A fixed array is a value like any other. Assigning it, passing it to
+        \\a procedure and returning it copy every element, and `==` compares
+        \\element by element:
+    );
+    code_block(13, "glosso", #string
+        \\#import "Io";
+        \\
+        \\bump :: (a: [3]s64) -> [3]s64 {
+        \\    a[0] += 100;          // changes the callee's own copy
+        \\    return a;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [3]s64 = .[1, 2, 3];
+        \\    b := a;               // copies all three elements
+        \\    b[1] = 0;
+        \\    c := bump(a);
+        \\    print("{} {} {} {}\n", a[0], a[1], b[1], c[0]);
+        \\    print("{} {}\n", a == b, a == a);
+        \\}
+    );
+    code_block(14, "text", #string
+        \\1 2 0 101
+        \\false true
+    );
+    paragraph(15, #string,oneline
+        \\Arrays have no `Show` instance, so `print("{}", a)` is an error;
+        \\print the elements in a loop. Copying a large array costs as much as
+        \\its size suggests, so pass a view or a pointer when the callee does
+        \\not need a copy of its own.
+    );
+    subheading(16, "Indexing and bounds");
+    paragraph(17, #string,oneline
+        \\`a[i]` indexes every shape from zero, and the index is checked against
+        \\the count. A constant index into a fixed array is checked when the
+        \\program is compiled; any other index is checked when it runs, at
+        \\`-O0` and `-O1`.
+    );
+    code_block(18, "text", #string
+        \\// a: [3]s64 = .[1, 2, 3];   x := a[3];
+        \\error: array index 3 is out of range for 3 elements
+    );
+    code_block(19, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: [3]s64 = .[1, 2, 3];
+        \\    i := get_cmdline_args().count + 2;     // 3 when run without arguments
+        \\    print("{}\n", a[i]);
+        \\}
+    );
+    code_block(20, "text", #string
+        \\$ glosso --run bounds.glo 2>&1 | tail -2
+        \\bounds.glo:6:19: runtime check failed: array.bounds
+        \\glosso: program exited with status 134
+    );
+    paragraph(21, #string,oneline
+        \\At `-O2` and above the check is not emitted, and the same program
+        \\reads whatever lies past the array. Feature Gates and Runtime Checks
+        \\lists the checks and the levels that keep them.
+    );
+    subheading(22, "Views");
+    paragraph(23, #string,oneline
+        \\A view `[]T` describes `count` elements starting at `data`. It is
+        \\what a procedure takes when it works on elements without caring where
+        \\they live. Copying a view copies the two words, not the elements, so
+        \\every copy refers to the same storage, and a write through any of
+        \\them is a write to that storage. `[]const T` is the read-only view,
+        \\and `[]T` converts to it implicitly.
+    );
+    code_block(24, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\double_all :: (values: []s64) {
+        \\    for *x: values x.* *= 2;          // writes go to the caller's storage
+        \\}
+        \\
+        \\total :: (values: []const s64) -> s64 {
+        \\    sum: s64 = 0;
+        \\    for x: values sum += x;
+        \\    return sum;
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [4]s64 = .[1, 2, 3, 4];
+        \\    v := a[..];                       // the whole array, as []s64
+        \\    double_all(v);
+        \\    print("{} {}\n", a[3], total(v)); // []s64 converts to []const s64
+        \\    print("{} {}\n", total(&a), size_of(type_of(v)));
+        \\    print("{}\n", type_name(type_of(a.view())));
+        \\}
+    );
+    code_block(25, "text", #string
+        \\8 20
+        \\20 16
+        \\[]s64
+    );
+    paragraph(26, #string,oneline
+        \\A view is obtained by slicing (`a[..]` for everything, or a part, as
+        \\described under Slicing below), with the `view()` method, or from a
+        \\pointer to a fixed array, which converts to a view of the whole array
+        \\as `total(&a)` shows. A fixed array or a dynamic array does not
+        \\convert by itself; passing one where a view is expected is an error:
+    );
+    code_block(27, "text", #string
+        \\// total(a) with a: [4]s64
+        \\error: arg type [4]s64 != []const s64 in call total
+    );
+    paragraph(28, #string,oneline
+        \\A read-only view does not convert back to a writable one: passing a
+        \\`[]const s64` to `double_all` is `error: arg type []const s64 !=
+        \\[]s64 in call double_all`. A view can also be initialized from an
+        \\array literal whose elements are all constants, as in
+        \\`v: []const s64 = .[1, 2, 3]`; the elements then live in storage that
+        \\lasts for the whole program (see Aggregate Literal Syntax).
+    );
+    subheading(29, "Dynamic arrays");
+    paragraph(30, #string,oneline
+        \\A `[..]T` declared without a value is empty: count 0, capacity 0 and
+        \\no buffer. `push` appends one or more values. When the count reaches
+        \\the capacity it reallocates the buffer through `context.allocator`,
+        \\starting at eight elements and doubling after that. The procedures
+        \\for dynamic arrays come from the prelude and need no import.
+    );
+    code_block(31, "glosso", #string
+        \\#import "Io";
+        \\
+        \\show :: (label: str, values: []const s64) {
+        \\    print("{}:", label);
+        \\    for x: values print(" {}", x);
+        \\    print(" (count {})\n", values.count);
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [..]s64;
+        \\    defer a.free();
+        \\    print("count {} capacity {}\n", a.count, a.capacity);
+        \\    a.push(10, 20, 30, 40, 50);
+        \\    print("count {} capacity {}\n", a.count, a.capacity);
+        \\    show("pushed", a.view());
+        \\    last := a.pop();
+        \\    first := a.swap_remove(0);         // the last element moves into slot 0
+        \\    print("pop {} swap_remove {}\n", last, first);
+        \\    show("now", a.view());
+        \\    a.truncate(1);
+        \\    show("truncate(1)", a.view());
+        \\    a.clear();
+        \\    print("clear: count {} capacity {}\n", a.count, a.capacity);
+        \\}
+    );
+    code_block(32, "text", #string
+        \\count 0 capacity 0
+        \\count 5 capacity 8
+        \\pushed: 10 20 30 40 50 (count 5)
+        \\pop 50 swap_remove 10
+        \\now: 40 20 30 (count 3)
+        \\truncate(1): 40 (count 1)
+        \\clear: count 0 capacity 8
+    );
+    table_header(33, "Operation   —   Effect");
+    table_row(34, "`push(v, ...)`, `append(v, ...)`   |   Append one or more values; may move the buffer.");
+    table_row(35, "`reserve(n)`   |   Make room for at least `n` elements without changing the count.");
+    table_row(36, "`pop()`   |   Remove and return the last element; an empty array stops the program.");
+    table_row(37, "`swap_remove(i)`   |   Remove and return element `i`, moving the last element into its place.");
+    table_row(38, "`truncate(n)`   |   Keep the first `n` elements and release the rest.");
+    table_row(39, "`clear()`   |   Release every element and keep the buffer for reuse.");
+    table_row(40, "`view()`   |   A `[]T` of the current elements.");
+    table_row(41, "`take()`   |   Return the whole array and leave this one empty.");
+    table_row(42, "`replace(other)`   |   Install `other` and return the previous array.");
+    table_row(43, "`drain()`   |   Hand every element to a `for` loop by value and leave the array empty.");
+    table_row(44, "`reset()`   |   Release the elements and the buffer; the array stays usable.");
+    table_row(45, "`free()`, `free(a)`   |   Release the elements and the buffer.");
+    paragraph(46, #string,oneline
+        \\The mutators take the array by pointer, so they work on a variable
+        \\or through a `*[..]T`, but not on a fixed array (`[3]s64 has no field
+        \\push`) or through a `*const [..]T`. "Release" means calling `free` on
+        \\elements that own something, such as an array of dynamic arrays; for
+        \\plain elements it does nothing. More operations on views, such as
+        \\`reverse`, `fill` and `sort`, are in the `Memory` and `Sort` modules
+        \\(see Appendix D: Standard Library Modules).
+    );
+    subheading(47, "Releasing and copying a dynamic array");
+    paragraph(48, #string,oneline
+        \\Nothing releases a dynamic array implicitly. Its buffer stays
+        \\allocated until the program calls `free` or `reset`, usually with
+        \\`defer` right after the declaration, as above. `free` releases
+        \\through the allocator installed at that moment, so it must be the one
+        \\the array grew with; `#Context` and `context` and `Allocator` and
+        \\Allocation Procedures explain how that allocator is chosen.
+    );
+    paragraph(49, #string,oneline
+        \\Assigning a dynamic array, or passing it by value, copies the three
+        \\words of the descriptor and not the elements. The two descriptors
+        \\then share one buffer: writes to elements are visible through both,
+        \\but each has its own count and capacity, so a `push` through one is
+        \\not seen by the other.
+    );
+    code_block(50, "glosso", #string
+        \\#import "Io";
+        \\
+        \\append_by_value :: (values: [..]s64) {
+        \\    values.push(99);            // grows the callee's descriptor only
+        \\}
+        \\
+        \\append_in_place :: (values: *[..]s64) {
+        \\    values.push(99);            // grows the caller's array
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [..]s64;
+        \\    defer a.free();
+        \\    a.push(1, 2, 3);
+        \\    b := a;                     // a second descriptor for the same buffer
+        \\    b[0] = 100;
+        \\    print("a[0] {} same buffer {}\n", a[0], a.data == b.data);
+        \\    append_by_value(a);
+        \\    print("after by value: count {}\n", a.count);
+        \\    append_in_place(&a);
+        \\    print("after in place: count {} last {}\n", a.count, a[a.count - 1]);
+        \\}
+    );
+    code_block(51, "text", #string
+        \\a[0] 100 same buffer true
+        \\after by value: count 3
+        \\after in place: count 4 last 99
+    );
+    paragraph(52, #string,oneline
+        \\A procedure that adds to an array therefore takes `*[..]T`. A second
+        \\descriptor is safe only while nothing grows or releases the buffer
+        \\through the first: growing may move the buffer and release the old
+        \\one, and releasing it through either descriptor leaves the other
+        \\pointing at freed memory. Exactly one of the copies is released.
+        \\`Freeable`, Copies, and Ownership Transfer describes how to hand an
+        \\array over with `take`, and Container Buffers, Arenas, and Pools how
+        \\the library's containers deal with the same question.
+    );
+    subheading(53, "Views and pointers into a dynamic array");
+    paragraph(54, #string,oneline
+        \\A view or element pointer taken from a dynamic array records the
+        \\buffer address and the count at the moment it was taken. A later
+        \\`push` that reallocates leaves it pointing at the released buffer;
+        \\`free`, `reset`, `take` and `drain` leave it pointing at a buffer the
+        \\array has given up; `pop`, `truncate` and `clear` leave its count
+        \\larger than the array's. None of this is detected. Take views after
+        \\the array has stopped changing, or `reserve` enough room first.
+    );
+    subheading(55, "Members and iteration");
+    table_header(56, "Member   —   Type   —   Available on");
+    table_row(57, "`.count`   |   `ssize`   |   Every shape; a constant for `[N]T`.");
+    table_row(58, "`.data`   |   `[*]T`, or `[*]const T` for a read-only view   |   Every shape.");
+    table_row(59, "`.capacity`   |   `ssize`   |   `[..]T` only; read-only.");
+    paragraph(60, #string,oneline
+        \\A `for` loop walks the elements of every shape. `for x: a` binds a
+        \\copy of each element, `for x, i: a` also binds its index, and
+        \\`for *x: a` binds a pointer to it, which is `*const T` for a
+        \\read-only view. `while`, `for`, and Unrolled Loops covers the loop
+        \\forms.
+    );
+    subheading(61, "Ranges");
+    paragraph(62, #string,oneline
+        \\`a..b` is the range from `a` up to but not including `b`, and `a..=b`
+        \\includes `b`. Either bound may be left out. A range is an ordinary
+        \\struct value with `start` and `end` fields, built by operators that
+        \\the prelude declares, and leaving out a bound gives a different
+        \\struct type rather than a default bound. That is what lets `a[2..]`
+        \\and `a[..2]` mean different things to the same container.
+    );
+    table_header(63, "Written   —   Type   —   Fields");
+    table_row(64, "`a..b`   |   `Range(T)`   |   `start`, `end`");
+    table_row(65, "`a..=b`   |   `RangeInclusive(T)`   |   `start`, `end`");
+    table_row(66, "`a..`   |   `RangeFrom(T)`   |   `start`");
+    table_row(67, "`..b`   |   `RangeTo(T)`   |   `end`");
+    table_row(68, "`..=b`   |   `RangeToInclusive(T)`   |   `end`");
+    table_row(69, "`..` inside `[ ]`   |   `RangeFull(T)`   |   none; its size is zero");
+    code_block(70, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    r := 2..5;
+        \\    print("{} start={} end={}\n", type_name(type_of(r)), r.start, r.end);
+        \\    print("{}\n", type_name(type_of(2..=5)));
+        \\    print("{}\n", type_name(type_of(2..)));
+        \\    print("{}\n", type_name(type_of(..5)));
+        \\    print("{}\n", type_name(type_of(..=5)));
+        \\    lo: u8 = 1;
+        \\    hi: u8 = 4;
+        \\    print("{}\n", type_name(type_of(lo..hi)));
+        \\    n := 5;
+        \\    s := 0..n - 1;              // .. binds looser than arithmetic
+        \\    print("{} {}\n", s.start, s.end);
+        \\}
+    );
+    code_block(71, "text", #string
+        \\Range(ssize) start=2 end=5
+        \\RangeInclusive(ssize)
+        \\RangeFrom(ssize)
+        \\RangeTo(ssize)
+        \\RangeToInclusive(ssize)
+        \\Range(u8)
+        \\0 4
+    );
+    paragraph(72, #string,oneline
+        \\The binary range operators have precedence 2 and group to the left,
+        \\below every arithmetic operator, so `0..n - 1` is `0..(n - 1)`. Both
+        \\bounds have the same type `T`; integer literals become `ssize` unless
+        \\the other bound fixes another type. A bare `..` is meaningful only as
+        \\an index, where the container supplies the type; elsewhere it is
+        \\`error: bare '..' needs an index context`. There is no `..<`
+        \\operator: `0..<3` is `error: unexpected token '<'`.
+    );
+    subheading(73, "Which types can bound a range");
+    paragraph(74, #string,oneline
+        \\A bound type needs an instance of the prelude's `Step` typeclass,
+        \\which supplies `next` and `prev`. Every integer type has one.
+        \\Floating-point types do not, because a float range has no natural
+        \\step, so `0.0..1.0` is `error: no operator '..' for f64, f64`. Mixing
+        \\bound types is an error too: `a..b` with `a: u8` and `b: s64` is
+        \\`error: no operator '..' for u8, s64`. The forms without a start,
+        \\`..b` and `..=b`, also need `RangeOrigin`, which says where they
+        \\begin; it is zero for integers.
+    );
+    paragraph(75, #string,oneline
+        \\A type of the program's own can be a bound once it has `Step`.
+        \\Walking a range with `for` also compares the bounds, so the type
+        \\needs `<` from `PartialOrd` as well:
+    );
+    code_block(76, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Day :: struct #derive(PartialEq) { n: s64; }
+        \\
+        \\Day ::: instance Step {
+        \\    next :: (d: Day) -> Day { return .{ d.n + 1 }; }
+        \\    prev :: (d: Day) -> Day { return .{ d.n - 1 }; }
+        \\}
+        \\
+        \\(Day, Day) ::: instance PartialOrd {
+        \\    '<=>' :: (a: Day, b: Day) -> Ordering { return a.n <=> b.n; }
+        \\}
+        \\
+        \\main :: () {
+        \\    week := Day.{ 1 }..Day.{ 4 };
+        \\    for d: week print("{} ", d.n);
+        \\    print("\n");
+        \\}
+    );
+    code_block(77, "text", #string
+        \\1 2 3 
+    );
+    subheading(78, "Ranges as values and in loops");
+    paragraph(79, #string,oneline
+        \\A range can be stored, passed, returned and used later; indexing with
+        \\a stored range `r` means exactly what writing the range inside the
+        \\brackets would. Ranges have no `Show` instance, so they are printed
+        \\through their fields.
+    );
+    paragraph(80, #string,oneline
+        \\A `for` loop accepts a range directly. The loop over `a..b` stops
+        \\before `b`, the loop over `a..=b` stops after `b`, `..b` starts at
+        \\the origin, and `a..` never stops on its own:
+    );
+    code_block(81, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    for i: 0..3 print("{} ", i);
+        \\    print("| ");
+        \\    for i: 0..=3 print("{} ", i);
+        \\    print("| ");
+        \\    for i: ..3 print("{} ", i);
+        \\    print("| ");
+        \\    for i: 10.. {
+        \\        if i == 13 break;
+        \\        print("{} ", i);
+        \\    }
+        \\    print("\n");
+        \\}
+    );
+    code_block(82, "text", #string
+        \\0 1 2 | 0 1 2 3 | 0 1 2 | 10 11 12 
+    );
+    paragraph(83, #string,oneline
+        \\The walk never steps outside its bounds, so `0..=255` over `u8` ends
+        \\after 255 instead of wrapping around, and `for < i: 0..3` walks the
+        \\range backwards, yielding 2, 1 and 0. `while`, `for`, and Unrolled
+        \\Loops covers the loop forms, and `#pattern` Matching and Pattern
+        \\Forms shows ranges used as patterns, as in matching a value against
+        \\`1..=9`.
+    );
+    subheading(84, "Slicing");
+    paragraph(85, #string,oneline
+        \\Indexing a fixed array, a view, a dynamic array or a string with a
+        \\range produces a view of part of it. Each of the six range types
+        \\gives one slicing form:
+    );
+    table_header(86, "Form   —   Elements");
+    table_row(87, "`a[lo..hi]`   |   From `lo` up to but not including `hi`: `hi - lo` elements.");
+    table_row(88, "`a[lo..=hi]`   |   From `lo` through `hi`: `hi - lo + 1` elements.");
+    table_row(89, "`a[lo..]`   |   From `lo` to the end.");
+    table_row(90, "`a[..hi]`   |   From the start up to but not including `hi`.");
+    table_row(91, "`a[..=hi]`   |   From the start through `hi`.");
+    table_row(92, "`a[..]`   |   Every element.");
+    code_block(93, "glosso", #string
+        \\#import "Io";
+        \\
+        \\show :: (label: str, values: []const s64) {
+        \\    print("{} count={}:", label, values.count);
+        \\    for x: values print(" {}", x);
+        \\    print("\n");
+        \\}
+        \\
+        \\main :: () {
+        \\    a: [6]s64 = .[10, 20, 30, 40, 50, 60];
+        \\    show("a[1..4] ", a[1..4]);
+        \\    show("a[1..=4]", a[1..=4]);
+        \\    show("a[2..]  ", a[2..]);
+        \\    show("a[..3]  ", a[..3]);
+        \\    show("a[..=3] ", a[..=3]);
+        \\    show("a[..]   ", a[..]);
+        \\    middle := 2..4;
+        \\    show("a[r]    ", a[middle]);
+        \\}
+    );
+    code_block(94, "text", #string
+        \\a[1..4]  count=3: 20 30 40
+        \\a[1..=4] count=4: 20 30 40 50
+        \\a[2..]   count=4: 30 40 50 60
+        \\a[..3]   count=3: 10 20 30
+        \\a[..=3]  count=4: 10 20 30 40
+        \\a[..]    count=6: 10 20 30 40 50 60
+        \\a[r]     count=2: 30 40
+    );
+    paragraph(95, #string,oneline
+        \\Slicing copies nothing. The result is a view into the original
+        \\storage, so a write through it changes the original, and it is valid
+        \\only as long as that storage is. The result type depends on the
+        \\container:
+    );
+    table_header(96, "Sliced value   —   Result");
+    table_row(97, "`[N]T`, `[]T`, `[..]T`   |   `[]T`");
+    table_row(98, "`[]const T`   |   `[]const T`");
+    table_row(99, "`str`, `cstr`   |   `str`");
+    table_row(100, "`string16`, `cstring16`   |   `string16`");
+    code_block(101, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\main :: () {
+        \\    fixed: [4]s64 = .[1, 2, 3, 4];
+        \\    readonly: []const s64 = fixed[..];
+        \\    dynamic: [..]s64;
+        \\    defer dynamic.free();
+        \\    dynamic.push(5, 6, 7);
+        \\    text := "hello, world";
+        \\    print("{}\n", type_name(type_of(fixed[1..])));
+        \\    print("{}\n", type_name(type_of(readonly[1..])));
+        \\    print("{}\n", type_name(type_of(dynamic[1..])));
+        \\    print("{} {}\n", text[7..], type_name(type_of(text[0..5])));
+        \\
+        \\    part := fixed[1..3];
+        \\    part[0] = 20;                 // a slice is a view: no element is copied
+        \\    print("{} {}\n", fixed[1], part[1..][0]);
+        \\}
+    );
+    code_block(102, "text", #string
+        \\[]s64
+        \\[]const s64
+        \\[]s64
+        \\world str
+        \\20 3
+    );
+    paragraph(103, #string,oneline
+        \\String slices count bytes, not characters; `str`, `cstr`, and UTF-16
+        \\Text explains what that means for text that is not ASCII. A slice of
+        \\a slice is a view of the same storage again, as `part[1..]` shows.
+        \\Two things cannot be sliced: a many-pointer, which has no end to
+        \\check against (see Pointer Types), and a `#soa` array, whose fields
+        \\live in separate buffers (see `#soa` and `#aos` Storage). Write slice
+        \\bounds as `ssize` values, which integer literals and `.count` already
+        \\are.
+    );
+    paragraph(104, #string,oneline
+        \\Slicing is the `[]` operator of the `Indexable` typeclass with a
+        \\range as the key. The prelude declares one instance per range type
+        \\for views, dynamic arrays and the string types, and fixed arrays are
+        \\sliced the same way. Compound Assignment and Indexing Typeclasses
+        \\shows how a type of the program's own gets the same syntax.
+    );
+    subheading(105, "Slice bounds");
+    paragraph(106, #string,oneline
+        \\A slice is valid when `0 <= lo <= hi <= count` for the bounds it
+        \\describes. An empty slice is allowed anywhere inside the container
+        \\or at its end, so `a[3..3]` of a three-element array is fine. At
+        \\`-O0` and `-O1` a slice outside those limits stops the program; the
+        \\message carries no source location:
+    );
+    code_block(107, "glosso", #string
+        \\#import "Io";
+        \\
+        \\main :: () {
+        \\    a: [3]s64 = .[1, 2, 3];
+        \\    print("a[3..3] count={}\n", a[3..3].count);   // empty, at the end: allowed
+        \\    end := get_cmdline_args().count + 4;          // 5 when run without arguments
+        \\    past := a[0..end];
+        \\    print("not reached {}\n", past.count);
+        \\}
+    );
+    code_block(108, "text", #string
+        \\$ glosso --run slice_bounds.glo 2>&1 | tail -3
+        \\a[3..3] count=0
+        \\runtime check failed: slice.bounds
+        \\glosso: program exited with status 134
+    );
+    paragraph(109, #string,oneline
+        \\In code evaluated at compile time the same mistake is a compile
+        \\error, `error: slice 1..5 is out of bounds`. At `-O2` and above the
+        \\check is not emitted and a bad slice describes memory outside the
+        \\container, so bounds that come from input or arithmetic should be
+        \\checked against `.count` by the program itself.
+    );
+}
+
+render_section_41 :: () {
+    paragraph(0, #string,oneline
+        \\An ordinary array of structs stores whole elements one after
+        \\another. The prefix `#soa` in front of a dynamic array or view type
+        \\stores the same elements as a structure of arrays instead: each field
+        \\of the element struct gets a buffer of its own. The element syntax
+        \\does not change. What changes is the memory a loop touches: a loop
+        \\that reads one field of every element reads one contiguous buffer and
+        \\skips the other fields entirely. `#aos` names the ordinary layout
+        \\explicitly.
+    );
+    code_block(1, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Particle :: struct {
+        \\    id: u8;
+        \\    x:  f64;
+        \\    y:  f64;
+        \\}
+        \\
+        \\main :: () {
+        \\    rows: [..]Particle;              // one buffer: id, x, y, id, x, y, ...
+        \\    columns: #soa [..]Particle;      // three buffers: ids, xs, ys
+        \\    defer rows.free();
+        \\    defer columns.free();
+        \\    rows.push(.{ 1, 10, 20 }, .{ 2, 30, 40 });
+        \\    columns.push(.{ 1, 10, 20 }, .{ 2, 30, 40 });
+        \\    print("{} {}\n", rows[1].y, columns[1].y);
+        \\    print("{} {}\n", type_name(type_of(columns.x)), columns.x.count);
+        \\    print("{} {}\n", size_of(type_of(rows)), size_of(type_of(columns)));
+        \\}
+    );
+    code_block(2, "text", #string
+        \\40 40
+        \\[]f64 2
+        \\24 40
+    );
+    paragraph(3, #string,oneline
+        \\The descriptor holds one data pointer per field where an ordinary
+        \\array holds one in total, which is why the `#soa` array above is 40
+        \\bytes and the plain one 24. For an element struct with `k` fields:
+    );
+    table_header(4, "Type   —   Descriptor   —   Size on a 64-bit target");
+    table_row(5, "`[..]T`   |   `count`, `data`, `capacity`   |   24 bytes");
+    table_row(6, "`#soa [..]T`   |   `count`, `k` pointers, `capacity`   |   `16 + 8k` bytes");
+    table_row(7, "`#soa []T`, `#soa []const T`   |   `count`, `k` pointers   |   `8 + 8k` bytes");
+    subheading(8, "Elements and columns");
+    paragraph(9, #string,oneline
+        \\Indexing a `#soa` array reads a whole element by gathering its fields
+        \\from their buffers, and assigning to an element or to one of its
+        \\fields scatters the value back. The name of a field after the array,
+        \\as in `soa.x`, is a view of that field's buffer: an ordinary `[]f64`
+        \\with the array's count, through which the column can be read,
+        \\written, sliced and iterated. `push`, `for` and the element syntax
+        \\work as for any array.
+    );
+    code_block(10, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Particle :: struct { id: u8; x: f64; y: f64; }
+        \\
+        \\main :: () {
+        \\    soa: #soa [..]Particle;
+        \\    defer soa.free();
+        \\    soa.push(.{ 1, 10, 20 }, .{ 2, 30, 40 }, .{ 3, 50, 60 });
+        \\
+        \\    soa.y[1] = 99;                   // write through the y column
+        \\    e := soa[1];                     // gather one whole element
+        \\    print("{} {} {}\n", e.id, e.x, e.y);
+        \\
+        \\    soa[0] = .{ 7, 70, 700 };        // scatter a whole element
+        \\    soa[0].y = 7000;                 // or store one field of it
+        \\    print("{} {} {}\n", soa.id[0], soa.x[0], soa.y[0]);
+        \\
+        \\    total: f64 = 0;
+        \\    for x: soa.x total += x;         // touches only the x column
+        \\    print("{}\n", total);
+        \\
+        \\    for p, i: soa print("[{}] id={} ", i, p.id);
+        \\    print("\n");
+        \\}
+    );
+    code_block(11, "text", #string
+        \\2 30 99
+        \\7 70 7000
+        \\150
+        \\[0] id=7 [1] id=2 [2] id=3 
+    );
+    paragraph(12, #string,oneline
+        \\The split is one level deep. A field whose type is itself a struct
+        \\becomes one column of that struct type and is not split again. With
+        \\`Body :: struct { pos: V2; mass: f64; }`, `bodies.pos` is a `[]V2`
+        \\and `bodies.pos[1].x` reads the `x` of the second position.
+    );
+    paragraph(13, #string,oneline
+        \\The descriptor's own members come first: `count` and `capacity`
+        \\always mean the array's, even when the element struct has a field of
+        \\the same name. Such a field is reachable through an element, as in
+        \\`soa[0].count`.
+    );
+    subheading(14, "What an element is not");
+    paragraph(15, #string,oneline
+        \\An element of a `#soa` array is assembled from several buffers, so it
+        \\has no address of its own. Everything that needs one is rejected:
+        \\`&soa[0]`, a `for *p: soa` loop, the single `.data` pointer, and
+        \\slicing the array as a whole. A column does have an address, so
+        \\`soa.x.data` is an ordinary `[*]f64` and `soa.x[1..]` an ordinary
+        \\slice.
+    );
+    code_block(16, "text", #string
+        \\// p := &soa[0];
+        \\error: cannot take a pointer to a non-addressable expression: 'Index'
+        \\
+        \\// d := soa.data;
+        \\error: #soa array has per-field data
+        \\
+        \\// v := soa[0..1];
+        \\error: cannot slice the #soa array #soa [..]Particle: each of its fields is a buffer of its own
+        \\note: slice one field's column instead, e.g. 'array.field[a..b]'
+    );
+    paragraph(17, #string,oneline
+        \\A `#soa [..]T` has `push`, `append`, `reserve`, `view`, `take`,
+        \\`replace`, `reset` and `free`. The operations that hand out or
+        \\shuffle single elements, `pop`, `swap_remove`, `truncate`, `clear`,
+        \\`drain` and `iter`, exist only for ordinary dynamic arrays (see
+        \\Arrays, Views, Dynamic Arrays, and Slicing); calling one is
+        \\`error: #soa [..]Particle has no field pop`.
+    );
+    subheading(18, "`#soa` views as parameters");
+    paragraph(19, #string,oneline
+        \\`view()` on a `#soa [..]T` returns a `#soa []T`, and a procedure that
+        \\works on columns takes that type. The prefix is part of the type: a
+        \\`#soa []T` and a `[]T` do not convert into each other. The element
+        \\type may be generic.
+    );
+    code_block(20, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Particle :: struct { id: u8; x: f64; y: f64; }
+        \\
+        \\sum_x :: (particles: #soa []const Particle) -> f64 {
+        \\    total: f64 = 0;
+        \\    for x: particles.x total += x;
+        \\    return total;
+        \\}
+        \\
+        \\scale_y :: (particles: #soa []Particle, factor: f64) {
+        \\    for i: 0..particles.count particles.y[i] *= factor;
+        \\}
+        \\
+        \\count_rows :: (rows: #soa []const $T) -> ssize {
+        \\    return rows.count;
+        \\}
+        \\
+        \\main :: () {
+        \\    soa: #soa [..]Particle;
+        \\    defer soa.free();
+        \\    soa.push(.{ 1, 10, 20 }, .{ 2, 30, 40 });
+        \\    view := soa.view();
+        \\    print("{} {}\n", type_name(type_of(view)), size_of(type_of(view)));
+        \\    scale_y(view, 10);
+        \\    print("{} {} {}\n", sum_x(view), soa.y[1], count_rows(view));
+        \\}
+    );
+    code_block(21, "text", #string
+        \\#soa []Particle 32
+        \\40 400 2
+    );
+    code_block(22, "text", #string
+        \\// take_plain :: (v: []Particle) {}   take_plain(soa.view());
+        \\error: arg type #soa []Particle != []Particle in call take_plain
+    );
+    subheading(23, "Where `#soa` may be written");
+    paragraph(24, #string,oneline
+        \\`#soa` is written in a type annotation: of a variable, a parameter, a
+        \\struct field or a return type. It applies to `[..]T`, `[]T` and
+        \\`[]const T` whose element type `T` is a struct. Every other use is
+        \\rejected:
+    );
+    table_header(25, "Written   —   Result");
+    table_row(26, "`#soa [4]Particle`   |   `error: #soa fixed arrays are not supported`");
+    table_row(27, "`#soa [..]s64`   |   `error: #soa arrays require a struct element type, got s64`");
+    table_row(28, "`#soa *Particle`, `#soa [*]Particle`   |   `error: #soa applies to an array type`");
+    table_row(29, "`Rows :: #soa [..]Particle;`   |   `error: unexpected directive 'soa'`");
+    paragraph(30, #string,oneline
+        \\The last row means that a `#soa` type cannot be given a name with a
+        \\constant declaration, and it cannot appear where an expression is
+        \\expected, as in `size_of(#soa [..]Particle)`. Take the type from a
+        \\variable with `type_of` instead, as the first example does.
+    );
+    subheading(31, "`#aos` and choosing a layout");
+    paragraph(32, #string,oneline
+        \\`#aos`, array of structures, is the layout every array has without a
+        \\prefix. It is accepted on `[N]T`, `[]T` and `[..]T` and changes
+        \\nothing; it exists so that code can state the choice next to a
+        \\`#soa` alternative.
+    );
+    paragraph(33, #string,oneline
+        \\Which layout is faster depends on the loops. A `#soa` array helps
+        \\when hot loops read a few fields of many elements; an ordinary array
+        \\helps when they read whole elements, which a `#soa` array has to
+        \\gather from several places. Changing the prefix changes no element
+        \\syntax, so both layouts can be measured with the same code.
+    );
+}
+
+render_section_42 :: () {
+    paragraph(0, #string,oneline
+        \\A literal builds a value of a compound type from its parts. The
+        \\bracket after the leading dot says what kind of value is built, and
+        \\the type comes either from a name written before the dot or from the
+        \\place where the literal appears. This chapter gives the complete rules
+        \\for struct and array literals, the places that supply a type to a
+        \\short literal, and the mistakes the compiler reports. The other
+        \\literal forms are described with their types:
+    );
+    table_header(1, "Literal   —   Builds   —   Described in");
+    table_row(2, "`.{ ... }`, `T.{ ... }`   |   A struct   |   this chapter");
+    table_row(3, "`.[ ... ]`   |   A fixed array, or a constant view   |   this chapter");
+    table_row(4, "`.( ... )`   |   A tuple   |   Tuple Types");
+    table_row(5, "`.Variant(...)`   |   A tagged union or optional   |   Tagged and Untagged Unions");
+    table_row(6, "`#simd .[ ... ]`, `#matrix .[ ... ]`   |   A SIMD vector or a matrix   |   `Simd` Vectors and `Matrix` Values");
+    subheading(7, "Struct literals");
+    paragraph(8, #string,oneline
+        \\Inside `.{ }` the elements are positional, matching the fields in
+        \\declaration order, or named, written `.field = value`. Positional
+        \\elements may be followed by named ones, but not the other way round.
+        \\Fields the literal does not mention take their declared default, or
+        \\zero when they have none, so `.{}` is the all-defaults value. A
+        \\trailing comma is allowed.
+    );
+    code_block(9, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec2 :: struct #derive(Show) {
+        \\    x: s64 = 0;
+        \\    y: s64 = 0;
+        \\}
+        \\
+        \\main :: () {
+        \\    a := Vec2.{ 10, 20 };          // qualified: the literal names its type
+        \\    b: Vec2 = .{ 30, 40 };         // inferred from the declaration
+        \\    c: Vec2 = .{ .y = 7 };         // named; x keeps its default
+        \\    d: Vec2 = .{ 1, .y = 2 };      // positional, then named
+        \\    e: Vec2 = .{};                 // every field takes its default
+        \\    f: Vec2 = .{ .y = 5, .x = 6, };
+        \\    print("{} {} {} {} {} {}\n", a, b, c, d, e, f);
+        \\}
+    );
+    code_block(10, "text", #string
+        \\{10, 20} {30, 40} {0, 7} {1, 2} {0, 0} {6, 5}
+    );
+    paragraph(11, #string,oneline
+        \\Each field is set at most once, and the literal is checked against
+        \\the struct's fields:
+    );
+    code_block(12, "text", #string
+        \\// Vec2.{ .z = 1 }
+        \\error: no field 'z' in struct literal for Vec2
+        \\
+        \\// Vec2.{ 1, .x = 2 }
+        \\error: field 'x' is initialized more than once
+        \\
+        \\// Vec2.{ .y = 1, 2 }
+        \\error: positional field after named field in struct literal for Vec2
+        \\
+        \\// Vec2.{ 1, 2, 3 }
+        \\error: no field '' in struct literal for Vec2
+    );
+    paragraph(13, #string,oneline
+        \\The last message, with an empty field name, means there are more
+        \\positional elements than fields. The qualified form accepts any
+        \\expression that names a struct type: an alias, or an instantiation
+        \\of a generic struct such as `Box(f64).{ .value = 1.5 }`. A literal
+        \\whose fields are all constants can itself be a named constant, as
+        \\`ORIGIN` is in the next example. Struct Types describes how defaults
+        \\are evaluated.
+    );
+    subheading(14, "Where the type comes from");
+    paragraph(15, #string,oneline
+        \\An unqualified `.{ }` needs a place that already knows the type of
+        \\the value it expects. These places do, and the same list serves
+        \\`.[ ]`:
+    );
+    table_header(16, "Place   —   Example");
+    table_row(17, "A declaration with a type   |   `b: Vec2 = .{ 30, 40 };`");
+    table_row(18, "Assignment to a typed place   |   `v = .{ 50, 60 };`");
+    table_row(19, "An argument for a typed parameter   |   `length2(.{ 3, 4 })`");
+    table_row(20, "A parameter's default value   |   `shifted :: (by: Vec2 = .{ 1, 1 })`");
+    table_row(21, "`return` in a procedure with a result type   |   `return .{ .from = .{ 1, 2 }, ... };`");
+    table_row(22, "A field default or a global's initializer   |   `cursor: Vec2 = .{ 8, 9 };`");
+    table_row(23, "An element or field of an enclosing literal   |   `.[.{ 0, 0 }, .{ 5, 5 }]`");
+    table_row(24, "A variant payload   |   `maybe: ?Vec2 = .Some(.{ 6, 7 });`");
+    table_row(25, "An element of a typed variadic pack   |   `points.push(.{ 1, 1 }, .{ 2, 2 })`");
+    code_block(26, "glosso", #string
+        \\#import "Io";
+        \\
+        \\Vec2 :: struct { x: s64; y: s64; }
+        \\Line :: struct { from: Vec2; to: Vec2; }
+        \\
+        \\ORIGIN :: Vec2.{ 0, 0 };
+        \\cursor: Vec2 = .{ 8, 9 };
+        \\
+        \\length2 :: (v: Vec2) -> s64 { return v.x * v.x + v.y * v.y; }
+        \\diagonal :: () -> Line { return .{ .from = .{ 1, 2 }, .to = .{ 3, 4 } }; }
+        \\shifted :: (by: Vec2 = .{ 1, 1 }) -> s64 { return by.x + by.y; }
+        \\
+        \\main :: () {
+        \\    print("{} {}\n", length2(.{ 3, 4 }), diagonal().to.y);
+        \\    print("{} {} {}\n", ORIGIN.x, cursor.y, shifted());
+        \\    corners: [2]Vec2 = .[.{ 0, 0 }, .{ 5, 5 }];
+        \\    maybe: ?Vec2 = .Some(.{ 6, 7 });
+        \\    points: [..]Vec2;
+        \\    defer points.free();
+        \\    points.push(.{ 1, 1 }, .{ 2, 2 });
+        \\    v: Vec2;
+        \\    v = .{ 50, 60 };
+        \\    print("{} {} {} {}\n", corners[1].x, maybe.unwrap_or(ORIGIN).y, points[1].x, v.y);
+        \\}
+    );
+    code_block(27, "text", #string
+        \\25 4
+        \\0 9 2
+        \\5 7 2 60
+    );
+    paragraph(28, #string,oneline
+        \\Nesting works because every inner literal is checked against the
+        \\type that the outer one has already fixed for that field or element.
+        \\Outside these places there is no expected type, and the literal must
+        \\be qualified. The everyday case is `:=`, which takes its type from
+        \\the initializer and so cannot give the initializer one. A parameter
+        \\whose type contains a generic `$T` does not supply one either.
+    );
+    code_block(29, "text", #string
+        \\// a := .{ 1, 2 };
+        \\error: struct literal needs a type
+        \\
+        \\// id :: (b: Box($T)) -> T { ... }   id(.{ 3 })
+        \\error: no overload 'id' accepts these arguments
+    );
+    paragraph(30, #string,oneline
+        \\An optional `?Vec2` is not a struct, so `.{ 6, 7 }` against it also
+        \\reports `struct literal needs a type`, and `Vec2.{ 6, 7 }` reports
+        \\`got Vec2, expected ?Vec2`; the present value is written
+        \\`.Some(.{ 6, 7 })`. In `ifx flag .{ 1, 0 } else .{ 0, 1 }` the
+        \\parser reads `flag .{ 1, 0 }` as a qualified literal whose type is
+        \\`flag`, and stops at `else` with `error: unexpected token 'else'`;
+        \\qualify the first arm instead, as in
+        \\`ifx flag Vec2.{ 1, 0 } else .{ 0, 1 }`.
+    );
+    subheading(31, "Array literals");
+    paragraph(32, #string,oneline
+        \\`.[a, b, c]` builds a fixed array. With an expected `[N]T` the number
+        \\of elements must be exactly `N`; with `[_]T` the literal decides the
+        \\length. Without any expected type, the element type is the type of
+        \\the first element, with integer literals becoming `ssize` and float
+        \\literals `f64`, and every later element must convert to it. A literal
+        \\of constants can itself be a named constant and is then indexed like
+        \\any array.
+    );
+    code_block(33, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\N :: 3;
+        \\SQUARES :: .[0, 1, 4, 9, 16];
+        \\
+        \\Config :: struct { origin: [2]s64 = .[3, 4]; }
+        \\
+        \\main :: () {
+        \\    fixed: [3]s64 = .[1, 2, 3];
+        \\    named: [N]s64 = .[4, 5, 6,];        // a trailing comma is allowed
+        \\    counted: [_]u16 = .[7, 8];
+        \\    plain := .[10, 20, 30];
+        \\    floats := .[1.5, 2];
+        \\    grid: [2][2]s64 = .[.[1, 0], .[0, 1]];
+        \\    c: Config;
+        \\    print("{} {} {}\n", type_name(type_of(counted)), type_name(type_of(plain)), type_name(type_of(floats)));
+        \\    print("{} {} {} {}\n", fixed[2] + named[0], grid[1][1], c.origin[1], SQUARES[get_cmdline_args().count + 2]);
+        \\}
+    );
+    code_block(34, "text", #string
+        \\[2]u16 [3]ssize [2]f64
+        \\7 1 4 9
+    );
+    code_block(35, "text", #string
+        \\// a: [3]s64 = .[1, 2];
+        \\error: fixed array literal has 2 element(s), expected 3
+        \\
+        \\// mixed := .[1, 2.5];
+        \\error: cannot implicitly convert comptime_float to ssize
+        \\
+        \\// empty := .[];
+        \\error: empty array literal needs an array context
+    );
+    paragraph(36, #string,oneline
+        \\The order matters in the second case: `.[1.5, 2]` is a `[2]f64`, but
+        \\`.[1, 2.5]` fixes `ssize` first. Literal Typing and Type Conversion
+        \\describes how untyped numbers settle on a type.
+    );
+    subheading(37, "Array literals for views");
+    paragraph(38, #string,oneline
+        \\An array literal also initializes a view when every element is a
+        \\compile-time constant. The elements are then placed in storage that
+        \\lasts for the whole program, and the view points at it, so it can be
+        \\returned or kept. A literal with run-time elements has no such
+        \\storage. For a single call, `&.[...]` makes a temporary fixed array
+        \\and passes a pointer to it, which converts to a view; the temporary
+        \\lasts until the end of the surrounding expression.
+    );
+    code_block(39, "glosso", #string
+        \\#import "Io";
+        \\
+        \\total :: (values: []const s64) -> s64 {
+        \\    sum: s64 = 0;
+        \\    for x: values sum += x;
+        \\    return sum;
+        \\}
+        \\
+        \\DIGITS: []const s64 = .[1, 2, 3, 4];
+        \\
+        \\main :: () {
+        \\    print("{}\n", total(.[10, 20, 30]));    // constant elements: static storage
+        \\    x: s64 = 5;
+        \\    print("{}\n", total(&.[x, x, 1]));      // runtime elements: a temporary array
+        \\    print("{}\n", total(DIGITS));
+        \\}
+    );
+    code_block(40, "text", #string
+        \\60
+        \\11
+        \\10
+    );
+    code_block(41, "text", #string
+        \\// total(.[x, x + 1])
+        \\error: while lowering demanded function 'main': slice literals require constant elements; use a fixed array or an allocated dynamic array for runtime values
+    );
+    note(42, #string,oneline
+        \\The static storage behind a view literal is one array for the whole
+        \\program, not a fresh copy per evaluation. A writable view, as in
+        \\`w: []s64 = .[1, 2]` inside a procedure, therefore sees the writes of
+        \\earlier calls. Use a fixed array for values that are meant to start
+        \\fresh each time.
+    );
+    paragraph(43, #string,oneline
+        \\A dynamic array declared in a procedure cannot be initialized from a
+        \\literal at all; declare it empty and `push` the elements, which
+        \\`push(1, 2)` does in one call. The attempt is reported while the
+        \\procedure is lowered, so the message names it:
+    );
+    code_block(44, "text", #string
+        \\// d: [..]s64 = .[1, 2];
+        \\error: while lowering demanded function 'main': runtime array literals require a fixed array, Simd, or Matrix context
+    );
+    subheading(45, "Mixing up the brackets");
+    paragraph(46, #string,oneline
+        \\The two bracket forms are not interchangeable, and only `.{ }` has a
+        \\qualified spelling:
+    );
+    code_block(47, "text", #string
+        \\// v: Vec2 = .[1, 2];
+        \\error: got [2]ssize, expected Vec2
+        \\
+        \\// a: [2]s64 = .{1, 2};
+        \\error: struct literal needs a type
+        \\
+        \\// a := s64.[1, 2];
+        \\error: unexpected token '.['
+        \\
+        \\// v: Simd(f32, 4) = .[1, 2, 3, 4];
+        \\error: ordinary array literal .[...] cannot initialize Simd(f32, 4); use #simd .[...]
+    );
+    paragraph(48, #string,oneline
+        \\A literal is a temporary value. Its fields can be read directly, as
+        \\in `Vec2.{ 3, 4 }.x`, but it has no address: `&Vec2.{ 1, 2 }` is
+        \\`error: cannot take a pointer to a non-addressable expression:
+        \\'StructLit'`. Array literals are the exception described above.
+    );
+}
+
+}
