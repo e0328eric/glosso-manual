@@ -22,6 +22,12 @@ const { referenceIndex } = await import(
   `data:text/javascript;base64,${read("dist/reference-index.js").toString("base64")}`);
 assert(referenceIndex.manual[0][1].includes("This tutorial teaches Glosso by writing programs."),
   "Chapter search prose was overwritten when its text builder was reused");
+for (const [chapter, terms] of [[18, ["#module_params", "DYLIB_PREFIX"]],
+  [54, ["#lazy", "first reaches a read", "result is cached"]],
+  [58, ["#specialize", "before the where clause", "exactly once"]]]) {
+  for (const term of terms) assert(referenceIndex.manual[chapter][1].includes(term),
+    `Chapter ${chapter} search index is missing ${term}`);
+}
 const decoder = new TextDecoder("utf-8", { fatal: true });
 let instance;
 const memoryView = () => new DataView(instance.exports.memory.buffer);
@@ -103,10 +109,13 @@ const parser = new Parser();
 parser.setLanguage(language);
 const tree = parser.parse(`
 #import "Io";
-#import "Math/Core" (sqrt, Fractional, Ops.'+', '<->');
-#import "instances.glo" ();
-Geometry :: #import "geometry.glo" (Point);
-#export "shapes.glo" (Circle);
+#module_params(NAME: str, COUNT: s64 = 4, ENABLED := false);
+#import "Math/Core" { sqrt, Fractional, Ops.'+', '<->' };
+Configured :: #import "counter.glo"(10, STEP = 2) { advance_count };
+#export "other.glo"(.COUNT = COUNT, .ENABLED = true);
+#import "instances.glo" {};
+Geometry :: #import "geometry.glo" { Point };
+#export "shapes.glo" { Circle };
 /* an outer comment /* with a nested one */ still a comment */
 #public Counter :: struct { value: s64; #private cached: s64; }
 Aligned :: struct #align(32) { value: s32; }
@@ -150,6 +159,8 @@ for (const source of [
   current.delete();
 }
 for (const source of [
+  'f :: (value: $T) -> T #modify true { return value; }',
+  'Box :: struct #modify { T = s64; return true; } { value: $T; }',
   'f :: (value: *mut s64) {}',
   '#load "fragment.glo";',
   '#import,only (sqrt) "Math/Core";',
@@ -162,6 +173,27 @@ for (const source of [
   removed.delete();
 }
 const query = new Query(language, querySource);
+const specialization = parser.parse(`
+Box :: struct #specialize { T = s64; return true; } { value: $T; }
+integer_only :: (value: $T) -> T #specialize Is_Integer(T) { return value; }
+read_foo :: (value: $T) -> s64 #specialize #meaningful { T,,foo; } { return value.foo; }
+main :: () {
+  has_field := #meaningful { Box(s64),,value; Module.Record,,foo; };
+  target := worker,,entry;
+  quoted := worker,,'entry;
+}
+`);
+assert(!specialization.rootNode.hasError, "Specialization and field probes did not parse");
+const specializationCaptures = query.captures(specialization.rootNode);
+assert.equal(specializationCaptures.filter(capture =>
+  capture.node.text === "#specialize" && capture.name === "attribute").length, 3);
+assert(specializationCaptures.some(capture =>
+  capture.node.parent?.type === "scoped_name_suffix" &&
+  capture.node.text === "foo" && capture.name === "property"));
+assert(specializationCaptures.some(capture =>
+  capture.node.text === "'entry" && capture.name === "label"));
+specialization.delete();
+
 for (const source of [
   'm: Matrix(s64, 2, 3) = #matrix .[1, 2, 3; 4, 5, 6];',
   'main :: () { m := cast(Matrix(s64, 2, 3))#matrix .[1, 2, 3,; 4, 5, 6,;]; }',
@@ -198,7 +230,7 @@ for (const literal of prefixedLiterals.rootNode.descendantsOfType(["c_string_lit
 prefixedLiterals.delete();
 assert.equal(query.captures(tree.rootNode).filter(capture =>
   capture.node.text === "#source_location" && capture.name === "constant.builtin").length, 2);
-for (const directive of ["#public", "#private", "#import", "#export", "#temp_scope"])
+for (const directive of ["#public", "#private", "#import", "#export", "#module_params", "#temp_scope"])
   assert(query.captures(tree.rootNode).some(capture =>
     capture.node.text === directive && capture.name === "attribute"), `${directive} is not highlighted`);
 assert(query.captures(tree.rootNode).some(capture =>
@@ -436,12 +468,14 @@ for (const width of [390, 1280]) {
     for (const removed of ["#on_drop_error", "ManuallyDrop", "--borrow-check", "#load ", "#public(unit)"])
       assert(!text.includes(removed), `Removed language feature ${removed} in chapter ${index}`);
     if (index === 0) assert(text.includes("main") && text.includes("print"), "The tutorial's first chapter is stale");
-    if (index === 18) assert(text.includes("#import") && text.includes("#export"), "Module chapter is stale");
+    if (index === 18) assert(text.includes("#module_params") && text.includes("DYLIB_PREFIX"), "Module parameters are missing");
     if (index === 19) assert(text.includes("#public,unit") && text.includes("#public,to"), "Visibility chapter is stale");
     if (index === 20) assert(text.includes("GLOSSO_COMPTIME_STEP_LIMIT"), "Compile-time execution budget is missing");
     if (index === 29) assert(text.includes("cstr") && text.includes("string16"), "String chapter is stale");
     if (index === 38) assert(text.includes("null"), "Optional chapter is stale");
     if (index === 39) assert(text.includes("*const T"), "Pointer chapter is stale");
+    if (index === 54) assert(text.includes("first reaches a read") && text.includes("result is cached") && text.includes("choose_constant"), "Lazy evaluation rules are missing");
+    if (index === 58) assert(text.includes("#specialize") && text.includes("#Self_Type") && text.includes("Specializing an inherent method"), "Specialization rules are missing");
     if (index === 57) assert(text.includes("#self"), "Receiver-method chapter is stale");
     if (index === 64) assert(text.includes("{1:x}") && text.includes("writef"), "Formatting chapter is stale");
     if (index === 73) assert(text.includes("Freeable") && text.includes("value_take"), "Ownership chapter is stale");

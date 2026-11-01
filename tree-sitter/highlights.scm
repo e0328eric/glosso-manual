@@ -32,6 +32,7 @@
   "#lazy"
   "#import"
   "#export"
+  "#module_params"
   "#thread_local"
   "#library"
   "#fn_ptr"
@@ -41,13 +42,14 @@
   "#aos"
   "#soa"
   "#operator"
-  "#modify"
+  "#specialize"
   "#expand"
   "#magic"
   "#foreign"
   "#c_call"
   "#packed"
   "#align"
+  "#link_section"
   "#no_context"
   "#dump"
   "#must"
@@ -206,6 +208,8 @@
   ] @type.definition))
 
 ; Parameters
+(module_parameter name: (identifier) @variable.parameter)
+(module_named_argument name: (identifier) @variable.parameter)
 (named_argument name: (identifier) @variable.parameter)
 (typeclass_parameter name: (identifier) @variable.parameter)
 (lambda_parameter name: (identifier) @variable.parameter)
@@ -244,6 +248,7 @@
 (postfix_expression field: (identifier) @property)
 (expression_statement field: (identifier) @property)
 (pattern_postfix_expression field: (identifier) @property)
+(scoped_name_suffix name: (identifier) @property)
 
 ; Functions
 (named_declaration

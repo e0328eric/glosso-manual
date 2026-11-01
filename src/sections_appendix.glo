@@ -672,6 +672,7 @@ render_section_94 :: () {
         \\              | "#if" expr decl_block
         \\                { "else" "#if" expr decl_block } [ "else" decl_block ]
         \\              | ( "#import" | "#export" ) import ";"
+        \\              | module_params
         \\              | "#comptime" ( block | "->" type block [ ";" ] | expr ";" )
         \\              | "#insert" insert_operand ";"
         \\              | "#thread_local" named_decl    (* a global variable *)
@@ -684,7 +685,13 @@ render_section_94 :: () {
         \\visibility    = "#private"
         \\              | "#public" [ "," "unit" ]
         \\              | "#public" "," "to" "(" string { "," string } [ "," ] ")" ;
-        \\import        = string [ "(" [ import_name { "," import_name } [ "," ] ] ")" ] ;
+        \\import        = string [ module_args ] [ import_list ] ;
+        \\module_args   = "(" [ module_arg { "," module_arg } [ "," ] ] ")" ;
+        \\module_arg    = [ [ "." ] ident "=" ] expr ;
+        \\import_list   = "{" [ import_name { "," import_name } [ "," ] ] "}" ;
+        \\module_params = "#module_params" "("
+        \\                [ module_param { "," module_param } [ "," ] ] ")" ";" ;
+        \\module_param  = ident ( ":" type [ "=" expr ] | ":=" expr ) ;
         \\import_name   = ( name | op_name ) { "." ( name | op_name ) } ;
         \\
         \\named_decl    = decl_name "::" definition
@@ -772,7 +779,7 @@ render_section_94 :: () {
         \\              | "#expand" [ "," "expression" ]
         \\              | "#foreign" ( ident | string ) [ string ]
         \\              | "#magic" string
-        \\              | "#modify" ( block | expr )
+        \\              | "#specialize" ( block | expr )
         \\              | "#c_call" | "#no_context" | "#must"
         \\              | "#returns_twice" | "#dump" ;
         \\mode          = "left" | "right" | "assign" | "prefix" | "suffix" ;
@@ -797,7 +804,7 @@ render_section_94 :: () {
     code_block(27, "ebnf", #string
         \\struct_type   = "struct" { struct_directive } "{" { struct_item } "}" ;
         \\struct_directive = "#packed" | "#align" "(" int_literal ")" | "#c_call"
-        \\              | "#derive" class_list | "#modify" ( block | expr )
+        \\              | "#derive" class_list | "#specialize" ( block | expr )
         \\              | "#magic" string ;
         \\struct_item   = visibility ( "{" { struct_item } "}" | field ) | field ;
         \\field         = { "using" | "#as" } ident ":" field_type [ "=" expr ] ";"
@@ -932,7 +939,7 @@ render_section_94 :: () {
         \\                        | "[" expr "]"
         \\                        | ".{" [ field_init { "," field_init } [ "," ] ] "}"
         \\                        | ".*" | ".&" | "?"
-        \\                        | ",," label
+        \\                        | ",," ( name | label )
         \\                        | suffix_op } ;
         \\argument      = [ "." ident "=" ] expr [ "..." ] ;
         \\field_init    = [ "." name "=" ] expr ;
@@ -972,7 +979,10 @@ render_section_94 :: () {
         \\struct literal (see Aggregate Literal Syntax). Nothing separates the
         \\condition of an `ifx` from its first arm, so an arm that starts with
         \\`(`, `[`, `-` or `.` continues the condition (see Statements and
-        \\Conditional Expressions).
+        \\Conditional Expressions). A bare name after `,,` is a type-field
+        \\requirement inside `#meaningful` when the left side is a type, or a
+        \\nonlocal label when the left side names a function. A quoted label
+        \\after `,,` keeps the nonlocal-label form.
     );
     subheading(39, "Statements");
     code_block(40, "ebnf", #string
@@ -1091,11 +1101,11 @@ render_section_94 :: () {
     );
     subheading(46, "Where directives may appear");
     table_header(47, "Position   —   Directives");
-    table_row(48, "Top level   |   `#import` `#export` `#public` `#private` `#if` `#comptime` `#insert` `#thread_local` `#enable` `#disable`");
+    table_row(48, "Top level   |   `#module_params` `#import` `#export` `#public` `#private` `#if` `#comptime` `#insert` `#thread_local` `#enable` `#disable`");
     table_row(49, "After `name ::`   |   `#import` `#export` `#library` `#fn_ptr`");
-    table_row(50, "After a procedure's parameters   |   `#operator` `#inline` `#expand` `#foreign` `#magic` `#modify` `#c_call` `#no_context` `#must` `#returns_twice` `#dump`");
+    table_row(50, "After a procedure's parameters   |   `#operator` `#inline` `#expand` `#foreign` `#magic` `#specialize` `#c_call` `#no_context` `#must` `#returns_twice` `#dump`");
     table_row(51, "Parameters   |   `#comptime` `#lazy` `#empty` `#self`");
-    table_row(52, "After `struct`, `union`, `enum`, `distinct`   |   `#packed` `#align` `#c_call` `#modify` (struct), `#raw` (union), `#derive`, `#magic`");
+    table_row(52, "After `struct`, `union`, `enum`, `distinct`   |   `#packed` `#align` `#c_call` `#specialize` (struct), `#raw` (union), `#derive`, `#magic`");
     table_row(53, "Aggregate members   |   `#as` `#empty` `#from` `#public` `#private`");
     table_row(54, "After `typeclass (...)`   |   `#minimal` `#derive` `#magic`");
     table_row(55, "Types   |   `#Never` `#Self_Type` `#Context` `#soa` `#aos`");
@@ -1161,7 +1171,7 @@ render_section_95 :: () {
         \\components' names into scope; importing one component, such as
         \\`Memory/Ownership`, brings only that component's. Prefer the
         \\component when one is enough and a short import list,
-        \\`#import "Math/Core" (sqrt);`, when a module's other names would
+        \\`#import "Math/Core" { sqrt };`, when a module's other names would
         \\collide with the file's own.
     );
     bullet(9, #string,oneline

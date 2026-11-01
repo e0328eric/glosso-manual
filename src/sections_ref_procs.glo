@@ -1056,7 +1056,7 @@ render_section_54 :: () {
     table_header(3, "Marker   —   Meaning   —   Described in");
     table_row(4, "`noalias p: *T`   |   Nothing else reaches this memory during the call.   |   `noalias` pointer parameters, below");
     table_row(5, "`using v: T`   |   The fields of the struct `v` are in scope by name in the body.   |   Struct Types");
-    table_row(6, "`#lazy v: T`   |   The argument is evaluated when the body first reads it.   |   Lazy parameters, below");
+    table_row(6, "`#lazy v: T`   |   The argument is evaluated when the body first reads it.   |   When `#lazy` arguments are evaluated, below");
     table_row(7, "`#comptime n: T`   |   The argument is a compile-time constant.   |   `#comptime` parameters, below");
     table_row(8, "`#empty: $T`   |   A slot that passes only a type.   |   Type-only slots with `#empty`, below");
     subheading(9, "`noalias` pointer parameters");
@@ -1120,13 +1120,15 @@ render_section_54 :: () {
         \\function-pointer type only if both mark the same parameters (see
         \\Lambdas and `#fn_ptr` Values).
     );
-    subheading(24, "Lazy parameters");
+    subheading(24, "When `#lazy` arguments are evaluated");
     paragraph(25, #string,oneline
-        \\An argument for a parameter marked `#lazy` is not evaluated before
-        \\the call. It is evaluated the first time the procedure reads the
-        \\parameter, and that value is reused for every later read. If the
-        \\procedure never reads the parameter, the argument is never
-        \\evaluated.
+        \\In a runtime call, an argument marked `#lazy` is evaluated when
+        \\execution first reaches a read of that parameter in the body.
+        \\The result is cached for that call: later reads reuse it, including
+        \\reads in a loop. If execution never reaches a read, the argument is
+        \\never evaluated. Each new call starts with its own unevaluated
+        \\argument. Ordinary parameters are evaluated before the body starts;
+        \\`#lazy` by itself does not move an expression to compile time.
     );
     code_block(26, "glosso", #string
         \\#import "Io";
@@ -1162,9 +1164,11 @@ render_section_54 :: () {
         \\use_twice = 3, 1 evaluations
     );
     paragraph(28, #string,oneline
-        \\The argument is evaluated inside the callee, at the point of the
-        \\first read. It therefore sees what the callee has done before that
-        \\point, which an ordinary argument does not:
+        \\The delayed expression keeps the caller's name bindings, but its
+        \\evaluation happens at the first read in the callee. It therefore
+        \\sees changes to shared state made before that point. After that
+        \\first evaluation, further changes do not change its cached value:
+        \\the following call reads `counter` after the body sets it to 100.
     );
     code_block(29, "glosso", #string
         \\#import "Io";
@@ -1193,21 +1197,23 @@ render_section_54 :: () {
         \\delayed=100 eager=1
     );
     paragraph(31, #string,oneline
-        \\The single evaluation holds however the parameter is used. Passing a
-        \\lazy parameter on to another lazy parameter does not evaluate it,
-        \\and the first read anywhere along the chain is the one evaluation. A
-        \\read inside a loop, such as `while i < limit` with a lazy `limit`,
-        \\evaluates the argument on the first test and compares against the
-        \\same value afterwards. A lazy parameter is therefore not a macro
-        \\argument, which is substituted and evaluated at every use; `#code`,
-        \\`#insert`, and `#expand` describes those.
+        \\Forwarding a lazy parameter to another `#lazy` parameter leaves it
+        \\unevaluated until a read along that chain needs its value. Passing
+        \\it to an ordinary parameter is a read and evaluates it before that
+        \\nested call. A read inside a loop, such as `while i < limit` with a
+        \\lazy `limit`, evaluates the argument on the first test and reuses
+        \\the result on later tests. Branches that are not taken do not read
+        \\their lazy parameters. The argument must still type-check, even if
+        \\the body ignores it. Macro substitution and repeated evaluation
+        \\are described in `#code`, `#insert`, and `#expand`.
     );
     subheading(32, "How a lazy call is compiled");
     paragraph(33, #string,oneline
-        \\A procedure with a `#lazy` parameter is expanded into each call, with
-        \\the argument expression placed where the parameter is first read. It
-        \\has no separate compiled body of its own, and that is why some uses
-        \\are rejected:
+        \\A procedure with a `#lazy` parameter is expanded into each call.
+        \\The generated code tracks whether each lazy value has been computed
+        \\and saves the result, so the first read reached at runtime evaluates
+        \\it even when that read is inside a branch. The procedure has no
+        \\separate compiled body of its own, and some uses are rejected:
     );
     table_header(34, "Use   —   Diagnostic");
     table_row(35, "Taking it as a value, `f := delayed;`   |   `lazy function 'delayed' cannot be used as an ordinary function pointer`");
@@ -1222,34 +1228,73 @@ render_section_54 :: () {
         \\program is translated, so its message begins with `while lowering
         \\demanded function 'main':`.
     );
-    paragraph(43, #string,oneline
-        \\`#lazy` combines with `#comptime` in either order. The argument must
-        \\then be a compile-time constant expression, and it is still
-        \\evaluated only if the body reads it:
+    subheading(43, "`#lazy` during compile-time execution");
+    paragraph(44, #string,oneline
+        \\During compile-time execution, an ordinary `#lazy` argument follows
+        \\the same first-read and caching rules. Adding `#comptime`, in either
+        \\order, requires any needed value during compilation. A completely
+        \\unused parameter can leave its argument unevaluated, as in
+        \\`ignore_value` below. If the declaration uses that parameter, the
+        \\compiler evaluates its argument while specializing the call. This
+        \\includes references in the body, constraints, and directives. A runtime
+        \\condition does not defer that work: `choose_constant(false, 1 / 0)`
+        \\fails even though the runtime branch would skip the read.
     );
-    code_block(44, "glosso", #string
+    code_block(45, "glosso", #string
         \\#import "Io";
         \\
         \\ignore_value :: (#lazy #comptime value: s64) -> s64 { return 7; }
         \\double_value :: (#comptime #lazy value: s64) -> s64 { return value * 2; }
+        \\choose_constant :: (take: bool, #lazy #comptime value: s64) -> s64 {
+        \\    if take return value;
+        \\    return 7;
+        \\}
         \\
         \\UNUSED :: #comptime ignore_value(1 / 0);    // 1 / 0 is never evaluated
         \\USED :: #comptime double_value(21);
+        \\CALL_VALID :: #meaningful { choose_constant(false, 1 / 0); };
         \\
         \\main :: () {
-        \\    print("{} {}\n", UNUSED, USED);
+        \\    print("{} {} {}\n", UNUSED, USED, CALL_VALID);
         \\}
     );
-    code_block(45, "text", #string
+    code_block(46, "text", #string
+        \\7 42 false
+    );
+    paragraph(47, #string,oneline
+        \\An ordinary `#lazy` parameter inside a `#comptime` call is different:
+        \\only a read reached by that compile-time execution evaluates it. In
+        \\the example below, the false branch never calls `divide(0)`. Adding
+        \\`#comptime` to the parameter would require its referenced argument
+        \\while checking the call, before executing that branch. The argument
+        \\must still type-check: laziness does not suppress diagnostics such
+        \\as an invalid constant expression rejected during type checking.
+    );
+    code_block(48, "glosso", #string
+        \\#import "Io";
+        \\
+        \\divide :: (divisor: s64) -> s64 { return 84 / divisor; }
+        \\
+        \\choose :: (take: bool, #lazy value: s64) -> s64 {
+        \\    if take return value;
+        \\    return 7;
+        \\}
+        \\
+        \\SKIPPED :: #comptime choose(false, divide(0));
+        \\TAKEN :: #comptime choose(true, divide(2));
+        \\
+        \\main :: () { print("{} {}\n", SKIPPED, TAKEN); }
+    );
+    code_block(49, "text", #string
         \\7 42
     );
-    subheading(46, "How `&&` and `||` short-circuit");
-    paragraph(47, #string,oneline
+    subheading(50, "How `&&` and `||` short-circuit");
+    paragraph(51, #string,oneline
         \\`&&` and `||` are the operators of the prelude typeclasses
         \\`LogicalAnd` and `LogicalOr`, and their right operand is a `#lazy`
         \\parameter. The prelude declares them as follows:
     );
-    code_block(48, "glosso", #string
+    code_block(52, "glosso", #string
         \\LogicalAnd :: typeclass (L: type, R: type) {
         \\    Output :: type;
         \\    '&&' :: (left: L, #lazy right: R) -> Output #operator(left, 6);
@@ -1260,14 +1305,14 @@ render_section_54 :: () {
         \\    '||' :: (left: L, #lazy right: R) -> Output #operator(left, 4);
         \\}
     );
-    paragraph(49, #string,oneline
+    paragraph(53, #string,oneline
         \\The instances for `bool` are implemented by the compiler. They read
         \\the right operand only when the left one does not decide the result,
         \\so the right operand of `&&` runs only after a `true`, and that of
         \\`||` only after a `false`. The compound assignments `&&=` and `||=`
         \\are defined through `&&` and `||` and short-circuit the same way.
     );
-    code_block(50, "glosso", #string
+    code_block(54, "glosso", #string
         \\#import "Io";
         \\
         \\side :: (label: str, value: bool) -> bool {
@@ -1292,20 +1337,20 @@ render_section_54 :: () {
         \\    else print("out of range\n");
         \\}
     );
-    code_block(51, "text", #string
+    code_block(55, "text", #string
         \\L = false
         \\L R = false
         \\L = true
         \\R = true
         \\out of range
     );
-    paragraph(52, #string,oneline
+    paragraph(56, #string,oneline
         \\The last test is the usual guard: `values[i]` is never evaluated,
         \\so it never goes out of bounds. An instance for another type gets
         \\the same behaviour by reading its lazy operand only when it needs
         \\it. This one stops at the first failed check:
     );
-    code_block(53, "glosso", #string
+    code_block(57, "glosso", #string
         \\#import "Io";
         \\
         \\Check :: struct {
@@ -1333,12 +1378,12 @@ render_section_54 :: () {
         \\    print("passed={} at: {}\n", result.passed, result.message);
         \\}
     );
-    code_block(54, "text", #string
+    code_block(58, "text", #string
         \\checking: file exists
         \\checking: file is readable
         \\passed=false at: file is readable
     );
-    paragraph(55, #string,oneline
+    paragraph(59, #string,oneline
         \\An instance must declare `#lazy` on the same parameters as its
         \\typeclass, so that a caller can rely on the typeclass to know
         \\whether an argument is evaluated. Leaving it out is an error, here
@@ -1346,8 +1391,8 @@ render_section_54 :: () {
         \\#lazy parameter contract of typeclass 'Pick'`. Operator Declarations
         \\describes operator typeclasses in general.
     );
-    subheading(56, "Arguments fixed at compile time");
-    paragraph(57, #string,oneline
+    subheading(60, "Arguments fixed at compile time");
+    paragraph(61, #string,oneline
         \\The remaining parameters receive their argument while the program is
         \\compiled rather than when it runs. A `#comptime` parameter receives
         \\a constant value, a parameter of type `type` receives a type, and a
@@ -1357,14 +1402,14 @@ render_section_54 :: () {
         \\the arguments built in. A `type` parameter that only the body uses
         \\is the exception, described under Type parameters below.
     );
-    subheading(58, "`#comptime` parameters");
-    paragraph(59, #string,oneline
+    subheading(62, "`#comptime` parameters");
+    paragraph(63, #string,oneline
         \\`#comptime` before a parameter name makes the parameter a
         \\compile-time constant inside the body. It can then appear wherever a
         \\constant is required: as the count of `#inline for`, the length of
         \\an array, the condition of `#if`, or in `#assert`.
     );
-    code_block(60, "glosso", #string
+    code_block(64, "glosso", #string
         \\#import "Io";
         \\
         \\power :: (#comptime exponent: s64, x: s64) -> s64 {
@@ -1388,21 +1433,21 @@ render_section_54 :: () {
         \\    print("{} {}\n", sum_of_squares(), sum_of_squares(.count = 6));
         \\}
     );
-    code_block(61, "text", #string
+    code_block(65, "text", #string
         \\25 8
         \\14 55
     );
-    paragraph(62, #string,oneline
+    paragraph(66, #string,oneline
         \\The argument must be something the compiler can evaluate: a literal,
         \\a `::` constant, or a compile-time expression. A variable is not one,
         \\even if its value never changes:
     );
-    code_block(63, "text", #string
+    code_block(67, "text", #string
         \\// k := 3; n := power(k, 2);
         \\error: argument for #comptime parameter 'exponent' must be known at compile time
         \\note: unknown const k
     );
-    paragraph(64, #string,oneline
+    paragraph(68, #string,oneline
         \\Otherwise a `#comptime` parameter behaves like any other: it may
         \\have a default and be passed by name, as `count` is above, and one
         \\`#comptime` applies to every name of a group such as `(#comptime
@@ -1411,27 +1456,27 @@ render_section_54 :: () {
         \\assertion failed: count must be positive` and `note: in
         \\instantiation of 'sum_of_squares'`.
     );
-    paragraph(65, #string,oneline
+    paragraph(69, #string,oneline
         \\Each distinct argument produces another compiled copy of the
         \\procedure, which takes only the run-time parameters. `power(2, x)`
         \\and `power(3, x)` are two functions of one parameter each. A
         \\`#comptime` parameter is therefore a trade: the body is specialized
         \\for the constant, and the program grows with every constant used.
     );
-    note(66, #string,oneline
+    note(70, #string,oneline
         \\The constant exists in the body only. The signature cannot use it,
         \\so `squares :: (#comptime n: s64) -> [n]s64` is `error: array count
         \\'n' is not compile-time known` at the call. Compute such a result
-        \\type in a `#modify` block instead (see Directives That Modify
+        \\type in a `#specialize` block instead (see Directives That Modify
         \\Procedures).
     );
-    table_header(67, "Declaration   —   Diagnostic");
-    table_row(68, "`(#comptime #comptime n: s64)`   |   `duplicate #comptime parameter directive`");
-    table_row(69, "`(noalias #comptime p: *s64)`   |   `noalias cannot qualify a #comptime parameter`");
-    table_row(70, "`(using #comptime v: Vec2)`   |   `using cannot qualify a #comptime parameter`");
-    table_row(71, "`(#comptime values: ...s64)`   |   `unexpected token '...'`");
-    subheading(72, "Type parameters");
-    paragraph(73, #string,oneline
+    table_header(71, "Declaration   —   Diagnostic");
+    table_row(72, "`(#comptime #comptime n: s64)`   |   `duplicate #comptime parameter directive`");
+    table_row(73, "`(noalias #comptime p: *s64)`   |   `noalias cannot qualify a #comptime parameter`");
+    table_row(74, "`(using #comptime v: Vec2)`   |   `using cannot qualify a #comptime parameter`");
+    table_row(75, "`(#comptime values: ...s64)`   |   `unexpected token '...'`");
+    subheading(76, "Type parameters");
+    paragraph(77, #string,oneline
         \\A parameter of type `type` receives a type. The caller writes the
         \\type as the argument, and in the body the parameter can be used
         \\wherever a type can. Such a parameter is a type parameter, and the
@@ -1440,7 +1485,7 @@ render_section_54 :: () {
         \\type`. Each type then gets its own compiled copy, which runs when the
         \\program runs:
     );
-    code_block(74, "glosso", #string
+    code_block(78, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
@@ -1463,12 +1508,12 @@ render_section_54 :: () {
         \\    print("{} {}\n", type_name(type_of(convert(3))), type_name(type_of(convert(3, f32))));
         \\}
     );
-    code_block(75, "text", #string
+    code_block(79, "text", #string
         \\u8
         \\7 56
         \\f64 f32
     );
-    paragraph(76, #string,oneline
+    paragraph(80, #string,oneline
         \\A `T: type` parameter that is used only in the body, without
         \\`#comptime`, is different. It is not a type parameter but an
         \\ordinary parameter whose type is `type`, and a value of type `type`
@@ -1478,7 +1523,7 @@ render_section_54 :: () {
         \\result in the call's place. Its other arguments must be compile-time
         \\constants too, and what it prints appears in the build's output:
     );
-    code_block(77, "glosso", #string
+    code_block(81, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
@@ -1492,7 +1537,7 @@ render_section_54 :: () {
         \\    print("{}\n", describe(f64, 4));
         \\}
     );
-    code_block(78, "text", #string
+    code_block(82, "text", #string
         \\$ glosso --run describe.glo
         \\glosso: compile describe.glo (target=x86_64-pc-linux-gnu)
         \\describing f64
@@ -1501,7 +1546,7 @@ render_section_54 :: () {
         \\start
         \\32
     );
-    paragraph(79, #string,oneline
+    paragraph(83, #string,oneline
         \\With `n := 4;` the call `describe(f64, n)` is `error: unknown const
         \\n`. This form is meant for procedures that compute something about a
         \\type, such as the `(T: type) -> bool` predicates used in `where`
@@ -1509,7 +1554,7 @@ render_section_54 :: () {
         \\that should run at run time declares `#comptime T: type`, or takes
         \\the type through a `#empty` slot, described below.
     );
-    paragraph(80, #string,oneline
+    paragraph(84, #string,oneline
         \\Type parameters come before the run-time parameters. The exception is
         \\a defaulted type parameter written `Name := Type`, like `Target`
         \\above, which may come last. For this form the name must begin with
@@ -1518,19 +1563,19 @@ render_section_54 :: () {
         \\so a variable holding a type is not accepted (`error: unknown const
         \\t`).
     );
-    table_header(81, "Declaration   —   Diagnostic");
-    table_row(82, "`(value: s64, T: type)`   |   `type parameter 'T' must appear before runtime parameters unless it has a default`");
-    table_row(83, "`(value: s64, T: type = f64)`   |   The same; write `T := f64` instead.");
-    table_row(84, "`(T: type, T: type)`   |   `parameter 'T' is already declared`");
-    table_row(85, "`(T: type, value: $T)`   |   `type parameter 'T' is already declared; use plain T after the declaration`");
-    subheading(86, "Type-only slots with `#empty`");
-    paragraph(87, #string,oneline
+    table_header(85, "Declaration   —   Diagnostic");
+    table_row(86, "`(value: s64, T: type)`   |   `type parameter 'T' must appear before runtime parameters unless it has a default`");
+    table_row(87, "`(value: s64, T: type = f64)`   |   The same; write `T := f64` instead.");
+    table_row(88, "`(T: type, T: type)`   |   `parameter 'T' is already declared`");
+    table_row(89, "`(T: type, value: $T)`   |   `type parameter 'T' is already declared; use plain T after the declaration`");
+    subheading(90, "Type-only slots with `#empty`");
+    paragraph(91, #string,oneline
         \\`#empty: $T` declares an argument position that carries a type and
         \\no value. The slot has no name. The caller writes a type there, and
         \\the procedure learns `T`. One `#empty` may list several captures,
         \\as in `#empty: $K, $V`.
     );
-    code_block(88, "glosso", #string
+    code_block(92, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
@@ -1550,28 +1595,28 @@ render_section_54 :: () {
         \\    print("{} {} {}\n", type_name(type_of(z)), z, calls);
         \\}
     );
-    code_block(89, "text", #string
+    code_block(93, "text", #string
         \\0 false 9
         \\f32 0 0
     );
-    paragraph(90, #string,oneline
+    paragraph(94, #string,oneline
         \\As the second call shows, any expression may stand in the slot: the
         \\slot takes its type and the expression is not evaluated. A type name
         \\states the intent more clearly.
     );
-    table_header(91, "Declaration   —   Diagnostic");
-    table_row(92, "`(x: s64, #empty: $T)`   |   `#empty parameters must appear before runtime parameters`");
-    table_row(93, "`(#empty: $T = s64)`   |   `unexpected token '='`: a slot has no default");
-    table_row(94, "`(noalias #empty: $T)`, `(using #empty: $T)`   |   `noalias cannot qualify a #empty parameter`, and the same for `using`");
-    table_row(95, "`(#lazy #empty: $T)`   |   `#lazy cannot qualify a #empty parameter`");
-    paragraph(96, #string,oneline
+    table_header(95, "Declaration   —   Diagnostic");
+    table_row(96, "`(x: s64, #empty: $T)`   |   `#empty parameters must appear before runtime parameters`");
+    table_row(97, "`(#empty: $T = s64)`   |   `unexpected token '='`: a slot has no default");
+    table_row(98, "`(noalias #empty: $T)`, `(using #empty: $T)`   |   `noalias cannot qualify a #empty parameter`, and the same for `using`");
+    table_row(99, "`(#lazy #empty: $T)`   |   `#lazy cannot qualify a #empty parameter`");
+    paragraph(100, #string,oneline
         \\The slot exists for procedures whose interesting type appears only in
         \\the result. Without it a call would have nothing to infer the type
         \\from. The standard library's `FromString` typeclass is declared
         \\with `from_string :: (#empty: T, text: str) -> ?T`, so the caller
         \\names the type to parse, and that type selects the instance:
     );
-    code_block(97, "glosso", #string
+    code_block(101, "glosso", #string
         \\#import "Io";
         \\
         \\main :: () {
@@ -1581,22 +1626,22 @@ render_section_54 :: () {
         \\    print("{} {} {}\n", count, ratio, flag);
         \\}
     );
-    code_block(98, "text", #string
+    code_block(102, "text", #string
         \\Some(-42) Some(2.5) None
     );
-    paragraph(99, #string,oneline
+    paragraph(103, #string,oneline
         \\`print` shows an empty optional as `None`; in source it is `null`
         \\(see `?T` and `E!T`). The same `#empty` marker on a struct field
         \\declares a type parameter that the struct does not store, as Struct
         \\Types describes.
     );
-    subheading(100, "Choosing a form");
-    table_header(101, "Parameter   —   The caller writes   —   At run time");
-    table_row(102, "`#comptime n: s64`   |   A constant value   |   Nothing; each value is a separate copy.");
-    table_row(103, "`T: type`, `#comptime T: type`   |   A type   |   Nothing; each type is a separate copy. Used only in the body without `#comptime`: the call is evaluated during compilation.");
-    table_row(104, "`#empty: $T`   |   A type, or an expression whose type is used   |   Nothing; each type is a separate copy.");
-    table_row(105, "`value: $T`   |   A value; its type is captured as `T`   |   The value; each type is a separate copy.");
-    paragraph(106, #string,oneline
+    subheading(104, "Choosing a form");
+    table_header(105, "Parameter   —   The caller writes   —   At run time");
+    table_row(106, "`#comptime n: s64`   |   A constant value   |   Nothing; each value is a separate copy.");
+    table_row(107, "`T: type`, `#comptime T: type`   |   A type   |   Nothing; each type is a separate copy. Used only in the body without `#comptime`: the call is evaluated during compilation.");
+    table_row(108, "`#empty: $T`   |   A type, or an expression whose type is used   |   Nothing; each type is a separate copy.");
+    table_row(109, "`value: $T`   |   A value; its type is captured as `T`   |   The value; each type is a separate copy.");
+    paragraph(110, #string,oneline
         \\The last form, the `$` capture that infers a type from an ordinary
         \\argument, is the most common one, and Generic Procedures and `where`
         \\Clauses describes it.
@@ -2055,21 +2100,60 @@ render_section_55 :: () {
         \\true false
         \\true false calls=0
     );
-    paragraph(66, #string,oneline
+    subheading(66, "Type-field requirements with `T,,foo`");
+    paragraph(67, #string,oneline
+        \\When `T` is a type, `#meaningful { T,,foo; }` tests whether `foo`
+        \\is an accessible field of that type. It does not construct a value
+        \\of `T`, so no initializer is needed. A missing or inaccessible field
+        \\makes the probe `false`. The requirement has no runtime value and
+        \\is valid only inside `#meaningful`. It can constrain a generic
+        \\procedure through `where` or `#specialize`:
+    );
+    code_block(68, "glosso", #string
+        \\#import "Io";
+        \\
+        \\With_Foo :: struct { foo: s64; }
+        \\Without_Foo :: struct { bar: s64; }
+        \\
+        \\read_foo :: (value: $T) -> s64
+        \\#specialize #meaningful { T,,foo; } {
+        \\    return value.foo;
+        \\}
+        \\
+        \\main :: () {
+        \\    present := #meaningful { With_Foo,,foo; };
+        \\    absent := #meaningful { Without_Foo,,foo; };
+        \\    record: With_Foo = .{ .foo = 42 };
+        \\    print("{} {} {}\n", present, absent, read_foo(record));
+        \\}
+    );
+    code_block(69, "text", #string
+        \\true false 42
+    );
+    paragraph(70, #string,oneline
+        \\The left side may also be a qualified type or a type-producing call,
+        \\as in `Module.Record,,foo` or `Box(s64),,foo`. The probe tests field
+        \\presence; using that field must still satisfy ordinary type rules.
+        \\When the left side names a function, `worker,,entry` instead denotes
+        \\its nonlocal label, just as `worker,,'entry` does. The compiler
+        \\resolves the left side to distinguish the two uses (see Labels,
+        \\`goto`, and Non-Local Transfers).
+    );
+    paragraph(71, #string,oneline
         \\Variables declared in the block exist only inside it. Without braces,
         \\`#meaningful` takes a single operand and binds as tightly as a unary
         \\operator: `#meaningful v.x == 3` is `(#meaningful v.x) == 3`, which
         \\compares a `bool` with a number. Write `#meaningful { v.x == 3; }`
         \\to probe the whole comparison.
     );
-    paragraph(67, #string,oneline
+    paragraph(72, #string,oneline
         \\A probe tests the code that a body actually writes, while a typeclass
         \\test asks whether an instance exists. They can disagree. A
         \\`distinct` type without derived operators (see Nominal Types with
         \\`distinct`) has no `+` of its own, but the standard `Show` instance
         \\for floating point covers it:
     );
-    code_block(68, "glosso", #string
+    code_block(73, "glosso", #string
         \\#import "Io";
         \\
         \\Meters :: distinct f64;
@@ -2081,26 +2165,26 @@ render_section_55 :: () {
         \\    print("{} {}\n", SHOWS, ADDS);
         \\}
     );
-    code_block(69, "text", #string
+    code_block(74, "text", #string
         \\true false
     );
-    paragraph(70, #string,oneline
+    paragraph(75, #string,oneline
         \\A probe can test what no typeclass expresses, such as the presence
         \\of a field or a call to an ordinary procedure. In a `where` clause,
         \\a probe may be written directly and sees the procedure's parameters.
         \\Wrapped in a procedure that takes a `type`, it gets a name and
         \\combines with other tests like any `bool`.
     );
-    code_block(71, "glosso", #string
+    code_block(76, "glosso", #string
         \\#import "Io";
         \\
         \\Left :: struct { left: s64; }
         \\Right :: struct { right: s64; }
         \\
-        \\Has_Left :: (T: type) -> bool { return #meaningful { v: T; v.left; }; }
-        \\Has_Right :: (T: type) -> bool { return #meaningful { v: T; v.right; }; }
+        \\Has_Left :: (T: type) -> bool { return #meaningful { T,,left; }; }
+        \\Has_Right :: (T: type) -> bool { return #meaningful { T,,right; }; }
         \\
-        \\read_left :: (v: $T) -> s64 where #meaningful { v.left; } {
+        \\read_left :: (v: $T) -> s64 where #meaningful { T,,left; } {
         \\    return v.left;
         \\}
         \\
@@ -2115,21 +2199,21 @@ render_section_55 :: () {
         \\    print("{} {} {}\n", read_left(l), either(l), either(r));
         \\}
     );
-    code_block(72, "text", #string
+    code_block(77, "text", #string
         \\1 1 2
     );
-    paragraph(73, #string,oneline
+    paragraph(78, #string,oneline
         \\A failed probe in a `where` clause gives the usual `constraint
         \\failed`. In `#assert`, the compiler also prints why the probe failed
         \\(see `#if`, `#assert`, and `#compile_error`):
     );
-    code_block(74, "text", #string
+    code_block(79, "text", #string
         \\// #assert #meaningful { p, q: Plain; p + q; }, "Plain does not support +";
         \\error: assertion failed: Plain does not support +
         \\note: constraint is not meaningful for these types
         \\note: no operator '+' for Plain, Plain
     );
-    paragraph(75, #string,oneline
+    paragraph(80, #string,oneline
         \\Nothing a probe does survives it. Generic procedures that it
         \\instantiates are not compiled into the program unless real code
         \\calls them too, and an error raised inside it, including one from
@@ -2137,7 +2221,7 @@ render_section_55 :: () {
         \\that rejects unsuitable types with `#compile_error` can therefore
         \\still be asked about:
     );
-    code_block(76, "glosso", #string
+    code_block(81, "glosso", #string
         \\#import "Io";
         \\
         \\strict_left :: (v: $T) -> s64 {
@@ -2154,16 +2238,16 @@ render_section_55 :: () {
         \\    print("{} {}\n", WORKS_FOR_S64, strict_left(l));
         \\}
     );
-    code_block(77, "text", #string
+    code_block(82, "text", #string
         \\false 4
     );
-    subheading(78, "Generic procedures are not values");
-    paragraph(79, #string,oneline
+    subheading(83, "Generic procedures are not values");
+    paragraph(84, #string,oneline
         \\A generic procedure is not one procedure until its types are known,
         \\so it cannot be stored as a value: `f := larger;` is `error: generic
         \\function 'larger' needs a call context`, even when the variable has
         \\a function type. Lambdas and `#fn_ptr` Values shows how to pass one
-        \\of its copies. A `#modify` block can compute or rewrite type
+        \\of its copies. A `#specialize` block can compute or rewrite type
         \\parameters after the arguments are matched (see Directives That
         \\Modify Procedures), and methods of generic types are described in
         \\Inherent Methods, Member Access, and Call Syntax.
@@ -3053,7 +3137,7 @@ render_section_58 :: () {
     table_row(8, "`#no_context`   |   The body does not use the implicit context.");
     table_row(9, "`#returns_twice`   |   A call may return more than once, like C's `setjmp`.");
     table_row(10, "`#dump`   |   Prints the procedure's intermediate code while compiling.");
-    table_row(11, "`#modify`   |   Compile-time code that checks or computes type parameters for each call.");
+    table_row(11, "`#specialize`   |   Compile-time code that checks or computes type parameters for each call.");
     table_row(12, "`#foreign`   |   The procedure is in a C library; no body. See `#foreign`, `#library`, and `#c_call`.");
     table_row(13, "`#magic`   |   The compiler implements the procedure; no body. See `#asm`, `#bytes`, and `#magic`.");
     table_row(14, "`#expand`   |   The procedure is a macro. See `#code`, `#insert`, and `#expand`.");
@@ -3214,23 +3298,26 @@ render_section_58 :: () {
         \\glosso: link dump (target=x86_64-pc-linux-gnu, -O1)
         \\glosso: done dump  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
     );
-    subheading(41, "`#modify`");
+    subheading(41, "`#specialize`: when specialization runs");
     paragraph(42, #string,oneline
-        \\`#modify` attaches compile-time code to a generic procedure. For each
-        \\call, after the arguments have been matched and the type parameters
-        \\inferred, the compiler runs the code with the type parameters and
-        \\`#comptime` parameters as values. The code may assign new types to
-        \\type parameters, and it returns a `bool`: `false` rejects the call
-        \\as a failed constraint. The code is either a block or, for a simple
-        \\test, a single expression.
+        \\`#specialize` attaches compile-time code to a procedure, usually a
+        \\generic one. It is written after the result type and before `where`.
+        \\After matching arguments and inferring type parameters, the compiler
+        \\runs it with those type bindings and the `#comptime` parameter values.
+        \\It runs before the `where` clause and before compiling the specialized
+        \\body. Ordinary runtime arguments are not evaluated by this step.
+        \\A block can assign type parameters and `return true` to accept the
+        \\call or `return false` to reject it; falling off the block also
+        \\accepts it. For a simple condition, write one expression instead:
+        \\`#specialize Is_Integer(T)` or `#specialize #meaningful { T,,foo; }`.
     );
     code_block(43, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\// R appears only in the result; #modify computes it.
+        \\// R appears only in the result; #specialize computes it.
         \\as_float :: (value: $T) -> $R
-        \\#modify {
+        \\#specialize {
         \\    if !Is_Numeric(T) return false;
         \\    #if Is_Float(T) { R = T; } else { R = f64; }
         \\    return true;
@@ -3241,7 +3328,7 @@ render_section_58 :: () {
         \\
         \\// The result's length depends on a #comptime parameter.
         \\squares :: (#comptime count: s64) -> $R
-        \\#modify {
+        \\#specialize {
         \\    R = [count]s64;
         \\    return true;
         \\}
@@ -3262,19 +3349,19 @@ render_section_58 :: () {
         \\[4]s64 9
     );
     paragraph(45, #string,oneline
-        \\A `where` clause can only accept or reject a call; `#modify` can also
+        \\A `where` clause can only accept or reject a call; `#specialize` can also
         \\decide types that the arguments do not determine, such as `R` above,
         \\or a result type that depends on a `#comptime` parameter, which the
         \\signature itself cannot name. A call that the code rejects reports
-        \\the `#modify` block:
+        \\the `#specialize` block:
     );
     code_block(46, "text", #string
         \\// as_float("text");
         \\error: constraint failed for as_float
-        \\note: the #modify constraint fails here: #modify returned false
+        \\note: the #specialize constraint fails here: #specialize returned false
     );
     paragraph(47, #string,oneline
-        \\When `#modify` assigns a type parameter that a parameter's type
+        \\When `#specialize` assigns a type parameter that a parameter's type
         \\uses, the arguments are then converted to the new type as in an
         \\ordinary call. An `s8` argument widens to an `s64` parameter, but an
         \\`f64` is not accepted for one:
@@ -3284,7 +3371,7 @@ render_section_58 :: () {
         \\#import "Meta";
         \\
         \\widen :: (value: $T) -> T
-        \\#modify {
+        \\#specialize {
         \\    T = s64;
         \\    return true;
         \\}
@@ -3303,27 +3390,72 @@ render_section_58 :: () {
     code_block(50, "text", #string
         \\// ratio: f64 = 1.5;  _ := widen(ratio);
         \\error: arg type f64 != s64 in call widen
-        \\note: #modify changes the type of parameter 'value' from f64 to s64
+        \\note: #specialize changes the type of parameter 'value' from f64 to s64
     );
     paragraph(51, #string,oneline
-        \\The standard library's `Math/Matrix` module uses `#modify` to compute
-        \\the result types of matrix operations.
+        \\The standard library's `Math/Matrix` module uses `#specialize` to
+        \\compute the result types of matrix operations. A block may return
+        \\`.(false, "reason")` to include a reason in a failed-constraint
+        \\diagnostic. Type-field requirements inside `#meaningful` are
+        \\described in Generic Procedures and `where` Clauses.
     );
-    subheading(52, "`#modify` on a generic struct");
-    paragraph(53, #string,oneline
-        \\A generic struct takes `#modify` between `struct` and its fields. The
-        \\code runs for each set of type arguments the struct is used with,
-        \\and can reject them or replace them:
+    paragraph(52, #string,oneline
+        \\Specialization is part of compile-time call checking, including
+        \\constraint probes such as `#meaningful`; it does not run when the
+        \\compiled procedure is called at runtime. The compiler can repeat
+        \\these checks, even for the same type arguments. Do not depend on a
+        \\block running exactly once or use it to count runtime calls.
     );
-    code_block(54, "glosso", #string
+    subheading(53, "Specializing an inherent method");
+    paragraph(54, #string,oneline
+        \\A method can rewrite its own type parameters. The type parameters
+        \\of its owner and `#Self_Type` are fixed by receiver lookup, however,
+        \\and cannot be changed by `#specialize`. Here `U` belongs to `widen`,
+        \\while `T` belongs to `Box`. The `where` clause sees the rewritten `U`:
+    );
+    code_block(55, "glosso", #string
         \\#import "Io";
         \\#import "Meta";
         \\
-        \\Counter :: struct #modify Is_Integer(T) {
+        \\Box :: struct { value: $T; }
+        \\Box($T) ::: {
+        \\    widen :: (#self, value: $U) -> U
+        \\    #specialize { U = s64; return true; }
+        \\    where U == s64
+        \\    { return value; }
+        \\}
+        \\
+        \\main :: () {
+        \\    box: Box(u8);
+        \\    small: s8 = 42;
+        \\    result := box.widen(small);
+        \\    print("{} {} {}\n", result, type_name(type_of(result)), type_name(type_of(box.value)));
+        \\}
+    );
+    code_block(56, "text", #string
+        \\42 s64 u8
+    );
+    paragraph(57, #string,oneline
+        \\Assigning `T = s64` in this method instead would fail with
+        \\`#specialize cannot change inherent owner type binding 'T'`.
+        \\Changing `#Self_Type` fails for the same reason. See Inherent
+        \\Methods, Member Access, and Call Syntax for owner bindings.
+    );
+    subheading(58, "`#specialize` on a generic struct");
+    paragraph(59, #string,oneline
+        \\A generic struct takes `#specialize` between `struct` and its fields. The
+        \\code runs for each set of type arguments the struct is used with,
+        \\and can reject them or replace them:
+    );
+    code_block(60, "glosso", #string
+        \\#import "Io";
+        \\#import "Meta";
+        \\
+        \\Counter :: struct #specialize Is_Integer(T) {
         \\    value: $T;
         \\}
         \\
-        \\Wide :: struct #modify {
+        \\Wide :: struct #specialize {
         \\    #if Is_Integer(T) && size_of(T) < 8 { T = s64; }
         \\    return true;
         \\} {
@@ -3336,16 +3468,16 @@ render_section_58 :: () {
         \\    print("{} {}\n", type_name(type_of(c.value)), type_name(type_of(w.value)));
         \\}
     );
-    code_block(55, "text", #string
+    code_block(61, "text", #string
         \\u8 s64
     );
-    code_block(56, "text", #string
+    code_block(62, "text", #string
         \\// c: Counter(f64);
-        \\error: #modify returned false for struct Counter
-        \\note: #modify returned false
+        \\error: #specialize returned false for struct Counter
+        \\note: #specialize returned false
     );
-    subheading(57, "Directives on parameters");
-    paragraph(58, #string,oneline
+    subheading(63, "Directives on parameters");
+    paragraph(64, #string,oneline
         \\`noalias`, `using`, `#comptime`, `#lazy` and `#empty` are written on
         \\a single parameter rather than on the procedure. `noalias`, `#lazy`,
         \\`#comptime`, and Type Parameters lists them with their order and describes

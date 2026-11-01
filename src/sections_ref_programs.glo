@@ -1120,7 +1120,7 @@ render_section_18 :: () {
         \\declarations of other modules only through its own `#import`
         \\directives, plus the prelude that every module receives without one.
         \\This chapter describes what an import names and how the module is
-        \\found, import lists and namespace imports, what happens when two
+        \\found, module parameters, import lists and namespace imports, what happens when two
         \\imports provide the same name, re-exporting, import cycles, and the
         \\contents of the prelude. Who may use a declaration once it is
         \\imported is the subject of Who Can Use a Declaration: Visibility and
@@ -1236,12 +1236,13 @@ render_section_18 :: () {
     );
     subheading(25, "Import lists");
     paragraph(26, #string,oneline
-        \\A list in parentheses after the module brings only the listed names:
+        \\A list in braces after the module brings only the listed names.
+        \\Parentheses, when present, supply module arguments and come first:
     );
     code_block(27, "glosso", #string
         \\#import "Io";
-        \\#import "Math/Core" (sqrt);
-        \\#import "geometry.glo" (Point, distance);
+        \\#import "Math/Core" { sqrt };
+        \\#import "geometry.glo" { Point, distance };
         \\
         \\main :: () {
         \\    p := Point.{ .x = 1, .y = 1 };
@@ -1253,20 +1254,20 @@ render_section_18 :: () {
     );
     paragraph(29, #string,oneline
         \\Listing a typeclass brings its members too, so its methods and
-        \\operators can be called: `#import "Math/Core" (Floating);` makes
+        \\operators can be called: `#import "Math/Core" { Floating };` makes
         \\`sqrt`, `exp` and the other members of `Floating` available, as
         \\procedures and as methods. A member whose typeclass is not listed is
         \\reported with that typeclass's name. An operator is listed by its
         \\quoted name, such as `'<->'` (see Encoding, Comments, and Tokens).
-        \\An empty list, `#import "instances.glo" ();`, brings no names at
+        \\An empty list, `#import "instances.glo" {};`, brings no names at
         \\all; the module is still loaded, and the typeclass instances it
         \\declares become available.
     );
     code_block(30, "text", #string
-        \\// #import "Math/Core" (Fractional);   then x.sqrt()
+        \\// #import "Math/Core" { Fractional };   then x.sqrt()
         \\error: typeclass member 'Floating.sqrt' is not available through this module's imports
-        \\note: list the member or its class in the import: #import "Module" (Class)
-        \\// #import "geometry.glo" (square);
+        \\note: list the member or its class in the import: #import "Module" { Class }
+        \\// #import "geometry.glo" { square };
         \\error: #import names unknown public declaration 'square' in module "geometry.glo"
         \\note: public names: Point, distance
     );
@@ -1291,7 +1292,7 @@ render_section_18 :: () {
     );
     paragraph(35, #string,oneline
         \\A namespace import also takes an import list, which limits what the
-        \\prefix reaches: after `Geo :: #import "geometry.glo" (Point);`,
+        \\prefix reaches: after `Geo :: #import "geometry.glo" { Point };`,
         \\`Geo.distance` is an unknown function. A namespace import adds no
         \\operators to the importing module, because an operator has no place
         \\for a prefix between its operands; Encoding, Comments, and Tokens
@@ -1348,7 +1349,7 @@ render_section_18 :: () {
     );
     code_block(46, "glosso", #string
         \\// reexp.glo
-        \\#export "geometry.glo" (Point);
+        \\#export "geometry.glo" { Point };
         \\
         \\#public origin :: () -> Point { return .{ .x = 0, .y = 0 }; }
     );
@@ -1358,19 +1359,105 @@ render_section_18 :: () {
         \\"not available through this module's imports" as in the `sqrt` case
         \\above.
     );
-    subheading(48, "Import cycles");
+    subheading(48, "Module parameters: `#module_params`");
     paragraph(49, #string,oneline
+        \\A module declares its compile-time inputs with one top-level
+        \\`#module_params(...)` declaration, ending in `;`. An importer supplies
+        \\values in parentheses after the module path, before an optional
+        \\`{ ... }` selector list. The parameters are private constants in the
+        \\loaded module and can configure types, declarations, `#if` branches,
+        \\and library paths. They are not runtime function parameters.
+    );
+    table_header(50, "Declaration   —   Meaning");
+    table_row(51, "`NAME: str`   |   Required argument with a declared type.");
+    table_row(52, "`COUNT: s64 = 4`   |   Typed argument with a default.");
+    table_row(53, "`ENABLED := false`   |   Defaulted argument whose type is inferred.");
+    paragraph(54, #string,oneline
+        \\Arguments may be positional or named (`START = 10` or `.START = 10`).
+        \\Positional arguments must precede named arguments. Omit parentheses,
+        \\or write `()`, to use defaults; a parameter without a default must
+        \\be supplied. Unknown names, duplicate arguments, and missing required
+        \\arguments are errors. `#import "M"();` imports all public names with
+        \\default arguments; `#import "M" {};` imports only its instances.
+        \\Braces select names independently of the arguments.
+    );
+    code_block(55, "glosso", #string
+        \\// counter.glo
+        \\#module_params(START: s64 = 0, STEP := 1);
+        \\
+        \\count: s64 = START;
+        \\#public advance_count :: () -> s64 {
+        \\    count += STEP;
+        \\    return count;
+        \\}
+    );
+    code_block(56, "glosso", #string
+        \\#import "Io";
+        \\A :: #import "counter.glo"(10, STEP = 2) { advance_count };
+        \\B :: #import "counter.glo"(.START = 10, .STEP = 2);
+        \\C :: #import "counter.glo"(START = 20, STEP = 2);
+        \\
+        \\main :: () {
+        \\    a := A.advance_count();
+        \\    b := B.advance_count();
+        \\    c := C.advance_count();
+        \\    print("{} {} {}\n", a, b, c);
+        \\}
+    );
+    code_block(57, "text", #string
+        \\12 14 22
+    );
+    paragraph(58, #string,oneline
+        \\The module path and the effective parameter values and types identify
+        \\a module instance. Equivalent positional, named, and defaulted
+        \\arguments reuse that instance, including its global state and types.
+        \\A different argument creates a different instance. In this program,
+        \\`A` and `B` share `count`; `C` has its own. Selectors and aliases do
+        \\not create another instance.
+    );
+    paragraph(59, #string,oneline
+        \\Explicit argument expressions are evaluated at compile time in the
+        \\importing module. Default expressions are evaluated in the imported
+        \\module, where its own imports and earlier parameter bindings are
+        \\available. A module can pass its parameters to another module through
+        \\`#import` or `#export`; parameters are not forwarded automatically:
+    );
+    code_block(60, "glosso", #string
+        \\// counting.glo
+        \\#module_params(START: s64 = 0);
+        \\#export "counter.glo"(START = START, STEP = 2) { advance_count };
+    );
+    code_block(61, "glosso", #string
+        \\#import "Io";
+        \\#import "counting.glo"(START = 40) { advance_count };
+        \\
+        \\main :: () { print("{}\n", advance_count()); }
+    );
+    code_block(62, "text", #string
+        \\42
+    );
+    paragraph(63, #string,oneline
+        \\For example, `#import "Glosso"(DYLIB_PREFIX = "$ORIGIN/../share");`
+        \\configures the `Glosso` module to link an application's bundled
+        \\libglosso on Linux. `$ORIGIN` is resolved relative to the executable
+        \\by the dynamic loader. The application must ship the matching
+        \\`libglosso.so` in that directory. Without an argument, `Glosso` uses
+        \\the parent of `GLOSSO_STANDARD_DIRECTORY`. This parameter chooses
+        \\the shared-library path; it does not copy the library.
+    );
+    subheading(64, "Import cycles");
+    paragraph(65, #string,oneline
         \\Modules may import each other. A cycle is resolved as a whole, so two
         \\modules can call each other's procedures and share each other's
         \\global variables:
     );
-    code_block(50, "glosso", #string
+    code_block(66, "glosso", #string
         \\// b.glo
         \\#import "a.glo";
         \\
         \\#public from_b :: () -> s32 { counter += 1; return 10; }
     );
-    code_block(51, "glosso", #string
+    code_block(67, "glosso", #string
         \\// a.glo
         \\#import "b.glo";
         \\
@@ -1379,13 +1466,13 @@ render_section_18 :: () {
         \\from_a :: () -> s32 { return counter + from_b(); }
         \\}
     );
-    paragraph(52, #string,oneline
+    paragraph(68, #string,oneline
         \\A program that imports `a.glo` and calls `from_a()` gets 10, after
         \\which `counter` is 1. Within a cycle, as anywhere else, a declaration
         \\may be used above the line that declares it.
     );
-    subheading(53, "The prelude");
-    paragraph(54, #string,oneline
+    subheading(69, "The prelude");
+    paragraph(70, #string,oneline
         \\The standard library module `Prelude` is imported into every module
         \\without an `#import`. It holds what the language itself is defined in
         \\terms of: the typeclasses behind operators and `for` loops, the
@@ -1393,7 +1480,7 @@ render_section_18 :: () {
         \\for `?` and for `main`'s result, and a few procedures that every
         \\program may need.
     );
-    code_block(55, "glosso", #string
+    code_block(71, "glosso", #string
         \\main :: () {
         \\    values: [..]s64;
         \\    defer values.free();
@@ -1404,39 +1491,39 @@ render_section_18 :: () {
         \\    if fallback != 2 exit(1);
         \\}
     );
-    paragraph(56, #string,oneline
+    paragraph(72, #string,oneline
         \\Nothing in that program is imported: dynamic arrays with `push`,
         \\`pop` and `free`, optional values with `unwrap_or`, and `exit` all
         \\come from the prelude.
     );
-    table_header(57, "Part   —   Contents");
-    table_row(58, "Operators   |   One typeclass per operator (arithmetic, wrapping and saturating arithmetic, bitwise, comparison, indexing, ranges) and their instances for the primitive types; see Operator Declarations.");
-    table_row(59, "Equality and order   |   `PartialEq`, `Eq`, `PartialOrd`, `Ordering`, `Num`, `AsView`.");
-    table_row(60, "Iteration   |   `Iterable`, `PointerIterable`, and the iterators `Iter`, `PointerIter`, `PointerIterMut` and `Drain` that `for` loops expand through.");
-    table_row(61, "Arrays   |   The operations of dynamic arrays `[..]T` and views `[]T`: `push`, `pop`, `swap_remove`, `drain`, `free` and more.");
-    table_row(62, "Optional and result values   |   Helpers for `?T` and `E!T` such as `unwrap_or`, and their `Try` instances.");
-    table_row(63, "Protocols   |   `Try`, `Try_Branch` and `Propagate` for `?`; `Termination` for `main`; `Freeable` and `free`; `Show` and `FromString`; the thread traits `Sync` and `Send`.");
-    table_row(64, "Target description   |   `Target_OS`, `Target_CPU`, `Target_ABI` and endianness, with the build's own target.");
-    table_row(65, "Procedures   |   `get_cmdline_args`, `exit`, and the `Source_Location` produced by `#source_location`.");
-    paragraph(66, #string,oneline
+    table_header(73, "Part   —   Contents");
+    table_row(74, "Operators   |   One typeclass per operator (arithmetic, wrapping and saturating arithmetic, bitwise, comparison, indexing, ranges) and their instances for the primitive types; see Operator Declarations.");
+    table_row(75, "Equality and order   |   `PartialEq`, `Eq`, `PartialOrd`, `Ordering`, `Num`, `AsView`.");
+    table_row(76, "Iteration   |   `Iterable`, `PointerIterable`, and the iterators `Iter`, `PointerIter`, `PointerIterMut` and `Drain` that `for` loops expand through.");
+    table_row(77, "Arrays   |   The operations of dynamic arrays `[..]T` and views `[]T`: `push`, `pop`, `swap_remove`, `drain`, `free` and more.");
+    table_row(78, "Optional and result values   |   Helpers for `?T` and `E!T` such as `unwrap_or`, and their `Try` instances.");
+    table_row(79, "Protocols   |   `Try`, `Try_Branch` and `Propagate` for `?`; `Termination` for `main`; `Freeable` and `free`; `Show` and `FromString`; the thread traits `Sync` and `Send`.");
+    table_row(80, "Target description   |   `Target_OS`, `Target_CPU`, `Target_ABI` and endianness, with the build's own target.");
+    table_row(81, "Procedures   |   `get_cmdline_args`, `exit`, and the `Source_Location` produced by `#source_location`.");
+    paragraph(82, #string,oneline
         \\Input and output, text formatting and reflection live in their own
         \\modules. `print` is in `Io`; `tprint`, `format` and the formatting
         \\machinery are in `Format`; `size_of`, `type_of` and the other type
         \\queries are in `Meta`. Using one of them without its import is an
         \\error:
     );
-    code_block(67, "text", #string
+    code_block(83, "text", #string
         \\// main :: () { size := size_of(s64); }
         \\error: unknown function size_of
         \\note: 'size_of' is not available through this module's imports; import its module directly, or include it in the import selector
     );
-    subheading(68, "Shadowing prelude names");
-    paragraph(69, #string,oneline
+    subheading(84, "Shadowing prelude names");
+    paragraph(85, #string,oneline
         \\Unlike the names of other imports, the prelude's names give way to a
         \\module's own top-level declarations. Declaring `exit` makes every
         \\unqualified `exit` in that module refer to the local procedure:
     );
-    code_block(70, "glosso", #string
+    code_block(86, "glosso", #string
         \\#import "Io";
         \\
         \\exit :: (code: ssize) {
@@ -1448,11 +1535,11 @@ render_section_18 :: () {
         \\    print("still running\n");
         \\}
     );
-    code_block(71, "text", #string
+    code_block(87, "text", #string
         \\my exit 4
         \\still running
     );
-    paragraph(72, #string,oneline
+    paragraph(88, #string,oneline
         \\Appendix D: Standard Library Modules lists the other modules of the
         \\standard library, and the library reference documents every public
         \\name.

@@ -17,10 +17,15 @@ and interop. Appendices (92-97) cover the diagnostic format, an index of error
 messages, the grammar, the standard library modules, the environment and exit
 codes, and style conventions.
 
-The chapters and the reference describe the sibling `../glosso` checkout at
-`85dabc5f` (2026-10-31). Every example in the chapters is compiled with that
-compiler, and every program's output is compared with the output the chapter
-shows (`scripts/test-examples.mjs`).
+The chapters and the reference track the sibling `../glosso` checkout,
+including `#module_params`, `#specialize` and `#meaningful { T,,foo; }`
+(2026-11-01). Chapter 18 covers parameterized imports with `(arguments)` and
+`{selectors}`, shared module instances, and bundled libglosso paths. Chapter 54
+explains when `#lazy` arguments are evaluated and cached, including the
+difference between a compile-time call and a `#comptime #lazy` parameter.
+Chapters 55 and 58 cover field requirements, specialization order, type
+rewriting, and inherent-method restrictions. `scripts/test-examples.mjs` compiles chapter
+examples and compares their output with the output shown in the manual.
 
 The interface follows Rustdoc's documentation layout: a fixed sidebar, a wide
 search bar, section links, and compact module listings, using Glosso's existing

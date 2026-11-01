@@ -24,7 +24,7 @@ assert.deepEqual(modules.map(module => module.name), ["Fixture", "Source_Locatio
 const fixture = modules.find(module => module.name === "Fixture");
 assert.ok(fixture);
 const symbols = new Map(fixture.symbols.map(symbol => [symbol.name, symbol]));
-assert.equal(symbols.size, 22, "include public declarations, excluding private and unit declarations");
+assert.equal(symbols.size, 27, "include public declarations, excluding private and unit declarations");
 assert.equal(fixture.source_path, "std/Fixture.glo");
 assert.equal(fixture.summary, "Source-only fixture: tests the reference scanner, not Glosso type checking.");
 // Fixture imports Source_Location.glo; the imported declarations stay in their own module.
@@ -126,6 +126,21 @@ const malloc = symbols.get("c_malloc");
 assert.equal(malloc.display_signature, 'c_malloc :: (size: usize) -> ?*void #foreign "c" "malloc"');
 assert.equal(malloc.function_info.return_type, "?*void");
 assert.equal(malloc.summary, "A foreign declaration keeps its directive after a nullable return type.");
+
+
+// Specialization code belongs to the signature, before the actual body.
+assert.equal(symbols.get("widen").display_signature,
+  "widen :: (value: $T) -> T #specialize");
+assert.equal(symbols.get("widen").function_info.return_type, "T");
+assert.equal(symbols.get("widen").summary, "Rebinds a type before compiling the body.");
+assert.equal(symbols.get("integer_only").display_signature,
+  "integer_only :: (value: $T) -> T #specialize Is_Integer(T)");
+assert.equal(symbols.get("read_foo").display_signature,
+  "read_foo :: (value: $T) -> s64 #specialize #meaningful { T,,foo; }");
+assert.equal(symbols.get("read_foo").function_info.return_type, "s64");
+for (const name of ["Specialized_Box", "Field_Box"])
+  assert.deepEqual(symbols.get(name).type_info.fields.map(field => [field.name, field.value_type]),
+    [["value", "$T"]], `${name} confused a specialization condition with the struct body`);
 
 const fixtureLines = readFileSync(join(root, "scripts/tests/reference-fixture/Fixture.glo"), "utf8").split(/\r?\n/);
 const fixtureLine = text => fixtureLines.findIndex(line => line.includes(text)) + 1;

@@ -11,6 +11,9 @@
 ] @local.scope
 
 ; Parameters
+; Module parameters are definitions in the source-file scope, including defaults.
+(module_parameter
+  name: (identifier) @local.definition)
 (receiver_parameter
   (self_expression) @local.definition)
 (parameter
@@ -82,6 +85,12 @@
   ] @local.reference)
 (postfix_expression
   procedure: [
+    (identifier)
+    (code_splice_identifier)
+    (non_hygienic_identifier)
+  ] @local.reference)
+(postfix_expression
+  scope: [
     (identifier)
     (code_splice_identifier)
     (non_hygienic_identifier)
