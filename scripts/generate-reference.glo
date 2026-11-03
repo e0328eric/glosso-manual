@@ -230,7 +230,16 @@ reference_manual_titles :: () -> [..]str {
         rest := line[5..line.count];
         index := reference_leading_number(rest);
         if index < 0 continue;
+        // `case N; return "title";`, or the `return` alone on the next line.
         title := reference_quoted_argument(rest);
+        if title.count == 0 && position < source.count {
+            finish = reference_line_end(source, position);
+            next := reference_trim_line(source[position..finish]);
+            if next.starts_with("return ") {
+                title = reference_quoted_argument(next);
+                position = finish + 1;
+            }
+        }
         if title.count == 0 continue;
         while titles.count <= index titles.push("");
         titles[index] = title.clone();
@@ -272,12 +281,15 @@ reference_collect_manual_text :: (path: str, texts: *[..]str) {
         position = finish + 1;
 
         if mode != MANUAL_SCAN_IDLE {
-            // A continuation line of a #string block starts with its marker;
-            // the call's own closing parenthesis is the only other shape.
+            // A wrapped call puts each argument on its own line: the index, an
+            // ordinary literal or a #string block whose lines start with its
+            // marker, and finally the call's own closing parenthesis.
             if line.starts_with(")") {
                 mode = MANUAL_SCAN_IDLE;
             } else if mode == MANUAL_SCAN_PROSE && line.starts_with("\\\\") {
                 reference_append_prose(&out, line[2..line.count]);
+            } else if mode == MANUAL_SCAN_PROSE && line.starts_with("\"") {
+                reference_append_prose(&out, reference_quoted_argument(line));
             }
             continue;
         }
@@ -300,7 +312,7 @@ reference_collect_manual_text :: (path: str, texts: *[..]str) {
         if !is_code && !is_text continue;
 
         // A call closed on its own line carries an ordinary literal; anything
-        // else opens a #string block that runs to a lone closing parenthesis.
+        // else is wrapped and runs to a lone closing parenthesis.
         if !line.ends_with(");") {
             if is_code mode = MANUAL_SCAN_CODE;
             else mode = MANUAL_SCAN_PROSE;

@@ -34,7 +34,7 @@ for (const file of readdirSync(join(root, "src")).filter(name => /^sections_.*\.
   const starts = [...source.matchAll(/^render_section_(\d+) :: \(\) \{$/gm)];
   starts.forEach((start, n) => {
     const body = source.slice(start.index, n + 1 < starts.length ? starts[n + 1].index : source.length);
-    const blocks = [...body.matchAll(/code_block\((\d+), "(\w+)", #string\n((?:[ \t]*\\\\.*\n)+)/g)]
+    const blocks = [...body.matchAll(/code_block\(\s*(\d+),\s*"(\w+)",\s*#string\n((?:[ \t]*\\\\.*\n)+)/g)]
       .map(match => ({
         index: Number(match[1]),
         language: match[2],

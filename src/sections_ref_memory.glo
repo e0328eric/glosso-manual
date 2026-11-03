@@ -817,7 +817,7 @@ render_section_71 :: () {
             \\
             \\main :: () {
             \\    arena := Arena.new();
-            \\    defer free(arena);
+            \\    defer free(&arena);
             \\
             \\    // One call: pass the allocator.
             \\    title := format("report {}", 7, .allocator = arena.allocator());
@@ -843,7 +843,7 @@ render_section_71 :: () {
         48,
         #string,oneline
             \\Nothing in the block is released on its own: the arena reclaims all
-            \\of it when `free(arena)` runs. Because the restore is registered like
+            \\of it when `free(&arena)` runs. Because the restore is registered like
             \\a deferred statement, its order relative to `defer` matters when an
             \\owner that grew under the pushed allocator is released at the end of
             \\the same block; the rule is given under Releasing through the
@@ -1671,15 +1671,17 @@ render_section_73 :: () {
         "glosso",
         #string
             \\Freeable :: typeclass (T: type) {
-            \\    free :: (x: T);
+            \\    free :: (x: *T);
             \\}
     );
     paragraph(
         6,
         #string,oneline
-            \\`Freeable(T)` holds exactly when `T` is an owner. `free(x)`,
-            \\`x.free()` and `Freeable.free(x)` are the same call. `free` cannot
-            \\fail and has no result; a release that can fail is offered as a
+            \\`Freeable(T)` holds exactly when `T` is an owner. `free` receives
+            \\the owner's address, so `free(&x)`, `x.free()` and
+            \\`Freeable.free(&x)` are the same call: a method call takes the
+            \\address of its receiver itself. `free` cannot fail and has no
+            \\result; a release that can fail is offered as a
             \\separate method, as Files, Handles, and Non-Memory Resources
             \\describes. These types are owners:
     );
@@ -1708,8 +1710,8 @@ render_section_73 :: () {
             \\many-pointers, not views, not `str`, `cstr` or `any`, whatever the
             \\memory they refer to. Calling `free` on a value that is not an owner
             \\is a compile-time error, so a release cannot be written for a type
-            \\that has nothing to release. The message lists the `free` methods
-            \\that were tried, each with a note that the constraint failed:
+            \\that has nothing to release. The message lists the first `free`
+            \\methods that were tried, with the receiver each one expects:
     );
     code_block(
         11,
@@ -1717,14 +1719,32 @@ render_section_73 :: () {
         #string
             \\// p: Point;  p.free();
             \\error: no typeclass method 'free' accepts this receiver and these arguments
-            \\note: got Point, expected String_Builder
-            \\note: constraint failed for free
-            \\note: got *Point, expected String_Builder
-            \\note: constraint failed for free
+            \\note: got Point, expected *Arena
+            \\note: got Point, expected *Memory_Writer
+            \\note: got Point, expected *String_Builder
+            \\note: got Point, expected *Path
     );
-    subheading(12, "The structural release");
     paragraph(
+        12,
+        #string,oneline
+            \\Because `free` receives an address, the owner must have one: a
+            \\variable, a field, an element, or `p.*` through a pointer `p`. A
+            \\pointer to an owner is passed as it is, `free(p)`. The result of a
+            \\call has no address, so it is stored in a variable before it is
+            \\released, as in `list := make_list(); free(&list);`. Releasing it
+            \\directly is rejected:
+    );
+    code_block(
         13,
+        "text",
+        #string
+            \\// free(&make_list());
+            \\error: no overload 'free' accepts these arguments
+            \\note: cannot take a pointer to a non-addressable expression: 'Call'
+    );
+    subheading(14, "The structural release");
+    paragraph(
+        15,
         #string,oneline
             \\An owner without a hand-written instance is released structurally:
             \\`free` releases its owner parts and skips everything else. Struct
@@ -1734,7 +1754,7 @@ render_section_73 :: () {
             \\a dynamic array's buffer goes last, through `context.allocator`.
     );
     code_block(
-        14,
+        16,
         "glosso",
         #string
             \\#import "Io";
@@ -1742,7 +1762,7 @@ render_section_73 :: () {
             \\// A type whose release is visible: it only prints.
             \\Tag :: struct { id: s64; }
             \\Tag ::: instance Freeable {
-            \\    free :: (x: Tag) { print("release {}\n", x.id); }
+            \\    free :: (x: *Tag) { print("release {}\n", x.id); }
             \\}
             \\
             \\Pair :: struct { first: Tag; count: s64; second: Tag; }
@@ -1750,18 +1770,18 @@ render_section_73 :: () {
             \\
             \\main :: () {
             \\    p: Pair = .{ .first = .{ .id = 1 }, .count = 9, .second = .{ .id = 2 } };
-            \\    free(p);                                  // fields in reverse order
+            \\    free(&p);                                  // fields in reverse order
             \\    tags: [..]Tag;
             \\    tags.push(.{ .id = 3 }, .{ .id = 4 });
-            \\    free(tags);                               // elements in ascending order, then the buffer
+            \\    free(&tags);                               // elements in ascending order, then the buffer
             \\    s: Shape = .Labelled(.{ .id = 5 });
-            \\    free(s);                                  // the active payload
+            \\    free(&s);                                  // the active payload
             \\    o: ?Tag = null;
-            \\    free(o);                                  // nothing to release
+            \\    free(&o);                                  // nothing to release
             \\}
     );
     code_block(
-        15,
+        17,
         "text",
         #string
             \\release 2
@@ -1771,15 +1791,15 @@ render_section_73 :: () {
             \\release 5
     );
     paragraph(
-        16,
+        18,
         #string,oneline
             \\A freshly declared owner holds nothing yet: an empty dynamic array has
             \\no buffer, and releasing it does nothing. That is what makes `defer
             \\x.free();` directly after the declaration safe on every path.
     );
-    subheading(17, "Hand-written instances");
+    subheading(19, "Hand-written instances");
     paragraph(
-        18,
+        20,
         #string,oneline
             \\A type needs its own instance when the structural release is not
             \\enough. The common reason is memory that the type owns through a
@@ -1788,7 +1808,7 @@ render_section_73 :: () {
             \\the structural release of the owner fields:
     );
     code_block(
-        19,
+        21,
         "glosso",
         #string
             \\#import "Io";
@@ -1802,7 +1822,7 @@ render_section_73 :: () {
             \\}
             \\
             \\Contact ::: instance Freeable {
-            \\    free :: (x: Contact) {
+            \\    free :: (x: *Contact) {
             \\        defer free_fields(x);      // afterwards, the owner fields: `phones`
             \\        x.name.free();
             \\    }
@@ -1822,13 +1842,13 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        20,
+        22,
         "text",
         #string
             \\Grace Hopper: 2 phones
     );
     paragraph(
-        21,
+        23,
         #string,oneline
             \\A hand-written instance runs only its own body: without
             \\`free_fields(x)` the `phones` buffer would leak. Three rules limit
@@ -1836,28 +1856,28 @@ render_section_73 :: () {
             \\nominal: a struct, union, enum or `distinct` type. The instance must
             \\be visible from the file that declares the type, so it is written in
             \\that file or in a file that file imports. And `free_fields` is
-            \\allowed only on a by-value parameter of the type, inside its
-            \\hand-written `Freeable` instance or another procedure of the module
-            \\that defines the type. A `distinct` integer with an instance is a
+            \\allowed only on a parameter of type `*T`, where `T` is the type,
+            \\inside its hand-written `Freeable` instance or another procedure of
+            \\the module that defines the type. A `distinct` integer with an instance is a
             \\convenient owner for a foreign handle (see Files, Handles, and
             \\Non-Memory Resources).
     );
     code_block(
-        22,
+        24,
         "text",
         #string
-            \\// *s64 ::: instance Freeable { free :: (x: *s64) {} }
+            \\// *s64 ::: instance Freeable { free :: (x: **s64) {} }
             \\error: `Freeable` instances require a nominal type defined in this module
             \\// Box ::: instance Freeable { ... }  in a module that imports Box
             \\error: `Freeable` instance for 'Box' is not visible from the file that declares 'Box'; declare it in that file, or in a file that file imports
-            \\// free_fields(b);  in main, with Box from another module
-            \\error: `free_fields` can only be used inside a hand-written `Freeable` instance or a function of `Box`'s defining module, on a by-value parameter of type `Box`
+            \\// free_fields(&b);  in main, with Box from another module
+            \\error: `free_fields` can only be used inside a hand-written `Freeable` instance or a function of `Box`'s defining module, on a parameter of type `*Box`
     );
-    subheading(23, "After `free`: `reset` and `clear`");
+    subheading(25, "After `free`: `reset` and `clear`");
     paragraph(
-        24,
+        26,
         #string,oneline
-            \\`free(x)` releases what `x` owns and ends `x`: afterwards `x` must
+            \\`free(&x)` releases what `x` owns and ends `x`: afterwards `x` must
             \\not be used or released again. A value that stays in use, such as a
             \\field of a longer-lived struct or a global, is released with `reset`
             \\instead where its type has one. `reset` releases the same things and
@@ -1865,7 +1885,7 @@ render_section_73 :: () {
             \\`clear` releases the elements but keeps the buffer for reuse.
     );
     code_block(
-        25,
+        27,
         "glosso",
         #string
             \\#import "Io";
@@ -1888,14 +1908,14 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        26,
+        28,
         "text",
         #string
             \\after reset: count 0 capacity 0
             \\after clear: count 0 capacity 8
     );
     paragraph(
-        27,
+        29,
         #string,oneline
             \\Dynamic arrays, the containers, `String_Builder`, `Arena` and `Pool`
             \\have `reset`, and most of them also have `clear`. Releasing an owner
@@ -1904,9 +1924,9 @@ render_section_73 :: () {
             \\`Allocator` and Allocation Procedures reports both at run time,
             \\together with owners that were never released.
     );
-    subheading(28, "Owners in generic code");
+    subheading(30, "Owners in generic code");
     paragraph(
-        29,
+        31,
         #string,oneline
             \\`Freeable(T)` is a compile-time condition, so generic code releases a
             \\`$T` only when it is an owner, with `#if` (see `#if`, `#assert`, and
@@ -1915,7 +1935,7 @@ render_section_73 :: () {
             \\failed`.
     );
     code_block(
-        30,
+        32,
         "glosso",
         #string
             \\#import "Io";
@@ -1924,7 +1944,7 @@ render_section_73 :: () {
             \\// Releases what a value owns, whatever its type.
             \\discard :: (value: $T) {
             \\    #if Freeable(T) {
-            \\        free(value);
+            \\        free(&value);
             \\        print("released a {}\n", type_name(T));
             \\    } else {
             \\        print("nothing to release in a {}\n", type_name(T));
@@ -1940,7 +1960,7 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        31,
+        33,
         "text",
         #string
             \\released a [..]s64
@@ -1948,15 +1968,15 @@ render_section_73 :: () {
             \\nothing to release in a str
     );
     paragraph(
-        32,
+        34,
         #string,oneline
             \\`Freeable(T)` is evaluated by the compiler. Use it in `#if`,
             \\`#assert`, `where` and `#comptime` expressions, not as a run-time
             \\`bool`.
     );
-    subheading(33, "Copies share what an owner owns");
+    subheading(35, "Copies share what an owner owns");
     paragraph(
-        34,
+        36,
         #string,oneline
             \\Assigning a value, passing it to a procedure and returning it all copy
             \\its bytes, as in C. A struct of numbers is copied completely, and the
@@ -1967,7 +1987,7 @@ render_section_73 :: () {
             \\may release it.
     );
     code_block(
-        35,
+        37,
         "glosso",
         #string
             \\#import "Io";
@@ -1986,21 +2006,21 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        36,
+        38,
         "text",
         #string
             \\a 100 / b 100
             \\same buffer: true
     );
     paragraph(
-        37,
+        39,
         #string,oneline
             \\Releasing both copies is a double free. Nothing prevents it at
             \\compile time; at run time the C library may stop the program, and
             \\the debug allocator names the places:
     );
     code_block(
-        38,
+        40,
         "glosso",
         #string
             \\// twice.glo: wrong, both copies are released
@@ -2015,7 +2035,7 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        39,
+        41,
         "text",
         #string
             \\$ glosso --run twice.glo 2>&1 | tail -2
@@ -2032,37 +2052,36 @@ render_section_73 :: () {
             \\glosso debug allocator: 1 allocator error(s)
     );
     paragraph(
-        40,
+        42,
         #string,oneline
             \\Glosso does not track which copy is responsible. That is a convention
             \\the program keeps, and the rest of this chapter describes the
             \\conventions the standard library follows and the operations that make
             \\them easy to keep.
     );
-    subheading(41, "Who releases what");
+    subheading(43, "Who releases what");
     bullet(
-        42,
+        44,
         #string,oneline
             \\The code that creates an owner releases it, unless it hands it on.
     );
     bullet(
-        43,
+        45,
         #string,oneline
             \\A procedure that only reads or changes an owner takes a pointer or a
             \\view: `*[..]T`, `*const Polygon`, `[]const T`. It neither copies the
             \\descriptor nor releases anything.
     );
     bullet(
-        44,
+        46,
         #string,oneline
             \\A procedure that takes an owner by value and keeps it takes over the
             \\release. `push` on a dynamic array, the `insert` operations of the
-            \\containers and `Pool.insert` store the value they are given, and
-            \\`free` itself takes its argument by value. After such a call the
-            \\caller does not release the value.
+            \\containers and `Pool.insert` store the value they are given. After
+            \\such a call the caller does not release the value.
     );
     bullet(
-        45,
+        47,
         #string,oneline
             \\A procedure that returns an owner hands it to the caller, as `format`
             \\and `collect`-style builders do. So does an operation that removes
@@ -2070,7 +2089,7 @@ render_section_73 :: () {
             \\`insert` that returns the value it displaced.
     );
     paragraph(
-        46,
+        48,
         #string,oneline
             \\Passing an owner by value to a procedure that changes it is the
             \\dangerous case. The callee works on a copy of the descriptor, and a
@@ -2078,7 +2097,7 @@ render_section_73 :: () {
             \\records the new one only in the copy:
     );
     code_block(
-        47,
+        49,
         "glosso",
         #string
             \\#import "Io";
@@ -2096,7 +2115,7 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        48,
+        50,
         "text",
         #string
             \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run marker.glo 2>&1 | grep 'debug allocator'
@@ -2106,16 +2125,16 @@ render_section_73 :: () {
             \\glosso debug allocator: 2 allocator error(s)
     );
     paragraph(
-        49,
+        51,
         #string,oneline
             \\`main` then reads the released buffer, releases it a second time,
             \\and leaks the new one. With `values: *[..]s64` and `add_marker(&a)`
             \\all three faults disappear: a procedure that grows an array takes it
             \\by pointer.
     );
-    subheading(50, "Handing an owner on: `value_take`");
+    subheading(52, "Handing an owner on: `value_take`");
     paragraph(
-        51,
+        53,
         #string,oneline
             \\A deferred release always runs, also on the path where the owner was
             \\returned or stored somewhere else; nothing checks whether the value
@@ -2123,7 +2142,7 @@ render_section_73 :: () {
             \\deferred `free` therefore returns a released buffer:
     );
     code_block(
-        52,
+        54,
         "glosso",
         #string
             \\// evens.glo: wrong, returns a released buffer
@@ -2142,7 +2161,7 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        53,
+        55,
         "text",
         #string
             \\$ GLOSSO_DEBUG_ALLOCATOR=1 glosso --run evens.glo 2>&1 | grep 'debug allocator'
@@ -2150,7 +2169,7 @@ render_section_73 :: () {
             \\glosso debug allocator: 1 allocator error(s)
     );
     paragraph(
-        54,
+        56,
         #string,oneline
             \\`value_take(&x)` from the `Memory/Ownership` module returns the value
             \\of `x` and leaves `x` holding its default value, which owns nothing.
@@ -2160,7 +2179,7 @@ render_section_73 :: () {
             \\on:
     );
     code_block(
-        55,
+        57,
         "glosso",
         #string
             \\#import "Io";
@@ -2193,14 +2212,14 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        56,
+        58,
         "text",
         #string
             \\batch 2 failed
             \\2 batches queued, 5 rows in the last
     );
     paragraph(
-        57,
+        59,
         #string,oneline
             \\`b` in `main` needs no release of its own: `push` stored it in the
             \\queue, and `queue.free()` releases it with the others. Had `main`
@@ -2208,7 +2227,7 @@ render_section_73 :: () {
             \\`queue.push(value_take(&b))`.
     );
     paragraph(
-        58,
+        60,
         #string,oneline
             \\The other way to release only on the failure path is `#try defer`,
             \\which registers a statement that runs only when `?` propagates a
@@ -2216,27 +2235,27 @@ render_section_73 :: () {
             \\uses it for resources acquired one after another, and Deferred
             \\Statements gives the exact rule.
     );
-    subheading(59, "The transfer operations");
-    table_header(60, "Operation   —   Effect");
+    subheading(61, "The transfer operations");
+    table_header(62, "Operation   —   Effect");
     table_row(
-        61,
+        63,
         "`value_take(&x)`   |   Returns the value of `x` and leaves `x` with its default value."
     );
     table_row(
-        62,
+        64,
         "`value_replace(&x, v)`   |   Stores `v` in `x` and returns the previous value, unreleased."
     );
-    table_row(63, "`value_swap(&a, &b)`   |   Exchanges the two values; nothing is released.");
+    table_row(65, "`value_swap(&a, &b)`   |   Exchanges the two values; nothing is released.");
     table_row(
-        64,
+        66,
         "`xs.take()`   |   For `[..]T`: returns the array and leaves `xs` empty. Needs no import."
     );
     table_row(
-        65,
+        67,
         "`xs.replace(ys)`   |   For `[..]T`: installs `ys` and returns the previous array."
     );
     paragraph(
-        66,
+        68,
         #string,oneline
             \\The first three work on any type and come from `Memory/Ownership`,
             \\which `Memory` also exports. The default that `value_take` leaves
@@ -2244,7 +2263,7 @@ render_section_73 :: () {
             \\"unnamed"` reads `"unnamed"` afterwards:
     );
     code_block(
-        67,
+        69,
         "glosso",
         #string
             \\#import "Io";
@@ -2282,7 +2301,7 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        68,
+        70,
         "text",
         #string
             \\a: unnamed 0 / b: build 2
@@ -2292,16 +2311,16 @@ render_section_73 :: () {
             \\frame 2: front 2 20
     );
     paragraph(
-        69,
+        71,
         #string,oneline
             \\After `value_replace(&b, c)`, `c` and `b` hold the same value, and
             \\only `b` is released. Assigning over an owner, `b = c;`, releases
             \\nothing: the value `b` held before is lost unless it was released or
             \\taken out first, which is what `value_replace` does in one step.
     );
-    subheading(70, "Copying what an owner owns");
+    subheading(72, "Copying what an owner owns");
     paragraph(
-        71,
+        73,
         #string,oneline
             \\There is no general deep copy, because only the type knows what a
             \\copy of its resources means. Strings have `text.clone(allocator)`, a
@@ -2310,7 +2329,7 @@ render_section_73 :: () {
             \\element. For a dynamic array of plain elements a loop is enough:
     );
     code_block(
-        72,
+        74,
         "glosso",
         #string
             \\#import "Io";
@@ -2334,21 +2353,21 @@ render_section_73 :: () {
             \\}
     );
     code_block(
-        73,
+        75,
         "text",
         #string
             \\1 100 same buffer: false
     );
     paragraph(
-        74,
+        76,
         #string,oneline
             \\For elements that are owners themselves, `duplicate` would copy
             \\descriptors again; each element needs its own copy, made the same way
             \\one level down.
     );
-    subheading(75, "Loops copy elements");
+    subheading(77, "Loops copy elements");
     paragraph(
-        76,
+        78,
         #string,oneline
             \\`for x: values` binds a copy of each element. For an array of owners
             \\the copy shares the element's resources, so the body must not release
@@ -2357,9 +2376,9 @@ render_section_73 :: () {
             \\elements uses `drain`, described in Container Buffers, Arenas, and
             \\Pools.
     );
-    subheading(77, "Deliberately not releasing: `leak`");
+    subheading(79, "Deliberately not releasing: `leak`");
     paragraph(
-        78,
+        80,
         #string,oneline
             \\`leak(x)` takes a value and does nothing with it. It marks in the
             \\source that an owner is meant to live until the program ends, such
@@ -2486,7 +2505,7 @@ render_section_74 :: () {
             \\
             \\Ticket :: struct { id: s64; }
             \\Ticket ::: instance Freeable {
-            \\    free :: (x: Ticket) { print("  release {}\n", x.id); }
+            \\    free :: (x: *Ticket) { print("  release {}\n", x.id); }
             \\}
             \\
             \\main :: () {
@@ -2496,7 +2515,7 @@ render_section_74 :: () {
             \\    for t: queue.drain() {
             \\        print("handle {}\n", t.id);
             \\        stop := t.id == 2;
-            \\        free(t);                     // the body owns each element
+            \\        free(&t);                     // the body owns each element
             \\        if stop break;               // the rest are released with the drain
             \\    }
             \\    print("queue count {}\n", queue.count);
@@ -2722,7 +2741,7 @@ render_section_74 :: () {
     table_row(41, "`a.clear()`   |   Every allocation dies; the first block is kept for reuse.");
     table_row(
         42,
-        "`a.reset()`, `free(a)`   |   Every allocation dies and every block goes back; `reset` leaves the arena usable."
+        "`a.reset()`, `free(&a)`   |   Every allocation dies and every block goes back; `reset` leaves the arena usable."
     );
     table_row(43, "`a.reserved()`   |   The bytes taken from the backing allocator.");
     paragraph(
@@ -2763,7 +2782,7 @@ render_section_74 :: () {
             \\
             \\main :: () {
             \\    arena := Arena.new(4096);
-            \\    defer free(arena);
+            \\    defer free(&arena);
             \\    for round: 1..4 {
             \\        list := tokenize(&arena, round * 50);
             \\        n := 0;
@@ -2869,7 +2888,7 @@ render_section_74 :: () {
             \\
             \\main :: () {
             \\    staff := Pool(Employee).new();
-            \\    defer free(staff);                 // releases every live value, then the slots
+            \\    defer free(&staff);                 // releases every live value, then the slots
             \\
             \\    boss := staff.insert(.{ .name = "Ada" });
             \\    names: []const str = .["Brian", "Carol", "Dave"];
@@ -2928,7 +2947,7 @@ render_section_74 :: () {
     );
     table_row(
         67,
-        "`p.reset()`, `free(p)`   |   Release every live value and the slots; every handle goes stale."
+        "`p.reset()`, `free(&p)`   |   Release every live value and the slots; every handle goes stale."
     );
     paragraph(
         68,
@@ -3226,7 +3245,7 @@ render_section_75 :: () {
             \\}
             \\
             \\C_File ::: instance Freeable {
-            \\    free :: (x: C_File) {
+            \\    free :: (x: *C_File) {
             \\        if x.stream print("closing a C stream\n");
             \\        _ := x.close();
             \\    }
@@ -3279,10 +3298,10 @@ render_section_75 :: () {
             \\Fd :: distinct s32;
             \\
             \\Fd ::: instance Freeable {
-            \\    free :: (x: Fd) {
-            \\        if cast(s32) x < 0 return;
-            \\        print("closing descriptor {}\n", cast(s32) x);
-            \\        _ := c_close(cast(s32) x);
+            \\    free :: (x: *Fd) {
+            \\        if cast(s32) x.* < 0 return;
+            \\        print("closing descriptor {}\n", cast(s32) x.*);
+            \\        _ := c_close(cast(s32) x.*);
             \\    }
             \\}
             \\

@@ -303,7 +303,7 @@ render_section_43 :: () {
         "text",
         #string
             \\// p := null;
-            \\error: cannot infer a type for null; annotate with a pointer type
+            \\error: cannot infer a type for null; add a type annotation
             \\// origin := .{ .x = 0 };
             \\error: struct literal needs a type
             \\// color := .Red;
@@ -363,8 +363,8 @@ render_section_43 :: () {
             \\has no values and cannot be default-initialized`. Neither has a
             \\struct with a field that is private to another module (see Who Can
             \\Use a Declaration: Visibility and Units). A name with neither a type
-            \\nor a value is not a declaration at all: `count;` alone is a statement
-            \\that reads `count`, and is `error: unbound 'count'` when no such name
+            \\nor a value is not a declaration at all: `tally;` alone is a statement
+            \\that reads `tally`, and is `error: unbound 'tally'` when no such name
             \\exists.
     );
     subheading(47, "Uninitialized variables: `#undefined`");
@@ -778,6 +778,94 @@ render_section_43 :: () {
             \\ordinary global. Compile-time code runs on a single thread and also
             \\sees a single instance. Freestanding, UEFI, and Wasm Programs
             \\describes those targets.
+    );
+    subheading(92, "Alignment and linker sections: `#align` and `#link_section`");
+    paragraph(
+        93,
+        #string,oneline
+            \\Two directives change where a variable is stored without changing its
+            \\type. `#align N` places the variable at an address that is a multiple
+            \\of `N` bytes, at least; `N` is a compile-time integer and a power of
+            \\two from 1 to 268435456. It applies to global, thread-local and local
+            \\variables. `#link_section "name"` puts a global variable into the
+            \\named section of the object file, initialized or not, so that a
+            \\linker script or another tool can find it there. Either directive
+            \\follows the type or the initial value, and a declaration may carry
+            \\both, in either order:
+    );
+    code_block(
+        94,
+        "glosso",
+        #string
+            \\#import "Io";
+            \\
+            \\CACHE_LINE :: 64;
+            \\
+            \\counters: [8]u64 #align CACHE_LINE;                  // after the type
+            \\table: [4]s32 #link_section ".lookup" = .[1, 2, 3, 4];
+            \\version: s64 = 3 #align 16;                          // after the initializer
+            \\
+            \\main :: () {
+            \\    scratch: [256]u8 #align (CACHE_LINE / 2);
+            \\    value := 7 #align 64;
+            \\    print("{} {} {}\n", cast(usize) &counters % 64, cast(usize) &scratch % 32, cast(usize) &value % 64);
+            \\    print("{} {} {}\n", version, value, table[3]);
+            \\}
+    );
+    code_block(
+        95,
+        "text",
+        #string
+            \\0 0 0
+            \\3 7 4
+    );
+    paragraph(
+        96,
+        #string,oneline
+            \\An `N` that is an expression with operators is written in
+            \\parentheses, as `scratch` shows. The type's own alignment is kept
+            \\when it is larger. The section of `table` is visible in the
+            \\executable:
+    );
+    code_block(
+        97,
+        "text",
+        #string
+            \\$ glosso storage.glo -o storage
+            \\glosso: compile storage.glo (target=x86_64-pc-linux-gnu)
+            \\glosso: link storage (target=x86_64-pc-linux-gnu, -O1)
+            \\glosso: done storage  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
+            \\$ readelf -SW storage | grep lookup
+            \\  [26] .lookup           PROGBITS        000000000001f698 01c698 000010 00  WA  0   0  4
+    );
+    paragraph(
+        98,
+        #string,oneline
+            \\Section names follow the conventions of the target's object format
+            \\(ELF, COFF, Mach-O or Wasm), which the compiler does not check. Both
+            \\directives belong to variable declarations only: a constant or a
+            \\parameter takes neither, and `#link_section` is rejected on a local
+            \\variable:
+    );
+    code_block(
+        99,
+        "text",
+        #string
+            \\// x: s64 #align 48;
+            \\error: #align expects a compile-time integer power of two between 1 and 268435456
+            \\// main :: () { y: s64 #link_section ".foo"; }
+            \\error: #link_section requires a global variable
+            \\// x: s64 #link_section "";
+            \\error: #link_section expects a nonempty section name without NUL bytes
+            \\// x: s64 #align 8 #align 16;
+            \\error: duplicate #align on variable declaration
+    );
+    paragraph(
+        100,
+        #string,oneline
+            \\A struct type can raise its own alignment with `#align(N)` instead,
+            \\which then holds for every variable, field and array element of that
+            \\type (see Field Order, Alignment, and Packing).
     );
 }
 
@@ -1232,9 +1320,9 @@ render_section_44 :: () {
         53,
         "text",
         #string
-            \\// if ready  count := 5;
-            \\// total := count;
-            \\error: unbound 'count'
+            \\// if ready  tally := 5;
+            \\// total := tally;
+            \\error: unbound 'tally'
             \\// for i: 0..3 { }
             \\// last := i;
             \\error: unbound 'i'
