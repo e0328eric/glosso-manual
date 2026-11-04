@@ -2744,15 +2744,15 @@ render_section_20 :: () {
             \\#import "Typeclass/Error";
             \\
             \\#comptime {
-            \\    set_build_options_dc(.do_output = false);
+            \\    set_current_output(false);
             \\
-            \\    workspace := Workspace.create("hello");
-            \\    options := workspace.get_build_options();
-            \\    options.output_path = "bin";
-            \\    options.set_optimization(.Optimized);
-            \\    options.set_build_options(workspace);
+            \\    profile := Build_Profile.create("hello");
+            \\    options := profile.options();
+            \\    options.output_directory = "bin";
+            \\    options.set_optimization_level(.O2);
+            \\    profile.set_options(options);
             \\
-            \\    if add_build_file("hello.glo", workspace) == {
+            \\    if compile_file("hello.glo", profile) == {
             \\        case .Ok(output);
             \\            print("{}", output);
             \\        case .Err(failure);
@@ -2779,29 +2779,29 @@ render_section_20 :: () {
     paragraph(
         14,
         #string,oneline
-            \\`set_build_options_dc(.do_output = false)` tells the compilation in
-            \\progress, the one running the script, to stop after its compile-time
-            \\steps and write nothing. The script then needs no `main`. (`_dc`
-            \\stands for "during compile"; the setting applies to the current
-            \\compilation only.) `add_build_file` compiles `hello.glo` in a child
-            \\compiler process, waits for it, and returns what the child printed,
+            \\`set_current_output(false)` tells the compilation in progress, the
+            \\one running the script, to stop after its compile-time steps and
+            \\write nothing. The script then needs no `main`, and the setting
+            \\applies to the current compilation only. `compile_file` compiles
+            \\`hello.glo` in a child compiler process, waits for it, and returns
+            \\what the child printed,
             \\its standard output followed by its standard error, which the script
             \\prints. The second run shows the two levels of caching: the script
             \\has a top-level `#comptime`, so it runs on every build, while the
             \\child compilation is an ordinary build that the artifact cache
             \\restores when nothing has changed.
     );
-    subheading(15, "Workspaces and build options");
+    subheading(15, "Build profiles and build options");
     paragraph(
         16,
         #string,oneline
             \\The settings of a nested compilation are a `Build_Options` value held
-            \\by the compiler in a workspace. `Workspace.create(name)` makes a
-            \\workspace with default options and returns its handle.
-            \\`get_build_options` returns a copy of the options, which the script
+            \\by the compiler in a build profile. `Build_Profile.create(name)` makes
+            \\a profile with default options and returns its handle.
+            \\`profile.options()` returns a copy of the options, which the script
             \\changes through its fields or its `set_*` and `add_*` methods, and
-            \\`set_build_options(workspace)` installs the copy; edits to the copy
-            \\have no effect until then. A call that names no workspace uses a
+            \\`profile.set_options(options)` installs the copy; edits to the copy
+            \\have no effect until then. A call that names no profile uses a
             \\shared implicit one, the handle `-1`. The defaults build an
             \\executable for the target of the running compilation, with the
             \\child's own optimization default.
@@ -2809,21 +2809,21 @@ render_section_20 :: () {
     table_header(17, "Field   —   Meaning   —   Method");
     table_row(
         18,
-        "`output_type`   |   What to produce: `Executable` (the default), `Object_File`, `LLVM_IR`, `Static_Library`, `Shared_Library`, or `No_Output`, which only leaves out `-o`   |   —"
+        "`output`   |   What to produce: `Executable` (the default), `Object_File`, `LLVM_IR`, `Static_Library`, `Shared_Library`, or `Default_Path`, an executable at the child's own default path (no `-o`)   |   —"
     );
     table_row(
         19,
-        "`output_path`, `output_executable_name`   |   Directory and name of the artifact; an empty name means the source file's name without `.glo`   |   —"
+        "`output_directory`, `output_name`   |   Directory and name of the artifact; an empty name means the source file's name without `.glo`   |   —"
     );
     table_row(
         20,
-        "`optimization_level`   |   `Debug`, `Very_Debug`, `Optimized` and `Very_Optimized` are `-O0` to `-O3`; `Optimized_Small`, `Optimized_Very_Small` and `Optimized_Tiny` are `-Os`, `-Oz`, `-Ozz`; `Default` passes no flag   |   `set_optimization`"
+        "`optimization_level`   |   `O0` to `O3`, `Os`, `Oz` and `Ozz` pass the flag of the same name; `Default` passes no flag   |   `set_optimization_level`"
     );
     table_row(
         21,
         "`target`   |   An `Output_Target`; all zero, the default, means the current target   |   `set_target`"
     );
-    table_row(22, "`import_path`   |   Extra `--module-path` directories   |   `add_module_path`");
+    table_row(22, "`module_paths`   |   Extra `--module-path` directories   |   `add_module_path`");
     table_row(
         23,
         "`compiler_args`, `linker_args`   |   Raw compiler arguments; arguments passed to the linker one by one   |   `add_compiler_arg`, `add_linker_arg`, `add_linker_args`"
@@ -2834,7 +2834,7 @@ render_section_20 :: () {
     );
     table_row(
         25,
-        "`compile_time_command_line`   |   Arguments after `--` for the child's compile-time code   |   —"
+        "`comptime_args`   |   Arguments after `--` for the child's compile-time code   |   —"
     );
     table_row(
         26,
@@ -2842,26 +2842,24 @@ render_section_20 :: () {
     );
     table_row(
         27,
-        "`temp_allocator_size`, `color`, `backend`   |   Temporary arena size; color of the captured diagnostics; an explicit backend instead of one derived from `output_type`   |   `set_temp_allocator_size`, `set_color`, `set_backend`"
+        "`temp_allocator_size`, `color`, `backend`   |   Temporary arena size; color of the captured diagnostics; an explicit backend instead of one derived from `output`   |   `set_temp_allocator_size`, `set_color`, `set_backend`"
     );
     paragraph(
         28,
         #string,oneline
-            \\`Build_Options` also has the fields `intermediate_path`, `do_output`,
-            \\`write_added_strings` and `text_output_flags`, which the compiler
-            \\does not read. In particular, `do_output = false` in a workspace does
-            \\not suppress the child's artifact; only `set_build_options_dc` stops
-            \\output, and only for the compilation that calls it.
+            \\A profile has no switch that suppresses the child's artifact: only
+            \\`set_current_output(false)` stops output, and only for the
+            \\compilation that calls it.
     );
     subheading(29, "Compiling a file or a string");
     paragraph(
         30,
         #string,oneline
-            \\`add_build_file(path, workspace)` compiles a file at once; it does not
-            \\collect files for later. `add_build_string(source, workspace)` does
+            \\`compile_file(path, profile)` compiles a file at once; it does not
+            \\collect files for later. `compile_source(source, profile)` does
             \\the same for source text: it writes the text to a new `.glo` file in
             \\the system's temporary directory, which is not deleted afterwards,
-            \\and compiles that, so set `output_executable_name` to get a
+            \\and compiles that, so set `output_name` to get a
             \\predictable artifact name. Both return `Compiler_Error!str`. A child
             \\that fails is not an error of the script: the result is `.Err` with
             \\the child's exit status in `status` and its diagnostics in `message`,
@@ -2888,8 +2886,8 @@ render_section_20 :: () {
         33,
         #string,oneline
             \\A build script hands arguments to the compile-time code of a program
-            \\it compiles through the `compile_time_command_line` field of the
-            \\workspace's options. Each element is passed as one argument, spaces
+            \\it compiles through the `comptime_args` field of the profile's
+            \\options. Each element is passed as one argument, spaces
             \\and empty strings included. This script passes two fixed arguments
             \\and then its own:
     );
@@ -2919,15 +2917,15 @@ render_section_20 :: () {
             \\#import "Typeclass/Error";
             \\
             \\#comptime {
-            \\    set_build_options_dc(.do_output = false);
-            \\    workspace := Workspace.create("child");
-            \\    options := workspace.get_build_options();
-            \\    options.output_path = "bin";
-            \\    options.compile_time_command_line.push("two words");
-            \\    options.compile_time_command_line.push("");
-            \\    for get_cmdline_args() options.compile_time_command_line.push(it);
-            \\    options.set_build_options(workspace);
-            \\    if add_build_file("child.glo", workspace) == {
+            \\    set_current_output(false);
+            \\    profile := Build_Profile.create("child");
+            \\    options := profile.options();
+            \\    options.output_directory = "bin";
+            \\    options.comptime_args.push("two words");
+            \\    options.comptime_args.push("");
+            \\    for get_cmdline_args() options.comptime_args.push(it);
+            \\    profile.set_options(options);
+            \\    if compile_file("child.glo", profile) == {
             \\        case .Ok(output); print("{}", output);
             \\        case .Err(failure); report_error(failure); exit(1);
             \\    }
@@ -2949,7 +2947,7 @@ render_section_20 :: () {
         #string,oneline
             \\The compile-time command line is how one script serves several
             \\tasks. The script below builds a debug or a release executable, or
-            \\cross-compiles one for 64-bit ARM Linux by setting the workspace's
+            \\cross-compiles one for 64-bit ARM Linux by setting the profile's
             \\target (see Target Triples and Cross Builds):
     );
     code_block(
@@ -2961,15 +2959,15 @@ render_section_20 :: () {
             \\#import "Compiler";
             \\#import "Typeclass/Error";
             \\
-            \\build :: (name: str, level: Optimization, target: Output_Target = .{}) -> bool {
-            \\    workspace := Workspace.create(name);
-            \\    options := workspace.get_build_options();
-            \\    options.output_path = "bin";
-            \\    options.output_executable_name = name;
-            \\    options.set_optimization(level);
+            \\build :: (name: str, level: Optimization_Level, target: Output_Target = .{}) -> bool {
+            \\    profile := Build_Profile.create(name);
+            \\    options := profile.options();
+            \\    options.output_directory = "bin";
+            \\    options.output_name = name;
+            \\    options.set_optimization_level(level);
             \\    options.set_target(target);
-            \\    options.set_build_options(workspace);
-            \\    if add_build_file("hello.glo", workspace) == {
+            \\    profile.set_options(options);
+            \\    if compile_file("hello.glo", profile) == {
             \\        case .Ok; return true;
             \\        case .Err(failure);
             \\            report_error(failure);
@@ -2978,18 +2976,18 @@ render_section_20 :: () {
             \\}
             \\
             \\run_task :: () {
-            \\    set_build_options_dc(.do_output = false);
+            \\    set_current_output(false);
             \\    args := get_cmdline_args();
             \\    task := "debug";
             \\    if args.count > 0 task = args[0];
             \\    ok := false;
             \\    if task == {
             \\        case "debug";
-            \\            ok = build("hello-debug", .Debug);
+            \\            ok = build("hello-debug", .O0);
             \\        case "release";
-            \\            ok = build("hello", .Optimized);
+            \\            ok = build("hello", .O2);
             \\        case "arm";
-            \\            ok = build("hello-aarch64", .Optimized_Small,
+            \\            ok = build("hello-aarch64", .Os,
             \\                .{ .os = .Linux, .cpu = .Aarch64, .abi = .Musl });
             \\        else;
             \\            print("unknown task {}; use debug, release or arm\n", task);
@@ -3068,7 +3066,7 @@ render_section_20 :: () {
     table_header(47, "Procedure   —   Result");
     table_row(
         48,
-        "`executable_path()`   |   The path of the running compiler, the one nested compilations use."
+        "`compiler_path()`   |   The path of the running compiler, the one nested compilations use."
     );
     table_row(
         49,
@@ -3299,9 +3297,9 @@ render_section_20 :: () {
             \\This manual is built by such a script, `first.glo`. Its top-level
             \\`#comptime run_manual_task();` reads a task name from the
             \\compile-time command line, so that `glosso first.glo -- build`
-            \\builds the manual: it creates a workspace for the WebAssembly target
-            \\with a cache directory and a list of linker arguments, compiles the
-            \\manual's main file with `add_build_file`, and copies the web assets
+            \\builds the manual: it creates a build profile for the WebAssembly
+            \\target with a cache directory and a list of linker arguments, compiles
+            \\the manual's main file with `compile_file`, and copies the web assets
             \\next to the result. The task dispatch reads:
     );
     code_block(
@@ -3309,7 +3307,7 @@ render_section_20 :: () {
         "glosso",
         #string
             \\run_manual_task :: () {
-            \\    set_build_options_dc(.do_output = false);
+            \\    set_current_output(false);
             \\    args := get_cmdline_args();
             \\    if args.count == 0 {
             \\        manual_task_usage();

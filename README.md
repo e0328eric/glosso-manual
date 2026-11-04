@@ -121,7 +121,7 @@ Use a current Glosso checkout whose Compiler/Bindgen service records preserve
 their field order on wasm32; the old local ABI adapters are no longer needed.
 Binding generation explicitly disables textual fallback so Clay uses Clang's
 complete C layouts.
-`Build_Options.output_executable_name` takes an executable base name: Windows
+`Build_Options.output_name` takes an executable base name: Windows
 builds append `.exe`, even if the supplied name already has that suffix.
 The build driver supplies base names and uses platform-specific paths to run
 the resulting tools. A CLI `-o` path still names the exact output file.

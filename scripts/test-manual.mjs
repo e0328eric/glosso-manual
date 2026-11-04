@@ -399,7 +399,7 @@ assert(stringFree, "Missing owned-string cleanup from Strings/Memory");
 assert.equal(stringFree[5], "method");
 assert(referenceIndex.symbols.some(symbol => symbol[4] === stringMemory && symbol[0] === "str.into_temporary"),
   "Missing arena ownership transfer from Strings/Memory");
-for (const name of ["Workspace.create", "String_Builder.new", "String_Builder.writef",
+for (const name of ["Build_Profile.create", "Build_Profile.set_options", "compile_file", "String_Builder.new", "String_Builder.writef",
   "Path.from_string", "matrix_array_type", "matrix_from_array", "matrix_to_array"])
   assert(referenceIndex.symbols.some(symbol => symbol[0] === name), `Missing current API ${name}`);
 for (const location of ["home", "cache", "config", "config_local", "data", "data_local",
@@ -410,7 +410,7 @@ for (const location of ["home", "cache", "config", "config_local", "data", "data
   assert(!referenceIndex.symbols.some(symbol => symbol[0] === `${location}_dir`),
     `Obsolete directory query ${location}_dir`);
 }
-for (const name of ["Workspace.create_workspace", "String_Builder.source_new", "Path.path_from_string",
+for (const name of ["Workspace.create", "Workspace.create_workspace", "set_build_options_dc", "add_build_file", "String_Builder.source_new", "Path.path_from_string",
   "Compiler_Borrow_Check"])
   assert(!referenceIndex.symbols.some(symbol => symbol[0] === name), `Obsolete API ${name}`);
 
