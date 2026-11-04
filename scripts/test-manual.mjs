@@ -153,6 +153,8 @@ for (const source of [
   'Rune :: #char "\\u{1f642}";',
   'main :: () { value: s64 = 7; p := &value; q := value.&; *p += 1; q.* += 1; pp := &p; answer := **pp; }',
   'f :: (writable: *s64, readonly: *const s64, nested: **const s64, bytes: []const u8) {}',
+  'main :: () { a: ?s64 = ?5; b := ?.(); c: ??s64 = ?null; d := ifx a != null ?a else null; }',
+  'f :: (x: ?s64) -> ?s64 { if x == { case ?1..=9; return ?(x? + 1); case ?_; return null; case null; } #pattern ?v := x else { return null; }; return ?v; }',
 ]) {
   const current = parser.parse(source);
   assert(!current.rootNode.hasError, "Current syntax did not parse: " + source);

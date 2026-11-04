@@ -2456,7 +2456,7 @@ render_section_63 :: () {
             \\    counts.insert(.{ 3, 4 }, 20)?;
             \\    counts.insert(.{ 1, 2 }, 11)?;
             \\    print("{} entries\n", counts.len());
-            \\    if #pattern .Some(value) = counts.get(.{ 1, 2 }) print("(1, 2) -> {}\n", value.*);
+            \\    if #pattern ?value = counts.get(.{ 1, 2 }) print("(1, 2) -> {}\n", value.*);
             \\    a := Cell.{ 1, 2 };
             \\    print("{}\n", a.hash() == Cell.{ 1, 2 }.hash());
             \\    return .Ok;
@@ -2598,7 +2598,7 @@ render_section_64 :: () {
         16,
         "Pointers and procedures   |   The address on Linux; the fixed text `<pointer>` on Windows, macOS and other targets."
     );
-    table_row(17, "`?T`   |   `Some(...)` or `None`, when `T` has `Show`.");
+    table_row(17, "`?T`   |   `?` and the payload, or `null`, when `T` has `Show`.");
     table_row(18, "`type`   |   The type's name.");
     table_row(19, "`any`   |   The text of the value inside, by its own type.");
     table_row(
@@ -2778,10 +2778,10 @@ render_section_64 :: () {
             \\
             \\Direction ::: instance FromString {
             \\    from_string :: (#empty: Direction, text: str) -> ?Direction {
-            \\        if text == "N" return .Some(.North);
-            \\        if text == "E" return .Some(.East);
-            \\        if text == "S" return .Some(.South);
-            \\        if text == "W" return .Some(.West);
+            \\        if text == "N" return ?.North;
+            \\        if text == "E" return ?.East;
+            \\        if text == "S" return ?.South;
+            \\        if text == "W" return ?.West;
             \\        return null;
             \\    }
             \\}
@@ -2795,8 +2795,8 @@ render_section_64 :: () {
         62,
         "text",
         #string
-            \\Some(-42) None Some(2.5)
-            \\Some(South) None
+            \\?-42 null ?2.5
+            \\?South null
     );
 }
 
@@ -3622,9 +3622,11 @@ render_section_66 :: () {
         29,
         #string,oneline
             \\A few spellings are syntax rather than class members and cannot be
-            \\given a meaning: plain `=`, member access, `.*` and `.&`, and prefix
-            \\`*` and `&`, which form pointer types and take addresses (see
-            \\Pointer Types).
+            \\given a meaning: plain `=`, member access, `.*` and `.&`, prefix `*`
+            \\and `&`, which form pointer types and take addresses (see Pointer
+            \\Types), and prefix `?`, which forms optional types and present
+            \\values (see `?T` and `E!T`). `?` has only its suffix form, owned by
+            \\`Try`; declaring it as a prefix or binary operator is an error.
     );
     subheading(30, "Declaring a new operator");
     paragraph(
@@ -4118,30 +4120,97 @@ render_section_67 :: () {
             \\operators, at level 2, so it applies to everything before it that
             \\binds tighter: `a[n - 1..]` is `a[(n - 1)..]`.
     );
-    subheading(30, "Comparisons do not chain");
+    subheading(30, "Spacing around a suffix operator");
     paragraph(
         31,
+        #string,oneline
+            \\A spelling with a suffix form, such as `?` or a declared suffix
+            \\operator, can be read two ways when an operand follows it: `a++b`
+            \\may be the suffix `a++` or the binary `a ++ b`. The spaces around it
+            \\decide. Attached to the operand before it and spaced from the one
+            \\after, as in `a++ b`, it is the suffix. Spaced before and attached
+            \\after, as in `a ++b`, it is the prefix form, which ends the
+            \\expression before it; without a prefix form it is the binary one.
+            \\With a space on both sides it is the binary form, and an error when
+            \\there is none. With no space at all it is the binary form when there
+            \\is one and the suffix otherwise. When what follows cannot start an
+            \\operand, it is always the suffix. The ranges keep their own rules
+            \\above.
+    );
+    code_block(
+        32,
+        "glosso",
+        #string
+            \\#import "Io";
+            \\
+            \\Bump :: typeclass (T: type) {
+            \\    '++' :: (value: T) -> T #operator(suffix);
+            \\    '++' :: (value: T) -> T #operator(prefix);
+            \\    '++' :: (a: T, b: T) -> T #operator(left, 600);
+            \\}
+            \\
+            \\s64 ::: instance Bump {
+            \\    '++' :: (value: s64) -> s64 #operator(suffix) { return value + 1; }
+            \\    '++' :: (value: s64) -> s64 #operator(prefix) { return value + 10; }
+            \\    '++' :: (a: s64, b: s64) -> s64 { return a * 100 + b; }
+            \\}
+            \\
+            \\plus_one :: (x: ?s64) -> ?s64 { return ?(x? + 1); }
+            \\
+            \\main :: () {
+            \\    a := 5;
+            \\    b := 7;
+            \\    print("{} {} {} {}\n", a++b, a ++ b, a++, ++b);
+            \\    flag := true;
+            \\    maybe: ?s64 = ifx flag ?a else null; // `?a` is the first arm
+            \\    print("{} {}\n", maybe, plus_one(maybe));
+            \\}
+    );
+    code_block(
+        33,
+        "text",
+        #string
+            \\507 507 6 17
+            \\?5 ?6
+    );
+    paragraph(
+        34,
+        #string,oneline
+            \\`?` has no binary form, so a `?` with a space on both sides is an
+            \\error:
+    );
+    code_block(
+        35,
+        "text",
+        #string
+            \\// total := maybe ? 1;
+            \\error: '?' with a space on both sides is ambiguous
+            \\note: write 'x? y' for the try operator, or 'x ?y' for a present value
+    );
+    subheading(36, "Comparisons do not chain");
+    paragraph(
+        37,
         #string,oneline
             \\The comparisons group from the left like the other operators, so
             \\`a < b < c` is `(a < b) < c`, which compares a `bool` with a number:
     );
     code_block(
-        32,
+        38,
         "text",
         #string
             \\// print("{}\n", a < b < c);
             \\error: no operator '<' for bool, ssize
     );
     paragraph(
-        33,
+        39,
         #string,oneline
             \\Write `a < b && b < c`. A chain of `==` compiles when the types fit,
             \\but it does not test three values for equality: `a == b == false` is
             \\`(a == b) == false`.
     );
-    subheading(34, "Associativity");
+    subheading(40, "Associativity");
     paragraph(
-        35,
+        41,
         #string,oneline
             \\`left` groups a chain from the left, so `10 - 4 - 3` is
             \\`(10 - 4) - 3`. Every binary operator of the prelude is `left`
@@ -4151,7 +4220,7 @@ render_section_67 :: () {
             \\`right`, which is the usual choice for exponentiation:
     );
     code_block(
-        36,
+        42,
         "glosso",
         #string
             \\#import "Io";
@@ -4179,7 +4248,7 @@ render_section_67 :: () {
             \\}
     );
     code_block(
-        37,
+        43,
         "text",
         #string
             \\512
@@ -4188,7 +4257,7 @@ render_section_67 :: () {
             \\4
     );
     paragraph(
-        38,
+        44,
         #string,oneline
             \\`2 ** 3 ** 2` is `2 ** (3 ** 2)`, and level 19 puts `**` above `*`.
             \\The last line shows the rule for prefix operators at work: `-x ** 2`
@@ -4196,22 +4265,22 @@ render_section_67 :: () {
             \\mathematics would give. Write `-(x ** 2)` for that.
     );
     paragraph(
-        39,
+        45,
         #string,oneline
             \\Two operators with the same level and different associativity cannot
             \\be chained, because neither grouping would be the natural one. If a
             \\class declared `~>` with `#operator(left, 19)` beside `**`:
     );
     code_block(
-        40,
+        46,
         "text",
         #string
             \\// y := x ** 2 ~> 3;
             \\error: operators '**' and '~>' both have precedence 19 but different associativity, so '** ~>' is ambiguous; add parentheses
     );
-    subheading(41, "Choosing a level for a new operator");
+    subheading(47, "Choosing a level for a new operator");
     paragraph(
-        42,
+        48,
         #string,oneline
             \\A new operator's level follows from what its operands usually are.
             \\An operator whose operands are comparisons belongs below the
@@ -4222,7 +4291,7 @@ render_section_67 :: () {
             \\the way implications are read:
     );
     code_block(
-        43,
+        49,
         "glosso",
         #string
             \\#import "Io";
@@ -4245,7 +4314,7 @@ render_section_67 :: () {
             \\}
     );
     code_block(
-        44,
+        50,
         "text",
         #string
             \\true
@@ -4253,7 +4322,7 @@ render_section_67 :: () {
             \\true false
     );
     paragraph(
-        45,
+        51,
         #string,oneline
             \\The first line is `((n > 10) && (n % 2 == 0)) ==> (n % 4 == 0)`. In
             \\the last, the right grouping gives `false ==> (false ==> false)`,
@@ -5113,7 +5182,7 @@ render_section_69 :: () {
             \\
             \\    print("by hand:");
             \\    walk := Iter(Ring).new(&ring);
-            \\    while #pattern .Some(x) = walk.next() print(" {}", x);
+            \\    while #pattern ?x = walk.next() print(" {}", x);
             \\
             \\    print("\nreversed iterator:");
             \\    for x: Iter(Ring).new(&ring, true) print(" {}", x);
@@ -5182,7 +5251,7 @@ render_section_69 :: () {
             \\    d := xs.drain().rev();
             \\    defer free(&d);
             \\    print("{} left:", d.remaining());
-            \\    while #pattern .Some(x) = d.next() print(" {}", x);
+            \\    while #pattern ?x = d.next() print(" {}", x);
             \\    print("\n");
             \\}
     );
@@ -5271,7 +5340,7 @@ render_section_69 :: () {
             \\        #if reverse { #compile_error "a List can only be walked forwards"; }
             \\        cursor := list.head;
             \\        step: ssize = 0;
-            \\        while #pattern .Some(node) = cursor {
+            \\        while #pattern ?node = cursor {
             \\            `it := node.value;
             \\            `it_index := step;
             \\            cursor = node.next;

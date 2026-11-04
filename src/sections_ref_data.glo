@@ -472,7 +472,7 @@ render_section_33 :: () {
             \\sum :: (head: *Node) -> s64 {
             \\    total := head.value;
             \\    if head.next == {
-            \\        case .Some(rest); total += sum(rest);
+            \\        case ?rest; total += sum(rest);
             \\        case null;
             \\    }
             \\    return total;
@@ -2539,14 +2539,16 @@ render_section_38 :: () {
     paragraph(
         2,
         #string,oneline
-            \\A value of type `?s64` either holds an `s64`, written `.Some(5)`, or
+            \\A value of type `?s64` either holds an `s64`, written `?5`, or
             \\holds nothing, written `null`. It is the type for answers that may
             \\not exist, such as the position of an element that may not be in a
             \\list, and it puts the absence in the type instead of in a special
-            \\value like -1. `?T` is a tagged union with two variants: `Some`, which
-            \\carries the `T`, and the empty one, which is always spelled `null`.
-            \\Everything in Tagged and Untagged Unions applies to it: a switch must
-            \\cover both cases, and the payload is read through a pattern.
+            \\value like -1. `?T` is a tagged union with two variants, a present
+            \\one that carries the `T` and an empty one. Both have spellings of
+            \\their own instead of variant names: a prefix `?` makes the present
+            \\value, as in `?5`, and `null` is the empty one. Everything in Tagged
+            \\and Untagged Unions applies to it: a switch must cover both cases,
+            \\and the payload is read through a pattern.
     );
     code_block(
         3,
@@ -2565,8 +2567,8 @@ render_section_38 :: () {
             \\    storage: [4]s64 = .[4, 8, 15, 16];
             \\    values := storage[..];
             \\    if find(values, 15) == {
-            \\        case .Some(i); print("found at {}\n", i);
-            \\        case null;     print("missing\n");
+            \\        case ?i;   print("found at {}\n", i);
+            \\        case null; print("missing\n");
             \\    }
             \\    missing := find(values, 23);
             \\    print("{} {}\n", missing == null, missing.unwrap_or(-1));
@@ -2583,12 +2585,15 @@ render_section_38 :: () {
     paragraph(
         6,
         #string,oneline
-            \\A present value is written `.Some(value)` where the type is expected,
-            \\and `(?T).make_some(value)` anywhere. An optional that is not
-            \\initialized is `null`. Inside a procedure that returns `?T`,
-            \\`return value;` with a plain `T` means `return .Some(value);`, as
-            \\`find` above relies on. Everywhere else a `T` does not become a `?T`
-            \\by itself, and an empty optional is never written `.None`:
+            \\A present value is a `?` written before any expression: `?5`,
+            \\`?name`, `?(n / 2)`. Where no type is expected the payload keeps the
+            \\type it would have alone, so `?6` by itself is a `?ssize`. The
+            \\payload of a `?void` is the unit value `.()`, so its present value
+            \\is `?.()`. An optional that is not initialized is `null`. Inside a
+            \\procedure that returns `?T`, `return value;` with a plain `T` means
+            \\`return ?value;`, as `find` above relies on. Everywhere else a `T`
+            \\does not become a `?T` by itself, and the variant spellings of a
+            \\declared union, `.Some(x)` and `.None`, are errors on a `?T`:
     );
     code_block(
         7,
@@ -2598,9 +2603,9 @@ render_section_38 :: () {
             \\
             \\main :: () {
             \\    a: ?s64;
-            \\    b: ?s64 = .Some(5);
+            \\    b: ?s64 = ?5;
             \\    c: ?s64 = null;
-            \\    d := (?s64).make_some(6);
+            \\    d := ?6;
             \\    print("{} {} {} {}\n", a, b, c, d);
             \\    print("{} {} {}\n", a.is_none(), b.is_some(), !c);
             \\}
@@ -2609,7 +2614,7 @@ render_section_38 :: () {
         8,
         "text",
         #string
-            \\None Some(5) None Some(6)
+            \\null ?5 null ?6
             \\true true true
     );
     code_block(
@@ -2618,6 +2623,8 @@ render_section_38 :: () {
         #string
             \\// b: ?s64 = 5;
             \\error: got ssize, expected ?s64
+            \\// c: ?s64 = .Some(5);
+            \\error: use `?x` for a present `?T`, not `.Some(x)`
             \\// c: ?s64 = .None;
             \\error: use `null` for an empty `?T`
             \\// n: s64 = b;
@@ -2626,23 +2633,25 @@ render_section_38 :: () {
     paragraph(
         10,
         #string,oneline
-            \\An optional prints as `Some(...)`, or as `None` when it is empty,
-            \\provided its payload can be printed. `!x` is true when `x` is empty,
+            \\An optional prints the way it is written: `?` and the payload, as in
+            \\`?5` or `?.()`, or `null` when it is empty, provided its payload can
+            \\be printed. `!x` is true when `x` is empty,
             \\as `x.is_none()` is; it does not look at the payload, so `!x` on a
-            \\`.Some(false)` is false. `x == null` tests the same thing, and two
+            \\`?false` is false. `x == null` tests the same thing, and two
             \\optionals compare equal when both are empty or both hold equal
-            \\payloads.
+            \\payloads; in `x == ?5` the `5` takes its type from `x`.
     );
     subheading(11, "Reading an optional");
     paragraph(
         12,
         #string,oneline
             \\The payload comes out through a pattern: a switch with
-            \\`case .Some(v);` and `case null;`, an `if #pattern .Some(v) = x` that
+            \\`case ?v;` and `case null;`, an `if #pattern ?v = x` that
             \\runs only when a value is present, or
-            \\`#pattern .Some(v) := x else { ... };`, which leaves the block when it
-            \\is not. Reading `x.Some` directly is the same error as for any tagged
-            \\union. For the common cases the helper methods are shorter:
+            \\`#pattern ?v := x else { ... };`, which leaves the block when it
+            \\is not. Reading the payload as a field, `x.Some`, is the same error as
+            \\for any tagged union. For the common cases the helper methods are
+            \\shorter:
     );
     code_block(
         13,
@@ -2656,8 +2665,8 @@ render_section_38 :: () {
             \\}
             \\
             \\main :: () {
-            \\    if #pattern .Some(h) = half(10) print("half of 10 is {}\n", h);
-            \\    #pattern .Some(q) := half(12) else { return; };
+            \\    if #pattern ?h = half(10) print("half of 10 is {}\n", h);
+            \\    #pattern ?q := half(12) else { return; };
             \\    print("half of 12 is {}\n", q);
             \\    print("{} {}\n", half(7).unwrap_or(0), half(8).map(|h| -> s64 { return h * 100; }));
             \\    print("{}\n", half(40).and_then(half).and_then(half));
@@ -2671,9 +2680,9 @@ render_section_38 :: () {
         #string
             \\half of 10 is 5
             \\half of 12 is 6
-            \\0 Some(400)
-            \\Some(5)
-            \\None
+            \\0 ?400
+            \\?5
+            \\null
             \\true
     );
     table_header(15, "Helper   —   Result");
@@ -2686,7 +2695,7 @@ render_section_38 :: () {
         18,
         "`x.unwrap_or_else(f)`   |   The payload, or `f()`, called only when `x` is empty."
     );
-    table_row(19, "`x.map(f)`   |   `.Some(f(v))` for a payload `v`, else `null`.");
+    table_row(19, "`x.map(f)`   |   `?f(v)` for a payload `v`, else `null`.");
     table_row(20, "`x.map_or(f, fallback)`   |   `f(v)` for a payload `v`, else `fallback`.");
     table_row(21, "`x.and_then(f)`   |   `f(v)` where `f` itself returns an optional, else `null`.");
     table_row(22, "`x.or_else(f)`   |   `x` if it holds a value, else the optional `f()` returns.");
@@ -2695,20 +2704,16 @@ render_section_38 :: () {
         24,
         "`x.ok_or(e)`, `x.ok_or_else(f)`   |   A result: `.Ok(v)`, or `.Err(e)` / `.Err(f())`."
     );
-    table_row(
-        25,
-        "`(?T).make_some(v)`, `(?T).make_none()`   |   Construct with the type written out."
-    );
     paragraph(
-        26,
+        25,
         #string,oneline
             \\The `f` arguments are procedures or lambdas (see Lambdas and
             \\`#fn_ptr` Values). The payload is copied out; for a pointer payload
             \\the copy is the same pointer.
     );
-    subheading(27, "Results: `E!T`");
+    subheading(26, "Results: `E!T`");
     paragraph(
-        28,
+        27,
         #string,oneline
             \\A value of type `E!T` is either a success holding a `T`, written
             \\`.Ok(value)`, or a failure holding an error of type `E`, written
@@ -2720,7 +2725,7 @@ render_section_38 :: () {
             \\error types (see `#from` variants in Tagged and Untagged Unions).
     );
     code_block(
-        29,
+        28,
         "glosso",
         #string
             \\#import "Io";
@@ -2750,16 +2755,16 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        30,
+        29,
         "text",
         #string
             \\"2026" -> 2026
             \\"20x6" -> Not_A_Digit
             \\"" -> Empty
     );
-    subheading(31, "Writing result types");
+    subheading(30, "Writing result types");
     paragraph(
-        32,
+        31,
         #string,oneline
             \\`!` between two types binds more loosely than the prefix type
             \\modifiers, so `Lookup_Error!?*User` is a result whose success is an
@@ -2770,15 +2775,15 @@ render_section_38 :: () {
             \\after the `!`:
     );
     code_block(
-        33,
+        32,
         "text",
         #string
             \\// find :: () -> Lookup_Error!*s64 { ... }
             \\error: unexpected token '!*'; no operator '!*' is declared, and adjacent operator characters form one token - write '! *' with spaces
     );
-    subheading(34, "Making and inspecting a result");
+    subheading(33, "Making and inspecting a result");
     paragraph(
-        35,
+        34,
         #string,oneline
             \\`.Ok(value)` and `.Err(error)` work where the result type is
             \\expected, and `(E!T).make_ok(value)` and `(E!T).make_err(error)` work
@@ -2789,7 +2794,7 @@ render_section_38 :: () {
             \\is.
     );
     code_block(
-        36,
+        35,
         "glosso",
         #string
             \\#import "Io";
@@ -2818,55 +2823,55 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        37,
+        36,
         "text",
         #string
             \\80 -1
             \\true true true
-            \\44 Some(22)
+            \\44 ?22
             \\true false
     );
     paragraph(
-        38,
+        37,
         #string,oneline
             \\`!r` is true when `r` failed. A result has no `Show` instance of its
             \\own, so it is printed by matching it or through a helper such as
             \\`ok()`, as above. The helpers:
     );
-    table_header(39, "Helper   —   Result");
-    table_row(40, "`r.is_ok()`, `r.is_err()`   |   Which variant `r` holds.");
+    table_header(38, "Helper   —   Result");
+    table_row(39, "`r.is_ok()`, `r.is_err()`   |   Which variant `r` holds.");
     table_row(
-        41,
+        40,
         "`r.unwrap_or(fallback)`   |   The success value, or `fallback`, which is evaluated either way."
     );
-    table_row(42, "`r.unwrap_or_else(f)`   |   The success value, or `f(error)`.");
-    table_row(43, "`r.map(f)`   |   `.Ok(f(v))` on success; an error passes through.");
+    table_row(41, "`r.unwrap_or_else(f)`   |   The success value, or `f(error)`.");
+    table_row(42, "`r.map(f)`   |   `.Ok(f(v))` on success; an error passes through.");
     table_row(
-        44,
+        43,
         "`r.map_error(f)`   |   `.Err(f(e))` on failure, changing the error type; a success passes through."
     );
     table_row(
-        45,
+        44,
         "`r.and_then(f)`   |   `f(v)` on success, where `f` returns a result with the same error type."
     );
     table_row(
-        46,
+        45,
         "`r.or_else(f)`, `r.bind_error(f)`   |   On failure, the result `f(e)` returns; a success passes through."
     );
     table_row(
-        47,
+        46,
         "`r.map_or(f, fallback)`, `r.map_or_else(f, g)`   |   One value from either side."
     );
     table_row(
-        48,
+        47,
         "`r.ok()`, `r.err()`   |   The success or the error as an optional, dropping the other side."
     );
     table_row(
-        49,
+        48,
         "`(E!T).make_ok(v)`, `(E!T).make_err(e)`   |   Construct with the type written out."
     );
     code_block(
-        50,
+        49,
         "text",
         #string
             \\// r: Lookup_Error!s64 = 80;
@@ -2877,9 +2882,9 @@ render_section_38 :: () {
             \\error: tagged-union payload '.Ok' may only be bound by a pattern match
             \\note: match on the union and use that arm's payload capture, or enable #enable(allow_union_unwrap) for unsafe access
     );
-    subheading(51, "Propagating with `?`");
+    subheading(50, "Propagating with `?`");
     paragraph(
-        52,
+        51,
         #string,oneline
             \\Postfix `?` reads the payload of an optional or the success value of
             \\a result. When there is none, it returns from the enclosing procedure
@@ -2888,7 +2893,7 @@ render_section_38 :: () {
             \\each come up empty then reads as straight-line code:
     );
     code_block(
-        53,
+        52,
         "glosso",
         #string
             \\#import "Io";
@@ -2909,13 +2914,13 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        54,
+        53,
         "text",
         #string
-            \\Some(3) None
+            \\?3 null
     );
     paragraph(
-        55,
+        54,
         #string,oneline
             \\On a result, the error types must match, or the error must convert
             \\through `Propagate`, as `#from` variants arrange. `number` in the
@@ -2925,7 +2930,7 @@ render_section_38 :: () {
             \\boundary instead, and its value is the result:
     );
     code_block(
-        56,
+        55,
         "glosso",
         #string
             \\#import "Io";
@@ -2944,20 +2949,20 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        57,
+        56,
         "text",
         #string
             \\5 -1
     );
     paragraph(
-        58,
+        57,
         #string,oneline
             \\An absent optional carries no error, so `?` cannot pass it on as the
             \\failure of a result. `ok_or` supplies the error, and the `?` that
             \\follows propagates it:
     );
     code_block(
-        59,
+        58,
         "glosso",
         #string
             \\#import "Io";
@@ -2996,14 +3001,14 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        60,
+        59,
         "text",
         #string
             \\port 8080
             \\error Missing
     );
     paragraph(
-        61,
+        60,
         #string,oneline
             \\When none of these conditions holds, no `?` applies. In a procedure
             \\that returns neither kind of type the message says so; otherwise it
@@ -3011,7 +3016,7 @@ render_section_38 :: () {
             \\requires matching or convertible types:
     );
     code_block(
-        62,
+        61,
         "text",
         #string
             \\// whole :: (n: s64) -> s64 { h := half(n)?; return h; }
@@ -3024,14 +3029,14 @@ render_section_38 :: () {
             \\note: constraint failed for ?
     );
     paragraph(
-        63,
+        62,
         #string,oneline
             \\`Try`, `?`, `#try`, and `Termination` describes the protocol behind
             \\`?`, how other types take part in it, and `#try` blocks in general.
     );
-    subheading(64, "Results from `main`");
+    subheading(63, "Results from `main`");
     paragraph(
-        65,
+        64,
         #string,oneline
             \\`main` may return `E!void` when `E` implements the `Error`
             \\typeclass. `.Ok` exits with status 0, and `.Err` reports the error on
@@ -3039,20 +3044,20 @@ render_section_38 :: () {
             \\failure straight to the process boundary. What a Program Is has an
             \\example, and `Try`, `?`, `#try`, and `Termination` describes `Error`.
     );
-    subheading(66, "Optional pointers and layout");
+    subheading(65, "Optional pointers and layout");
     paragraph(
-        67,
+        66,
         #string,oneline
             \\A pointer `*T` is never null, so "a pointer or nothing" is spelled
             \\`?*T`. A `*T` converts to `?*T` wherever one is expected, without
-            \\`.Some`. The optional uses the null address for `null` and needs no
+            \\a `?`. The optional uses the null address for `null` and needs no
             \\tag, so `?*T` is exactly as large as `*T` and passes to C as an
             \\ordinary pointer. The same holds for many-pointers `?[*]T` and for
             \\function pointers. Every other optional stores a tag next to its
             \\payload, `?bool` and `?cstr` included.
     );
     paragraph(
-        68,
+        67,
         #string,oneline
             \\A result is stored like any tagged union: an `ssize` tag and room for
             \\the larger of the two payloads. The one exception is a result where
@@ -3061,7 +3066,7 @@ render_section_38 :: () {
             \\does.
     );
     code_block(
-        69,
+        68,
         "glosso",
         #string
             \\#import "Io";
@@ -3078,7 +3083,7 @@ render_section_38 :: () {
             \\}
     );
     code_block(
-        70,
+        69,
         "text",
         #string
             \\8 8 8 8
@@ -3087,9 +3092,9 @@ render_section_38 :: () {
             \\Failure!?*s64
     );
     paragraph(
-        71,
+        70,
         #string,oneline
-            \\In a pattern, `case .Some(p);` on a `?*T` binds `p` as a `*T` that
+            \\In a pattern, `case ?p;` on a `?*T` binds `p` as a `*T` that
             \\can be used without further checks. Pointer Types describes `null`
             \\and the optional pointer forms in more detail.
     );
@@ -3613,7 +3618,7 @@ render_section_39 :: () {
             \\    b := Node.{ 2, &c };     // a *Node converts to ?*Node
             \\    a := Node.{ 1, &b };
             \\    cursor: ?*Node = &a;
-            \\    while #pattern .Some(node) = cursor {
+            \\    while #pattern ?node = cursor {
             \\        print("{} ", node.value);
             \\        cursor = node.next;
             \\    }
@@ -3746,8 +3751,8 @@ render_section_39 :: () {
         #string
             \\// p := cast(*s64) 0;
             \\error: cast to *s64 of an address that is zero at compile time
-            \\note: a plain pointer excludes zero - that is what gives ?T its niche, where .None IS address 0
-            \\note: cast to ?*s64 instead, which is total and yields .None here
+            \\note: a plain pointer excludes zero - that is what gives ?T its niche, where null IS address 0
+            \\note: cast to ?*s64 instead, which is total and yields null here
     );
     paragraph(
         81,
@@ -4895,7 +4900,7 @@ render_section_42 :: () {
     );
     table_row(22, "A field default or a global's initializer   |   `cursor: Vec2 = .{ 8, 9 };`");
     table_row(23, "An element or field of an enclosing literal   |   `.[.{ 0, 0 }, .{ 5, 5 }]`");
-    table_row(24, "A variant payload   |   `maybe: ?Vec2 = .Some(.{ 6, 7 });`");
+    table_row(24, "A present payload   |   `maybe: ?Vec2 = ?.{ 6, 7 };`");
     table_row(25, "An element of a typed variadic pack   |   `points.push(.{ 1, 1 }, .{ 2, 2 })`");
     code_block(
         26,
@@ -4917,7 +4922,7 @@ render_section_42 :: () {
             \\    print("{} {}\n", length2(.{ 3, 4 }), diagonal().to.y);
             \\    print("{} {} {}\n", ORIGIN.x, cursor.y, shifted());
             \\    corners: [2]Vec2 = .[.{ 0, 0 }, .{ 5, 5 }];
-            \\    maybe: ?Vec2 = .Some(.{ 6, 7 });
+            \\    maybe: ?Vec2 = ?.{ 6, 7 };
             \\    points: [..]Vec2;
             \\    defer points.free();
             \\    points.push(.{ 1, 1 }, .{ 2, 2 });
@@ -4960,7 +4965,7 @@ render_section_42 :: () {
             \\An optional `?Vec2` is not a struct, so `.{ 6, 7 }` against it also
             \\reports `struct literal needs a type`, and `Vec2.{ 6, 7 }` reports
             \\`got Vec2, expected ?Vec2`; the present value is written
-            \\`.Some(.{ 6, 7 })`. In `ifx flag .{ 1, 0 } else .{ 0, 1 }` the
+            \\`?.{ 6, 7 }`. In `ifx flag .{ 1, 0 } else .{ 0, 1 }` the
             \\parser reads `flag .{ 1, 0 }` as a qualified literal whose type is
             \\`flag`, and stops at `else` with `error: unexpected token 'else'`;
             \\qualify the first arm instead, as in

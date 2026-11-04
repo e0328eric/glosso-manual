@@ -65,6 +65,7 @@ assert.equal(compileAndRun("current_comptime"), "current comptime passed\n");
 assert.equal(compileAndRun("current_strings"), "current strings passed\n");
 assert.equal(compileAndRun("current_format"), "brace formatting passed\n");
 assert.equal(compileAndRun("current_pointer_fields"), "pointer fields passed\n");
+assert.equal(compileAndRun("optional_values"), "optional values passed\n");
 
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
@@ -84,6 +85,12 @@ for (const [name, diagnostic] of [
   ["readonly_view_write", "not assignable"],
   ["readonly_pointer_field", "not assignable"],
   ["optional_pointer_field", "no union field x"],
+  ["optional_some_value", "use `?x` for a present `?T`, not `.Some(x)`"],
+  ["optional_none_value", "use `null` for an empty `?T`"],
+  ["optional_some_pattern", "use `?p` to match a present `?T`, not `.Some(p)`"],
+  ["optional_implicit_wrap", "got ssize, expected ?s64"],
+  ["optional_spaced_question", "'?' with a space on both sides is ambiguous"],
+  ["optional_prefix_operator", "operator '?' cannot be overloaded as a prefix operator"],
   ["format_unused_argument", "format argument 0 is not used"],
   ["format_index_range", "format argument index 2 is out of range for 2 arguments"],
   ["format_unmatched_brace", "unmatched '}' in format string"],
@@ -150,4 +157,4 @@ for (const [name, diagnostic] of [
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
 }
 
-console.log("Language checks passed: argument-vector commands, shell and compile-time build commands, matrix literals and fixed-array conversions, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, explicit file and container cleanup, Strings umbrella, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, string views, visibility, inherent methods, current std APIs, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: argument-vector commands, shell and compile-time build commands, matrix literals and fixed-array conversions, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, optional values and their rejected variant spellings, explicit file and container cleanup, Strings umbrella, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, string views, visibility, inherent methods, current std APIs, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
