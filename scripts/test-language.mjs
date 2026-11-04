@@ -30,7 +30,7 @@ function compile(name, backend = "llvm", environment = process.env, options = []
   const output = join(outputDirectory,
     `${name}${backend === "llvm" ? executableSuffix : ".o"}`);
   const result = run(compiler, [
-    "--color", "never", "--cache-dir", cacheDirectory,
+    "compile", "--color", "never", "--cache-dir", cacheDirectory,
     "--backend", backend, "-O0", "-o", output, ...options,
     join(fixtures, `${name}.glo`),
   ], environment);

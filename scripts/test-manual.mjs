@@ -1,4 +1,4 @@
-// Run after `glosso first.glo -- build`. No packages or browser are required.
+// Run after `glosso compile first.glo -- build`. No packages or browser are required.
 // Approximate text metrics exercise the Wasm/Clay ABI, not browser typography.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

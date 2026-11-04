@@ -76,7 +76,7 @@ async function checkChapter(chapter) {
     checked += 1;
     const hasMain = /^main ::/m.test(block.text);
     const output = path.replace(/\.glo$/, hasMain ? `.out${executableSuffix}` : ".o");
-    const args = ["--color", "never", "--cache-dir", cacheDirectory];
+    const args = ["compile", "--color", "never", "--cache-dir", cacheDirectory];
     if (!hasMain) args.push("--no-main", "--backend", "object");
     const compiled = await run(compiler, [...args, path, "-o", output], directory);
     if (compiled.status !== 0) {

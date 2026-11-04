@@ -109,7 +109,7 @@ render_section_15 :: () {
         12,
         "text",
         #string
-            \\$ glosso --run run_tool.glo 2>/dev/null
+            \\$ glosso compile --run run_tool.glo 2>/dev/null
             \\the tool runs
     );
     paragraph(
@@ -293,7 +293,7 @@ render_section_15 :: () {
         37,
         "text",
         #string
-            \\$ glosso --run status.glo 2>&1 | tail -2
+            \\$ glosso compile --run status.glo 2>&1 | tail -2
             \\working
             \\glosso: program exited with status 3
     );
@@ -353,7 +353,7 @@ render_section_15 :: () {
         42,
         "text",
         #string
-            \\$ glosso --run config.glo 2>&1 | tail -2
+            \\$ glosso compile --run config.glo 2>&1 | tail -2
             \\config: no value on line 1
             \\glosso: program exited with status 1
     );
@@ -478,16 +478,15 @@ render_section_15 :: () {
     paragraph(
         56,
         #string,oneline
-            \\The view and its strings belong to the runtime: they stay valid for
-            \\the whole run and must not be freed or changed. On most targets the
-            \\strings point at the C `argv` entries; on Windows the wide-character
-            \\arguments are re-encoded as UTF-8, and on WASI they are copied from
-            \\the runtime. A program started by `glosso --run` receives only its
-            \\own path, because the arguments after `--` on the compiler's command
-            \\line are not the program's. They belong to compile-time code, which
-            \\reads them with the same procedure; there the view holds only those
-            \\arguments, without a program path in front (see Build Scripts and
-            \\Compile-Time Arguments).
+            \\The view and its strings belong to the runtime: they stay valid for the
+            \\whole run and must not be freed or changed. On most targets the strings
+            \\point at the C `argv` entries; on Windows the wide-character arguments
+            \\are re-encoded as UTF-8, and on WASI they are copied from the runtime.
+            \\A program started by `glosso compile --run` receives only its own path,
+            \\because the arguments after `--` on the compiler's command line are not
+            \\the program's. They belong to compile-time code, which reads them with
+            \\the same procedure; there the view holds only those arguments, without
+            \\a program path in front (see Build Scripts and Compile-Time Arguments).
     );
     subheading(57, "Before `main` runs");
     paragraph(
@@ -534,12 +533,12 @@ render_section_16 :: () {
     paragraph(
         0,
         #string,oneline
-            \\The compiler is one executable, `glosso`, that takes options and the
-            \\path of the program's root source file. Everything else the program
-            \\needs is found through its imports, so there is no project file and
-            \\no list of sources to pass. This chapter describes the command line,
-            \\what the compiler prints, the five kinds of output it can produce and
-            \\their file names, `--run`, the optimization levels, and every other
+            \\The compiler is one executable, `glosso`. Its `compile` command takes
+            \\options and the path of the program's root source file. Everything else
+            \\the program needs is found through its imports, so there is no project
+            \\file and no list of sources to pass. This chapter describes the command
+            \\line, what the compiler prints, the five kinds of output it can produce
+            \\and their file names, `--run`, the optimization levels, and every other
             \\option. What happens inside a build, and the caches that make a
             \\repeated build fast, are described in Inside a Build: Stages and
             \\Caches.
@@ -549,58 +548,79 @@ render_section_16 :: () {
         2,
         "text",
         #string
-            \\glosso [options] <file.glo> [-- <args...>]
+            \\glosso compile [options] <file.glo> [-- <args...>]
     );
     paragraph(
         3,
         #string,oneline
-            \\Options and the source file may come in any order, but there is
-            \\exactly one source file. An option with a value takes it from the
-            \\next argument, and the long options with a value also accept it after
-            \\`=`, as in `--backend=object` or `--color=never`; `-o` accepts only
-            \\the separate form. Everything after `--` is not read as options: it
-            \\is the command line of the program's compile-time code (see Build
+            \\The first argument names a command, and everything after it belongs
+            \\to that command. `compile` builds a Glosso program; the other
+            \\commands are tools for the C code a program links with. `glosso
+            \\--help` lists them, and `-h` after a command describes it.
+    );
+    table_header(4, "Command   —   Purpose");
+    table_row(5, "`compile`   |   Build a Glosso program, as this chapter describes.");
+    table_row(
+        6,
+        "`cc`, `c++`   |   Clang-compatible C and C++ compilers that take the same targets and link with the bundled C library."
+    );
+    table_row(7, "`ar`, `ranlib`   |   LLVM's archiver, for static libraries of object files.");
+    paragraph(
+        8,
+        #string,oneline
+            \\After `compile`, options and the source file may come in any order, but
+            \\there is exactly one source file. An option with a value takes it from
+            \\the next argument, and the long options with a value also accept it
+            \\after `=`, as in `--backend=object` or `--color=never`; `-o` accepts
+            \\only the separate form. Everything after `--` is not read as options:
+            \\it is the command line of the program's compile-time code (see Build
             \\Scripts and Compile-Time Arguments).
     );
     paragraph(
-        4,
+        9,
         #string,oneline
             \\A command line the compiler cannot use is rejected before any work
             \\starts. The compiler prints the reason, for most mistakes followed by
-            \\the option summary, and exits with status 2:
+            \\the summary of the commands or of the options, and exits with status
+            \\2. A source file or an option written without a command is rejected
+            \\in the same way:
     );
     code_block(
-        5,
+        10,
         "text",
         #string
-            \\$ glosso --frobnicate hello.glo
+            \\$ glosso compile --frobnicate hello.glo
             \\glosso: unknown option --frobnicate
-            \\$ glosso hello.glo args.glo
+            \\$ glosso compile hello.glo args.glo
             \\glosso: only one positional source file is supported
-            \\$ glosso --backend exe hello.glo
+            \\$ glosso compile --backend exe hello.glo
             \\glosso: unknown backend 'exe' (choose llvm, object, static-lib, shared-lib, or llvm-ir)
-            \\$ glosso -O4 hello.glo
+            \\$ glosso compile -O4 hello.glo
             \\glosso: unknown option -O4
+            \\$ glosso hello.glo
+            \\glosso: unknown command 'hello.glo'; to compile it, run `glosso compile hello.glo`
+            \\$ glosso -O2 hello.glo
+            \\glosso: unknown option -O2; compiler options follow `glosso compile`
     );
-    subheading(6, "What the compiler prints");
+    subheading(11, "What the compiler prints");
     paragraph(
-        7,
+        12,
         #string,oneline
             \\The compiler describes its work on lines that begin with `glosso:`,
             \\and it writes them, with its diagnostics, to standard error. A build
             \\that produces an executable prints three of them:
     );
     code_block(
-        8,
+        13,
         "text",
         #string
-            \\$ glosso hello.glo
+            \\$ glosso compile hello.glo
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
     );
     paragraph(
-        9,
+        14,
         #string,oneline
             \\On a terminal the compiler also shows a progress display with the
             \\stage it is in; `--color never` turns off both the display and the
@@ -611,50 +631,50 @@ render_section_16 :: () {
             \\and Appendix E: Environment, Toolchain, and Exit Codes lists every exit
             \\status of the compiler.
     );
-    subheading(10, "Output kinds");
+    subheading(15, "Output kinds");
     paragraph(
-        11,
+        16,
         #string,oneline
             \\`--backend <kind>` chooses what the build produces. All kinds share
             \\every step up to code generation; they differ in whether and how the
             \\generated code is linked, and in the progress lines they print.
     );
-    table_header(12, "Backend   —   Artifact   —   Progress lines");
-    table_row(13, "`llvm` (default)   |   A linked executable.   |   `link`, `done`");
-    table_row(14, "`object`   |   An object file, not linked.   |   `wrote`");
-    table_row(15, "`static-lib`   |   A static library archive.   |   `link`, `done`");
-    table_row(16, "`shared-lib`   |   A shared library.   |   `link`, `done`");
-    table_row(17, "`llvm-ir`   |   The module as textual LLVM IR.   |   `wrote`");
+    table_header(17, "Backend   —   Artifact   —   Progress lines");
+    table_row(18, "`llvm` (default)   |   A linked executable.   |   `link`, `done`");
+    table_row(19, "`object`   |   An object file, not linked.   |   `wrote`");
+    table_row(20, "`static-lib`   |   A static library archive.   |   `link`, `done`");
+    table_row(21, "`shared-lib`   |   A shared library.   |   `link`, `done`");
+    table_row(22, "`llvm-ir`   |   The module as textual LLVM IR.   |   `wrote`");
     code_block(
-        18,
+        23,
         "text",
         #string
-            \\$ glosso --backend object hello.glo
+            \\$ glosso compile --backend object hello.glo
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: wrote hello.o  (backend=object, target=x86_64-pc-linux-gnu, -O1)
     );
-    subheading(19, "Output file names");
+    subheading(24, "Output file names");
     paragraph(
-        20,
+        25,
         #string,oneline
             \\By default the artifact is written to the current directory and named
             \\after the source file without its extension. The kind of output and
             \\the target add a prefix or a suffix:
     );
-    table_header(21, "Backend   —   Linux and other Unix targets   —   Other targets");
-    table_row(22, "`llvm`   |   `hello`   |   `hello.exe` on Windows, `hello.wasm` on WebAssembly");
-    table_row(23, "`object`   |   `hello.o`   |   `hello.obj` for `windows-msvc`");
+    table_header(26, "Backend   —   Linux and other Unix targets   —   Other targets");
+    table_row(27, "`llvm`   |   `hello`   |   `hello.exe` on Windows, `hello.wasm` on WebAssembly");
+    table_row(28, "`object`   |   `hello.o`   |   `hello.obj` for `windows-msvc`");
     table_row(
-        24,
+        29,
         "`static-lib`   |   `libhello.a`   |   `hello.lib` on Windows, except `windows-gnu`"
     );
     table_row(
-        25,
+        30,
         "`shared-lib`   |   `libhello.so`; `libhello.dylib` on macOS   |   `hello.dll` on Windows, `libhello.wasm` on WebAssembly"
     );
-    table_row(26, "`llvm-ir`   |   `hello.ll`   |   `hello.ll`");
+    table_row(31, "`llvm-ir`   |   `hello.ll`   |   `hello.ll`");
     paragraph(
-        27,
+        32,
         #string,oneline
             \\`-o <file>` names the output exactly, with no prefix or suffix added,
             \\and creates the directories on its path that do not exist. A Windows
@@ -662,17 +682,17 @@ render_section_16 :: () {
             \\such as `libhello.dll.a`, which its own progress line names.
     );
     code_block(
-        28,
+        33,
         "text",
         #string
-            \\$ glosso -o build/greeter hello.glo
+            \\$ glosso compile -o build/greeter hello.glo
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link build/greeter (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done build/greeter  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
     );
-    subheading(29, "Roots: `main`, libraries, and `--no-main`");
+    subheading(34, "Roots: `main`, libraries, and `--no-main`");
     paragraph(
-        30,
+        35,
         #string,oneline
             \\The compiler translates only what the build's roots reach. An
             \\executable's root is `main` (see What a Program Is). A static or
@@ -683,7 +703,7 @@ render_section_16 :: () {
             \\is not a root.
     );
     code_block(
-        31,
+        36,
         "glosso",
         #string
             \\add :: (a: s32, b: s32) -> s32 #c_call {
@@ -691,10 +711,10 @@ render_section_16 :: () {
             \\}
     );
     code_block(
-        32,
+        37,
         "text",
         #string
-            \\$ glosso --backend shared-lib add.glo
+            \\$ glosso compile --backend shared-lib add.glo
             \\glosso: compile add.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link libadd.so (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done libadd.so  (backend=shared-lib, target=x86_64-pc-linux-gnu, -O1)
@@ -702,7 +722,7 @@ render_section_16 :: () {
             \\0000000000002700 T glo_add
     );
     paragraph(
-        33,
+        38,
         #string,oneline
             \\An object file follows the executable's rule: when the file declares
             \\`main`, the object holds `main` and what it reaches, and a `#c_call`
@@ -714,7 +734,7 @@ render_section_16 :: () {
             \\file handed to the linker:
     );
     code_block(
-        34,
+        39,
         "text",
         #string
             \\$ cat cmain.c
@@ -722,12 +742,12 @@ render_section_16 :: () {
             \\int glo_add(int, int);
             \\int main(void) { printf("%d\n", glo_add(2, 3)); return 0; }
             \\$ clang -c cmain.c -o cmain.o
-            \\$ glosso --no-main --linker-arg cmain.o -o adder add.glo 2>/dev/null
+            \\$ glosso compile --no-main --linker-arg cmain.o -o adder add.glo 2>/dev/null
             \\$ ./adder
             \\5
     );
     paragraph(
-        35,
+        40,
         #string,oneline
             \\Calling Glosso from C, including how data types cross the boundary,
             \\is described in `#foreign`, `#library`, and `#c_call` and in C Types,
@@ -735,9 +755,9 @@ render_section_16 :: () {
             \\file that declares no `main` fails with `error: program has no
             \\`main` function`.
     );
-    subheading(36, "Running the program: `--run`");
+    subheading(41, "Running the program: `--run`");
     paragraph(
-        37,
+        42,
         #string,oneline
             \\`--run` builds a native executable, writes it to its usual output
             \\path, and starts it. The program receives no arguments besides its
@@ -748,53 +768,53 @@ render_section_16 :: () {
             \\works only with the `llvm` backend and only for the host target:
     );
     code_block(
-        38,
+        43,
         "text",
         #string
-            \\$ glosso --run --backend object hello.glo
+            \\$ glosso compile --run --backend object hello.glo
             \\glosso: --run is available only for --backend llvm
-            \\$ glosso --run --target x86_64-windows-gnu hello.glo
+            \\$ glosso compile --run --target x86_64-windows-gnu hello.glo
             \\glosso: --run can only execute the host target (got x86_64-w64-windows-gnu)
     );
     paragraph(
-        39,
+        44,
         #string,oneline
             \\The first is a rejected command line (status 2), the second a failed
             \\build (status 1). A build restored from the artifact cache is run in
             \\the same way.
     );
-    subheading(40, "Optimization levels");
+    subheading(45, "Optimization levels");
     paragraph(
-        41,
+        46,
         #string,oneline
             \\`-O` sets how much work goes into making the generated code fast or
             \\small. It applies both to Glosso's own intermediate code and to
             \\LLVM's code generation. When several levels are given, the last one
             \\counts.
     );
-    table_header(42, "Flag   —   Effect");
-    table_row(43, "`-O0`   |   No optimization; the most direct translation of the source.");
-    table_row(44, "`-O1`   |   The default: light per-procedure cleanup that keeps builds fast.");
+    table_header(47, "Flag   —   Effect");
+    table_row(48, "`-O0`   |   No optimization; the most direct translation of the source.");
+    table_row(49, "`-O1`   |   The default: light per-procedure cleanup that keeps builds fast.");
     table_row(
-        45,
+        50,
         "`-O2`, `-O3`   |   Full speed optimization; `-O3` inlines and vectorizes more aggressively."
     );
     table_row(
-        46,
+        51,
         "`-Os`, `-Oz`   |   Optimize for size, `-Oz` more strongly; also removes unused sections and folds identical code where the target supports it."
     );
     table_row(
-        47,
+        52,
         "`-Ozz`   |   `-Oz` that also strips the symbols the program does not need at run time."
     );
     paragraph(
-        48,
+        53,
         #string,oneline
             \\For a sense of scale, the hello world above is about 51 KB at `-O0`
             \\and `-O1`, 19 KB at `-O2` and 15 KB at `-Ozz` on x86-64 Linux.
     );
     note(
-        49,
+        54,
         #string,oneline
             \\Some runtime checks are compiled only at `-O0` and `-O1`. Casting an
             \\integer that names no member to an enum stops the program with
@@ -802,9 +822,9 @@ render_section_16 :: () {
             \\default level, but is not checked at `-O2`. Feature Gates and Runtime
             \\Checks lists which checks depend on the level.
     );
-    subheading(50, "Targets");
+    subheading(55, "Targets");
     paragraph(
-        51,
+        56,
         #string,oneline
             \\The program is compiled for the machine the compiler runs on unless
             \\`--target <triple>` names another. A triple may be written
@@ -814,9 +834,9 @@ render_section_16 :: () {
             \\and Cross Builds describes the targets and what each needs, and the
             \\program sees its target as the constant `OUT`.
     );
-    subheading(52, "Finding the standard library and modules");
+    subheading(57, "Finding the standard library and modules");
     paragraph(
-        53,
+        58,
         #string,oneline
             \\`--std <dir>` names the standard library directory. Without it, the
             \\compiler takes the first of these directories that holds a standard
@@ -829,7 +849,7 @@ render_section_16 :: () {
             \\hold a standard library itself.
     );
     paragraph(
-        54,
+        59,
         #string,oneline
             \\A module name such as `"Math/Core"` is looked up first in the
             \\standard library and then in each `--module-path` directory, in the
@@ -841,19 +861,19 @@ render_section_16 :: () {
             \\difference.
     );
     code_block(
-        55,
+        60,
         "text",
         #string
-            \\$ glosso --std /tmp hello.glo
+            \\$ glosso compile --std /tmp hello.glo
             \\glosso: --std directory must contain Prelude.glo or Prelude/
-            \\$ glosso --module-path vendor hello.glo
+            \\$ glosso compile --module-path vendor hello.glo
             \\glosso: --module-path must name an existing directory
             \\// #import "Geometry";   found nowhere
             \\error: cannot find module "Geometry" (searched: /usr/local/glosso/std, /home/user/project/libs)
     );
-    subheading(56, "Other options");
+    subheading(61, "Other options");
     paragraph(
-        57,
+        62,
         #string,oneline
             \\`--use-std` imports the standard modules into the root file, as if
             \\it began with an `#import` for each of them, except `String_Builder`,
@@ -861,7 +881,7 @@ render_section_16 :: () {
             \\a program should import what it uses.
     );
     paragraph(
-        58,
+        63,
         #string,oneline
             \\`--no-std` compiles without any standard library. No directory is
             \\searched for one, the `Prelude` and `Context` modules are not loaded,
@@ -873,7 +893,7 @@ render_section_16 :: () {
             \\still work, so the program brings what it needs itself:
     );
     code_block(
-        59,
+        64,
         "glosso",
         #string
             \\// bare.glo
@@ -888,10 +908,10 @@ render_section_16 :: () {
             \\}
     );
     code_block(
-        60,
+        65,
         "text",
         #string
-            \\$ glosso --no-std --run bare.glo
+            \\$ glosso compile --no-std --run bare.glo
             \\glosso: compile bare.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link bare (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done bare  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
@@ -899,18 +919,18 @@ render_section_16 :: () {
             \\glosso: program exited with status 4
             \\// main :: () { x := 1 + 2; }   with --no-std
             \\error: unexpected token '+'
-            \\$ glosso --no-std --use-std bare.glo
+            \\$ glosso compile --no-std --use-std bare.glo
             \\glosso: --no-std cannot be combined with --use-std or --std
     );
     paragraph(
-        61,
+        66,
         #string,oneline
             \\`--linker-arg <arg>` passes one argument to the final link, such as
             \\an object file, a library or a linker flag. The option may be
             \\repeated, and the arguments keep their order.
     );
     paragraph(
-        62,
+        67,
         #string,oneline
             \\`--temp-allocator-size <bytes>` sets the size of the static first
             \\block of the temporary allocator, 4 MiB by default. The value must be
@@ -918,73 +938,73 @@ render_section_16 :: () {
             \\Temporary Allocator describes what the size means.
     );
     code_block(
-        63,
+        68,
         "text",
         #string
-            \\$ glosso --temp-allocator-size 0 hello.glo
+            \\$ glosso compile --temp-allocator-size 0 hello.glo
             \\glosso: --temp-allocator-size must be a positive byte count
-            \\$ glosso --temp-allocator-size 2000000000 hello.glo
+            \\$ glosso compile --temp-allocator-size 2000000000 hello.glo
             \\glosso: --temp-allocator-size must not exceed 1073741824 bytes
     );
-    subheading(64, "Option summary");
-    table_header(65, "Option   —   Meaning");
-    table_row(66, "`-o <file>`   |   Output path, used as given.");
+    subheading(69, "Option summary");
+    table_header(70, "Option   —   Meaning");
+    table_row(71, "`-o <file>`   |   Output path, used as given.");
     table_row(
-        67,
+        72,
         "`--backend <kind>`   |   `llvm` (executable, the default), `object`, `static-lib`, `shared-lib` or `llvm-ir`."
     );
     table_row(
-        68,
+        73,
         "`--run`   |   Build a native executable for the host and run it; exit with its status."
     );
     table_row(
-        69,
+        74,
         "`--target <triple>`   |   Compile for another target; see Target Triples and Cross Builds."
     );
     table_row(
-        70,
+        75,
         "`--print-targets`, `--targets`   |   Print the target syntax and the common targets, and exit."
     );
     table_row(
-        71,
+        76,
         "`-O0` … `-O3`, `-Os`, `-Oz`, `-Ozz`   |   Optimization level; `-O1` is the default."
     );
-    table_row(72, "`--std <dir>`   |   Standard library directory.");
-    table_row(
-        73,
-        "`--module-path <dir>`   |   Another directory to search for module names; repeatable."
-    );
-    table_row(74, "`--no-main`   |   Make the `#c_call` procedures the roots instead of `main`.");
-    table_row(75, "`--use-std`   |   Import every standard module into the root file.");
-    table_row(76, "`--no-std`   |   Compile without a standard library, prelude included.");
-    table_row(77, "`--linker-arg <arg>`   |   Pass an argument to the final link; repeatable.");
+    table_row(77, "`--std <dir>`   |   Standard library directory.");
     table_row(
         78,
+        "`--module-path <dir>`   |   Another directory to search for module names; repeatable."
+    );
+    table_row(79, "`--no-main`   |   Make the `#c_call` procedures the roots instead of `main`.");
+    table_row(80, "`--use-std`   |   Import every standard module into the root file.");
+    table_row(81, "`--no-std`   |   Compile without a standard library, prelude included.");
+    table_row(82, "`--linker-arg <arg>`   |   Pass an argument to the final link; repeatable.");
+    table_row(
+        83,
         "`--temp-allocator-size <bytes>`   |   Size of the temporary allocator's first block (default 4 MiB)."
     );
     table_row(
-        79,
+        84,
         "`--memory-sanitizer`, `--thread-sanitizer`   |   Instrument the program; see `--memory-sanitizer` and `--thread-sanitizer`."
     );
     table_row(
-        80,
+        85,
         "`--cache-dir <dir>`   |   Use another cache directory; see Inside a Build: Stages and Caches."
     );
-    table_row(81, "`--print-cache-dir`   |   Print the cache directory in use and exit.");
-    table_row(82, "`--show-generated`   |   Print the cached files that hold `#insert` output.");
+    table_row(86, "`--print-cache-dir`   |   Print the cache directory in use and exit.");
+    table_row(87, "`--show-generated`   |   Print the cached files that hold `#insert` output.");
     table_row(
-        83,
+        88,
         "`--color <auto|always|never>`   |   Color in diagnostics; `never` also hides the progress display."
     );
     table_row(
-        84,
+        89,
         "`--unit-source UNIT=FILE`   |   Assign a source file to an ownership unit; see Who Can Use a Declaration: Visibility and Units."
     );
     table_row(
-        85,
+        90,
         "`-- <args...>`   |   Command-line arguments for compile-time code; see Build Scripts and Compile-Time Arguments."
     );
-    table_row(86, "`-h`, `--help`   |   Print the option summary and exit.");
+    table_row(91, "`-h`, `--help`   |   Print the option summary and exit.");
 }
 
 render_section_17 :: () {
@@ -1106,7 +1126,7 @@ render_section_17 :: () {
         19,
         "text",
         #string
-            \\$ glosso order.glo
+            \\$ glosso compile order.glo
             \\glosso: compile order.glo (target=x86_64-pc-linux-gnu)
             \\constant evaluated
             \\top-level block runs
@@ -1174,15 +1194,15 @@ render_section_17 :: () {
         32,
         "text",
         #string
-            \\$ glosso --print-cache-dir
+            \\$ glosso compile --print-cache-dir
             \\/home/user/.cache/glosso
-            \\$ XDG_CACHE_HOME=/var/cache glosso --print-cache-dir
+            \\$ XDG_CACHE_HOME=/var/cache glosso compile --print-cache-dir
             \\/var/cache/glosso
-            \\$ GLOSSO_CACHE_DIR=/tmp/glosso-cache glosso --print-cache-dir
+            \\$ GLOSSO_CACHE_DIR=/tmp/glosso-cache glosso compile --print-cache-dir
             \\/tmp/glosso-cache
-            \\$ glosso --cache-dir build/cache --print-cache-dir
+            \\$ glosso compile --cache-dir build/cache --print-cache-dir
             \\/home/user/project/build/cache
-            \\$ GLOSSO_CACHE_DIR=cache glosso --print-cache-dir
+            \\$ GLOSSO_CACHE_DIR=cache glosso compile --print-cache-dir
             \\glosso: cache directory unavailable: GLOSSO_CACHE_DIR must contain an absolute path
     );
     table_header(33, "Path in the cache directory   —   Contents");
@@ -1221,14 +1241,14 @@ render_section_17 :: () {
         41,
         "text",
         #string
-            \\$ glosso hello.glo
+            \\$ glosso compile hello.glo
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
-            \\$ glosso -o greeter hello.glo
+            \\$ glosso compile -o greeter hello.glo
             \\glosso: restored greeter from the native artifact cache
             \\$ touch hello.glo
-            \\$ glosso hello.glo
+            \\$ glosso compile hello.glo
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link hello (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
@@ -1301,13 +1321,13 @@ render_section_17 :: () {
         54,
         "text",
         #string
-            \\$ glosso --run answer.glo
+            \\$ glosso compile --run answer.glo
             \\glosso: compile answer.glo (target=x86_64-pc-linux-gnu)
             \\computing the answer
             \\glosso: link answer (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done answer  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
             \\42
-            \\$ glosso --run answer.glo
+            \\$ glosso compile --run answer.glo
             \\glosso: restored answer from the native artifact cache
             \\42
     );
@@ -1324,7 +1344,7 @@ render_section_17 :: () {
         56,
         "text",
         #string
-            \\$ glosso main.glo
+            \\$ glosso compile main.glo
             \\warning: unreachable pattern - already covered by an earlier case
             \\  --> main.glo:7:10
             \\  |
@@ -1398,11 +1418,11 @@ render_section_17 :: () {
         65,
         "text",
         #string
-            \\$ glosso version.glo
+            \\$ glosso compile version.glo
             \\glosso: compile version.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link version (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done version  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
-            \\$ glosso version.glo
+            \\$ glosso compile version.glo
             \\glosso: compile version.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link version (target=x86_64-pc-linux-gnu, -O1)
             \\glosso: done version  (backend=llvm, target=x86_64-pc-linux-gnu, -O1)
@@ -1517,7 +1537,7 @@ render_section_17 :: () {
         78,
         "text",
         #string
-            \\$ glosso --show-generated getters.glo
+            \\$ glosso compile --show-generated getters.glo
             \\glosso: compile getters.glo (target=x86_64-pc-linux-gnu)
             \\glosso: generated source ~/.cache/glosso/generated/insert/v1/f41df44cc76f15d4f2759a26e9d8e8aa1e4592ce994b008b37aa6ab0e5148f82.glo
             \\glosso: link getters (target=x86_64-pc-linux-gnu, -O1)
@@ -2482,7 +2502,7 @@ render_section_19 :: () {
         39,
         "text",
         #string
-            \\$ glosso --module-path libs app/main.glo
+            \\$ glosso compile --module-path libs app/main.glo
             \\error: inherent methods for 'Square' belong to ownership unit 'dependency:libs/geometry'; this block belongs to 'project:app'
             \\error: unknown identifier UNIT_SCALE
             \\note: 'UNIT_SCALE' is visible only within ownership unit 'dependency:libs/geometry'
@@ -2501,10 +2521,10 @@ render_section_19 :: () {
         41,
         "text",
         #string
-            \\$ glosso --module-path libs --unit-source geo=app/main.glo \
+            \\$ glosso compile --module-path libs --unit-source geo=app/main.glo \
             \\      --unit-source geo=libs/geometry/shapes.glo --run app/main.glo
             \\9 7
-            \\$ glosso --module-path libs --unit-source app=app/main.glo app/main.glo
+            \\$ glosso compile --module-path libs --unit-source app=app/main.glo app/main.glo
             \\error: source libs/geometry/shapes.glo has no ownership unit; add --unit-source UNIT=FILE (explicit ownership mapping requires every non-standard source)
             \\error: unknown identifier UNIT_SCALE
     );
@@ -2518,9 +2538,9 @@ render_section_19 :: () {
         43,
         "text",
         #string
-            \\$ glosso --unit-source builtin:x=app/main.glo app/main.glo
+            \\$ glosso compile --unit-source builtin:x=app/main.glo app/main.glo
             \\glosso: ownership unit names beginning with 'builtin:' are reserved
-            \\$ glosso --unit-source a=app/main.glo --unit-source b=app/main.glo app/main.glo
+            \\$ glosso compile --unit-source a=app/main.glo --unit-source b=app/main.glo app/main.glo
             \\glosso: source app/main.glo is already assigned to ownership unit 'a'
             \\// --unit-source a=std/Io.glo
             \\error: standard-library source std/Io.glo cannot be assigned to a user ownership unit
@@ -2529,12 +2549,12 @@ render_section_19 :: () {
         44,
         #string,oneline
             \\The project unit is taken from the root file's directory as it is
-            \\written on the command line. For a root file given without a
-            \\directory, as in `glosso main.glo`, every file outside the standard
-            \\library and the `--module-path` directories lands in the
-            \\project unit, including files such as `../shared/util.glo` that the
-            \\table gives a unit of their own, and the artifact cache does not tell
-            \\the two spellings apart. Writing `./main.glo` gives the rule above.
+            \\written on the command line. For a root file given without a directory,
+            \\as in `glosso compile main.glo`, every file outside the standard
+            \\library and the `--module-path` directories lands in the project unit,
+            \\including files such as `../shared/util.glo` that the table gives a
+            \\unit of their own, and the artifact cache does not tell the two
+            \\spellings apart. Writing `./main.glo` gives the rule above.
     );
     subheading(45, "Naming the recipients: `#public,to`");
     paragraph(
@@ -2665,7 +2685,7 @@ render_section_20 :: () {
         4,
         "text",
         #string
-            \\$ glosso ctargs.glo -- first second 2>/dev/null
+            \\$ glosso compile ctargs.glo -- first second 2>/dev/null
             \\compile time sees 2 arguments
             \\  first
             \\  second
@@ -2699,11 +2719,11 @@ render_section_20 :: () {
         7,
         "text",
         #string
-            \\$ glosso mode.glo 2>/dev/null; ./mode
+            \\$ glosso compile mode.glo 2>/dev/null; ./mode
             \\built in debug mode
-            \\$ glosso mode.glo -- release 2>/dev/null; ./mode
+            \\$ glosso compile mode.glo -- release 2>/dev/null; ./mode
             \\built in release mode
-            \\$ glosso mode.glo
+            \\$ glosso compile mode.glo
             \\glosso: restored mode from the native artifact cache
     );
     paragraph(
@@ -2765,14 +2785,14 @@ render_section_20 :: () {
         13,
         "text",
         #string
-            \\$ glosso build.glo
+            \\$ glosso compile build.glo
             \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
             \\glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link bin/hello (target=x86_64-pc-linux-gnu, -O2)
             \\glosso: done bin/hello  (backend=llvm, target=x86_64-pc-linux-gnu, -O2)
             \\$ bin/hello
             \\hello from the built program
-            \\$ glosso build.glo
+            \\$ glosso compile build.glo
             \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
             \\glosso: restored bin/hello from the native artifact cache
     );
@@ -2871,7 +2891,7 @@ render_section_20 :: () {
         31,
         "text",
         #string
-            \\$ glosso build.glo; echo "status $?"
+            \\$ glosso compile build.glo; echo "status $?"
             \\glosso: compile build.glo (target=x86_64-pc-linux-gnu)
             \\compiler error: glosso: compile hello.glo (target=x86_64-pc-linux-gnu)
             \\error: unexpected token '}'
@@ -2935,7 +2955,7 @@ render_section_20 :: () {
         36,
         "text",
         #string
-            \\$ glosso parent.glo -- extra 2>/dev/null
+            \\$ glosso compile parent.glo -- extra 2>/dev/null
             \\child sees 3 arguments: [two words] [] [extra]
             \\glosso: compile child.glo (target=x86_64-pc-linux-gnu)
             \\glosso: link bin/child (target=x86_64-pc-linux-gnu, -O1)
@@ -3002,9 +3022,9 @@ render_section_20 :: () {
         40,
         "text",
         #string
-            \\$ glosso make.glo -- arm 2>/dev/null
+            \\$ glosso compile make.glo -- arm 2>/dev/null
             \\arm build done
-            \\$ glosso make.glo -- test 2>/dev/null; echo "status $?"
+            \\$ glosso compile make.glo -- test 2>/dev/null; echo "status $?"
             \\unknown task test; use debug, release or arm
             \\status 1
     );
@@ -3140,9 +3160,9 @@ render_section_20 :: () {
         57,
         "text",
         #string
-            \\$ glosso --run cmain.glo 2>/dev/null
+            \\$ glosso compile --run cmain.glo 2>/dev/null
             \\-1243003483
-            \\$ glosso --run cmain.glo
+            \\$ glosso compile --run cmain.glo
             \\glosso: restored cmain from the native artifact cache
             \\-1243003483
     );
@@ -3295,12 +3315,12 @@ render_section_20 :: () {
         79,
         #string,oneline
             \\This manual is built by such a script, `first.glo`. Its top-level
-            \\`#comptime run_manual_task();` reads a task name from the
-            \\compile-time command line, so that `glosso first.glo -- build`
-            \\builds the manual: it creates a build profile for the WebAssembly
-            \\target with a cache directory and a list of linker arguments, compiles
-            \\the manual's main file with `compile_file`, and copies the web assets
-            \\next to the result. The task dispatch reads:
+            \\`#comptime run_manual_task();` reads a task name from the compile-time
+            \\command line, so that `glosso compile first.glo -- build` builds the
+            \\manual: it creates a build profile for the WebAssembly target with a
+            \\cache directory and a list of linker arguments, compiles the manual's
+            \\main file with `compile_file`, and copies the web assets next to the
+            \\result. The task dispatch reads:
     );
     code_block(
         80,

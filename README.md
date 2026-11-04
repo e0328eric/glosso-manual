@@ -109,9 +109,9 @@ The compile-time build driver accepts a task after the compiler's `--`
 separator:
 
 ```sh
-glosso first.glo -- build
-glosso first.glo -- tree-sitter
-glosso first.glo -- gen-reference ../glosso/std
+glosso compile first.glo -- build
+glosso compile first.glo -- tree-sitter
+glosso compile first.glo -- gen-reference ../glosso/std
 ```
 
 `src/clay_bindings.glo` uses `Native_Compile_Output.compile_c_archive`,
@@ -223,8 +223,8 @@ source checkout. After changing declarations or documentation comments under
 `glosso/std/`, run:
 
 ```sh
-glosso first.glo -- gen-reference ../glosso/std
-glosso first.glo -- build
+glosso compile first.glo -- gen-reference ../glosso/std
+glosso compile first.glo -- build
 ```
 
 Review the regenerated `src/generated/std_reference.glo`, then commit
@@ -282,8 +282,8 @@ whenever the library or chapters change.
 
 ```powershell
 $env:GLOSSO_STD = (Resolve-Path ../glosso/std).Path
-glosso first.glo -- gen-reference ../glosso/std
-glosso first.glo -- build
+glosso compile first.glo -- gen-reference ../glosso/std
+glosso compile first.glo -- build
 ```
 
 ### Linux or macOS
@@ -291,8 +291,8 @@ glosso first.glo -- build
 ```sh
 export PATH="$HOME/.local/glosso/bin:$PATH"
 export GLOSSO_STD="$(cd ../glosso/std && pwd)"
-glosso --cache-dir build/cache first.glo -- gen-reference ../glosso/std
-glosso --cache-dir build/cache first.glo -- build
+glosso compile --cache-dir build/cache first.glo -- gen-reference ../glosso/std
+glosso compile --cache-dir build/cache first.glo -- build
 ```
 
 After a successful build, serve `dist/` over HTTP:
