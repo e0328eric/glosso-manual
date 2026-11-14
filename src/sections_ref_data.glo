@@ -1456,9 +1456,10 @@ render_section_35 :: () {
     paragraph(
         17,
         #string,oneline
-            \\An annotation fixes the element types. Without one, each element has
-            \\the type of its value, and a number literal stays a compile-time
-            \\number (see Literal Typing and Type Conversion). A tuple may contain
+            \\An annotation fixes the element types. Without one, each element
+            \\follows value inference; when a tuple is stored in a run-time
+            \\variable, integer and floating-point literals default to `ssize`
+            \\and `f64` (see Literal Typing and Type Conversion). A tuple may contain
             \\tuples, and `n.0.1` reads an element of an element.
     );
     code_block(
@@ -1481,7 +1482,7 @@ render_section_35 :: () {
         19,
         "text",
         #string
-            \\(comptime_int, comptime_float, str)
+            \\(ssize, f64, str)
             \\(s32, f32, str)
             \\2 3
     );
@@ -3693,7 +3694,8 @@ render_section_39 :: () {
         "text",
         #string
             \\// p: ?*Node = &a;   x := p.value;
-            \\error: no union field value
+            \\error: ?*Node has no field 'value': it is an optional, which may be null
+            \\note: unwrap it first: a `case ?v;` arm or `if #pattern ?v = o` gives the *Node
             \\
             \\// q: *Node = p;
             \\error: got ?*Node, expected *Node
@@ -4124,25 +4126,41 @@ render_section_40 :: () {
     );
     table_row(
         36,
-        "`pop()`   |   Remove and return the last element; an empty array stops the program."
+        "`insert(i, value)`   |   Insert before `i`, shifting later elements; `i == count` appends."
     );
     table_row(
         37,
+        "`remove(i)`   |   Remove and return element `i`, preserving the order of the rest."
+    );
+    table_row(
+        38,
+        "`resize(n)`   |   Grow with ordinary element defaults, or truncate; a negative `n` means zero."
+    );
+    table_row(
+        39,
+        "`extend(values)`   |   Append the elements of a read-only view, including a view into this array."
+    );
+    table_row(
+        40,
+        "`pop()`   |   Remove and return the last element; an empty array stops the program."
+    );
+    table_row(
+        41,
         "`swap_remove(i)`   |   Remove and return element `i`, moving the last element into its place."
     );
-    table_row(38, "`truncate(n)`   |   Keep the first `n` elements and release the rest.");
-    table_row(39, "`clear()`   |   Release every element and keep the buffer for reuse.");
-    table_row(40, "`view()`   |   A `[]T` of the current elements.");
-    table_row(41, "`take()`   |   Return the whole array and leave this one empty.");
-    table_row(42, "`replace(other)`   |   Install `other` and return the previous array.");
+    table_row(42, "`truncate(n)`   |   Keep the first `n` elements and release the rest.");
+    table_row(43, "`clear()`   |   Release every element and keep the buffer for reuse.");
+    table_row(44, "`view()`   |   A `[]T` of the current elements.");
+    table_row(45, "`take()`   |   Return the whole array and leave this one empty.");
+    table_row(46, "`replace(other)`   |   Install `other` and return the previous array.");
     table_row(
-        43,
+        47,
         "`drain()`   |   Hand every element to a `for` loop by value and leave the array empty."
     );
-    table_row(44, "`reset()`   |   Release the elements and the buffer; the array stays usable.");
-    table_row(45, "`free()`, `free(&a)`   |   Release the elements and the buffer.");
+    table_row(48, "`reset()`   |   Release the elements and the buffer; the array stays usable.");
+    table_row(49, "`free()`, `free(&a)`   |   Release the elements and the buffer.");
     paragraph(
-        46,
+        50,
         #string,oneline
             \\The mutators take the array by pointer, so they work on a variable
             \\or through a `*[..]T`, but not on a fixed array (`[3]s64 has no field
@@ -4150,11 +4168,50 @@ render_section_40 :: () {
             \\elements that own something, such as an array of dynamic arrays; for
             \\plain elements it does nothing. More operations on views, such as
             \\`reverse`, `fill` and `sort`, are in the `Memory` and `Sort` modules
-            \\(see Appendix D: Standard Library Modules).
+            \\(see Appendix D: Standard Library Modules). A mutable view also
+            \\offers `iter()`, `iter_rev()` and `iter_mut()` for pointer walks;
+            \\the view variable and its backing storage must outlive the iterator
+            \\(see Iteration: Cursors and `for_expansion`).
     );
-    subheading(47, "Releasing and copying a dynamic array");
     paragraph(
-        48,
+        51,
+        #string,oneline
+            \\`insert` and `remove` move the following elements, so their cost is
+            \\linear in the number moved; use `swap_remove` for constant-time
+            \\removal when order does not matter. `insert` accepts indices from
+            \\zero through `count`, while `remove` needs an existing element.
+            \\`extend` copies each element as `push` does: an owner element shares
+            \\its resources with the source unless it is cloned first. It handles
+            \\a source view of the array even when growth moves the buffer.
+    );
+    code_block(
+        52,
+        "glosso",
+        #string
+            \\#import "Io";
+            \\
+            \\main :: () {
+            \\    a: [..]s64;
+            \\    defer a.free();
+            \\    a.push(10, 30);
+            \\    a.insert(1, 20);
+            \\    removed := a.remove(0);
+            \\    a.resize(3);                     // new s64 elements default to zero
+            \\    a.extend(a.view());              // copies the three elements
+            \\    print("removed {}, count {}:", removed, a.count);
+            \\    for value: a print(" {}", value);
+            \\    print("\n");
+            \\}
+    );
+    code_block(
+        53,
+        "text",
+        #string
+            \\removed 10, count 6: 20 30 0 20 30 0
+    );
+    subheading(54, "Releasing and copying a dynamic array");
+    paragraph(
+        55,
         #string,oneline
             \\Nothing releases a dynamic array implicitly. Its buffer stays
             \\allocated until the program calls `free` or `reset`, usually with
@@ -4164,7 +4221,7 @@ render_section_40 :: () {
             \\Allocation Procedures explain how that allocator is chosen.
     );
     paragraph(
-        49,
+        56,
         #string,oneline
             \\Assigning a dynamic array, or passing it by value, copies the three
             \\words of the descriptor and not the elements. The two descriptors
@@ -4173,7 +4230,7 @@ render_section_40 :: () {
             \\not seen by the other.
     );
     code_block(
-        50,
+        57,
         "glosso",
         #string
             \\#import "Io";
@@ -4200,7 +4257,7 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        51,
+        58,
         "text",
         #string
             \\a[0] 100 same buffer true
@@ -4208,7 +4265,7 @@ render_section_40 :: () {
             \\after in place: count 4 last 99
     );
     paragraph(
-        52,
+        59,
         #string,oneline
             \\A procedure that adds to an array therefore takes `*[..]T`. A second
             \\descriptor is safe only while nothing grows or releases the buffer
@@ -4219,9 +4276,9 @@ render_section_40 :: () {
             \\array over with `take`, and Container Buffers, Arenas, and Pools how
             \\the library's containers deal with the same question.
     );
-    subheading(53, "Views and pointers into a dynamic array");
+    subheading(60, "Views and pointers into a dynamic array");
     paragraph(
-        54,
+        61,
         #string,oneline
             \\A view or element pointer taken from a dynamic array records the
             \\buffer address and the count at the moment it was taken. A later
@@ -4231,13 +4288,13 @@ render_section_40 :: () {
             \\larger than the array's. None of this is detected. Take views after
             \\the array has stopped changing, or `reserve` enough room first.
     );
-    subheading(55, "Members and iteration");
-    table_header(56, "Member   —   Type   —   Available on");
-    table_row(57, "`.count`   |   `ssize`   |   Every shape; a constant for `[N]T`.");
-    table_row(58, "`.data`   |   `[*]T`, or `[*]const T` for a read-only view   |   Every shape.");
-    table_row(59, "`.capacity`   |   `ssize`   |   `[..]T` only; read-only.");
+    subheading(62, "Members and iteration");
+    table_header(63, "Member   —   Type   —   Available on");
+    table_row(64, "`.count`   |   `ssize`   |   Every shape; a constant for `[N]T`.");
+    table_row(65, "`.data`   |   `[*]T`, or `[*]const T` for a read-only view   |   Every shape.");
+    table_row(66, "`.capacity`   |   `ssize`   |   `[..]T` only; read-only.");
     paragraph(
-        60,
+        67,
         #string,oneline
             \\A `for` loop walks the elements of every shape. `for x: a` binds a
             \\copy of each element, `for x, i: a` also binds its index, and
@@ -4245,9 +4302,9 @@ render_section_40 :: () {
             \\read-only view. `while`, `for`, and Unrolled Loops covers the loop
             \\forms.
     );
-    subheading(61, "Ranges");
+    subheading(68, "Ranges");
     paragraph(
-        62,
+        69,
         #string,oneline
             \\`a..b` is the range from `a` up to but not including `b`, and `a..=b`
             \\includes `b`. Either bound may be left out. A range is an ordinary
@@ -4256,15 +4313,15 @@ render_section_40 :: () {
             \\struct type rather than a default bound. That is what lets `a[2..]`
             \\and `a[..2]` mean different things to the same container.
     );
-    table_header(63, "Written   —   Type   —   Fields");
-    table_row(64, "`a..b`   |   `Range(T)`   |   `start`, `end`");
-    table_row(65, "`a..=b`   |   `RangeInclusive(T)`   |   `start`, `end`");
-    table_row(66, "`a..`   |   `RangeFrom(T)`   |   `start`");
-    table_row(67, "`..b`   |   `RangeTo(T)`   |   `end`");
-    table_row(68, "`..=b`   |   `RangeToInclusive(T)`   |   `end`");
-    table_row(69, "`..` inside `[ ]`   |   `RangeFull(T)`   |   none; its size is zero");
+    table_header(70, "Written   —   Type   —   Fields");
+    table_row(71, "`a..b`   |   `Range(T)`   |   `start`, `end`");
+    table_row(72, "`a..=b`   |   `RangeInclusive(T)`   |   `start`, `end`");
+    table_row(73, "`a..`   |   `RangeFrom(T)`   |   `start`");
+    table_row(74, "`..b`   |   `RangeTo(T)`   |   `end`");
+    table_row(75, "`..=b`   |   `RangeToInclusive(T)`   |   `end`");
+    table_row(76, "`..` inside `[ ]`   |   `RangeFull(T)`   |   none; its size is zero");
     code_block(
-        70,
+        77,
         "glosso",
         #string
             \\#import "Io";
@@ -4286,7 +4343,7 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        71,
+        78,
         "text",
         #string
             \\Range(ssize) start=2 end=5
@@ -4298,7 +4355,7 @@ render_section_40 :: () {
             \\0 4
     );
     paragraph(
-        72,
+        79,
         #string,oneline
             \\The binary range operators have precedence 2 and group to the left,
             \\below every arithmetic operator, so `0..n - 1` is `0..(n - 1)`. Both
@@ -4308,9 +4365,9 @@ render_section_40 :: () {
             \\`error: bare '..' needs an index context`. There is no `..<`
             \\operator: `0..<3` is `error: unexpected token '<'`.
     );
-    subheading(73, "Which types can bound a range");
+    subheading(80, "Which types can bound a range");
     paragraph(
-        74,
+        81,
         #string,oneline
             \\A bound type needs an instance of the prelude's `Step` typeclass,
             \\which supplies `next` and `prev`. Every integer type has one.
@@ -4322,14 +4379,14 @@ render_section_40 :: () {
             \\begin; it is zero for integers.
     );
     paragraph(
-        75,
+        82,
         #string,oneline
             \\A type of the program's own can be a bound once it has `Step`.
             \\Walking a range with `for` also compares the bounds, so the type
             \\needs `<` from `PartialOrd` as well:
     );
     code_block(
-        76,
+        83,
         "glosso",
         #string
             \\#import "Io";
@@ -4352,14 +4409,14 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        77,
+        84,
         "text",
         #string
             \\1 2 3 
     );
-    subheading(78, "Ranges as values and in loops");
+    subheading(85, "Ranges as values and in loops");
     paragraph(
-        79,
+        86,
         #string,oneline
             \\A range can be stored, passed, returned and used later; indexing with
             \\a stored range `r` means exactly what writing the range inside the
@@ -4367,14 +4424,14 @@ render_section_40 :: () {
             \\through their fields.
     );
     paragraph(
-        80,
+        87,
         #string,oneline
             \\A `for` loop accepts a range directly. The loop over `a..b` stops
             \\before `b`, the loop over `a..=b` stops after `b`, `..b` starts at
             \\the origin, and `a..` never stops on its own:
     );
     code_block(
-        81,
+        88,
         "glosso",
         #string
             \\#import "Io";
@@ -4394,13 +4451,13 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        82,
+        89,
         "text",
         #string
             \\0 1 2 | 0 1 2 3 | 0 1 2 | 10 11 12 
     );
     paragraph(
-        83,
+        90,
         #string,oneline
             \\The walk never steps outside its bounds, so `0..=255` over `u8` ends
             \\after 255 instead of wrapping around, and `for < i: 0..3` walks the
@@ -4409,23 +4466,23 @@ render_section_40 :: () {
             \\Forms shows ranges used as patterns, as in matching a value against
             \\`1..=9`.
     );
-    subheading(84, "Slicing");
+    subheading(91, "Slicing");
     paragraph(
-        85,
+        92,
         #string,oneline
             \\Indexing a fixed array, a view, a dynamic array or a string with a
             \\range produces a view of part of it. Each of the six range types
             \\gives one slicing form:
     );
-    table_header(86, "Form   —   Elements");
-    table_row(87, "`a[lo..hi]`   |   From `lo` up to but not including `hi`: `hi - lo` elements.");
-    table_row(88, "`a[lo..=hi]`   |   From `lo` through `hi`: `hi - lo + 1` elements.");
-    table_row(89, "`a[lo..]`   |   From `lo` to the end.");
-    table_row(90, "`a[..hi]`   |   From the start up to but not including `hi`.");
-    table_row(91, "`a[..=hi]`   |   From the start through `hi`.");
-    table_row(92, "`a[..]`   |   Every element.");
+    table_header(93, "Form   —   Elements");
+    table_row(94, "`a[lo..hi]`   |   From `lo` up to but not including `hi`: `hi - lo` elements.");
+    table_row(95, "`a[lo..=hi]`   |   From `lo` through `hi`: `hi - lo + 1` elements.");
+    table_row(96, "`a[lo..]`   |   From `lo` to the end.");
+    table_row(97, "`a[..hi]`   |   From the start up to but not including `hi`.");
+    table_row(98, "`a[..=hi]`   |   From the start through `hi`.");
+    table_row(99, "`a[..]`   |   Every element.");
     code_block(
-        93,
+        100,
         "glosso",
         #string
             \\#import "Io";
@@ -4449,7 +4506,7 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        94,
+        101,
         "text",
         #string
             \\a[1..4]  count=3: 20 30 40
@@ -4461,20 +4518,20 @@ render_section_40 :: () {
             \\a[r]     count=2: 30 40
     );
     paragraph(
-        95,
+        102,
         #string,oneline
             \\Slicing copies nothing. The result is a view into the original
             \\storage, so a write through it changes the original, and it is valid
             \\only as long as that storage is. The result type depends on the
             \\container:
     );
-    table_header(96, "Sliced value   —   Result");
-    table_row(97, "`[N]T`, `[]T`, `[..]T`   |   `[]T`");
-    table_row(98, "`[]const T`   |   `[]const T`");
-    table_row(99, "`str`, `cstr`   |   `str`");
-    table_row(100, "`string16`, `cstring16`   |   `string16`");
+    table_header(103, "Sliced value   —   Result");
+    table_row(104, "`[N]T`, `[]T`, `[..]T`   |   `[]T`");
+    table_row(105, "`[]const T`   |   `[]const T`");
+    table_row(106, "`str`, `cstr`   |   `str`");
+    table_row(107, "`string16`, `cstring16`   |   `string16`");
     code_block(
-        101,
+        108,
         "glosso",
         #string
             \\#import "Io";
@@ -4498,7 +4555,7 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        102,
+        109,
         "text",
         #string
             \\[]s64
@@ -4508,7 +4565,7 @@ render_section_40 :: () {
             \\20 3
     );
     paragraph(
-        103,
+        110,
         #string,oneline
             \\String slices count bytes, not characters; `str`, `cstr`, and UTF-16
             \\Text explains what that means for text that is not ASCII. A slice of
@@ -4520,7 +4577,7 @@ render_section_40 :: () {
             \\are.
     );
     paragraph(
-        104,
+        111,
         #string,oneline
             \\Slicing is the `[]` operator of the `Indexable` typeclass with a
             \\range as the key. The prelude declares one instance per range type
@@ -4528,9 +4585,9 @@ render_section_40 :: () {
             \\sliced the same way. Compound Assignment and Indexing Typeclasses
             \\shows how a type of the program's own gets the same syntax.
     );
-    subheading(105, "Slice bounds");
+    subheading(112, "Slice bounds");
     paragraph(
-        106,
+        113,
         #string,oneline
             \\A slice is valid when `0 <= lo <= hi <= count` for the bounds it
             \\describes. An empty slice is allowed anywhere inside the container
@@ -4539,7 +4596,7 @@ render_section_40 :: () {
             \\message carries no source location:
     );
     code_block(
-        107,
+        114,
         "glosso",
         #string
             \\#import "Io";
@@ -4553,7 +4610,7 @@ render_section_40 :: () {
             \\}
     );
     code_block(
-        108,
+        115,
         "text",
         #string
             \\$ glosso compile --run slice_bounds.glo 2>&1 | tail -3
@@ -4562,7 +4619,7 @@ render_section_40 :: () {
             \\glosso: program exited with status 134
     );
     paragraph(
-        109,
+        116,
         #string,oneline
             \\In code evaluated at compile time the same mistake is a compile
             \\error, `error: slice 1..5 is out of bounds`. At `-O2` and above the

@@ -426,7 +426,12 @@ assert(referenceIndex.symbols.some(symbol => symbol[4] === compilerModule && sym
 assert(!referenceIndex.symbols.some(symbol => symbol[4] === compilerModule && symbol[0] === "run_command"));
 assert(!referenceIndex.symbols.some(symbol => symbol[0] === "run_command_line"));
 
-assert(!referenceIndex.symbols.some(symbol => ["str.cat", "str.repeat", "string.cat", "string.repeat"].includes(symbol[0])),
+const stringRepeat = referenceIndex.symbols.find(symbol =>
+  symbol[4] === moduleIndex("Strings/Utf8") && symbol[0] === "str.repeat");
+assert(stringRepeat, "Missing allocating string repetition from Strings/Utf8");
+assert(stringRepeat[1].includes("allocator: Allocator = context.allocator"),
+  "String repetition must expose its result allocator");
+assert(!referenceIndex.symbols.some(symbol => ["str.cat", "string.cat", "string.repeat"].includes(symbol[0])),
   "Removed allocating-string methods remain in the reference");
 
 function symbolIndex(module, name) {

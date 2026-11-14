@@ -57,6 +57,7 @@ assert.equal(compileAndRun("current_std_api"), "current std APIs passed\n");
 assert.equal(compileAndRun("current_commands"), "current command APIs passed\n");
 assert.equal(compileAndRun("current_build_commands"), "current build command API passed\n");
 assert.equal(compileAndRun("string_views"), "string views passed\n");
+assert.equal(compileAndRun("string_repeat"), "string repeat passed\n");
 assert.equal(compileAndRun("current_syntax"), "current syntax passed\n");
 assert.equal(compileAndRun("pointers_literals"), "pointers and literals passed\n");
 assert.equal(compileAndRun("current_reflection"), "current reflection passed\n");
@@ -70,7 +71,7 @@ assert.equal(compileAndRun("optional_values"), "optional values passed\n");
 for (const [name, diagnostic] of [
   ["try_missing_witness", "a quoted try operator call requires a leading boundary type and one operand"],
   ["try_missing_conversion", "no overload '?' accepts these arguments"],
-  ["try_missing_boundary", "requires a Try-returning function or an enclosing #try block"],
+  ["try_missing_boundary", "requires a Try-returning function or #comptime block, or an enclosing #try block"],
   ["try_invalid_token", "with the boundary result in Break"],
   ["empty_parameter_order", "#empty parameters must appear before runtime parameters"],
   ["removed_address_star", "operator '*' expects a typed pointer"],
@@ -79,12 +80,11 @@ for (const [name, diagnostic] of [
   ["invalid_float_literal", "out of range for f16"],
   ["non_exhaustive_switch", "non-exhaustive switch"],
   ["removed_string_cat", "str has no field cat"],
-  ["removed_string_repeat", "str has no field repeat"],
   ["runtime_string_add", "string concatenation with '+' requires constant strings"],
   ["readonly_write", "not assignable"],
   ["readonly_view_write", "not assignable"],
   ["readonly_pointer_field", "not assignable"],
-  ["optional_pointer_field", "no union field x"],
+  ["optional_pointer_field", "it is an optional, which may be null"],
   ["optional_some_value", "use `?x` for a present `?T`, not `.Some(x)`"],
   ["optional_none_value", "use `null` for an empty `?T`"],
   ["optional_some_pattern", "use `?p` to match a present `?T`, not `.Some(p)`"],
@@ -137,7 +137,7 @@ assert.equal(locationOutput.length, 5);
 const rejected = compile("removed_precedence", "object");
 assert.notEqual(rejected.status, 0, "removed #precedence directives compiled successfully");
 const diagnostics = `${rejected.stdout}\n${rejected.stderr}`;
-assert.equal((diagnostics.match(/error: unexpected token 'precedence'/g) ?? []).length, 3,
+assert.equal((diagnostics.match(/error: unexpected token '#precedence'/g) ?? []).length, 3,
   `expected rejection of left, right and assign #precedence directives:\n${diagnostics}`);
 
 for (const name of ["removed_noreturn", "removed_private_section", "private_declaration",
@@ -157,4 +157,4 @@ for (const [name, diagnostic] of [
   assert.match(`${rejected.stdout}\n${rejected.stderr}`, diagnostic);
 }
 
-console.log("Language checks passed: argument-vector commands, shell and compile-time build commands, matrix literals and fixed-array conversions, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, optional values and their rejected variant spellings, explicit file and container cleanup, Strings umbrella, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, string views, visibility, inherent methods, current std APIs, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");
+console.log("Language checks passed: argument-vector commands, shell and compile-time build commands, matrix literals and fixed-array conversions, brace and indexed formatting, builder writef, pointer-field shorthand and qualifiers, optional values and their rejected variant spellings, explicit file and container cleanup, Strings umbrella, owned string repetition, constant concatenation, rejected removed string methods, compile-time execution budgets, unevaluated type_of, local declarations, explicit alignment, compile-time builders and reflection, exhaustive switches and constant range checks, pointer expressions, C-string and byte-array literals, string views, visibility, inherent methods, current std APIs, operators, Try, arrays, source locations, and rejected obsolete or invalid syntax.");

@@ -18,8 +18,9 @@ messages, the grammar, the standard library modules, the environment and exit
 codes, and style conventions.
 
 The chapters and the reference track the sibling `../glosso` checkout,
-including `#module_params`, `#specialize` and `#meaningful { T,,foo; }`
-(2026-11-01). Chapter 18 covers parameterized imports with `(arguments)` and
+including the current `Clone` protocol, derived ordering and hashing, returned-string
+ownership, array editing, and thread-handle lifetime rules (2026-11-14).
+Chapter 18 covers parameterized imports with `(arguments)` and
 `{selectors}`, shared module instances, and bundled libglosso paths. Chapter 54
 explains when `#lazy` arguments are evaluated and cached, including the
 difference between a compile-time call and a `#comptime #lazy` parameter.
@@ -149,7 +150,12 @@ every `glosso` code block of the chapters. A block with `main` is run, and its
 standard output must equal the `text` block shown right after it, unless that
 block is a command transcript (it starts with `$ `) or a diagnostic (it starts
 with `//`). A block whose first line is `// name.glo` is saved under that name
-so later blocks of the same chapter can import it. Blocks listed in
+so later blocks of the same chapter can import it. A `// Platform: Linux`
+comment marks an example that depends on Linux APIs and is skipped on other
+hosts. A `// Output: Linux` comment marks Linux sample output: the program
+still compiles and runs successfully on other hosts, but that transcript is
+compared only on Linux. The same markers accept `Windows` and `macOS`.
+The check reports both kinds of exclusions. Blocks listed in
 `scripts/tests/manual-fragments.txt` (`chapter:index`) are excerpts, quotes of
 standard-library declarations, programs for another target or programs that
 fail on purpose; they are checked by hand. Pass a compiler path as the first
@@ -158,7 +164,7 @@ parallel; output and caches stay under `build/example-tests/`.
 
 `node scripts/test-language.mjs` checks language behavior the chapters rely on
 beyond their own examples: operators, Try boundary witnesses, array
-reservation, source locations, visibility, receiver methods, string views,
+reservation, source locations, visibility, receiver methods, string views and repetition,
 formatting selectors and invalid formats, matrix literals and conversions,
 argument-vector commands, compile-time builders and reflection, compile-time
 execution budgets, and the rejection of removed or invalid syntax. Pass a

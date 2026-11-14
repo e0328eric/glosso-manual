@@ -9,6 +9,8 @@
 // saved under that name, so later blocks of the same chapter can import it.
 // Blocks listed in scripts/tests/manual-fragments.txt ("chapter:index") are
 // deliberately incomplete; they are saved but not compiled.
+// `// Platform: Linux` restricts an example to that host; `// Output: Linux`
+// restricts its sample-output comparison. Windows and macOS are also supported.
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { availableParallelism } from "node:os";
@@ -20,6 +22,15 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
 const compiler = process.argv[2] ? resolve(process.argv[2]) : `glosso${executableSuffix}`;
 const wanted = new Set(process.argv.slice(3));
+const hostPlatform = ({ win32: "windows", linux: "linux", darwin: "darwin" })[process.platform] ?? process.platform;
+function examplePlatform(text, kind) {
+  const label = kind === "target" ? "Platform" : "Output";
+  const marker = text.match(new RegExp(`^// ${label}: (\\S+)\\s*$`, "m"));
+  if (!marker) return null;
+  const platform = ({ Linux: "linux", Windows: "windows", macOS: "darwin" })[marker[1]];
+  assert(platform, `Unknown example platform: ${marker[1]}`);
+  return platform;
+}
 const outputDirectory = join(root, "build", "example-tests");
 const cacheDirectory = join(outputDirectory, "cache");
 mkdirSync(cacheDirectory, { recursive: true });
@@ -62,6 +73,8 @@ function run(executable, args, cwd) {
 async function checkChapter(chapter) {
   const failures = [];
   let checked = 0;
+  let skippedTarget = 0;
+  let skippedOutput = 0;
   const directory = join(outputDirectory, `s${chapter.number}`);
   mkdirSync(directory, { recursive: true });
   for (const [position, block] of chapter.blocks.entries()) {
@@ -73,6 +86,11 @@ async function checkChapter(chapter) {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, block.text);
     if (fragments.has(key)) continue;
+    const targetPlatform = examplePlatform(block.text, "target");
+    if (targetPlatform && targetPlatform !== hostPlatform) {
+      skippedTarget += 1;
+      continue;
+    }
     checked += 1;
     const hasMain = /^main ::/m.test(block.text);
     const output = path.replace(/\.glo$/, hasMain ? `.out${executableSuffix}` : ".o");
@@ -88,11 +106,17 @@ async function checkChapter(chapter) {
     const next = chapter.blocks[position + 1];
     const expected = next && next.language === "text" && next.index === block.index + 1 ? next.text : null;
     const result = await run(output, [], directory);
+    const outputPlatform = examplePlatform(block.text, "output");
+    if (outputPlatform && outputPlatform !== hostPlatform) {
+      skippedOutput += 1;
+      if (result.status !== 0) failures.push(`${key} failed on ${hostPlatform}: ${result.stderr.trim()}`);
+      continue;
+    }
     if (expected === null || expected.startsWith("$ ") || expected.startsWith("//")) continue;
     const actual = result.stdout.replace(/\r\n/g, "\n");
     if (actual !== expected) failures.push(`${key} prints\n${actual}--- instead of\n${expected}---`);
   }
-  return { checked, failures };
+  return { checked, failures, skippedTarget, skippedOutput };
 }
 
 const selected = chapters.filter(chapter => wanted.size === 0 || wanted.has(chapter.number));
@@ -111,4 +135,6 @@ const failures = results.flatMap(result => result.failures);
 const checked = results.reduce((sum, result) => sum + result.checked, 0);
 for (const failure of failures) console.error(failure);
 assert.equal(failures.length, 0, `${failures.length} of ${checked} examples failed`);
-console.log(`Example checks passed: ${checked} examples in ${selected.length} chapters compile, and every program prints the output shown after it.`);
+const skippedTarget = results.reduce((sum, result) => sum + result.skippedTarget, 0);
+const skippedOutput = results.reduce((sum, result) => sum + result.skippedOutput, 0);
+console.log(`Example checks passed: ${checked} examples in ${selected.length} chapters compile and matching-platform sample outputs agree; ${skippedTarget} target-specific examples skipped, ${skippedOutput} other-platform sample outputs not compared.`);

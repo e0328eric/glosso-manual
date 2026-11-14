@@ -1104,8 +1104,10 @@ render_section_17 :: () {
     paragraph(
         17,
         #string,oneline
-            \\Compile-time code runs inside the compiler, on an interpreter for
-            \\Glosso's intermediate code, and at two different moments. A constant
+            \\Compile-time code runs inside the compiler at two different moments.
+            \\Constant evaluation uses the compiler's interpreters; eligible
+            \\top-level build steps use a native JIT, with the intermediate-code
+            \\interpreter as the fallback. A constant
             \\such as `X :: #comptime f();` is evaluated while the program is
             \\checked, as soon as the checker needs its value. A top-level
             \\`#comptime` declaration is a build step: it runs in the `comptime`
@@ -3182,11 +3184,13 @@ render_section_20 :: () {
     paragraph(
         60,
         #string,oneline
-            \\Compile-time code is interpreted, which is slow for heavy work.
+            \\A generator can also run as a separate native tool.
             \\`macro_unit(path, argument)` builds the Glosso program at `path` as a
             \\native executable, through the artifact cache, runs it with
             \\`argument` after `--` on its command line, and returns what it printed
-            \\to standard output, which is usually source text for `#insert`:
+            \\to standard output, which is usually source text for `#insert`.
+            \\The call runs on the build machine, so even within `#insert` it
+            \\needs an explicit `#comptime` expression:
     );
     code_block(
         61,
@@ -3212,7 +3216,7 @@ render_section_20 :: () {
             \\#import "Io";
             \\#import "Compiler";
             \\
-            \\#insert macro_unit("squares_gen.glo", "SQUARES");
+            \\#insert #comptime macro_unit("squares_gen.glo", "SQUARES");
             \\
             \\main :: () {
             \\    print("{} {}\n", SQUARES.count, SQUARES[9]);
@@ -3251,12 +3255,14 @@ render_section_20 :: () {
     paragraph(
         68,
         #string,oneline
-            \\Compile-time code runs on an interpreter, which is much slower than
-            \\compiled code, and its resources are bounded. Each evaluation, a
-            \\constant, a `#comptime` expression or a top-level declaration, may
-            \\execute at most 2^28 (268,435,456) steps of the interpreter. A loop
-            \\that does not end therefore stops the build with an error instead of
-            \\hanging it, after a while:
+            \\Compile-time evaluation has bounded resources. Eligible top-level
+            \\build steps use the native JIT; other evaluations use the
+            \\interpreter (see Compile-Time Evaluation). The default execution
+            \\budget is 2^28 (268,435,456): the interpreter counts VM instructions,
+            \\and the JIT spends the same numerical budget on loop iterations.
+            \\A loop that does not end therefore stops the build with a diagnostic,
+            \\although the stopping point differs between engines. For example,
+            \\these are the interpreter's diagnostic messages:
     );
     code_block(
         69,
@@ -3264,36 +3270,33 @@ render_section_20 :: () {
         #string
             \\// spin :: () -> s64 { n := 0; while true n += 1; return n; }
             \\// FOREVER :: #comptime spin();
-            \\error: constant evaluation exceeded GLOSSO_COMPTIME_STEP_LIMIT; set 0 for no limit
-            \\// #comptime { print("{}\n", spin()); }
-            \\error: #comptime stopped: compile-time evaluation did not finish within 1000000 VM instructions and may never terminate; set GLOSSO_COMPTIME_STEP_LIMIT to change the limit, or to 0 to remove it
-            \\VM trace: spin word 10 (Move) at spin.glo:1:40
-            \\  called from __run_0 before word 4
+            \\error: VM constant evaluation: compile-time evaluation did not finish within 100000 VM instructions and may never terminate; set GLOSSO_COMPTIME_STEP_LIMIT to change the limit, or to 0 to remove it
+            \\// #comptime { spin(); }
+            \\error: #comptime stopped: compile-time evaluation did not finish within 100000 VM instructions and may never terminate; set GLOSSO_COMPTIME_STEP_LIMIT to change the limit, or to 0 to remove it
     );
     paragraph(
         70,
         #string,oneline
-            \\The first error points at the statement that was running; the second,
-            \\from a top-level block, comes with a trace of the calls it was in.
-            \\The environment variable `GLOSSO_COMPTIME_STEP_LIMIT` replaces the
-            \\limit; both messages came from builds with
-            \\`GLOSSO_COMPTIME_STEP_LIMIT=1000000`, which stop within a second
-            \\rather than after the much longer default. `0` removes the limit, for
-            \\a build that legitimately computes more, and a value that is not a
-            \\whole number is an error.
+            \\Both messages were captured with `GLOSSO_JIT=0` and
+            \\`GLOSSO_COMPTIME_STEP_LIMIT=100000`; the source call traces that
+            \\follow them are omitted here. The environment variable
+            \\`GLOSSO_COMPTIME_STEP_LIMIT` replaces the budget for either engine.
+            \\The JIT reports loop iterations instead of VM instructions. `0`
+            \\removes the budget for a build that legitimately computes more,
+            \\and a value that is not a whole number is an error.
     );
     table_header(71, "Limit   —   Value   —   When exceeded");
     table_row(
         72,
-        "Interpreter steps per evaluation   |   2^28, or `GLOSSO_COMPTIME_STEP_LIMIT`   |   The errors above."
+        "Execution budget   |   2^28, or `GLOSSO_COMPTIME_STEP_LIMIT`; VM instructions in the interpreter, loop iterations in the JIT   |   A step-budget diagnostic."
     );
     table_row(
         73,
-        "Nested calls   |   65,536   |   `call stack exhausted: more than 65536 nested calls`"
+        "Nested VM calls   |   65,536   |   `call stack exhausted: more than 65536 nested calls`"
     );
     table_row(
         74,
-        "One block from `alloc` or another raw allocation   |   4 MiB   |   `compile-time heap allocation of N bytes exceeds the 4194304-byte limit`"
+        "One raw allocation in the VM   |   1 GiB   |   `compile-time heap allocation of N bytes exceeds the 1073741824-byte limit`"
     );
     table_row(
         75,
@@ -3306,10 +3309,12 @@ render_section_20 :: () {
     paragraph(
         77,
         #string,oneline
-            \\The allocation limit applies to raw blocks of memory. Dynamic arrays
-            \\and string builders grow past it, at the speed of the interpreter.
-            \\Work that is too heavy for compile-time code belongs in a generator
-            \\program compiled with `macro_unit`, as shown above. Appendix E:
+            \\The raw-block allocation limit belongs to the VM; it is not a
+            \\general limit on native JIT allocations or typed array storage.
+            \\The JIT's recursion guard instead follows the compiler thread's
+            \\available native stack on hosts that expose its bounds. A generator
+            \\compiled with `macro_unit`, as shown above, runs as a separate
+            \\program when that is more suitable for the work. Appendix E:
             \\Environment, Toolchain, and Exit Codes lists the compiler's other
             \\environment variables.
     );

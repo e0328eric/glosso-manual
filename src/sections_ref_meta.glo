@@ -16,8 +16,10 @@ render_section_79 :: () {
             \\of `#if`, the source that `#insert` adds and the build steps that a
             \\top-level `#comptime` declares. The rest runs when the finished
             \\program is started. Compile-time code is ordinary Glosso, executed
-            \\by an interpreter inside the compiler (see Inside a Build: Stages and
-            \\Caches), so one procedure can be called at both times. This chapter
+            \\by the compiler's evaluator. Eligible top-level `#comptime` steps
+            \\run through a native JIT, with an interpreter as the fallback (see
+            \\Inside a Build: Stages and Caches), so one procedure can be called at
+            \\both times. This chapter
             \\is the reference for compile-time evaluation: the forms of
             \\`#comptime`, which code runs at compile time and at what point of the
             \\build, what a compile-time value may be, and what compile-time code
@@ -181,9 +183,19 @@ render_section_79 :: () {
             \\every returned value is checked against one type. At the top level,
             \\`#comptime` before a constant's value is optional, because a
             \\top-level constant is computed at compile time in any case. Writing
-            \\it states the intent, and it changes the meaning only where the
-            \\value reads a global variable, as described under Reading a global's
-            \\initial value below.
+            \\it states the intent, and it changes the meaning in two cases. One is
+            \\a value that reads a global variable, as described under Reading a
+            \\global's initial value below. The other is a computation that
+            \\reaches the build machine. Compile-time code evaluated without
+            \\`#comptime` - a constant, a global's initializer, a call evaluated at
+            \\compile time, the operand of a directive - may only compute: memory,
+            \\arrays, strings and calls to any procedure are allowed. Printing,
+            \\files, processes, the environment, clocks, random numbers, sockets,
+            \\foreign calls and compiler services act on the build machine, and
+            \\reaching one is `error: #magic '...' runs on the build machine, which
+            \\only code under #comptime may do`, with a note at the expression
+            \\that started the evaluation. `#comptime` there lets it run, together
+            \\with everything it calls.
     );
     subheading(25, "When a value is computed");
     paragraph(
@@ -358,11 +370,13 @@ render_section_79 :: () {
         #string,oneline
             \\`index_type` returns a type, so it runs only at compile time (see
             \\Procedures that run only at compile time below), and `Index` names
-            \\whichever type it picked for the target. Two kinds of values cannot
-            \\be the result. An owner, such as a dynamic array, holds memory that
+            \\whichever type it picked for the target. Some values cannot become
+            \\the result. An owner, such as a dynamic array, holds memory that
             \\some code must free (see `Freeable`, Copies, and Ownership Transfer),
             \\and a constant would be a copy that nobody frees. A procedure value
-            \\cannot be a result either.
+            \\cannot be a result either. A pointer into compile-time memory also
+            \\cannot escape the computation, including through a field of a
+            \\returned struct; return the value it points at instead.
     );
     code_block(
         39,
@@ -456,7 +470,9 @@ render_section_79 :: () {
             \\parameter, or returns one, cannot exist in the running program.
             \\Every call to it is evaluated at compile time and replaced by its
             \\result, so its body runs while the call is checked, once for each
-            \\call in the source, however often the surrounding code later runs:
+            \\call in the source, however often the surrounding code later runs.
+            \\The `describe` below prints, which reaches the build machine, so the
+            \\call is marked `#comptime`; a body that only computes needs no mark:
     );
     code_block(
         51,
@@ -471,7 +487,7 @@ render_section_79 :: () {
             \\}
             \\
             \\main :: () {
-            \\    for 0..2 print("{}\n", describe(s32));
+            \\    for 0..2 print("{}\n", #comptime describe(s32));
             \\}
     );
     code_block(
@@ -592,6 +608,7 @@ render_section_79 :: () {
         65,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\
             \\#comptime {
@@ -623,11 +640,16 @@ render_section_79 :: () {
     paragraph(
         69,
         #string,oneline
-            \\Compile-time code cannot use what exists only in the running program.
-            \\It cannot call a `#foreign` procedure, whose machine code is in a
-            \\library that the compiler does not load, and it cannot read a
-            \\run-time value of the procedure being compiled, such as a local
-            \\variable or a parameter:
+            \\Compile-time code cannot read a run-time value of the procedure
+            \\being compiled, such as a local variable or a parameter. Foreign
+            \\calls depend on the evaluator. A direct `#foreign` call cannot
+            \\supply a compile-time constant's result. A top-level `#comptime`
+            \\step can call foreign code through the native JIT when the target
+            \\matches the compiler's host and the required libraries and symbols
+            \\resolve. The interpreter fallback cannot call arbitrary native
+            \\code; it implements selected platform services used by the standard
+            \\library. Prefer those library services for build steps that also
+            \\need to run during cross compilation:
     );
     code_block(
         70,
@@ -636,8 +658,6 @@ render_section_79 :: () {
             \\// c_rand :: () -> s32 #foreign libc "rand";
             \\// SEED :: #comptime c_rand();
             \\error: 'c_rand' is foreign, so its result is not compile-time known
-            \\// #comptime { print("{}\n", c_rand()); }
-            \\error: #comptime stopped: VM cannot call foreign/undeclared function 'c_rand'; use the LLVM backend
             \\// n := 4;
             \\// m := #comptime n * 2;
             \\error: unknown const n
@@ -645,12 +665,12 @@ render_section_79 :: () {
     paragraph(
         71,
         #string,oneline
-            \\The two messages for `c_rand` differ because the two kinds of
-            \\compile-time code run at different points. A value computed while
+            \\Constant-result evaluation and top-level build steps run at
+            \\different points. A value computed while
             \\checking is evaluated from the checked source, and its errors point
             \\at the source. A top-level block runs after the program has been
-            \\translated to intermediate code, and an error stops it with a trace
-            \\of the calls it was in. The difference also shows in what each can
+            \\translated to intermediate code; interpreted failures can include
+            \\a trace of the calls they were in. The difference also shows in what each can
             \\run: labels and `goto` (see Labels, `goto`, and Non-Local Transfers)
             \\are refused in a value computed while checking, while a top-level
             \\block runs the same procedure. Inline assembly runs in neither.
@@ -669,7 +689,7 @@ render_section_79 :: () {
         #string,oneline
             \\Compile-time execution is also bounded, so that a loop that never
             \\ends cannot hang the build: one evaluation may run a limited number
-            \\of interpreter steps and nest a limited number of calls, and macro
+            \\of evaluation steps and nest a limited number of calls, and macro
             \\expansion and `#insert` have depth limits of their own. Build
             \\Scripts and Compile-Time Arguments lists the limits and how to raise
             \\them.
@@ -683,7 +703,7 @@ render_section_80 :: () {
             \\Three directives act on the program while it is compiled. `#if`
             \\chooses which code is compiled, `#assert` states a condition that
             \\must hold, and `#compile_error` stops the build with a message. This
-            \\chapter describes all three, the constants `OUT` and `HOST` that
+            \\chapter describes all three, the constants `OUT` and `EXEC` that
             \\their conditions usually test, and `#source_location`, which gives a
             \\program the kind of location that a failed assertion reports. Code
             \\That Runs at Compile Time shows them at work in a small program.
@@ -746,7 +766,7 @@ render_section_80 :: () {
             \\compiling: it may use constants declared with `::`, compile-time
             \\parameters and variables, properties of types such as `size_of(T)`
             \\and `Is_Integer(T)` from the `Meta` module, and the target constants
-            \\`OUT` and `HOST`. A run-time variable is reported by name:
+            \\`OUT` and `EXEC`. A run-time variable is reported by name:
     );
     code_block(
         8,
@@ -799,7 +819,7 @@ render_section_80 :: () {
             \\as a `where` clause, which rejects the call before the body is
             \\instantiated (see Generic Procedures and `where` Clauses).
     );
-    subheading(14, "`OUT` and `HOST`");
+    subheading(14, "`OUT` and `EXEC`");
     paragraph(
         15,
         #string,oneline
@@ -808,16 +828,22 @@ render_section_80 :: () {
     );
     table_header(16, "Constant   —   Fields   —   Describes");
     table_row(17, "`OUT`   |   `.os`, `.cpu`, `.abi`   |   The target the program is compiled for.");
-    table_row(18, "`HOST`   |   `.os`, `.cpu`   |   The machine that runs the compiler.");
+    table_row(
+        18,
+        "`EXEC`   |   `.os`, `.cpu`, `.abi`   |   The machine the code runs on: the target in the program, the build machine in compile-time code."
+    );
     paragraph(
         19,
         #string,oneline
             \\The fields are members of the enums `Target_OS`, `Target_CPU` and
             \\`Target_ABI`, listed in Target Triples and Cross Builds. The two
-            \\constants differ when the program is cross-compiled. Code that the
-            \\program will run tests `OUT`; compile-time code, which runs inside
-            \\the compiler, tests `HOST` when it does something on the build
-            \\machine, such as running a tool.
+            \\constants differ only in compile-time code of a cross build. Code
+            \\that asks what is being built, such as which library to link,
+            \\tests `OUT`; code that acts on the machine it runs on, such as
+            \\running a tool, tests `EXEC`, and the same procedure then does the
+            \\right thing in the program and at compile time. When the two views
+            \\differ, both branches of an `#if` on `EXEC` are checked and each
+            \\code keeps its own.
     );
     subheading(20, "Static switches");
     paragraph(
@@ -878,6 +904,7 @@ render_section_80 :: () {
         27,
         "glosso",
         #string
+            \\// Output: Linux
             \\#import "Io";
             \\
             \\main :: () {
@@ -916,6 +943,7 @@ render_section_80 :: () {
         32,
         "glosso",
         #string
+            \\// Output: Linux
             \\#import "Io";
             \\
             \\#if OUT.os == Target_OS.Windows {
@@ -2027,8 +2055,11 @@ render_section_82 :: () {
     paragraph(
         24,
         #string,oneline
-            \\The operand is evaluated at compile time. Besides a name or a call,
-            \\it can be a block, `#insert { ...; return text; }`, or a block with a
+            \\The operand is evaluated at compile time, under the rule for
+            \\compile-time code without `#comptime`: an operand that reaches the
+            \\build machine, such as one that generates C bindings or compiles a C
+            \\library, is written `#insert #comptime f();`. Besides a name or a
+            \\call, it can be a block, `#insert { ...; return text; }`, or a block with a
             \\stated result type, `#insert -> str { ... }`, whose returned value is
             \\checked against that type before it is parsed. Inside a macro,
             \\`#insert,scope() code` makes an inserted quote see the macro's own

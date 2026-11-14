@@ -783,8 +783,8 @@ render_section_59 :: () {
             \\}
             \\
             \\Balloon :: struct { grams: s64; }
-            \\Balloon ::: instance Ranked {
-            \\    rank :: (value: Balloon) -> s64 { return 1; }
+            \\Balloon ::: instance Weighted {
+            \\    weight :: (value: Balloon) -> s64 { return value.grams / 1000; }
             \\}
             \\
             \\score :: (value: $T) -> s64 where Ranked(T) {
@@ -809,12 +809,12 @@ render_section_59 :: () {
     paragraph(
         97,
         #string,oneline
-            \\The `Balloon` instance is accepted where it is declared, but it never
-            \\applies: the superclass condition is checked each time the class is
-            \\consulted, and `Weighted(Balloon)` is false, so `rank(b)` on a
-            \\`Balloon` is `error: no overload 'rank' accepts these arguments`.
-            \\Declaring the missing `Weighted` instance makes the `Ranked` one
-            \\usable with no other change. The standard classes are layered this
+            \\`Balloon` implements `Weighted`, but has no `Ranked` instance, so
+            \\`Ranked(Balloon)` is false: superclass evidence alone does not imply
+            \\the subclass. Conversely, declaring a concrete `Ranked` instance
+            \\without the required `Weighted` instance is rejected at its
+            \\declaration. Generic and conditional instances must satisfy the
+            \\superclass condition when they are used. The standard classes are layered this
             \\way: `Eq` requires `PartialEq`, and `Monad` requires `Applicative`,
             \\which requires `Functor`.
     );
@@ -1865,16 +1865,16 @@ render_section_61 :: () {
             \\promise that no other module can break. The standard library denies
             \\`Eq` to the floating-point types with
             \\`$T ::: instance !Eq where Is_Float(T) {}`, because `NaN` is not
-            \\equal to itself, and a program that declares an `Eq` instance of its
-            \\own for `f64` does not change the answer:
+            \\equal to itself. A concrete `f64 ::: instance Eq {}` declaration is
+            \\rejected; it cannot override that negative evidence. Without such a
+            \\declaration, the compile-time tests show the difference between
+            \\partial and full equality:
     );
     code_block(
         50,
         "glosso",
         #string
             \\#import "Io";
-            \\
-            \\f64 ::: instance Eq {}
             \\
             \\F64_EQ :: Eq(f64);
             \\F64_PARTIAL :: PartialEq(f64, f64);
@@ -1947,8 +1947,9 @@ render_section_62 :: () {
         "glosso",
         #string
             \\#import "Io";
+            \\#import "Container/Hash";
             \\
-            \\Point :: struct #derive(Show, PartialEq) { x: s64; label: str; }
+            \\Point :: struct #derive(Show, PartialEq, Clone, PartialOrd, Hash) { x: s64; label: str; }
             \\
             \\Shape :: union #derive(Show, PartialEq) {
             \\    Dot: void;
@@ -1960,9 +1961,11 @@ render_section_62 :: () {
             \\
             \\main :: () {
             \\    a := Point.{ 1, "left" };
-            \\    b := Point.{ 1, "left" };
+            \\    b := a.clone();
+            \\    defer b.label.free();
             \\    c := Point.{ 2, "left" };
             \\    print("{} {} {}\n", a, a == b, a == c);
+            \\    print("{} {} {}\n", a.label.data == b.label.data, a < c, a.hash() == b.hash());
             \\    s: Shape = .Line(7);
             \\    t: Shape = .Line(7);
             \\    u: Shape = .Dot;
@@ -1976,6 +1979,7 @@ render_section_62 :: () {
         "text",
         #string
             \\{1, left} true false
+            \\false true true
             \\Line(7) Dot true false
             \\Some(2.5)
     );
@@ -2011,35 +2015,61 @@ render_section_62 :: () {
         10,
         "`Serialize`, `Deserialize`   |   Field-wise and variant-wise encoding, from the `Serialization` module."
     );
-    paragraph(
+    table_row(
         11,
+        "`Clone`   |   Explicitly duplicates a struct field by field or a tagged union's active payload; every field or payload needs `Clone`."
+    );
+    table_row(
+        12,
+        "`PartialOrd`   |   Compares a struct's fields in declaration order, returning the first result other than `Equal`, including `Unordered`; unions are not supported."
+    );
+    table_row(
+        13,
+        "`Hash`   |   Feeds a struct's fields to the hasher in declaration order, or a tagged union's variant position followed by its payload; import `Container/Hash`."
+    );
+    paragraph(
+        14,
         #string,oneline
-            \\`Eq`, `PartialOrd`, `Hash` and `FromString` have no derive macro. A
-            \\type promises `Eq` with an empty instance, and an order, a hash or a
-            \\parser is written by hand (see `PartialEq`, `PartialOrd`, and `Hash`
+            \\The first example's `a.clone()` allocates a new copy of the label's
+            \\bytes; assignment alone would share them. `Clone` is never called
+            \\implicitly. Its instances decide what an independent duplicate
+            \\means: strings and dynamic arrays copy storage, shared handles take
+            \\another reference, and pointers and views still refer to the same
+            \\borrowed storage. `Freeable`, Copies, and Ownership Transfer describes
+            \\the protocol. Deriving `PartialOrd` uses each field's own `<=>`;
+            \\deriving `Hash` writes the same parts that derived `PartialEq`
+            \\compares, so equal values have equal hashes.
+    );
+    paragraph(
+        15,
+        #string,oneline
+            \\`Eq` and `FromString` have no derive macro. A type promises `Eq`
+            \\with an empty instance, and a parser is written by hand (see
+            \\`PartialEq`, `PartialOrd`, and `Hash`
             \\and `Show`, `Formatter`, `FromString`, and Format Strings). Asking for one of
             \\them is an error at the type's declaration:
     );
     code_block(
-        12,
+        16,
         "text",
         #string
             \\// Point :: struct #derive(Eq) { x: s64; }
             \\error: typeclass 'Eq' does not declare a derive macro
     );
-    subheading(13, "When a derive fails");
+    subheading(17, "When a derive fails");
     paragraph(
-        14,
+        18,
         #string,oneline
             \\A macro that cannot handle the type it is given says so with a
             \\`#compile_error` of its own. The standard macros reject enums, which
-            \\already have `Show` and `PartialEq`, and `#raw` unions, which have no
+            \\already have `Show`, `PartialEq`, `Clone` and `Hash`, and `#raw`
+            \\unions, which have no
             \\tag to switch on. A field without the instance that the derive needs
             \\is reported when the instance is first used, with the generated code
             \\and the type's declaration in the notes:
     );
     code_block(
-        15,
+        19,
         "text",
         #string
             \\// Color :: enum #derive(Show) { Red; Green; }
@@ -2048,16 +2078,16 @@ render_section_62 :: () {
             \\error: cannot derive Show for Grid: field 'cells' of type [3]s64 has no Show instance
     );
     paragraph(
-        16,
+        20,
         #string,oneline
             \\`#derive` on a `distinct` type is a separate feature with the same
             \\spelling: it selects which operators the new type borrows from the
             \\type it wraps, and runs no macro. Nominal Types with `distinct`
             \\describes it.
     );
-    subheading(17, "Writing a derive macro");
+    subheading(21, "Writing a derive macro");
     paragraph(
-        18,
+        22,
         #string,oneline
             \\A class becomes derivable by naming a macro with `#derive(macro)` in
             \\its declaration. The macro is an `#expand` procedure with three
@@ -2068,7 +2098,7 @@ render_section_62 :: () {
             \\field names of a struct:
     );
     code_block(
-        19,
+        23,
         "glosso",
         #string
             \\#import "Io";
@@ -2113,14 +2143,14 @@ render_section_62 :: () {
             \\}
     );
     code_block(
-        20,
+        24,
         "text",
         #string
             \\x, y
             \\first, second
     );
     paragraph(
-        21,
+        25,
         #string,oneline
             \\`info.type_section(no_focus)` builds the instance head: `Point` for
             \\`Point`, and `Pair($A, $B)` for the generic `Pair`, so one inserted
@@ -2133,38 +2163,38 @@ render_section_62 :: () {
             \\technique the standard `Show` derive uses. `#code`, `#insert`, and
             \\`#expand` describes these tools.
     );
-    subheading(22, "The derive description");
-    table_header(23, "Member   —   Meaning");
-    table_row(24, "`info.base`   |   The type's `Type_Info`; `info.base.name` is its name.");
-    table_row(25, "`info.params`   |   The generic parameters, each with `name` and `index`.");
-    table_row(26, "`info.fields`   |   A struct's fields, each with `name` and `ty`.");
+    subheading(26, "The derive description");
+    table_header(27, "Member   —   Meaning");
+    table_row(28, "`info.base`   |   The type's `Type_Info`; `info.base.name` is its name.");
+    table_row(29, "`info.params`   |   The generic parameters, each with `name` and `index`.");
+    table_row(30, "`info.fields`   |   A struct's fields, each with `name` and `ty`.");
     table_row(
-        27,
+        31,
         "`info.variants`   |   A union's variants, each with `name` and `payload` (`void` when it has none)."
     );
-    table_row(28, "`info.raw_union`   |   True for a `#raw` union.");
+    table_row(32, "`info.raw_union`   |   True for a `#raw` union.");
     table_row(
-        29,
+        33,
         "`info.type_section(focuses)`   |   The head, with the focused parameters left as `_` holes."
     );
     table_row(
-        30,
+        34,
         "`info.type_apply(focuses, replacements)`   |   The type with the focused parameters replaced by the given code."
     );
     table_row(
-        31,
+        35,
         "`info.focus_params(opts, n)`   |   The `n` parameters a derive should focus on; the last `n` by default."
     );
     table_row(
-        32,
+        36,
         "`type_uses_param(T, i)`, `type_is_param(T, i)`   |   Whether a field type mentions, or is, parameter `i`."
     );
     table_row(
-        33,
+        37,
         "`type_occurs_covariantly(T, i)`   |   Whether parameter `i` appears in `T` only outside procedure parameter types."
     );
     paragraph(
-        34,
+        38,
         #string,oneline
             \\The focus functions serve derives over one type parameter, such as
             \\`Functor`: focusing the last parameter of `Either(L, R)` gives the
@@ -2352,8 +2382,10 @@ render_section_63 :: () {
     paragraph(
         21,
         #string,oneline
-            \\There is no built-in ordering of structs and no derive for
-            \\`PartialOrd`; a type that should sort writes `<=>`. The `sort`
+            \\A struct gets lexicographic ordering with `#derive(PartialOrd)`;
+            \\fields are compared in declaration order until one result is not
+            \\`Equal`, including `Unordered`. A type with a different ordering
+            \\writes its own `<=>` instead. The `sort`
             \\method of the `Sort` module accepts any view whose element type has
             \\a `PartialOrd(T, T)` instance:
     );
@@ -2364,14 +2396,7 @@ render_section_63 :: () {
             \\#import "Io";
             \\#import "Sort";
             \\
-            \\Version :: struct #derive(Show, PartialEq) { major: s32; minor: s32; }
-            \\
-            \\(Version, Version) ::: instance PartialOrd {
-            \\    '<=>' :: (a: Version, b: Version) -> Ordering {
-            \\        if a.major != b.major return a.major <=> b.major;
-            \\        return a.minor <=> b.minor;
-            \\    }
-            \\}
+            \\Version :: struct #derive(Show, PartialEq, PartialOrd) { major: s32; minor: s32; }
             \\
             \\main :: () -> Sort_Error!void {
             \\    releases: [4]Version = .[.{ 2, 0 }, .{ 1, 10 }, .{ 1, 2 }, .{ 2, 1 }];
@@ -2417,7 +2442,7 @@ render_section_63 :: () {
         27,
         "glosso",
         #string
-            \\Hash :: typeclass (T: type, H: type) where Hasher(H) #minimal(hash_into) {
+            \\Hash :: typeclass (T: type, H: type) where Hasher(H) #derive(derive_hash) #minimal(hash_into) {
             \\    hash_into :: (value: T, state: *H);
             \\}
     );
@@ -2425,9 +2450,11 @@ render_section_63 :: () {
         28,
         #string,oneline
             \\`HashMap(K, V)` and `HashSet(K)` need `Eq(K)` and
-            \\`Hash(K, DefaultHasher)`. A key type writes its fields one after
-            \\another with their own instances, and declares the instance generic
-            \\in the hasher so that it works with any:
+            \\`Hash(K, DefaultHasher)`. `#derive(Hash)` writes a struct's fields
+            \\one after another through their own instances. A tagged union writes
+            \\its variant position followed by its payload. The generated instance
+            \\is generic in the hasher, so it works with any `Hasher(H)`. A key
+            \\that derives `PartialEq` over the same fields can use it directly:
     );
     code_block(
         29,
@@ -2438,16 +2465,9 @@ render_section_63 :: () {
             \\#import "Container/HashMap";
             \\#import "Container/Error";
             \\
-            \\Cell :: struct #derive(PartialEq) { row: s32; column: s32; }
+            \\Cell :: struct #derive(PartialEq, Hash) { row: s32; column: s32; }
             \\
             \\Cell ::: instance Eq {}
-            \\
-            \\(Cell, $H) ::: instance Hash where Hasher(H) {
-            \\    hash_into :: (cell: Cell, state: *H) {
-            \\        hash_into(cell.row, state);
-            \\        hash_into(cell.column, state);
-            \\    }
-            \\}
             \\
             \\main :: () -> Container_Error!void {
             \\    counts := HashMap(Cell, s64).new()?;

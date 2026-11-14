@@ -11,16 +11,17 @@ render_section_70 :: () {
     paragraph(
         0,
         #string,oneline
-            \\Every procedure can read and change a value named `context` without
-            \\importing or declaring it. The context holds the policies that
+            \\An ordinary procedure can read and change a value named `context`
+            \\without importing or declaring it. The context holds the policies that
             \\library code consults instead of taking them as parameters: the
             \\allocator that serves memory, the arena for short-lived memory, the
             \\sink for log records and the source of random numbers, together with
-            \\two fields that belong to the program. A caller changes a field for a
-            \\stretch of code, and every procedure that runs in that stretch,
-            \\standard-library code included, follows the change although no
-            \\signature mentions it. This chapter describes the fields, the ways
-            \\to change them, and the places where the context is not available.
+            \\two fields that belong to the program. Each ordinary call inherits
+            \\the caller's active context. Changing a field affects the current
+            \\call and the procedures it then calls, including standard-library
+            \\code; returning does not change the caller's context. This chapter
+            \\describes the fields, the ways to change them, and the places where
+            \\the context is not available.
             \\The allocators themselves are the subject of `Allocator` and
             \\Allocation Procedures.
     );
@@ -30,10 +31,13 @@ render_section_70 :: () {
         "`allocator`   |   `Allocator`   |   The heap allocator, or the debug allocator in a build made with `GLOSSO_DEBUG_ALLOCATOR=1`"
     );
     table_row(3, "`temp_allocator`   |   `Allocator`   |   The temporary arena");
-    table_row(4, "`logger`   |   `Logger`   |   Zero: no sink installed");
+    table_row(
+        4,
+        "`logger`   |   `Logger`   |   `stderr_logger()`, accepting Debug and higher levels"
+    );
     table_row(
         5,
-        "`random_generator`   |   `Random_Generator`   |   Zero: the operating system's entropy source"
+        "`random_generator`   |   `Random_Generator`   |   `system_random_generator()`: the operating system's entropy source"
     );
     table_row(6, "`user_ptr`   |   `?*void`   |   `null`");
     table_row(7, "`user_index`   |   `ssize`   |   0");
@@ -48,18 +52,21 @@ render_section_70 :: () {
             \\other short-lived results described in The Temporary Allocator. The
             \\procedures of the `Random` module draw from
             \\`context.random_generator` unless they are given a generator.
-            \\Nothing in the standard library writes through `context.logger`, and
-            \\nothing at all reads `user_ptr` or `user_index`; those three are
-            \\slots for the program.
+            \\`log_message` from `Context` sends records through `context.logger`.
+            \\Nothing in the standard library reads `user_ptr` or `user_index`;
+            \\those two slots belong to the program.
     );
     subheading(9, "Reading and changing fields");
     paragraph(
         10,
         #string,oneline
             \\`context.user_index` reads a field like any struct field, and
-            \\`context.user_index = 7;` changes it for everything that runs
-            \\afterwards on the same thread, until the next assignment. `saved :=
-            \\context;` copies the whole context into an ordinary `#Context` value,
+            \\`context.user_index = 7;` changes the active context for the rest of
+            \\this call, until another assignment or an explicit restore. Later
+            \\callees inherit it, but their own field assignments stay local to
+            \\their calls. An ordinary block does not restore context fields when
+            \\it ends. `saved := context;` copies the whole context into an ordinary
+            \\`#Context` value,
             \\which can be changed, passed to procedures and returned. To change
             \\the context for a limited stretch of code and have the change undone
             \\afterwards, install such a value with `#push_context`.
@@ -153,8 +160,14 @@ render_section_70 :: () {
         #string
             \\#import "Io";
             \\
+            \\change_index :: () {
+            \\    context.user_index = 99;
+            \\    print("callee {}\n", context.user_index);
+            \\}
+            \\
             \\main :: () {
             \\    context.user_index = 7;
+            \\    change_index();                       // the callee's assignment stays in that call
             \\    print("outer {}\n", context.user_index);
             \\    #push_context {
             \\        print("default {}\n", context.user_index);
@@ -166,6 +179,7 @@ render_section_70 :: () {
         20,
         "text",
         #string
+            \\callee 99
             \\outer 7
             \\default 0
             \\outer again 7
@@ -220,9 +234,11 @@ render_section_70 :: () {
     paragraph(
         25,
         #string,oneline
-            \\The cast is not checked. The context does not record what `user_ptr`
-            \\points to, so the code that sets it and the code that reads it must
-            \\agree on the type, and the value it points to must outlive the
+            \\The cast is not checked. Copying a context copies its pointers and
+            \\service handles, not the state they refer to: `record` changes the
+            \\caller's `totals` through the shared pointer. The context does not
+            \\record what `user_ptr` points to, so the code that sets it and the
+            \\code that reads it must agree on the type, and the value it points to must outlive the
             \\region in which it is installed.
     );
     subheading(26, "The random generator");
@@ -231,8 +247,10 @@ render_section_70 :: () {
         #string,oneline
             \\Every sampling procedure of the `Random` module takes a last
             \\parameter `generator` whose default is `context.random_generator`.
-            \\The zero generator of the default context draws from the operating
-            \\system's entropy source. Installing the generator of a deterministic
+            \\The default context installs `system_random_generator()`, which draws
+            \\from the operating system's entropy source. A zero generator also
+            \\selects system entropy through the checked `random_*` APIs. Installing
+            \\the generator of a deterministic
             \\engine makes every draw in a region reproducible, in code that does
             \\not know about the engine:
     );
@@ -263,7 +281,7 @@ render_section_70 :: () {
             \\            rolls("seeded");
             \\        }
             \\    }
-            \\    print("system generator installed: {}\n", context.random_generator.procedure == null);
+            \\    print("system generator installed: {}\n", context.random_generator.info().name == "system");
             \\}
     );
     code_block(
@@ -293,9 +311,11 @@ render_section_70 :: () {
             \\to it; and `lowest_level` names the least severe level the sink is
             \\meant to keep. `Logger_Level` has the members `Debug`, `Info`,
             \\`Warning`, `Error` and `Fatal`, with the values 0, 10, 20, 30 and 40.
-            \\Nothing reads the logger on the program's behalf, so a program
-            \\writes its own logging procedure that hands records to whatever sink
-            \\its caller installed:
+            \\`log_message(level, text, logger = context.logger)` checks the
+            \\threshold and sends the borrowed text to the selected sink. The
+            \\default `stderr_logger()` writes the message and a newline to
+            \\standard error; a zero `Logger` discards records. A program can
+            \\install its own sink:
     );
     code_block(
         33,
@@ -303,15 +323,6 @@ render_section_70 :: () {
         #string
             \\#import "Io";
             \\#import "Context";
-            \\
-            \\// The program's own logging procedure: it hands each record to the sink in
-            \\// `context.logger`, and does nothing while none is installed.
-            \\log :: (level: Logger_Level, text: str) {
-            \\    logger := context.logger;
-            \\    #pattern ?sink := logger.procedure else { return; }
-            \\    if cast(s64) level < cast(s64) logger.lowest_level return;
-            \\    sink(logger.data, level, cast(*void) text.data, text.count);
-            \\}
             \\
             \\// A sink that numbers the records it receives; `data` points at its counter.
             \\counting_sink :: (data: ?*void, level: Logger_Level, text: *void, len: ssize) {
@@ -322,12 +333,11 @@ render_section_70 :: () {
             \\}
             \\
             \\work :: () {
-            \\    log(.Debug, "opening the archive");
-            \\    log(.Warning, "the archive is almost full");
+            \\    log_message(.Debug, "opening the archive");
+            \\    log_message(.Warning, "the archive is almost full");
             \\}
             \\
             \\main :: () {
-            \\    work();                                  // no sink: nothing happens
             \\    records: s64 = 0;
             \\    logged := context;
             \\    logged.logger = .{ .procedure = counting_sink, .data = &records, .lowest_level = .Info };
@@ -347,9 +357,10 @@ render_section_70 :: () {
     paragraph(
         35,
         #string,oneline
-            \\`lowest_level` is advisory: nothing compares it on the program's
-            \\behalf, so the code that produces records, or the sink, drops the ones
-            \\below it, as `log` does here.
+            \\`log_message` filters records below `lowest_level` before calling
+            \\the sink. A direct call to `logger.procedure` bypasses that check.
+            \\On a freestanding target without standard error, the default sink
+            \\discards records until a program installs a sink of its own.
     );
     subheading(36, "`#push_allocator`");
     paragraph(
@@ -362,20 +373,20 @@ render_section_70 :: () {
             \\is ordered with deferred releases, are in `Allocator` and Allocation
             \\Procedures.
     );
-    subheading(38, "One context per thread");
+    subheading(38, "Context and threads");
     paragraph(
         39,
         #string,oneline
-            \\Each thread has its own context. A new thread starts with the default
-            \\context, not with a copy of its creator's, and an assignment, a
-            \\`#push_context` or a `#push_allocator` in one thread is never seen
-            \\by another. State that a thread needs is handed to it explicitly, as
-            \\`spawn_owned`, `thread_scope`, and `Thread_Pool` describes; that
-            \\chapter also explains that a thread which runs several tasks of a
-            \\batch keeps its context from one task to the next. Each thread also
-            \\has its own temporary arena. On a target without
-            \\thread-local storage, such as a freestanding one, the program has a
-            \\single context.
+            \\A new thread starts with the default context, not with a copy of its
+            \\creator's active context. Its calls inherit that context in the usual
+            \\way, and field assignments stay local to the call that makes them.
+            \\State that a thread needs is handed to it explicitly, as
+            \\`spawn_owned`, `thread_scope`, and `Thread_Pool` describes. Reusing a
+            \\worker for another task does not carry the previous task's field
+            \\assignments into the next call. State behind a pointer or service
+            \\handle can still be shared and requires synchronization. Temporary
+            \\arena storage is per thread where the target supports thread-local
+            \\storage; a freestanding target without it has one temporary arena.
     );
     subheading(40, "Procedures without a context: `#no_context` and `#c_call`");
     paragraph(
@@ -395,8 +406,10 @@ render_section_70 :: () {
     paragraph(
         43,
         #string,oneline
-            \\The restriction is on the name, not on the machinery. The procedures
-            \\such a procedure calls still read the context of the thread;
+            \\The restriction is on the name, not on the machinery. Callees of
+            \\`#no_context` still inherit the caller's context. A `#c_call` entry
+            \\instead uses the default context, since its C caller passes none;
+            \\procedures it calls inherit that default context.
             \\`#push_allocator`, which does not name `context`, is accepted; and a
             \\`#push_context` block installs a context and makes the name usable
             \\again inside it:
@@ -757,7 +770,7 @@ render_section_71 :: () {
         #string,oneline
             \\A standard-library procedure that allocates on the caller's behalf
             \\usually takes a last parameter `allocator` whose default is
-            \\`context.allocator`: `format`, `clone`, `String_Builder.make_len_cap`
+            \\`context.allocator`: `format`, `str.clone`, `String_Builder.make_len_cap`
             \\and the container constructors among them. A few path helpers
             \\default to `context.temp_allocator` instead, and say so. A caller
             \\that wants another allocator for one call passes it by name.
@@ -2322,11 +2335,11 @@ render_section_73 :: () {
     paragraph(
         73,
         #string,oneline
-            \\There is no general deep copy, because only the type knows what a
-            \\copy of its resources means. Strings have `text.clone(allocator)`, a
-            \\builder has `builder.clone()`, and `Deque` and `LinkedList` have
-            \\`clone` and `clone_with`, which takes a procedure that copies one
-            \\element. For a dynamic array of plain elements a loop is enough:
+            \\The prelude's `Clone(T)` typeclass provides explicit duplication:
+            \\`clone(&value)`, `value.clone()` or `Clone(T).clone(&value)`.
+            \\Assignment never calls it. Owners duplicate their resources, while
+            \\shared handles retain another reference to the same payload.
+            \\A dynamic array clones its elements into a new buffer:
     );
     code_block(
         74,
@@ -2334,19 +2347,11 @@ render_section_73 :: () {
         #string
             \\#import "Io";
             \\
-            \\// A new array holding copies of the elements of `source`.
-            \\duplicate :: (source: []const $T) -> [..]T {
-            \\    out: [..]T;
-            \\    out.reserve(source.count);
-            \\    for x: source out.push(x);
-            \\    return out;
-            \\}
-            \\
             \\main :: () {
             \\    a: [..]s64;
             \\    defer a.free();
             \\    a.push(1, 2, 3);
-            \\    b := duplicate(a.view());
+            \\    b := clone(&a);
             \\    defer b.free();
             \\    b[0] = 100;
             \\    print("{} {} same buffer: {}\n", a[0], b[0], a.data == b.data);
@@ -2361,9 +2366,15 @@ render_section_73 :: () {
     paragraph(
         76,
         #string,oneline
-            \\For elements that are owners themselves, `duplicate` would copy
-            \\descriptors again; each element needs its own copy, made the same way
-            \\one level down.
+            \\Fixed arrays, dynamic arrays, matrices, optionals and results clone
+            \\their contained values when those values satisfy `Clone`. A struct
+            \\or tagged union can use `#derive(Clone)`; see `#derive`. Strings
+            \\receive owned byte copies, but pointers and borrowed slices still
+            \\refer to the same memory. The protocol's allocation defaults to
+            \\`context.allocator`; methods such as `text.clone(allocator)` can
+            \\also select one explicitly. Release each duplicate according to
+            \\its type's ownership rules. Container clones abort on allocation
+            \\failure; a fallible API such as `LinkedList.try_clone` reports it.
     );
     subheading(77, "Loops copy elements");
     paragraph(
@@ -2618,7 +2629,8 @@ render_section_74 :: () {
         25,
         #string,oneline
             \\A `String_Builder` is a `[..]u8` together with the allocator it grows
-            \\through. Its `to_string()` borrows the bytes, `clone()` copies them
+            \\through. Its `to_string()` borrows the bytes, `clone()` returns an
+            \\independent builder, `clone_string(allocator)` copies the bytes
             \\into a new string, and `into_string()` turns the buffer itself into
             \\a string. `into_string` takes the builder by value, so the variable
             \\still holds the buffer afterwards; take the builder out first when it
@@ -2639,7 +2651,7 @@ render_section_74 :: () {
             \\    view := b.to_string();                       // borrows the builder's bytes
             \\    print("{}\n", view);
             \\    b.write_string(", world");                   // may move the bytes: `view` is stale from here on
-            \\    copy := b.clone();                           // an independent copy
+            \\    copy := b.clone_string();                    // an independent string
             \\    defer copy.free();
             \\    text := value_take(&b).into_string();        // the buffer itself; b is left empty
             \\    defer text.free();
@@ -3035,7 +3047,10 @@ render_section_75 :: () {
             \\
             \\main :: () -> Dynamic_Library_Error!void {
             \\    #assert !Freeable(Dynamic_Library);
-            \\    lib := Dynamic_Library.dynamic_library_open("libm.so.6")?;
+            \\    library := "libm.so.6";              // hosted Linux with glibc
+            \\    #if EXEC.os == .Windows library = "ucrtbase.dll";
+            \\    #if EXEC.os == .Freebsd library = "libm.so.5";
+            \\    lib := Dynamic_Library.dynamic_library_open(library)?;
             \\    defer lib.close();                   // the error of a deferred close is dropped
             \\    sym := lib.symbol("cos")?;
             \\    print("found cos: {}\n", sym != null);

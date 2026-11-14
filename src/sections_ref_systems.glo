@@ -121,12 +121,14 @@ render_section_84 :: () {
         #string,oneline
             \\Only functions can be foreign; a global variable cannot. A C variable
             \\is reached through a function, the way C's own headers reach
-            \\`errno`:
+            \\`errno`. This example uses glibc on Linux;
+            \\`__errno_location` is not a portable C symbol:
     );
     code_block(
         14,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\
             \\libc           :: #library "c";
@@ -400,7 +402,7 @@ render_section_84 :: () {
             \\    }
             \\}
             \\
-            \\#insert greet_library();
+            \\#insert #comptime greet_library();
             \\
             \\greet_add   :: (a: s32, b: s32) -> s32 #foreign greet;
             \\greet_hello :: (name: cstr) #foreign greet;
@@ -530,12 +532,15 @@ render_section_84 :: () {
             \\`#fn_ptr` type marked `#c_call` (Lambdas and `#fn_ptr` Values
             \\describes these types). The cast is trusted: the signature has to
             \\match the library's. `close` releases the library, and every address
-            \\taken from it is invalid afterwards.
+            \\taken from it is invalid afterwards. The following Linux example
+            \\loads glibc's `libm.so.6`; library filenames and exported symbols
+            \\must match the platform where the program runs.
     );
     code_block(
         67,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\#import "Dynamic_Library";
             \\
@@ -914,7 +919,10 @@ render_section_85 :: () {
         9,
         "`char` as a value: a parameter, result or field   |   `s8` where `char` is signed (x86), `u8` where it is unsigned (AArch64 Linux)"
     );
-    table_row(10, "`char` as text: `char *`, `char[N]`   |   `u8` on every target: `[*]u8`, `[N]u8`");
+    table_row(
+        10,
+        "`char` as text: `char *`, `char[N]`   |   `u8` on every target: `[*]u8`, `[N]u8`"
+    );
     table_row(11, "`float`, `double`   |   `f32`, `f64`");
     table_row(12, "`long double`   |   `f80` on x86-64 Linux; it differs between targets");
     table_row(13, "`_Bool`   |   `bool`");
@@ -1008,8 +1016,14 @@ render_section_85 :: () {
         #string
             \\#import "Io";
             \\
+            \\#if OUT.os == .Windows {
+            \\    C_Long :: s32;
+            \\} else {
+            \\    C_Long :: ssize;
+            \\}
+            \\
             \\libc   :: #library "c";
-            \\strtol :: (text: cstr, end: *cstr, base: s32) -> s64 #foreign libc;
+            \\strtol :: (text: cstr, end: *cstr, base: s32) -> C_Long #foreign libc;
             \\getenv :: (name: cstr) -> cstr #foreign libc;
             \\strdup :: (text: cstr) -> cstr #foreign libc;
             \\c_free :: (memory: ?*void) #foreign libc "free";
@@ -1051,12 +1065,15 @@ render_section_85 :: () {
             \\A struct that C reads is declared `struct #c_call`, which keeps the
             \\declared field order and C's padding (Field Order, Alignment, and
             \\Packing gives the rules). C fills a struct or a buffer through a
-            \\pointer to Glosso storage, and that storage can be a local:
+            \\pointer to Glosso storage, and that storage can be a local. This
+            \\example uses the 64-bit glibc `struct tm` layout on Linux;
+            \\other C libraries require their own declarations or generated bindings:
     );
     code_block(
         38,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\
             \\// struct tm, as glibc declares it on 64-bit Linux
@@ -1252,13 +1269,16 @@ render_section_85 :: () {
             \\it back on every call, so that the callback can find the caller's
             \\data. The Glosso side passes the address of its own value and casts
             \\it back in the callback. C only hands the pointer around, so the
-            \\type it points to needs no `#c_call`. glibc's `qsort_r` works this
-            \\way:
+            \\type it points to needs no `#c_call`. glibc's `qsort_r` on Linux
+            \\works this way. The signature is platform-specific: other C
+            \\libraries may order the context and callback arguments differently
+            \\or provide a different function:
     );
     code_block(
         58,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\
             \\Order :: struct { descending: bool; calls: s32; }
@@ -1338,7 +1358,7 @@ render_section_85 :: () {
             \\    }
             \\}
             \\
-            \\#insert stdlib_bindings();
+            \\#insert #comptime stdlib_bindings();
             \\
             \\by_value :: (a: ?[*]const void, b: ?[*]const void) -> s32 #c_call {
             \\    if #pattern ?x = a if #pattern ?y = b {
@@ -1352,7 +1372,12 @@ render_section_85 :: () {
             \\    print("17 / 5 = {} remainder {}\n", parts.quot, parts.rem);
             \\    print("abs(-8) = {}\n", abs(-8));
             \\    values: [4]s32 = .[4, 2, 3, 1];
-            \\    qsort(cast([*]void) values.data, 4, 4, by_value);
+            \\    #if OUT.os == .Windows {
+            \\        // The Windows CRT header exposes the comparator as an opaque pointer.
+            \\        qsort(cast([*]void) values.data, 4, 4, cast(*void) by_value);
+            \\    } else {
+            \\        qsort(cast([*]void) values.data, 4, 4, by_value);
+            \\    }
             \\    for v: values print("{} ", v);
             \\    print("\n");
             \\}
@@ -1374,7 +1399,12 @@ render_section_85 :: () {
             \\from, and the allowlist restricts the output to the named
             \\declarations and what they need. When generation fails, the
             \\procedure prints the reason and inserts a failing assertion, which
-            \\stops the build. This is the text that was inserted:
+            \\stops the build. Generated declarations depend on the target's C
+            \\headers. On Windows, the CRT header's comparison callback is an
+            \\opaque `?*void`, so the call explicitly casts the `#c_call`
+            \\procedure to that pointer type. Its ABI must still match C's
+            \\comparison function. The following generated text is from
+            \\64-bit Linux with glibc:
     );
     code_block(
         67,
@@ -2629,7 +2659,7 @@ render_section_87 :: () {
             \\#import "Io";
             \\#import "Lua/Build";
             \\
-            \\#insert static_bindings_source(.[
+            \\#insert #comptime static_bindings_source(.[
             \\    "luaL_newstate", "lua_close", "luaL_openlibs", "luaL_dostring",
             \\    "lua_getglobal", "lua_tonumber", "lua_pop", "LUA_OK",
             \\]);
@@ -2718,7 +2748,7 @@ render_section_88 :: () {
             \\The compiler carries code generators for many processors and
             \\operating systems, and it builds for any of them on any machine it
             \\runs on. This chapter describes how a target is named, which targets
-            \\exist, the constants `OUT` and `HOST` through which a program sees
+            \\exist, the constants `OUT` and `EXEC` through which a program sees
             \\its target, what linking for another system needs, and how a build
             \\script builds for several targets. The targets without an ordinary
             \\operating system are the subject of Freestanding, UEFI, and Wasm
@@ -2893,17 +2923,20 @@ render_section_88 :: () {
             \\$ wine hello.exe
             \\hello, world
     );
-    subheading(34, "`OUT` and `HOST`");
+    subheading(34, "`OUT` and `EXEC`");
     paragraph(
         35,
         #string,oneline
             \\Every program sees two constants that describe its build, declared
             \\in the implicit prelude. `OUT` is an `Output_Target` that describes
             \\the target being compiled for, with the fields `os`, `cpu` and
-            \\`abi`. `HOST` is a `Host_Target` that describes the machine running
-            \\the compiler, with `os` and `cpu` only. Both are compile-time
-            \\constants, so a comparison with them can decide an `#if`. Their
-            \\fields use these enumerations:
+            \\`abi`. `EXEC` is an `Exec_Target`, with the same fields, that
+            \\describes the machine the code runs on: in the program it is the
+            \\target, the same as `OUT`, and in code run at compile time it is
+            \\the machine running the compiler. The program reads the build
+            \\machine as `#comptime EXEC`. Both are compile-time constants, so a
+            \\comparison with them can decide an `#if`. Their fields use these
+            \\enumerations:
     );
     table_header(36, "Type   —   Members");
     table_row(
@@ -2926,12 +2959,14 @@ render_section_88 :: () {
             \\and FreeBSD. `Unknown` in any of the enumerations means a part that
             \\the compiler did not recognize. `target_endian()` returns the byte
             \\order of `OUT` and is folded at compile time like the constants. This
-            \\program reports what it was built for:
+            \\program reports what it was built for; its sample output below
+            \\comes from a native x86-64 Linux build:
     );
     code_block(
         42,
         "glosso",
         #string
+            \\// Output: Linux
             \\#import "Io";
             \\#import "Meta";
             \\
@@ -2943,7 +2978,7 @@ render_section_88 :: () {
             \\
             \\main :: () {
             \\    print("target: {} {} {}\n", OUT.os, OUT.cpu, OUT.abi);
-            \\    print("host: {} {}\n", HOST.os, HOST.cpu);
+            \\    print("built on: {} {}\n", #comptime EXEC.os, #comptime EXEC.cpu);
             \\    print("usize: {} bytes, {} endian\n", size_of(usize), target_endian());
             \\    print("path separator: {}\n", PATH_SEPARATOR);
             \\}
@@ -2953,7 +2988,7 @@ render_section_88 :: () {
         "text",
         #string
             \\target: Linux X86_64 Gnu
-            \\host: Linux X86_64
+            \\built on: Linux X86_64
             \\usize: 8 bytes, Little endian
             \\path separator: /
     );
@@ -2961,9 +2996,9 @@ render_section_88 :: () {
         44,
         #string,oneline
             \\Built for other targets on the same x86-64 Linux machine, the program
-            \\reports each target and the same host. The size of `usize`, the byte
-            \\order and the constant chosen by the top-level `#if` all follow the
-            \\target:
+            \\reports each target and the same build machine. The size of `usize`,
+            \\the byte order and the constant chosen by the top-level `#if` all
+            \\follow the target:
     );
     code_block(
         45,
@@ -2972,19 +3007,19 @@ render_section_88 :: () {
             \\$ glosso compile --target s390x-linux-musl platform.glo 2>/dev/null
             \\$ qemu-s390x ./platform
             \\target: Linux S390x Musl
-            \\host: Linux X86_64
+            \\built on: Linux X86_64
             \\usize: 8 bytes, Big endian
             \\path separator: /
             \\$ glosso compile --target wasm32-wasi platform.glo 2>/dev/null
             \\$ wasmtime platform.wasm
             \\target: Wasm Wasm32 Wasi
-            \\host: Linux X86_64
+            \\built on: Linux X86_64
             \\usize: 4 bytes, Little endian
             \\path separator: /
             \\$ glosso compile --target x86_64-windows-gnu platform.glo 2>/dev/null
             \\$ wine platform.exe
             \\target: Windows X86_64 Gnu
-            \\host: Linux X86_64
+            \\built on: Linux X86_64
             \\usize: 8 bytes, Little endian
             \\path separator: \
     );
@@ -2992,10 +3027,12 @@ render_section_88 :: () {
     paragraph(
         47,
         #string,oneline
-            \\Compile-time code runs inside the compiler, on the host, but it
-            \\computes for the target: `OUT` is the target, and sizes and layouts
-            \\are the target's. Code that is about the host itself, such as the
-            \\file name of a tool that the build will run, tests `HOST` instead.
+            \\Compile-time code runs inside the compiler, on the build machine,
+            \\but it computes for the target: `OUT` is the target, and sizes and
+            \\layouts are the target's. `EXEC` there is the build machine, so code
+            \\that acts on the machine it runs on, such as running a tool or
+            \\choosing a shell, tests `EXEC` and does the right thing in both
+            \\places.
     );
     code_block(
         48,
@@ -3006,7 +3043,7 @@ render_section_88 :: () {
             \\
             \\#comptime {
             \\    print("compiling for {} on {}: usize is {} bytes\n",
-            \\        OUT.cpu, HOST.cpu, size_of(usize));
+            \\        OUT.cpu, EXEC.cpu, size_of(usize));
             \\}
             \\
             \\main :: () {}
@@ -3028,13 +3065,23 @@ render_section_88 :: () {
             \\discards the others before they are checked. Code for one platform
             \\can therefore call procedures that exist on that platform only, and a
             \\mistake in it is reported when the program is built for that
-            \\platform. `#if`, `#assert`, and `#compile_error` describes `#if` in
-            \\full.
+            \\platform. An `#if` on `EXEC`, directly, through a constant computed
+            \\from it, or through a procedure that reads it, is decided for the
+            \\code that runs it. When the program and compile-time code see
+            \\different machines, the compiler checks both branches, each a block
+            \\of its own; the program keeps its target's branch and compile-time
+            \\code the build machine's, so neither tests at run time. A
+            \\`#compile_error` in such a branch stops the build only for the code
+            \\that keeps it. `#if`, `#assert`, and `#compile_error` describes `#if`
+            \\in full. The following deliberately undeclared Windows procedure
+            \\is ignored when this program is built for Linux; the Windows build
+            \\reports the diagnostic shown after the Linux output.
     );
     code_block(
         52,
         "glosso",
         #string
+            \\// Platform: Linux
             \\#import "Io";
             \\
             \\main :: () {

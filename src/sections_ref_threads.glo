@@ -82,7 +82,9 @@ render_section_76 :: () {
             \\
             \\main :: () -> Thread_Error!void {
             \\    small := spawn_owned(10000, count_primes)?;
+            \\    defer free(&small);
             \\    large := spawn_owned(100000, count_primes)?;
+            \\    defer free(&large);
             \\    print("primes below 10000: {}\n", small.join()?);
             \\    print("primes below 100000: {}\n", large.join()?);
             \\    return .Ok;
@@ -170,11 +172,15 @@ render_section_76 :: () {
     paragraph(
         18,
         #string,oneline
-            \\Every `Task(R)` is completed exactly once, by `join` or by `free`.
+            \\Every `Task(R)` is completed by `join` or by `free`.
             \\`free(&task)` also waits for the thread, then releases the result when
             \\`R` is an owner, so `defer free(&task);` suits a task whose result is
-            \\not needed. A task is a handle: assigning it copies the handle, both
-            \\copies name the same thread, and once one of them is completed the
+            \\not needed. Both operations empty the task variable: another `join`
+            \\returns `.Err(.Invalid_Argument)`, and another `free` does nothing.
+            \\It is therefore safe to register `defer free(&task);` and explicitly
+            \\join the same variable before leaving the block. A task is a handle:
+            \\assigning it copies the handle, both copies name the same thread,
+            \\and once one of them is completed the
             \\other must not be joined or released.
     );
     paragraph(
@@ -462,7 +468,10 @@ render_section_76 :: () {
             \\`join` waits for the thread and returns the pointer `proc` returned,
             \\as a `Thread_Error!?*void`; on Windows, which reports only an exit
             \\code, it is always `null`. `detach` lets the thread run on
-            \\unobserved. Every thread is completed by exactly one of the two. A
+            \\unobserved. Both operations take the receiver by pointer and clear
+            \\its handle: joining or detaching that variable again returns
+            \\`.Err(.Invalid_Argument)`. A copy made before completion still names
+            \\the finished thread and must not be joined or detached. A
             \\`Thread` is a handle that may be copied, and a zero `Thread` names no
             \\thread: `join` and `detach` on it return `.Err(.Invalid_Argument)`. A
             \\procedure without `#c_call` does not convert to `Thread_Proc`:
@@ -540,12 +549,12 @@ render_section_76 :: () {
         #string,oneline
             \\The threads of `thread_scope` and of a `Thread_Pool` run the tasks of
             \\a batch in turn, so a task may start on a thread where another task
-            \\has already run. It then sees what that task left behind: an
-            \\assignment to `context`, temporary memory that was not rewound, and
-            \\the values of `#thread_local` globals. A task that changes its
-            \\context does so with `#push_context` or `#push_allocator`, which undo
-            \\the change when the task returns, and a task that uses temporary
-            \\memory rewinds it before it returns.
+            \\has already run. Temporary memory that was not rewound and the values
+            \\of `#thread_local` globals remain on that thread. Assignments to a
+            \\task's context fields stay local to its call, so the next task does
+            \\not inherit them. State reached through a shared pointer or service
+            \\handle may persist independently of those field assignments. A task
+            \\that uses temporary memory rewinds it before it returns.
     );
     subheading(54, "Errors");
     paragraph(
